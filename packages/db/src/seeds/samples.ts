@@ -124,7 +124,16 @@ export async function sembrarSamples(
   opciones: { passwordAdmin?: string; passwordTecnico?: string } = {},
 ): Promise<ResumenSeed> {
   const capas: Record<string, number> = {};
+  // Las capas sintéticas solo se cargan si NO hay una capa real vigente (la del municipio manda).
   for (const capa of ['distrito_municipal', 'unidad_vecinal', 'manzana'] as const) {
+    const [vig] = await ex.consultar<{ version: string }>(
+      'SELECT version FROM geo.capa_version WHERE capa = $1 AND vigente',
+      [capa],
+    );
+    if (vig && vig.version !== VERSION_SAMPLES) {
+      capas[capa] = 0;
+      continue;
+    }
     const fc = leerCapa(capa);
     await cargarCapa(ex, capa, fc);
     capas[capa] = fc.features.length;
@@ -148,38 +157,37 @@ export async function sembrarSamples(
     `SELECT id::text FROM usuario WHERE email = 'tecnico@curichi.local'`,
   );
 
-  // Reportes sintéticos: puntos dentro de manzanas de la muestra, con algunos grupos cercanos (recurrencia).
+  // Reportes sintéticos ubicados dentro de las UV VIGENTES de la base (reales del municipio si están
+  // cargadas, sintéticas si no). ST_GeneratePoints garantiza que el punto cae dentro del polígono.
   await ex.consultar(
     `DELETE FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%'`,
   );
-  const uvs = leerCapa('unidad_vecinal');
   const al = rng(20260913);
   const elegir = <T>(arr: readonly T[]): T => arr[Math.floor(al() * arr.length)]!;
-  const puntos: Array<{ lon: number; lat: number; uvIdx: number }> = [];
-  // 10 "focos" con 1–5 reportes cada uno dentro de ~20 m, más 12 reportes aislados
-  const centroides = uvs.features.map((f) => {
-    const anillo = (f.geometry.coordinates as number[][][])[0]!;
-    const lon = anillo.reduce((s, c) => s + c[0]!, 0) / anillo.length;
-    const lat = anillo.reduce((s, c) => s + c[1]!, 0) / anillo.length;
-    return { lon, lat };
+
+  // 10 focos (varios reportes a pocos metros, para ejercitar la recurrencia) + 14 puntos sueltos
+  const uvsMuestra = await ex.consultar<{ id: string; lon: number; lat: number }>(
+    `SELECT id, ST_X(p) AS lon, ST_Y(p) AS lat
+     FROM (
+       SELECT id, (ST_Dump(ST_GeneratePoints(geom, 1, 20260913))).geom AS p
+       FROM geo.unidad_vecinal_vigente
+       ORDER BY md5(id) LIMIT 24
+     ) s`,
+  );
+  if (!uvsMuestra.length)
+    throw new Error('No hay unidades vecinales vigentes: cargá una capa antes de sembrar.');
+
+  const puntos: Array<{ lon: number; lat: number }> = [];
+  uvsMuestra.forEach((u, i) => {
+    const lon = Number(u.lon);
+    const lat = Number(u.lat);
+    if (i < 10) {
+      // foco: entre 1 y 4 reportes dentro de ~20 m
+      const n = 1 + Math.floor(al() * 4);
+      for (let k = 0; k < n; k++)
+        puntos.push({ lon: lon + (al() - 0.5) * 0.0003, lat: lat + (al() - 0.5) * 0.0003 });
+    } else puntos.push({ lon, lat });
   });
-  for (let foco = 0; foco < 10; foco++) {
-    const uvIdx = Math.floor(al() * centroides.length);
-    const c = centroides[uvIdx]!;
-    const base = { lon: c.lon + (al() - 0.5) * 0.006, lat: c.lat + (al() - 0.5) * 0.006 };
-    const n = 1 + Math.floor(al() * 5);
-    for (let k = 0; k < n; k++)
-      puntos.push({
-        lon: base.lon + (al() - 0.5) * 0.0003,
-        lat: base.lat + (al() - 0.5) * 0.0003,
-        uvIdx,
-      });
-  }
-  for (let k = 0; k < 12; k++) {
-    const uvIdx = Math.floor(al() * centroides.length);
-    const c = centroides[uvIdx]!;
-    puntos.push({ lon: c.lon + (al() - 0.5) * 0.007, lat: c.lat + (al() - 0.5) * 0.007, uvIdx });
-  }
 
   let insertados = 0;
   for (const [i, p] of puntos.entries()) {
