@@ -1,0 +1,48 @@
+# Versiones de capas que procesa el ETL (Parte 5). Cada versión es una carpeta en data/raw/<version>/
+# con los shapefiles tal como los entrega el municipio. `null` = autodetectar; el comando
+# `pnpm etl:inspect --version <v>` lista archivos y campos para completar esta configuración.
+versiones:
+  - version: DM_UV_MZ_2025
+    carpeta: data/raw/DM_UV_MZ_2025
+    fuente: "Gobierno Autónomo Municipal de Santa Cruz de la Sierra <a confirmar>"
+    fecha_vigencia: null # AAAA-MM-DD <a confirmar>
+    crs_origen: null # null = leer del .prj. Si falta el .prj, el ETL se detiene y pide el CRS (p. ej. EPSG:32720)
+    encoding: null # null = .cpg o UTF-8; usar ISO-8859-1 si los nombres salen con caracteres corruptos
+    capas:
+      distrito_municipal:
+        archivo: null # null = autodetectar por nombre (*DM*, *distrito*)
+        campos: { codigo: null, nombre: null }
+      unidad_vecinal:
+        archivo: null # (*UV*, *vecinal*)
+        campos: { codigo: null, nombre: null, distrito: null }
+      manzana:
+        archivo: null # (*MZ*, *manzan*)
+        campos: { codigo: null, nombre: null, unidad_vecinal: null, distrito: null }
+
+  # Muestra SINTÉTICA generada por `pnpm --filter geodata-etl samples:generar` (en UTM 20S para ejercitar la reproyección)
+  - version: DM_UV_MZ_SAMPLE
+    carpeta: data/samples/shp/DM_UV_MZ_SAMPLE
+    fuente: "sintético — pipelines/geodata-etl samples:generar"
+    fecha_vigencia: null
+    crs_origen: null
+    encoding: null
+    capas:
+      distrito_municipal:
+        archivo: DM_SAMPLE.shp
+        campos: { codigo: COD_DM, nombre: NOM_DM }
+      unidad_vecinal:
+        archivo: UV_SAMPLE.shp
+        campos: { codigo: COD_UV, nombre: NOM_UV, distrito: COD_DM }
+      manzana:
+        archivo: MZ_SAMPLE.shp
+        campos: { codigo: COD_MZ, nombre: null, unidad_vecinal: COD_UV, distrito: COD_DM }
+
+# Tolerancias (metros). Iniciales; se ajustan viendo el resultado (CLAUDE.md §6.6).
+simplificacion:
+  distrito_municipal: 3
+  unidad_vecinal: 3
+  manzana: 2
+# Por encima de este tamaño de web.geojson, geo-service sirve la capa por teselas
+umbral_teselas_bytes: 5242880
+# Reparación "segura": cambio de área por feature tolerado tras make-valid/clean (fracción)
+tolerancia_cambio_area: 0.001
