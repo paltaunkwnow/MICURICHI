@@ -42,3 +42,6 @@ Thumbs.db
 # modo local sin Docker (ADR 0002)
 infra/.pglite/
 infra/.storage/
+
+# Carpeta de shapefiles entregada por el municipio en la raíz: NUNCA al repo (va a data/raw/, inmutable)
+/DM_UV_MZ_2025/
