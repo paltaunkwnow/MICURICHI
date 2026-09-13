@@ -1,7 +1,7 @@
 # CLAUDE.md — Mi Curichi
 
 > **Manual operativo permanente del repositorio.** Cualquier agente o persona que trabaje aquí debe leer este archivo completo antes de tocar nada.
-> Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada por el usuario el 2026-09-13. Tarea activa: Parte 5, arranque del repositorio (plan pendiente de aprobación).
+> Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada el 2026-09-13. Tarea 1 (Parte 5, arranque) hecha en `fase-1/repo`. El 2026-09-13 el usuario ordenó **completar toda la Fase 1 sin detenerse por aprobaciones por tarea**, probar la ejecución y desplegar en localhost; esa orden sustituye la puerta por tarea de §10.2 solo para la Fase 1.
 > Última actualización: 2026-09-13. Versiones de software verificadas en esa fecha (ver §8). Distribución del trabajo en **5 partes** fijada por el usuario (§4).
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)
@@ -35,7 +35,7 @@
 | Técnico municipal / analista | Valida, rechaza, fusiona duplicados, reclasifica, filtra, exporta, analiza | Parte 2 (`apps/panel-admin`) |
 | Administrador | Gestiona capas base, usuarios, moderación y configuración | Parte 2 (`apps/panel-admin`) |
 
-**Contexto territorial.** Ciudad: **Santa Cruz de la Sierra, Bolivia** `<a confirmar>` (inferido por el nombre "curichi" y por la división distrito municipal / unidad vecinal, propia de esa ciudad). Capas administrativas provistas por el municipio en **shapefile**; fuente oficial y fecha de vigencia `<a confirmar>`.
+**Contexto territorial.** Ciudad: **Santa Cruz de la Sierra, Bolivia** `<a confirmar>` (inferido por el nombre "curichi" y por la división distrito municipal / unidad vecinal, propia de esa ciudad). Capas administrativas provistas por el municipio en **shapefile**, en una carpeta llamada **`DM_UV_MZ_2025`** con tres capas: distritos municipales (DM), unidades vecinales (UV) y **manzanas** (MZ). Fuente oficial y fecha de vigencia `<a confirmar>`. Las manzanas se usan para el **render del mapa interactivo**; el point-in-polygon del MVP resuelve distrito y UV (la manzana se anota si el punto cae en una, como dato opcional).
 
 **Lo que este sistema ES y NO ES.** Es un **inventario de reportes ciudadanos** (percepción, no medición). **No es** un modelo hidráulico, ni un estudio de drenaje, ni un instrumento para decidir inversiones por sí solo. Ver §9.5.
 
@@ -66,6 +66,7 @@
 | **Método racional** | Q = C · i · A: caudal pico = coeficiente de escorrentía × intensidad × área. Referencia para fases futuras. |
 | **Distrito municipal** | Unidad administrativa mayor de la ciudad. Capa oficial en shapefile. |
 | **Unidad vecinal (UV)** | Subdivisión del distrito. Es la unidad de agregación principal del sistema. Cada UV pertenece a exactamente un distrito. |
+| **Manzana (MZ)** | Bloque urbano delimitado por calles, dentro de una UV. Capa de referencia visual en el mapa; entre manzanas hay huecos (calles) por diseño, no por error. |
 | **Point-in-polygon (PIP)** | Operación espacial que determina en qué polígono cae un punto. Es como el sistema asigna distrito y UV a cada reporte. |
 | **Punto crítico** | Agrupación analítica de reportes validados dentro de un radio configurable (§9.2). No reemplaza a los reportes individuales. |
 | **CRS / SRS** | Sistema de referencia de coordenadas. Define cómo se interpretan los números de una coordenada. |
@@ -321,7 +322,7 @@ Todo el pipeline vive en `pipelines/geodata-etl/` y es responsabilidad de la **P
 
 ### 6.1 Ingesta
 
-- Los shapefiles entran en `data/raw/<capa>/<version>/` con el conjunto completo: `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg`. `<capa>` ∈ {`distrito_municipal`, `unidad_vecinal`}. `<version>` = `AAAA-MM` de vigencia o recepción (p. ej. `2026-09`).
+- Los shapefiles entran en `data/raw/<version>/` tal como los entrega el municipio; la primera versión real es la carpeta **`DM_UV_MZ_2025`**, que contiene las tres capas (`distrito_municipal`, `unidad_vecinal`, `manzana`), cada una con su conjunto completo: `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg`. La correspondencia archivo → capa y los nombres de campos se declaran en `pipelines/geodata-etl/config/capas.yaml`; el comando `etl:inspect` lista archivos y campos para completarla.
 - Junto a ellos, `MANIFEST.md` escrito a mano con: fuente oficial, persona/oficina que entregó, fecha de recepción, fecha de vigencia declarada, CRS declarado, y `sha256` de cada archivo (`shasum -a 256 *`).
 - **Si falta `.prj`: el pipeline se detiene con error y se pregunta el CRS de origen. No se adivina.** Una vez confirmado, se registra en `MANIFEST.md` y se pasa por parámetro `--crs-origen EPSG:xxxxx`.
 - Si falta `.cpg`: intentar UTF-8; si aparecen caracteres corruptos en `nombre`, probar `ISO-8859-1` con `-oo ENCODING=ISO-8859-1` y **registrar la decisión** en el reporte de calidad.
@@ -380,8 +381,8 @@ Se ejecuta **antes y después** de la reparación, y cada corrección se lista c
 | `id` | string estable (`<tipo>:<codigo>`) | ✔ | ✔ |
 | `codigo` | string | ✔ | ✔ |
 | `nombre` | string UTF-8 | ✔ | ✔ |
-| `tipo` | `distrito_municipal` \| `unidad_vecinal` | ✔ | ✔ |
-| `distrito_id` | string (FK lógica) | — | ✔ |
+| `tipo` | `distrito_municipal` \| `unidad_vecinal` \| `manzana` | ✔ | ✔ |
+| `distrito_id` | string (FK lógica) | — | ✔ (y en `manzana`, junto con `unidad_vecinal_id`) |
 | `version_capa` | string (`2026-09`) | ✔ | ✔ |
 | `fuente` | string | ✔ | ✔ |
 | `fecha_vigencia` | date ISO o null | ✔ | ✔ |
@@ -458,6 +459,8 @@ Luego un SQL versionado en `pipelines/geodata-etl/sql/promover_capa.sql` inserta
 
 `ogrinfo` / `ogr2ogr` (GDAL), `mapshaper`, GeoPandas + Shapely + pyogrio, `tippecanoe`. Nada más sin justificarlo en un ADR en `docs/decisiones/`.
 
+**Implementación de Fase 1 (ADR 0002):** la máquina de desarrollo no tiene GDAL, Python 3.12 ni tippecanoe y no se pueden instalar sin permisos de administrador. El ETL se implementa en **TypeScript con mapshaper** (lee shapefiles con su `.prj`, reproyecta, limpia topología, simplifica preservando bordes compartidos y escribe GeoJSON) más `@turf/turf` para el reporte de calidad, y se prueba con Vitest. Las teselas se generan **al vuelo** en `geo-service` con `geojson-vt` + `vt-pbf` desde el `web.geojson` vigente, en lugar de PMTiles con tippecanoe. Los comandos de GDAL/tippecanoe de esta sección quedan como referencia equivalente para cuando existan.
+
 ---
 
 ## 7. Modelo de datos y contratos de API
@@ -475,6 +478,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 | `autor_id` | `uuid` null FK `usuario` | null = anónimo |
 | `distrito_id` | `text` FK `geo.distrito_municipal.id` | **calculado por el sistema** |
 | `unidad_vecinal_id` | `text` FK `geo.unidad_vecinal.id` | **calculado por el sistema** |
+| `manzana_id` | `text` null | calculado por el sistema si el punto cae en una manzana; solo informativo |
 | `version_capa` | `text` | versión de capa con la que se resolvió; permite recalcular si cambia la capa |
 | `resolucion_flags` | `jsonb` | `{ en_limite, asignado_por_proximidad, distancia_m }` (§7.4) |
 | `ubicacion_metodo` | enum `gps` \| `manual` | |
@@ -506,7 +510,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 
 **`reporte_foto`**: `id uuid`, `reporte_id uuid FK`, `objeto_key text` (clave en MinIO), `mime text`, `bytes int`, `ancho int`, `alto int`, `exif_sanitizado boolean NOT NULL DEFAULT false` (debe ser `true` antes de servirse), `creado_en`. La API expone `foto_url[]` firmadas/temporales.
 
-**`geo.distrito_municipal`** y **`geo.unidad_vecinal`**: `id text PK`, `codigo text`, `nombre text`, `geom geometry(MultiPolygon, 4326)` con **GIST**, `version_capa text`, `fuente text`, `fecha_vigencia date null`, `distrito_id text` (solo UV), `distrito_inferido boolean` (solo UV). PK compuesta lógica `(id, version_capa)`; una vista `geo.unidad_vecinal_vigente` filtra por `capa_version.vigente = true`.
+**`geo.distrito_municipal`**, **`geo.unidad_vecinal`** y **`geo.manzana`**: `id text`, `codigo text`, `nombre text`, `geom geometry(MultiPolygon, 4326)` con **GIST**, `version_capa text`, `fuente text`, `fecha_vigencia date null`, `distrito_id text` (UV y manzana), `unidad_vecinal_id text` (solo manzana), `distrito_inferido boolean` (UV). PK compuesta `(id, version_capa)`; vistas `geo.<capa>_vigente` filtran por `capa_version.vigente = true`. La manzana es capa de render; `reporte_inundacion.manzana_id` es opcional.
 
 **`geo.capa_version`**: `id`, `capa`, `version`, `fuente`, `fecha_vigencia`, `crs_origen`, `sha256_manifiesto`, `n_features`, `cargado_en`, `vigente boolean`, `activado_por`, `activado_en`.
 
@@ -658,6 +662,10 @@ Fuentes: registro npm (`npm view <pkg> version`), `nodejs.org/dist/index.json`, 
 - **PostgreSQL + PostGIS.** Estándar de facto para datos espaciales: índices GIST, `ST_Contains`, `ST_ClusterDBSCAN`, `geography` para distancias en metros, y un solo motor para reportes y capas.
 - **Drizzle ORM.** Migraciones versionadas en SQL legible, tipos inferidos del esquema y `sql` crudo tipado para PostGIS. Esquema y migraciones centralizados en `packages/db` (Parte 4), consumidos por `api-core` y `geo-service`. Prisma está en RC (8.0.0-rc.14) al momento de esta verificación.
 - **Docker Compose.** `postgis`, `minio`, `api-core`, `geo-service` y (opcional) los frontends. `pnpm dev` + `docker compose up -d` levantan todo.
+- **Modo local sin Docker (ADR 0002).** Como la máquina de desarrollo no tiene Docker, la Fase 1 corre PostGIS **dentro de Node** con PGlite (Postgres compilado a WASM) + la extensión oficial `@electric-sql/pglite-postgis` (experimental), expuesto por protocolo de PostgreSQL con `@electric-sql/pglite-socket` en el puerto 5433 con multiplexado de conexiones. `api-core` y `geo-service` se conectan con el driver `pg` y la misma `DATABASE_URL` que usarían contra Docker; el SQL (ST_Contains, GIST, ST_ClusterDBSCAN) es el mismo. Las fotos se guardan en disco (`infra/.storage/`) mediante un adaptador con interfaz S3-compatible; MinIO se usa cuando exista Docker. `pnpm db:local` levanta esa base y aplica migraciones pendientes.
+- **Fuentes tipográficas** vía `@fontsource` (Sora y Source Sans 3 empaquetadas, sin llamadas a Google Fonts en runtime).
+- **Componentes de UI** hechos a medida siguiendo el UI kit del usuario (§14.4); shadcn/ui no se usa en Fase 1 para no depender de su registro remoto con la red lenta disponible.
+- **Contraseñas** con `scrypt` de Node (sin dependencias nativas); Argon2id queda `<a confirmar>` para Fase 2.
 - **Biome.** Un binario para lint y formato, mucho más rápido que ESLint + Prettier, con reglas de accesibilidad. Si en Fase 1 se necesita una regla que Biome no tiene (p. ej. específica de Next), se evalúa añadir ESLint solo para eso, con ADR.
 - **Vitest + Playwright + pytest.** Vitest comparte config con Vite/Next y es rápido; Playwright es el estándar para E2E con soporte de geolocalización simulada (`context.setGeolocation`), esencial para probar el formulario; pytest para el ETL.
 - **GitHub Actions.** Lint, typecheck, test y build en cada PR, con caché de Turborepo.
@@ -812,7 +820,8 @@ Los nombres de estos comandos **son el contrato**; se implementan en la primera 
 | `pnpm install` | Instala todo el monorepo (Node 24 LTS, ver `.nvmrc`). |
 | `docker compose up -d` | Levanta `postgis`, `minio`, `geo-service`, `api-core`. |
 | `pnpm dev` | Turborepo: todos los `dev` en paralelo (frontends y servicios). |
-| `pnpm db:generate` | Genera una migración nueva a partir del esquema Drizzle de `packages/db` (Parte 4). |
+| `pnpm db:local` | Levanta PostGIS local sin Docker (PGlite + pglite-socket en `localhost:5433`) y aplica migraciones pendientes. `pnpm dev` lo incluye. |
+| `pnpm db:generate` | Crea un archivo de migración SQL nuevo con marca de tiempo en `packages/db/migraciones/` (Parte 4). |
 | `pnpm db:migrate` | Aplica las migraciones de `packages/db` (Parte 4): extensiones PostGIS, esquemas `public` y `geo`, índices GIST, vistas vigentes. |
 | `pnpm db:seed:samples` | Carga reportes **sintéticos** y capas de `data/samples/` (script de `packages/db`). |
 | `pnpm etl:inspect --capa unidad_vecinal --version 2026-09` | Inspección previa (§6.2). |
@@ -914,7 +923,16 @@ Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13
 - Fase 1 (local): teselas raster de OpenStreetMap **solo para desarrollo**, con atribución `© OpenStreetMap contributors`, respetando su política de uso (no apta para producción).
 - Fase 2: mapa base vectorial sin dependencia propietaria de pago, opciones a evaluar con ADR: extracto PMTiles auto-hospedado (Protomaps) u OpenFreeMap `<a confirmar>`. Siempre con atribución visible.
 
-### 14.4 PWA
+### 14.4 Sistema de diseño (fijado por el usuario con mockups, 2026-09-13)
+
+- **Paleta, tomada del logotipo (capibara sobre círculo verde y azul):** verde marca `#28934D` (acción, marca, severidad baja; botones rellenos con el paso 700 `#1B6B38` para contraste 6:1), azul agua `#0D6189` (enlaces, datos de agua, estado resuelto), azul profundo o *tinta* `#0F2D43` (todo el texto, mapa oscuro, tarjetas invertidas; contraste 12,8:1). Cada rol con rampa 100/300/500/700/900. Fondo de página verde-gris muy claro, superficies blancas.
+- **Severidad = color + etiqueta + forma** (contador de barras), nunca solo color: baja relleno `#28934D` texto `#1B6B38`; media relleno `#C98A0E` texto `#8A5A00`; alta relleno `#E4601B` texto `#B84A0E`; crítica relleno `#B3200A`, texto blanco sobre tinta.
+- **Tipografía:** Sora 600 para titulares y cifras (52/54 titular de pantalla, 32/36 título de sección, 20/24 título de tarjeta); Source Sans 3 400/600 para interfaz (18/28 cuerpo del flujo de reporte, 16/24 interfaz, 13,5/20 metadatos). Mínimo 16 px en interfaz y 18 px en el cuerpo del flujo de reporte.
+- **UI kit:** radios de 12 a 30 px, controles en pastilla completa, objetivos táctiles de 48 px, foco visible en verde. Botón primario relleno verde 700; secundario blanco con filete; acciones del mapa en tinta; deshabilitado verde apagado. Chips de filtro con punto de color y nombre (activo en tinta). Botones circulares (filtros, +, ubicación) y buscador en pastilla. Campo de texto con contador «Mínimo 10 caracteres · 0/1000» y error en rojo. Tirante elegido en tarjetas radio por referencia corporal.
+- **Layouts:** móvil = mapa a toda altura, «Reportar un punto» fijo al alcance del pulgar, hoja de detalle redondeada que sube sobre el punto; estado vacío «Todavía nadie reportó en esta zona» con «Reportar el primero acá». Escritorio = panel izquierdo con «N puntos cerca de vos», chips de severidad y tarjetas de reporte; mapa oscuro a la derecha con buscador, chip «Distrito 07 · UV-123 · capa oficial vigente», marcadores en pastilla «● Crítica» y KPIs abajo. Tono cercano con voseo («cerca de vos», «contanos qué ves»).
+- **Logo:** el usuario lo envió como imagen; el archivo definitivo va en `apps/web-ciudadano/public/logo.png` `<pendiente de recibir el archivo>`.
+
+### 14.5 PWA
 
 - `manifest.webmanifest`, service worker con caché de shell y de la capa `web.geojson`/PMTiles vigente (invalidada por `version_capa`).
 - Reporte **offline** (guardar y enviar luego) queda en backlog (§15); en Misión 1 la PWA solo garantiza instalación y caché de lectura.
@@ -948,7 +966,7 @@ Cada ítem se cierra con una respuesta del usuario y se actualiza en este archiv
 | # | Punto | Supuesto provisional adoptado | Decisión necesaria |
 |---|---|---|---|
 | 1 | Ciudad, país y fuente oficial de las capas | Santa Cruz de la Sierra, Bolivia; capas del Gobierno Autónomo Municipal `<a confirmar>` | Confirmar ciudad y quién entrega los shapefiles (oficina, fecha, licencia de uso). |
-| 2 | Existencia y CRS de los shapefiles | No se asume nada. El ETL se desarrolla con muestra sintética hasta tenerlos. | ¿Ya existen? ¿Ruta? ¿Traen `.prj`? ¿CRS? (probable EPSG:32720 o EPSG:24880). |
+| 2 | Existencia y CRS de los shapefiles | Carpeta `DM_UV_MZ_2025` anunciada por el usuario, aún no entregada. El ETL se desarrolla con muestra sintética hasta tenerla. | Copiarla a `data/raw/DM_UV_MZ_2025/` con `MANIFEST.md`. ¿Traen `.prj`? ¿CRS? (probable EPSG:32720 o EPSG:24880). |
 | 3 | Nombres de campos originales de las capas | `<a confirmar>`; el mapeo vive en `config/<capa>.yaml`. | Ver el `.dbf` real. |
 | 4 | Autenticación en el MVP | Reporte ciudadano **anónimo** sin cuenta; login solo para técnico/admin con email + contraseña (Argon2id) gestionado por `api-core`. | Confirmar; alternativa: proveedor externo de identidad en Fase 2. |
 | 5 | Lenguaje de `geo-service` (Parte 4) | **Node + Fastify + PostGIS** (§8.2). ETL en Python (Parte 5). | Confirmar o pedir Python/FastAPI. |
