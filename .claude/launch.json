@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-ciudadano",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "web-ciudadano", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "panel-admin",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "panel-admin", "dev"],
+      "port": 3100
+    }
+  ]
+}

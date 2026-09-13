@@ -1,0 +1,14 @@
+{
+  "name": "e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pruebas end-to-end transversales (Parte 5): recorrido ciudadano → técnico → mapa público → exportación",
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.4",
+    "typescript": "5.9.3"
+  }
+}

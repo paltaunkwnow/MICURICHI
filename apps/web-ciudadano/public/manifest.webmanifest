@@ -1,0 +1,11 @@
+{
+  "name": "Mi Curichi",
+  "short_name": "Mi Curichi",
+  "description": "Reporte ciudadano de puntos de inundación",
+  "lang": "es",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EEF3EF",
+  "theme_color": "#0F2D43",
+  "icons": [{ "src": "/icono.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

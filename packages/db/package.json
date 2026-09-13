@@ -1,0 +1,46 @@
+{
+  "name": "db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mi Curichi — esquema, migraciones, seeds sintéticos y PostGIS local sin Docker (Parte 4)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./test-utils": {
+      "types": "./dist/test-utils.d.ts",
+      "import": "./dist/test-utils.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "dev": "tsx src/local/servidor.ts",
+    "local": "tsx src/local/servidor.ts",
+    "migrate": "tsx src/cli/migrar.ts",
+    "generate": "tsx src/cli/nueva-migracion.ts",
+    "seed:samples": "tsx src/cli/seed-samples.ts",
+    "puntos-criticos:recalcular": "tsx src/cli/recalcular-puntos-criticos.ts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-postgis": "0.2.8",
+    "@electric-sql/pglite-socket": "0.2.11",
+    "contracts": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/geojson": "7946.0.16",
+    "@types/node": "24.13.4",
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11"
+  }
+}

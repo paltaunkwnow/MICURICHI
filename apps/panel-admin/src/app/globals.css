@@ -1,0 +1,354 @@
+@import "tailwindcss";
+@import "@fontsource/sora/600.css";
+@import "@fontsource-variable/source-sans-3";
+
+/* Sistema de diseño Mi Curichi (CLAUDE.md §14.4): paleta del logotipo, Sora + Source Sans 3. */
+@theme {
+  --font-titular: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-interfaz: "Source Sans 3 Variable", "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+
+  --color-verde-100: #e6f2ea;
+  --color-verde-300: #a8d5b5;
+  --color-verde-500: #28934d;
+  --color-verde-700: #1b6b38;
+  --color-verde-900: #0f3d1f;
+
+  --color-agua-100: #e3eef5;
+  --color-agua-300: #8fbcd6;
+  --color-agua-500: #0d6189;
+  --color-agua-700: #0a4a69;
+  --color-agua-900: #06324a;
+
+  --color-tinta-100: #e8edf1;
+  --color-tinta-300: #8a98a6;
+  --color-tinta-600: #3e5468;
+  --color-tinta-800: #1b3a52;
+  --color-tinta-900: #0f2d43;
+
+  --color-fondo: #eef3ef;
+  --color-superficie: #ffffff;
+  --color-filete: #d7dfda;
+
+  --color-sev-baja: #28934d;
+  --color-sev-baja-texto: #1b6b38;
+  --color-sev-baja-fondo: #e6f2ea;
+  --color-sev-media: #c98a0e;
+  --color-sev-media-texto: #8a5a00;
+  --color-sev-media-fondo: #fbf1dc;
+  --color-sev-alta: #e4601b;
+  --color-sev-alta-texto: #b84a0e;
+  --color-sev-alta-fondo: #fde8dc;
+  --color-sev-critica: #b3200a;
+  --color-sev-critica-texto: #ffffff;
+  --color-sev-critica-fondo: #fbe1dc;
+
+  --color-error: #b3200a;
+
+  --radius-pastilla: 999px;
+  --radius-tarjeta: 20px;
+  --radius-hoja: 30px;
+  --radius-campo: 12px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-fondo);
+  color: var(--color-tinta-900);
+  font-family: var(--font-interfaz);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3,
+.titular {
+  font-family: var(--font-titular);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-verde-500);
+  outline-offset: 2px;
+}
+
+/* Botones en pastilla, 48 px de alto mínimo (objetivo táctil) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 1.5rem;
+  border-radius: var(--radius-pastilla);
+  font-weight: 600;
+  font-size: 1rem;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease;
+  text-decoration: none;
+}
+.btn:active {
+  transform: scale(0.98);
+}
+.btn-primario {
+  background: var(--color-verde-700);
+  color: #fff;
+}
+.btn-primario:hover {
+  background: var(--color-verde-900);
+}
+.btn-primario:disabled {
+  background: #9dc9ac;
+  cursor: not-allowed;
+}
+.btn-secundario {
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  border-color: var(--color-tinta-300);
+}
+.btn-secundario:hover {
+  border-color: var(--color-tinta-900);
+}
+.btn-tinta {
+  background: var(--color-tinta-900);
+  color: #fff;
+}
+.btn-tinta:hover {
+  background: var(--color-tinta-800);
+}
+.btn-circular {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  box-shadow: 0 2px 8px rgb(15 45 67 / 0.15);
+}
+.btn-circular-verde {
+  background: var(--color-verde-500);
+  color: #fff;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border-radius: var(--radius-pastilla);
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1.5px solid var(--color-filete);
+  cursor: pointer;
+}
+.chip[aria-pressed="true"],
+.chip-activo {
+  background: var(--color-tinta-900);
+  color: #fff;
+  border-color: var(--color-tinta-900);
+}
+.chip-suave {
+  min-height: 32px;
+  padding: 0 0.7rem;
+  font-size: 0.875rem;
+  background: var(--color-tinta-100);
+  border-color: transparent;
+  cursor: default;
+}
+
+.punto {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tarjeta {
+  background: var(--color-superficie);
+  border-radius: var(--radius-tarjeta);
+  box-shadow:
+    0 1px 2px rgb(15 45 67 / 0.06),
+    0 8px 24px rgb(15 45 67 / 0.06);
+}
+
+.campo {
+  width: 100%;
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-campo);
+  border: 1.5px solid var(--color-filete);
+  background: #fff;
+  font: inherit;
+  font-size: 1.125rem;
+  color: var(--color-tinta-900);
+}
+.campo:focus {
+  border-color: var(--color-verde-500);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(40 147 77 / 0.25);
+}
+.campo[aria-invalid="true"] {
+  border-color: var(--color-error);
+  background: #fff6f4;
+}
+.ayuda {
+  color: var(--color-tinta-600);
+  font-size: 0.875rem;
+}
+.error {
+  color: var(--color-error);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.opcion-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 56px;
+  padding: 0 1rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--color-filete);
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.125rem;
+}
+.opcion-radio:has(input:checked) {
+  border-color: var(--color-verde-500);
+  box-shadow: 0 0 0 2px rgb(40 147 77 / 0.35);
+}
+.opcion-radio input {
+  accent-color: var(--color-verde-700);
+  width: 20px;
+  height: 20px;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+}
+
+/* --- Extensiones del panel técnico (tablas, navegación lateral, datos) --- */
+.tabla {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+.tabla th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--color-tinta-600);
+  padding: 0.75rem 0.75rem;
+  border-bottom: 1.5px solid var(--color-filete);
+  white-space: nowrap;
+}
+.tabla td {
+  padding: 0.75rem 0.75rem;
+  border-bottom: 1px solid var(--color-filete);
+  vertical-align: middle;
+}
+.tabla tbody tr:hover {
+  background: var(--color-fondo);
+}
+.tabla td.numero,
+.tabla th.numero {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-lateral a {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 48px;
+  padding: 0 1rem;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  opacity: 0.85;
+}
+.nav-lateral a:hover {
+  background: var(--color-tinta-800);
+  opacity: 1;
+}
+.nav-lateral a[aria-current="page"] {
+  background: var(--color-verde-700);
+  opacity: 1;
+}
+
+.lista-datos {
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 2fr;
+  column-gap: 1rem;
+  row-gap: 0.5rem;
+  margin: 0;
+}
+.lista-datos dt {
+  color: var(--color-tinta-600);
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.lista-datos dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.aviso {
+  border-radius: var(--radius-campo);
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+}
+.aviso-ok {
+  background: var(--color-verde-100);
+  color: var(--color-verde-700);
+}
+.aviso-error {
+  background: var(--color-sev-critica-fondo);
+  color: var(--color-error);
+}
+.aviso-info {
+  background: var(--color-agua-100);
+  color: var(--color-agua-700);
+}
+.aviso-alerta {
+  background: var(--color-sev-media-fondo);
+  color: var(--color-sev-media-texto);
+}
+
+.barra-proporcion {
+  height: 10px;
+  border-radius: var(--radius-pastilla);
+  background: var(--color-tinta-100);
+  overflow: hidden;
+}
+.barra-proporcion > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pastilla);
+  background: var(--color-agua-500);
+}
+
+.mapa-panel {
+  border-radius: var(--radius-tarjeta);
+  overflow: hidden;
+  background: var(--color-tinta-900);
+}
