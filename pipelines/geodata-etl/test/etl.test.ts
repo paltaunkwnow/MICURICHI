@@ -114,11 +114,25 @@ describe('descubrimiento e inspección', () => {
       capas: {
         distrito_municipal: {
           archivo: 'UV_X.shp',
-          campos: { codigo: null, nombre: null, distrito: null, unidad_vecinal: null },
+          campos: {
+            codigo: null,
+            nombre: null,
+            distrito: null,
+            unidad_vecinal: null,
+            respaldo: null,
+            plantilla_nombre: null,
+          },
         },
         unidad_vecinal: {
           archivo: 'UV_X.shp',
-          campos: { codigo: null, nombre: null, distrito: null, unidad_vecinal: null },
+          campos: {
+            codigo: null,
+            nombre: null,
+            distrito: null,
+            unidad_vecinal: null,
+            respaldo: null,
+            plantilla_nombre: null,
+          },
         },
       },
     };

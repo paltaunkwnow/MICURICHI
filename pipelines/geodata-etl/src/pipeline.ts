@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as turf from '@turf/turf';
 import type { TipoCapa } from 'contracts';
-import type { FeatureCollection } from 'geojson';
+import type { Feature, FeatureCollection } from 'geojson';
 import { type Config, dirProcessed, rutaAbsoluta, type VersionConfig } from './config.js';
 import { limpiar, shapefileAWgs84, simplificar } from './mapshaper.js';
 import {
@@ -15,6 +15,7 @@ import {
   detectarHuecos,
   detectarSolapes,
   estadisticas,
+  geometriaVacia,
   type Hallazgo,
   idDe,
   type ReporteCalidad,
@@ -40,6 +41,8 @@ export interface CapaResuelta {
     nombre: string | null;
     distrito: string | null;
     unidad_vecinal: string | null;
+    respaldo: string | null;
+    plantilla_nombre: string | null;
   };
 }
 
@@ -87,6 +90,8 @@ export function resolverCapas(v: VersionConfig): CapaResuelta[] {
         nombre: cfg.campos.nombre,
         distrito: cfg.campos.distrito ?? null,
         unidad_vecinal: cfg.campos.unidad_vecinal ?? null,
+        respaldo: cfg.campos.respaldo ?? null,
+        plantilla_nombre: cfg.campos.plantilla_nombre ?? null,
       },
     });
   }
@@ -254,70 +259,8 @@ export async function procesarVersion(
     proceso.reproyeccion = `${insp.crs.epsg_probable ?? insp.crs.nombre ?? v.crs_origen} → EPSG:4326 (mapshaper -proj wgs84)`;
     log(`  reproyectado: ${crudo.features.length} features`);
 
-    // 2) validación antes
-    const antes = [
-      ...validarGeometrias(crudo),
-      ...(cr.capa === 'manzana' ? [] : detectarSolapes(crudo)),
-    ];
-    hallazgos.push(...antes);
-    let fc = crudo;
-    let reparada = false;
-    if (antes.some((h) => h.tipo === 'invalida' || h.tipo === 'solape')) {
-      // 3) reparación con -clean, verificada por cambio de área por feature
-      const limpio = await limpiar(crudo);
-      const areasAntes = new Map(
-        crudo.features.map((f, i) => [idDe(f, i), f.geometry ? turf.area(f) : 0]),
-      );
-      let noSeguras = 0;
-      limpio.features.forEach((f, i) => {
-        const id = idDe(f, i);
-        const a0 = areasAntes.get(id) ?? 0;
-        const a1 = f.geometry ? turf.area(f) : 0;
-        const cambio = a0 ? Math.abs(a1 - a0) / a0 : 0;
-        if (cambio > cfg.tolerancia_cambio_area) {
-          noSeguras++;
-          hallazgos.push({
-            tipo: 'reparacion_no_segura',
-            ids: [id],
-            detalle: `área ${a0.toFixed(1)} → ${a1.toFixed(1)} m² (${(cambio * 100).toFixed(2)} %)`,
-          });
-        } else if (a0 !== a1)
-          hallazgos.push({
-            tipo: 'reparada',
-            ids: [id],
-            detalle: `área ${a0.toFixed(1)} → ${a1.toFixed(1)} m²`,
-          });
-      });
-      const despues = [
-        ...validarGeometrias(limpio),
-        ...(cr.capa === 'manzana' ? [] : detectarSolapes(limpio)),
-      ];
-      proceso.reparacion = {
-        antes: resumir(antes),
-        despues: resumir(despues),
-        no_seguras: noSeguras,
-      };
-      if (noSeguras && !o.forzar)
-        throw new ErrorEtl(
-          `${cr.capa}: ${noSeguras} reparaciones cambian el área más de ${cfg.tolerancia_cambio_area * 100} %. Revisá el reporte y reejecutá con --forzar si es aceptable.`,
-        );
-      fc = limpio;
-      reparada = true;
-      log(`  reparado con -clean: ${JSON.stringify(proceso.reparacion)}`);
-    }
-    // 4) exclusión de vacías/duplicadas
-    const excluir = new Set(
-      hallazgos
-        .filter((h) => h.tipo === 'vacia')
-        .flatMap((h) => h.ids)
-        .concat(hallazgos.filter((h) => h.tipo === 'duplicada').map((h) => h.ids[1]!)),
-    );
-    fc = {
-      type: 'FeatureCollection',
-      features: fc.features.filter((f, i) => !excluir.has(idDe(f, i))),
-    };
-
-    // 5) jerarquía y normalización
+    // 2) clave estable por feature: los shapefiles crudos no traen `id`, así que se arma con los
+    //    campos configurados. Si no es única, la verificación de la reparación se hace por área total.
     const campos = insp.atributos.map((a) => a.campo);
     const campoCodigo = cr.campos.codigo ?? autodetectarCampo(campos, 'codigo', cr.capa);
     if (!campoCodigo)
@@ -325,6 +268,119 @@ export async function procesarVersion(
         `${cr.capa}: no se pudo determinar el campo de código. Campos: ${campos.join(', ')}. Fijalo en config/capas.yaml.`,
       );
     const campoNombre = cr.campos.nombre ?? autodetectarCampo(campos, 'nombre', cr.capa);
+    const claveDe = (f: Feature): string | null => {
+      const p = f.properties ?? {};
+      const partes = [campoCodigo, cr.campos.respaldo, cr.campos.distrito, cr.campos.unidad_vecinal]
+        .filter((c): c is string => !!c)
+        .map((c) => String(p[c] ?? ''));
+      const clave = partes.join('|');
+      return clave.replace(/\|/g, '') ? clave : null;
+    };
+    const claves = crudo.features.map(claveDe);
+    const clavesUnicas =
+      claves.every((k) => k !== null) && new Set(claves as string[]).size === claves.length;
+    const identificar = (f: Feature, i: number) => claveDe(f) ?? idDe(f, i);
+    proceso.claves = clavesUnicas
+      ? `únicas por (${[campoCodigo, cr.campos.respaldo].filter(Boolean).join(', ')})`
+      : 'NO únicas: la reparación se verifica por área total de la capa, no feature por feature';
+
+    // 3) validación antes de reparar
+    const antes = [
+      ...validarGeometrias(crudo),
+      ...(cr.capa === 'manzana' ? [] : detectarSolapes(crudo)),
+    ];
+    hallazgos.push(...antes);
+
+    // 4) exclusión de geometrías vacías y duplicadas (antes de reparar, para no arrastrarlas)
+    const excluir = new Set(
+      antes
+        .filter((h) => h.tipo === 'vacia')
+        .flatMap((h) => h.ids)
+        .concat(antes.filter((h) => h.tipo === 'duplicada').map((h) => h.ids[1] as string)),
+    );
+    let fc: FeatureCollection = {
+      type: 'FeatureCollection',
+      features: crudo.features.filter((f, i) => !excluir.has(idDe(f, i))),
+    };
+    if (excluir.size) log(`  excluidas ${excluir.size} geometrías vacías o duplicadas`);
+
+    // 5) reparación con -clean, verificada por área (por feature si las claves son únicas)
+    let reparada = false;
+    const areaTotal = (x: FeatureCollection) =>
+      x.features.reduce((s, f) => s + (f.geometry ? turf.area(f) : 0), 0);
+    if (antes.some((h) => h.tipo === 'invalida' || h.tipo === 'solape')) {
+      const teselada = cr.capa !== 'manzana';
+      const limpio = await limpiar(fc, teselada);
+      const areaAntes = areaTotal(fc);
+      const areaDespues = areaTotal(limpio);
+      const cambioTotal = areaAntes ? Math.abs(areaDespues - areaAntes) / areaAntes : 0;
+      let noSeguras = 0;
+      if (clavesUnicas) {
+        const areasAntes = new Map(
+          fc.features.map((f, i) => [identificar(f, i), f.geometry ? turf.area(f) : 0]),
+        );
+        limpio.features.forEach((f, i) => {
+          const id = identificar(f, i);
+          const a0 = areasAntes.get(id);
+          if (a0 === undefined) return; // feature nueva o sin par: se refleja en el área total
+          const a1 = f.geometry ? turf.area(f) : 0;
+          const cambio = a0 ? Math.abs(a1 - a0) / a0 : 0;
+          if (cambio > cfg.tolerancia_cambio_area) {
+            noSeguras++;
+            hallazgos.push({
+              tipo: 'reparacion_no_segura',
+              ids: [id],
+              detalle: `área ${a0.toFixed(1)} → ${a1.toFixed(1)} m² (${(cambio * 100).toFixed(2)} %)`,
+            });
+          } else if (a0 !== a1)
+            hallazgos.push({
+              tipo: 'reparada',
+              ids: [id],
+              detalle: `área ${a0.toFixed(1)} → ${a1.toFixed(1)} m²`,
+            });
+        });
+      }
+      const despues = [
+        ...validarGeometrias(limpio),
+        ...(cr.capa === 'manzana' ? [] : detectarSolapes(limpio)),
+      ];
+      proceso.reparacion = {
+        modo: teselada
+          ? '-clean (topológico: la capa debe teselar)'
+          : '-clean allow-overlaps no-snap (conserva vértices)',
+        antes: resumir(antes),
+        despues: resumir(despues),
+        features: `${fc.features.length} → ${limpio.features.length}`,
+        area_km2: `${(areaAntes / 1e6).toFixed(3)} → ${(areaDespues / 1e6).toFixed(3)}`,
+        cambio_area_total_pct: Number((cambioTotal * 100).toFixed(4)),
+        no_seguras: clavesUnicas ? noSeguras : 'no evaluable por feature (claves no únicas)',
+      };
+      const limite = cfg.tolerancia_cambio_area;
+      if (cambioTotal > limite && !o.forzar)
+        throw new ErrorEtl(
+          `${cr.capa}: la reparación cambia el área total de la capa un ${(cambioTotal * 100).toFixed(3)} % (límite ${limite * 100} %). Revisá ${join(salidaDir, cr.capa, 'reporte_calidad.md')} y reejecutá con --forzar si es aceptable.`,
+        );
+      if (noSeguras && !o.forzar)
+        throw new ErrorEtl(
+          `${cr.capa}: ${noSeguras} features cambian de área más de ${limite * 100} %. Revisá el reporte y reejecutá con --forzar si es aceptable.`,
+        );
+      // `-clean` puede dejar polígonos con anillos vacíos: se descartan para que turf no falle después
+      const sanas = limpio.features.filter((f) => !geometriaVacia(f));
+      if (sanas.length !== limpio.features.length) {
+        const n = limpio.features.length - sanas.length;
+        hallazgos.push({
+          tipo: 'vacia',
+          ids: [],
+          detalle: `${n} geometrías quedaron sin coordenadas tras la reparación y se descartaron`,
+        });
+        log(`  descartadas ${n} geometrías vacías tras la reparación`);
+      }
+      fc = { type: 'FeatureCollection', features: sanas };
+      reparada = true;
+      log(`  reparado con -clean: ${JSON.stringify(proceso.reparacion)}`);
+    }
+
+    // 6) jerarquía y normalización
     let distritoInferido: Map<number, string> | undefined;
     let uvInferida: Map<number, string> | undefined;
     if (cr.capa !== 'distrito_municipal') {
@@ -367,17 +423,25 @@ export async function procesarVersion(
         campoUv: cr.campos.unidad_vecinal ?? autodetectarCampo(campos, 'unidad_vecinal', cr.capa),
         distritoInferido,
         uvInferida,
+        campoRespaldo: cr.campos.respaldo,
+        plantillaNombre: cr.campos.plantilla_nombre,
+        alResolverId: (aviso) =>
+          hallazgos.push({
+            tipo: aviso.tipo === 'codigo_vacio' ? 'sin_codigo' : 'codigo_repetido',
+            ids: [aviso.id],
+            detalle: aviso.detalle,
+          }),
       }),
       7,
     );
-    // 6) huecos (solo UV respecto de distritos)
+    // 7) huecos (solo UV respecto de distritos)
     if (cr.capa === 'unidad_vecinal') {
       const padres = procesadas.get('distrito_municipal');
       if (padres) hallazgos.push(...detectarHuecos(padres, normalizado, 'distrito_id'));
     }
     procesadas.set(cr.capa, normalizado);
 
-    // 7) salidas
+    // 8) salidas
     const dirCapa = join(salidaDir, cr.capa);
     mkdirSync(dirCapa, { recursive: true });
     const bytesFull = escribirJson(join(dirCapa, `${cr.capa}.full.geojson`), normalizado);

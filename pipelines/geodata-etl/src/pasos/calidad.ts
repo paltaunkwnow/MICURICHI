@@ -17,7 +17,9 @@ export interface Hallazgo {
     | 'sin_padre'
     | 'fuera_de_padre'
     | 'reparada'
-    | 'reparacion_no_segura';
+    | 'reparacion_no_segura'
+    | 'sin_codigo'
+    | 'codigo_repetido';
   ids: string[];
   detalle?: string;
   area_m2?: number;
@@ -35,6 +37,25 @@ export interface ReporteCalidad {
 }
 
 type Poli = Feature<Polygon | MultiPolygon>;
+
+/**
+ * `true` si la geometría no tiene coordenadas numéricas utilizables. `-clean` puede dejar
+ * polígonos con anillos vacíos, y turf falla con "coordinates must contain numbers" al leerlos.
+ */
+export function geometriaVacia(f: Feature): boolean {
+  const g = f.geometry as { type?: string; coordinates?: unknown } | null;
+  if (!g || !g.coordinates) return true;
+  let numeros = 0;
+  const recorrer = (c: unknown) => {
+    if (typeof c === 'number') {
+      numeros++;
+      return;
+    }
+    if (Array.isArray(c)) for (const s of c) recorrer(s);
+  };
+  recorrer(g.coordinates);
+  return numeros < 6; // un anillo válido necesita al menos 3 vértices
+}
 
 export function idDe(f: Feature, i: number): string {
   return String(f.id ?? f.properties?.id ?? f.properties?.codigo ?? `#${i}`);
@@ -75,7 +96,7 @@ export function validarGeometrias(fc: FeatureCollection): Hallazgo[] {
   const vistos = new Map<string, string>();
   fc.features.forEach((f, i) => {
     const id = idDe(f, i);
-    if (!f.geometry) {
+    if (geometriaVacia(f)) {
       h.push({ tipo: 'vacia', ids: [id] });
       return;
     }

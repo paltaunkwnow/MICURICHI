@@ -47,10 +47,18 @@ export async function shapefileAWgs84(
   return aGeoJson(salida, 'salida.json');
 }
 
-/** Repara topología con -clean (elimina solapes y micro-huecos entre polígonos vecinos, corrige errores de geometría). */
-export async function limpiar(fc: FeatureCollection): Promise<FeatureCollection> {
+/**
+ * Repara geometría con `-clean`.
+ *
+ * - `teselada` (distritos, UV): las piezas deben cubrir el territorio sin huecos ni solapes, así que
+ *   se deja que mapshaper ajuste vértices y reparta las áreas compartidas.
+ * - no teselada (manzanas): entre manzanas hay calles, y mover vértices o repartir solapes destruiría
+ *   la geometría; se repara solo el orden de los anillos y las auto-intersecciones (`no-snap allow-overlaps`).
+ */
+export async function limpiar(fc: FeatureCollection, teselada = true): Promise<FeatureCollection> {
+  const opciones = teselada ? '' : ' allow-overlaps no-snap';
   const salida = await correr(
-    '-i entrada.json -clean -o salida.json format=geojson precision=0.0000001',
+    `-i entrada.json -clean${opciones} -o salida.json format=geojson precision=0.0000001`,
     { 'entrada.json': JSON.stringify(fc) },
   );
   return aGeoJson(salida, 'salida.json');

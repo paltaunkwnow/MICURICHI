@@ -58,8 +58,10 @@ export function detectarCapa(nombreArchivo: string): TipoCapa | null {
 
 /** Tabla mínima WKT → EPSG para mostrar un código conocido. Si no coincide, se informa el nombre del .prj sin adivinar. */
 const CONOCIDOS: Array<{ re: RegExp; epsg: string }> = [
-  { re: /WGS[_ ]?84.*UTM.*zone[_ ]?20S/i, epsg: 'EPSG:32720' },
-  { re: /PSAD[_ ]?56.*UTM.*zone[_ ]?20S/i, epsg: 'EPSG:24880' },
+  // acepta el estilo OGC ("WGS 84 / UTM zone 20S") y el estilo ESRI ("WGS_1984_UTM_Zone_20S")
+  { re: /WGS[_ ]?(19)?84.*UTM.*zone[_ ]?20\s?S/i, epsg: 'EPSG:32720' },
+  { re: /WGS[_ ]?(19)?84.*UTM.*zone[_ ]?21\s?S/i, epsg: 'EPSG:32721' },
+  { re: /PSAD[_ ]?56.*UTM.*zone[_ ]?20\s?S/i, epsg: 'EPSG:24880' },
   { re: /^GEOGCS\["GCS_WGS_1984"|^GEOGCS\["WGS 84"/i, epsg: 'EPSG:4326' },
 ];
 

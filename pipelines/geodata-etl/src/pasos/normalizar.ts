@@ -67,6 +67,16 @@ export interface OpcionesNormalizacion {
   fecha_vigencia: string | null;
   campoCodigo: string;
   campoNombre: string | null;
+  /** Campo único de respaldo (p. ej. OBJECTID) cuando el código viene vacío. */
+  campoRespaldo?: string | null;
+  /** Plantilla para construir el nombre cuando la capa no trae campo de nombre, p. ej. "Unidad Vecinal {codigo}". */
+  plantillaNombre?: string | null;
+  /** Se llama por cada id repetido o código vacío que hubo que resolver. */
+  alResolverId?: (aviso: {
+    tipo: 'codigo_vacio' | 'id_repetido';
+    id: string;
+    detalle: string;
+  }) => void;
   campoDistrito?: string | null;
   campoUv?: string | null;
   /** Padre inferido espacialmente cuando el campo no existe (índice → id del padre). */
@@ -79,10 +89,36 @@ export function idCapa(capa: TipoCapa, codigo: string): string {
 }
 
 export function normalizar(fc: FeatureCollection, o: OpcionesNormalizacion): FeatureCollection {
+  const vistos = new Map<string, number>();
   const features: Feature[] = fc.features.map((f, i) => {
     const p = f.properties ?? {};
-    const codigo = String(p[o.campoCodigo] ?? '').trim();
-    const nombre = String((o.campoNombre ? p[o.campoNombre] : null) ?? codigo).trim();
+    let codigo = String(p[o.campoCodigo] ?? '').trim();
+    if (!codigo) {
+      // sin código: se usa el campo de respaldo (OBJECTID) para no perder la geometría ni colisionar
+      const respaldo = o.campoRespaldo ? String(p[o.campoRespaldo] ?? '').trim() : '';
+      codigo = respaldo || `sin_codigo_${i + 1}`;
+      o.alResolverId?.({
+        tipo: 'codigo_vacio',
+        id: idCapa(o.capa, codigo),
+        detalle: `feature ${i + 1} sin ${o.campoCodigo}; se usó ${o.campoRespaldo ?? 'un correlativo'}`,
+      });
+    }
+    const repeticiones = vistos.get(codigo) ?? 0;
+    vistos.set(codigo, repeticiones + 1);
+    if (repeticiones > 0) {
+      const original = codigo;
+      codigo = `${codigo}-${repeticiones + 1}`;
+      o.alResolverId?.({
+        tipo: 'id_repetido',
+        id: idCapa(o.capa, codigo),
+        detalle: `el código ${original} aparece ${repeticiones + 1} veces; esta geometría quedó como ${codigo}`,
+      });
+    }
+    const nombreOriginal = o.campoNombre ? p[o.campoNombre] : null;
+    const nombre = String(
+      nombreOriginal ??
+        (o.plantillaNombre ? o.plantillaNombre.replace('{codigo}', codigo) : codigo),
+    ).trim();
     const props: Record<string, unknown> = {
       id: idCapa(o.capa, codigo),
       codigo,

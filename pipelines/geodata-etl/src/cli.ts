@@ -81,7 +81,7 @@ async function main() {
             fechaVigencia: v.fecha_vigencia,
           });
           console.log(
-            `[${v.version}/${cr.capa}] cargadas ${r.n} features → geo.${cr.capa} (vigente: ${r.vigente})`,
+            `[${v.version}/${cr.capa}] cargadas ${r.n} features → geo.${cr.capa} (vigente: ${r.vigente}${r.reparadas ? `, ${r.reparadas} reparadas con ST_MakeValid` : ''})`,
           );
         }
       }

@@ -12,6 +12,10 @@ const CamposSchema = z.object({
   nombre: z.string().nullable().default(null),
   distrito: z.string().nullable().optional().default(null),
   unidad_vecinal: z.string().nullable().optional().default(null),
+  /** Campo único de respaldo (p. ej. OBJECTID) para features sin código. */
+  respaldo: z.string().nullable().optional().default(null),
+  /** Plantilla del nombre cuando la capa no trae uno, p. ej. "Unidad Vecinal {codigo}". */
+  plantilla_nombre: z.string().nullable().optional().default(null),
 });
 
 const CapaConfigSchema = z.object({

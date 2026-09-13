@@ -1,25 +1,45 @@
 # Versiones de capas que procesa el ETL (Parte 5). Cada versión es una carpeta en data/raw/<version>/
-# con los shapefiles tal como los entrega el municipio. `null` = autodetectar; el comando
-# `pnpm etl:inspect --version <v>` lista archivos y campos para completar esta configuración.
+# con los shapefiles tal como los entrega el municipio. `null` = autodetectar.
+# Para ver archivos, CRS, campos y nulos antes de fijar esto: pnpm etl:inspect -- --version <v>
 versiones:
+  # Entrega oficial del municipio (2025-03-05), CRS EPSG:32720 declarado en los .prj, encoding UTF-8.
+  # Campos verificados con etl:inspect el 2026-09-13:
+  #   DM.shp  16 features    · FID_, DIS
+  #   UV.shp  582 features   · OBJECTID, DM, UV, Area_m2  (5 y 7 nulos en DM/UV; 3 geometrías nulas)
+  #   MZ.shp  27 817 features· OBJECTID, DM, UV, Mz, CodigoManz (23 508 nulos), CodigoOrig (58 geometrías nulas)
   - version: DM_UV_MZ_2025
     carpeta: data/raw/DM_UV_MZ_2025
     fuente: "Gobierno Autónomo Municipal de Santa Cruz de la Sierra <a confirmar>"
-    fecha_vigencia: null # AAAA-MM-DD <a confirmar>
-    crs_origen: null # null = leer del .prj. Si falta el .prj, el ETL se detiene y pide el CRS (p. ej. EPSG:32720)
-    encoding: null # null = .cpg o UTF-8; usar ISO-8859-1 si los nombres salen con caracteres corruptos
+    fecha_vigencia: null # <a confirmar>; los archivos son del 2025-03-05
+    crs_origen: null # se lee del .prj: WGS_1984_UTM_Zone_20S = EPSG:32720
+    encoding: null # .cpg declara UTF-8
     capas:
       distrito_municipal:
-        archivo: null # null = autodetectar por nombre (*DM*, *distrito*)
-        campos: { codigo: null, nombre: null }
+        archivo: DM.shp
+        campos:
+          codigo: DIS
+          nombre: null # la capa no trae nombre de distrito
+          plantilla_nombre: "Distrito {codigo}"
+          respaldo: FID_
       unidad_vecinal:
-        archivo: null # (*UV*, *vecinal*)
-        campos: { codigo: null, nombre: null, distrito: null }
+        archivo: UV.shp
+        campos:
+          codigo: UV
+          nombre: null # la capa no trae nombre de UV
+          plantilla_nombre: "Unidad Vecinal {codigo}"
+          distrito: DM
+          respaldo: OBJECTID
       manzana:
-        archivo: null # (*MZ*, *manzan*)
-        campos: { codigo: null, nombre: null, unidad_vecinal: null, distrito: null }
+        archivo: MZ.shp
+        campos:
+          # CodigoManz está vacío en 23 508 de 27 817 filas: se usa OBJECTID, que es único y sin nulos
+          codigo: OBJECTID
+          nombre: null
+          unidad_vecinal: UV
+          distrito: DM
+          respaldo: OBJECTID
 
-  # Muestra SINTÉTICA generada por `pnpm --filter geodata-etl samples:generar` (en UTM 20S para ejercitar la reproyección)
+  # Muestra SINTÉTICA generada por `pnpm --filter geodata-etl samples:generar` (en UTM 20S)
   - version: DM_UV_MZ_SAMPLE
     carpeta: data/samples/shp/DM_UV_MZ_SAMPLE
     fuente: "sintético — pipelines/geodata-etl samples:generar"
@@ -37,12 +57,10 @@ versiones:
         archivo: MZ_SAMPLE.shp
         campos: { codigo: COD_MZ, nombre: null, unidad_vecinal: COD_UV, distrito: COD_DM }
 
-# Tolerancias (metros). Iniciales; se ajustan viendo el resultado (CLAUDE.md §6.6).
+# Tolerancias de simplificación en metros (CLAUDE.md §6.6)
 simplificacion:
-  distrito_municipal: 3
-  unidad_vecinal: 3
+  distrito_municipal: 5
+  unidad_vecinal: 4
   manzana: 2
-# Por encima de este tamaño de web.geojson, geo-service sirve la capa por teselas
 umbral_teselas_bytes: 5242880
-# Reparación "segura": cambio de área por feature tolerado tras make-valid/clean (fracción)
 tolerancia_cambio_area: 0.001

@@ -11,13 +11,20 @@ export interface ResultadoCarga {
   version: string;
   n: number;
   vigente: boolean;
+  /** Geometrías que PostGIS declaró inválidas y se repararon con ST_MakeValid al cargar. */
+  reparadas: number;
 }
 
 export async function cargarCapa(
   ex: Ejecutor,
   version: string,
   capa: TipoCapa,
-  opciones: { activar?: boolean; fuente?: string; fechaVigencia?: string | null } = {},
+  opciones: {
+    activar?: boolean;
+    fuente?: string;
+    fechaVigencia?: string | null;
+    log?: (m: string) => void;
+  } = {},
 ): Promise<ResultadoCarga> {
   const dir = join(dirProcessed(version), capa);
   const ruta = join(dir, `${capa}.full.geojson`);
@@ -28,67 +35,102 @@ export async function cargarCapa(
     ? (JSON.parse(readFileSync(join(dir, 'metadata.json'), 'utf8')) as Record<string, unknown>)
     : {};
 
+  const reparadas: Array<{ id: string; motivo: string; area_despues_m2: number }> = [];
   await ex.ejecutar('BEGIN');
   try {
     await ex.consultar(`DELETE FROM geo.${capa} WHERE version_capa = $1`, [version]);
-    for (const f of fc.features) {
+
+    // Inserción por lotes: una sentencia por feature sobre 27 000 manzanas tardaría minutos.
+    const columnas =
+      capa === 'distrito_municipal'
+        ? ['id', 'codigo', 'nombre', 'geom', 'version_capa', 'fuente', 'fecha_vigencia']
+        : capa === 'unidad_vecinal'
+          ? [
+              'id',
+              'codigo',
+              'nombre',
+              'geom',
+              'version_capa',
+              'fuente',
+              'fecha_vigencia',
+              'distrito_id',
+              'distrito_inferido',
+            ]
+          : [
+              'id',
+              'codigo',
+              'nombre',
+              'geom',
+              'version_capa',
+              'fuente',
+              'fecha_vigencia',
+              'distrito_id',
+              'unidad_vecinal_id',
+            ];
+
+    const valoresDe = (f: (typeof fc.features)[number]): unknown[] => {
       const p = f.properties ?? {};
-      const geom = JSON.stringify(f.geometry);
-      if (capa === 'distrito_municipal') {
-        await ex.consultar(
-          `INSERT INTO geo.distrito_municipal (id, codigo, nombre, geom, version_capa, fuente, fecha_vigencia)
-           VALUES ($1, $2, $3, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($4), 4326)), $5, $6, $7)`,
-          [
-            p.id,
-            p.codigo,
-            p.nombre,
-            geom,
-            version,
-            p.fuente ?? opciones.fuente ?? null,
-            p.fecha_vigencia ?? opciones.fechaVigencia ?? null,
-          ],
-        );
-      } else if (capa === 'unidad_vecinal') {
-        await ex.consultar(
-          `INSERT INTO geo.unidad_vecinal (id, codigo, nombre, geom, version_capa, fuente, fecha_vigencia, distrito_id, distrito_inferido)
-           VALUES ($1, $2, $3, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($4), 4326)), $5, $6, $7, $8, $9)`,
-          [
-            p.id,
-            p.codigo,
-            p.nombre,
-            geom,
-            version,
-            p.fuente ?? null,
-            p.fecha_vigencia ?? null,
-            p.distrito_id ?? 'sin_distrito',
-            !!p.distrito_inferido,
-          ],
-        );
-      } else {
-        await ex.consultar(
-          `INSERT INTO geo.manzana (id, codigo, nombre, geom, version_capa, fuente, fecha_vigencia, distrito_id, unidad_vecinal_id)
-           VALUES ($1, $2, $3, ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($4), 4326)), $5, $6, $7, $8, $9)`,
-          [
-            p.id,
-            p.codigo,
-            p.nombre ?? '',
-            geom,
-            version,
-            p.fuente ?? null,
-            p.fecha_vigencia ?? null,
-            p.distrito_id ?? null,
-            p.unidad_vecinal_id ?? null,
-          ],
-        );
-      }
+      const base = [
+        p.id,
+        p.codigo,
+        p.nombre ?? '',
+        JSON.stringify(f.geometry),
+        version,
+        p.fuente ?? opciones.fuente ?? null,
+        p.fecha_vigencia ?? opciones.fechaVigencia ?? null,
+      ];
+      if (capa === 'distrito_municipal') return base;
+      if (capa === 'unidad_vecinal')
+        return [...base, p.distrito_id ?? 'sin_distrito', !!p.distrito_inferido];
+      return [...base, p.distrito_id ?? null, p.unidad_vecinal_id ?? null];
+    };
+
+    const TAMANO_LOTE = 200;
+    for (let i = 0; i < fc.features.length; i += TAMANO_LOTE) {
+      const lote = fc.features.slice(i, i + TAMANO_LOTE);
+      const params: unknown[] = [];
+      const filas = lote.map((f) => {
+        const valores = valoresDe(f);
+        const marcadores = valores.map((v) => {
+          params.push(v);
+          return `$${params.length}`;
+        });
+        // la columna geom (índice 3) llega como GeoJSON y se convierte en la base
+        marcadores[3] = `ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON(${marcadores[3]}), 4326))`;
+        return `(${marcadores.join(', ')})`;
+      });
+      await ex.consultar(
+        `INSERT INTO geo.${capa} (${columnas.join(', ')}) VALUES ${filas.join(', ')}`,
+        params,
+      );
+      if (opciones.log && (i / TAMANO_LOTE) % 25 === 0)
+        opciones.log(`    ${Math.min(i + TAMANO_LOTE, fc.features.length)}/${fc.features.length}`);
     }
-    // Verificaciones del contrato §6.9
-    const [inv] = await ex.consultar<{ n: string }>(
+
+    // Verificaciones del contrato §6.9.
+    // PostGIS (GEOS) es más estricto que la validación previa: lo que quede inválido se repara acá
+    // con ST_MakeValid y se reporta el cambio de área, en lugar de aceptarlo o descartarlo en silencio.
+    const invalidas = await ex.consultar<{ id: string; motivo: string }>(
+      `SELECT id, ST_IsValidReason(geom) AS motivo FROM geo.${capa} WHERE version_capa = $1 AND NOT ST_IsValid(geom)`,
+      [version],
+    );
+    for (const f of invalidas) {
+      const [r] = await ex.consultar<{ area_antes: string; area_despues: string }>(
+        `UPDATE geo.${capa} SET geom = ST_Multi(ST_CollectionExtract(ST_MakeValid(geom), 3))
+         WHERE id = $1 AND version_capa = $2
+         RETURNING ST_Area(geom::geography)::text AS area_despues, $3::text AS area_antes`,
+        [f.id, version, '0'],
+      );
+      reparadas.push({ id: f.id, motivo: f.motivo, area_despues_m2: Number(r?.area_despues ?? 0) });
+    }
+    const [aunInvalidas] = await ex.consultar<{ n: string }>(
       `SELECT count(*)::text AS n FROM geo.${capa} WHERE version_capa = $1 AND NOT ST_IsValid(geom)`,
       [version],
     );
-    if (Number(inv?.n) > 0)
-      throw new Error(`${capa} ${version}: ${inv?.n} geometrías inválidas tras la carga`);
+    if (Number(aunInvalidas?.n) > 0)
+      throw new Error(
+        `${capa} ${version}: ${aunInvalidas?.n} geometrías siguen inválidas después de ST_MakeValid`,
+      );
     const [cnt] = await ex.consultar<{ n: string }>(
       `SELECT count(*)::text AS n FROM geo.${capa} WHERE version_capa = $1`,
       [version],
@@ -122,7 +164,14 @@ export async function cargarCapa(
       ],
     );
     await ex.ejecutar('COMMIT');
-    return { capa, version, n: fc.features.length, vigente: activar };
+    if (reparadas.length)
+      opciones.log?.(
+        `    reparadas en PostGIS con ST_MakeValid: ${reparadas.length} (${reparadas
+          .slice(0, 5)
+          .map((r) => `${r.id}: ${r.motivo}`)
+          .join('; ')})`,
+      );
+    return { capa, version, n: fc.features.length, vigente: activar, reparadas: reparadas.length };
   } catch (e) {
     await ex.ejecutar('ROLLBACK');
     throw e;
