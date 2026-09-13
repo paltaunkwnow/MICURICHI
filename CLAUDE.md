@@ -1,7 +1,7 @@
 # CLAUDE.md — Mi Curichi
 
 > **Manual operativo permanente del repositorio.** Cualquier agente o persona que trabaje aquí debe leer este archivo completo antes de tocar nada.
-> Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada el 2026-09-13. Tarea 1 (Parte 5, arranque) hecha en `fase-1/repo`. El 2026-09-13 el usuario ordenó **completar toda la Fase 1 sin detenerse por aprobaciones por tarea**, probar la ejecución y desplegar en localhost; esa orden sustituye la puerta por tarea de §10.2 solo para la Fase 1.
+> Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada el 2026-09-13. Las cinco partes están escritas y corren con los datos reales del municipio; queda la tarea 9 (E2E, seguridad, cierre). El estado exacto, los defectos abiertos y cómo retomar están en **`docs/TRASPASO.md`**.
 > Última actualización: 2026-09-13. Versiones de software verificadas en esa fecha (ver §8). Distribución del trabajo en **5 partes** fijada por el usuario (§4).
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)

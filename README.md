@@ -6,19 +6,21 @@ Plataforma de **reporte ciudadano georreferenciado de puntos de inundación**. E
 
 ## Estado
 
-**Fase 1 — Local**, en curso. Orden de tareas en `CLAUDE.md` §10.2.
+**Fase 1 — Local.** Las cinco partes están escritas y corren en la máquina con datos reales del municipio (16 distritos, 576 unidades vecinales, 27 527 manzanas). Falta cerrar la tarea 9.
 
 | Tarea | Parte | Qué | Estado |
 |---|---|---|---|
-| 1 | 5 | Arranque del repositorio | hecha (rama `fase-1/repo`) |
-| 2 | transversal | `packages/contracts` | pendiente |
-| 3 | 4 | `packages/db` | pendiente |
-| 4 | 5 | `pipelines/geodata-etl` | pendiente |
-| 5 | 4 | `services/geo-service` | pendiente |
-| 6 | 3 | `services/api-core` | pendiente |
-| 7 | 1 | `apps/web-ciudadano` | pendiente |
-| 8 | 2 | `apps/panel-admin` | pendiente |
-| 9 | 5 | E2E, seguridad, cierre | pendiente |
+| 1 | 5 | Arranque del repositorio | hecha |
+| 2 | transversal | `packages/contracts` | hecha |
+| 3 | 4 | `packages/db` | hecha |
+| 4 | 5 | `pipelines/geodata-etl` | hecha (ver traspaso §3.1) |
+| 5 | 4 | `services/geo-service` | hecha |
+| 6 | 3 | `services/api-core` | hecha |
+| 7 | 1 | `apps/web-ciudadano` | hecha (ver traspaso §3.2 y §3.3) |
+| 8 | 2 | `apps/panel-admin` | hecha |
+| 9 | 5 | E2E, seguridad, cierre | **en curso**: pruebas escritas, nunca ejecutadas |
+
+👉 **[docs/TRASPASO.md](docs/TRASPASO.md)** dice exactamente qué funciona, qué falta y cómo retomarlo.
 
 ## Requisitos en local
 
