@@ -38,3 +38,7 @@ e2e/playwright-report/
 # sistema
 .DS_Store
 Thumbs.db
+
+# modo local sin Docker (ADR 0002)
+infra/.pglite/
+infra/.storage/

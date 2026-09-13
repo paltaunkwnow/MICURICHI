@@ -4,3 +4,19 @@ packages:
   - packages/*
   - pipelines/*
   - e2e
+
+# Paquetes con scripts de instalación permitidos (pnpm los bloquea por defecto)
+allowBuilds:
+  better-sqlite3: set this to true or false
+  esbuild: set this to true or false
+  msgpackr-extract: set this to true or false
+
+minimumReleaseAgeExclude:
+  - zod@4.6.4
+
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+  - "@tailwindcss/oxide"
+  - unrs-resolver
+  - protobufjs
