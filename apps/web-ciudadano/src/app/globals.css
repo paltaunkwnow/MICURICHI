@@ -1,0 +1,397 @@
+@import "tailwindcss";
+@import "@fontsource/sora/600.css";
+@import "@fontsource-variable/source-sans-3";
+
+/* Sistema de diseño Mi Curichi (CLAUDE.md §14.4): paleta del logotipo, Sora + Source Sans 3. */
+@theme {
+  --font-titular: "Sora", ui-sans-serif, system-ui, sans-serif;
+  --font-interfaz: "Source Sans 3 Variable", "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+
+  --color-verde-100: #e6f2ea;
+  --color-verde-300: #a8d5b5;
+  --color-verde-500: #28934d;
+  --color-verde-700: #1b6b38;
+  --color-verde-900: #0f3d1f;
+
+  --color-agua-100: #e3eef5;
+  --color-agua-300: #8fbcd6;
+  --color-agua-500: #0d6189;
+  --color-agua-700: #0a4a69;
+  --color-agua-900: #06324a;
+
+  --color-tinta-100: #e8edf1;
+  --color-tinta-300: #8a98a6;
+  --color-tinta-600: #3e5468;
+  --color-tinta-800: #1b3a52;
+  --color-tinta-900: #0f2d43;
+
+  --color-fondo: #eef3ef;
+  --color-superficie: #ffffff;
+  --color-filete: #d7dfda;
+
+  --color-sev-baja: #28934d;
+  --color-sev-baja-texto: #1b6b38;
+  --color-sev-baja-fondo: #e6f2ea;
+  --color-sev-media: #c98a0e;
+  --color-sev-media-texto: #8a5a00;
+  --color-sev-media-fondo: #fbf1dc;
+  --color-sev-alta: #e4601b;
+  --color-sev-alta-texto: #b84a0e;
+  --color-sev-alta-fondo: #fde8dc;
+  --color-sev-critica: #b3200a;
+  --color-sev-critica-texto: #ffffff;
+  --color-sev-critica-fondo: #fbe1dc;
+
+  --color-error: #b3200a;
+
+  --radius-pastilla: 999px;
+  --radius-tarjeta: 20px;
+  --radius-hoja: 30px;
+  --radius-campo: 12px;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  background: var(--color-fondo);
+  color: var(--color-tinta-900);
+  font-family: var(--font-interfaz);
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+}
+
+h1,
+h2,
+h3,
+.titular {
+  font-family: var(--font-titular);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-verde-500);
+  outline-offset: 2px;
+}
+
+/* Botones en pastilla, 48 px de alto mínimo (objetivo táctil) */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 48px;
+  padding: 0 1.5rem;
+  border-radius: var(--radius-pastilla);
+  font-weight: 600;
+  font-size: 1rem;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    background-color 120ms ease;
+  text-decoration: none;
+}
+.btn:active {
+  transform: scale(0.98);
+}
+.btn-primario {
+  background: var(--color-verde-700);
+  color: #fff;
+}
+.btn-primario:hover {
+  background: var(--color-verde-900);
+}
+.btn-primario:disabled {
+  background: #9dc9ac;
+  cursor: not-allowed;
+}
+.btn-secundario {
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  border-color: var(--color-tinta-300);
+}
+.btn-secundario:hover {
+  border-color: var(--color-tinta-900);
+}
+.btn-tinta {
+  background: var(--color-tinta-900);
+  color: #fff;
+}
+.btn-tinta:hover {
+  background: var(--color-tinta-800);
+}
+.btn-circular {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  box-shadow: 0 2px 8px rgb(15 45 67 / 0.15);
+}
+.btn-circular-verde {
+  background: var(--color-verde-500);
+  color: #fff;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  padding: 0 0.9rem;
+  border-radius: var(--radius-pastilla);
+  background: var(--color-superficie);
+  color: var(--color-tinta-900);
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1.5px solid var(--color-filete);
+  cursor: pointer;
+}
+.chip[aria-pressed="true"],
+.chip-activo {
+  background: var(--color-tinta-900);
+  color: #fff;
+  border-color: var(--color-tinta-900);
+}
+.chip-suave {
+  min-height: 32px;
+  padding: 0 0.7rem;
+  font-size: 0.875rem;
+  background: var(--color-tinta-100);
+  border-color: transparent;
+  cursor: default;
+}
+
+.punto {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tarjeta {
+  background: var(--color-superficie);
+  border-radius: var(--radius-tarjeta);
+  box-shadow:
+    0 1px 2px rgb(15 45 67 / 0.06),
+    0 8px 24px rgb(15 45 67 / 0.06);
+}
+
+.campo {
+  width: 100%;
+  min-height: 48px;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-campo);
+  border: 1.5px solid var(--color-filete);
+  background: #fff;
+  font: inherit;
+  font-size: 1.125rem;
+  color: var(--color-tinta-900);
+}
+.campo:focus {
+  border-color: var(--color-verde-500);
+  outline: none;
+  box-shadow: 0 0 0 3px rgb(40 147 77 / 0.25);
+}
+.campo[aria-invalid="true"] {
+  border-color: var(--color-error);
+  background: #fff6f4;
+}
+.ayuda {
+  color: var(--color-tinta-600);
+  font-size: 0.875rem;
+}
+.error {
+  color: var(--color-error);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.opcion-radio {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 56px;
+  padding: 0 1rem;
+  border-radius: 14px;
+  border: 1.5px solid var(--color-filete);
+  background: #fff;
+  cursor: pointer;
+  font-size: 1.125rem;
+}
+.opcion-radio:has(input:checked) {
+  border-color: var(--color-verde-500);
+  box-shadow: 0 0 0 2px rgb(40 147 77 / 0.35);
+}
+.opcion-radio input {
+  accent-color: var(--color-verde-700);
+  width: 20px;
+  height: 20px;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 11px;
+}
+
+/* --- Complementos de la Parte 1 ---------------------------------------------------------
+   Las clases del kit (.btn, .chip, .campo…) viven fuera de @layer, así que los utilitarios
+   de Tailwind no pueden sobreescribir sus propiedades. Las variantes responsivas se definen acá. */
+
+/* Cuerpo del flujo de reporte: 18/28 (CLAUDE.md §14.4). */
+.cuerpo-reporte {
+  font-size: 1.125rem;
+  line-height: 1.55;
+}
+
+/* Chips de filtro con objetivo táctil de 48 px. */
+.chip-filtro {
+  min-height: 48px;
+}
+
+/* Tarjeta de reporte seleccionada. */
+.tarjeta-reporte {
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+.tarjeta-reporte:hover {
+  border-color: var(--color-tinta-300);
+}
+.tarjeta-reporte[aria-pressed="true"] {
+  border-color: var(--color-tinta-900);
+}
+
+/* Placeholder rayado cuando el vecino no adjuntó foto. */
+.placeholder-foto {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0.5rem;
+  background: repeating-linear-gradient(135deg, #e8edf1 0 8px, #f5f7f9 8px 16px);
+  color: var(--color-tinta-600);
+  font-family: var(--font-titular);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+/* Botón "Reportar un punto": pastilla fija al alcance del pulgar en móvil, "+" circular verde
+   sobre el mapa en escritorio. */
+.boton-reportar {
+  position: fixed;
+  left: 1rem;
+  right: 1rem;
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  z-index: 20;
+  min-height: 56px;
+  font-size: 1.125rem;
+  box-shadow: 0 8px 24px rgb(15 45 67 / 0.25);
+}
+@media (min-width: 768px) {
+  .boton-reportar {
+    position: absolute;
+    left: auto;
+    right: 1rem;
+    top: 1rem;
+    bottom: auto;
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+    padding: 0;
+    border-radius: 50%;
+    background: var(--color-verde-500);
+  }
+  .boton-reportar:hover {
+    background: var(--color-verde-700);
+  }
+}
+
+/* Hoja de detalle: sube desde abajo en móvil (radio 30 px arriba); tarjeta en escritorio. */
+.hoja {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  max-height: 82dvh;
+  overflow-y: auto;
+  border-radius: var(--radius-hoja) var(--radius-hoja) 0 0;
+  background: var(--color-superficie);
+  box-shadow: 0 -8px 30px rgb(15 45 67 / 0.25);
+  padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+}
+@media (min-width: 768px) {
+  .hoja {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    border-radius: var(--radius-tarjeta);
+    box-shadow:
+      0 1px 2px rgb(15 45 67 / 0.06),
+      0 8px 24px rgb(15 45 67 / 0.06);
+    padding-bottom: 1.5rem;
+  }
+}
+
+/* Tarjetas de indicadores sobre el mapa. */
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.75rem 1rem;
+  background: rgb(255 255 255 / 0.94);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+}
+.kpi-valor {
+  font-family: var(--font-titular);
+  font-weight: 600;
+  font-size: 1.5rem;
+  line-height: 1.1;
+  color: var(--color-tinta-900);
+}
+.kpi-etiqueta {
+  font-size: 0.8125rem;
+  color: var(--color-tinta-600);
+}
+
+/* Chip flotante sobre el mapa oscuro. */
+.chip-mapa {
+  background: rgb(255 255 255 / 0.94);
+  border-color: transparent;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+  cursor: default;
+}
+
+/* Tarjeta destacada del "Cómo funciona". */
+.tabla-simple {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 1rem;
+}
+.tabla-simple th,
+.tabla-simple td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-filete);
+  text-align: left;
+  vertical-align: top;
+}
+.tabla-simple th {
+  font-weight: 600;
+  color: var(--color-tinta-600);
+}
