@@ -1,0 +1,40 @@
+# dependencias y builds
+node_modules/
+.pnpm-store/
+dist/
+.next/
+out/
+coverage/
+.turbo/
+*.log
+*.tsbuildinfo
+
+# entorno: NUNCA secretos en el repo (CLAUDE.md §13)
+.env
+.env.*
+!.env.example
+
+# datos pesados: nunca en git (CLAUDE.md §6.10). Se versionan solo README y MANIFEST.md
+data/raw/**
+!data/raw/**/
+!data/raw/README.md
+!data/raw/**/MANIFEST.md
+data/processed/**
+!data/processed/**/
+!data/processed/README.md
+
+# python (ETL, Parte 5)
+__pycache__/
+.venv/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# playwright (Parte 5)
+e2e/test-results/
+e2e/playwright-report/
+**/playwright/.cache/
+
+# sistema
+.DS_Store
+Thumbs.db

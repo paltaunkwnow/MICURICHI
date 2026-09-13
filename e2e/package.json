@@ -1,0 +1,9 @@
+{
+  "name": "e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pruebas end-to-end transversales (Parte 5): recorrido ciudadano → técnico → mapa público → exportación",
+  "scripts": {
+    "test:e2e": "echo 'e2e transversal: pendiente (tarea 9 de la Fase 1)'"
+  }
+}

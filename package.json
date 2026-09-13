@@ -1,0 +1,39 @@
+{
+  "name": "mi-curichi",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Plataforma de reporte ciudadano georreferenciado de puntos de inundación",
+  "packageManager": "pnpm@12.4.1",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=12"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:e2e": "turbo run test:e2e",
+    "db:generate": "pnpm --filter db generate",
+    "db:migrate": "pnpm --filter db migrate",
+    "db:seed:samples": "pnpm --filter db seed:samples",
+    "etl:inspect": "pnpm --filter geodata-etl inspect",
+    "etl:run": "pnpm --filter geodata-etl run:capa",
+    "etl:load": "pnpm --filter geodata-etl load",
+    "etl:all": "pnpm --filter geodata-etl all",
+    "etl:test": "pnpm --filter geodata-etl test",
+    "contracts:build": "pnpm --filter contracts build",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@commitlint/cli": "^21.2.2",
+    "@commitlint/config-conventional": "^21.2.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.5.1",
+    "turbo": "2.10.12"
+  }
+}

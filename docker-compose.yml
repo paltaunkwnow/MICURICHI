@@ -1,0 +1,67 @@
+# Entorno local de Mi Curichi (Fase 1). Parte 5.
+# Uso: cp .env.example .env && docker compose up -d
+# Los servicios api-core y geo-service se agregan bajo el perfil `apps` cuando existan (tareas 5 y 6).
+name: mi-curichi
+
+services:
+  postgis:
+    image: postgis/postgis:18-3.6
+    container_name: curichi-postgis
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-curichi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-curichi}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # PostgreSQL 18 mueve el directorio de datos: el volumen se monta en /var/lib/postgresql
+      - postgis-data:/var/lib/postgresql
+      # Solo extensiones (CLAUDE.md §5.1). Se ejecuta UNA vez, al crear el volumen.
+      - ./infra/sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-curichi} -d ${POSTGRES_DB:-curichi}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    # <tag a confirmar>: fijar una versión RELEASE.YYYY-MM-DD concreta al primer arranque real
+    image: minio/minio:latest
+    container_name: curichi-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio-init:
+    # Crea el bucket de fotos una vez y termina.
+    image: minio/mc:latest
+    container_name: curichi-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
+      S3_BUCKET: ${S3_BUCKET:-fotos}
+    entrypoint: >
+      /bin/sh -c "
+        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
+        mc mb --ignore-existing local/$$S3_BUCKET &&
+        echo 'bucket listo: '$$S3_BUCKET
+      "
+    restart: "no"
+
+volumes:
+  postgis-data:
+  minio-data:
