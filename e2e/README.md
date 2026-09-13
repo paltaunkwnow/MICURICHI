@@ -1,12 +1,23 @@
-# e2e — Parte 5
+# e2e — Parte 5 (calidad)
 
-Pruebas end-to-end **transversales** con Playwright. Cubren el recorrido completo:
+Pruebas end-to-end **transversales**: las que cruzan varias partes. Los E2E propios de cada app viven dentro de la app.
 
-1. Un ciudadano crea un reporte (GPS simulado o selección manual) con foto.
-2. Un técnico inicia sesión, lo filtra por UV y lo valida.
-3. El punto aparece en el mapa público con distrito y UV.
-4. La exportación GeoJSON contiene el reporte.
+| Archivo | Qué cubre |
+|---|---|
+| `tests/recorrido-completo.spec.ts` | Vecino reporta → moderación previa (404 en público) → técnico valida → aparece en el mapa público → sale en CSV y GeoJSON |
+| `tests/api-contratos.spec.ts` | Sin navegador: `/ready`, point-in-polygon dentro y fuera, validación de payload, honeypot, 422 fuera de cobertura, 401 sin sesión, capas y teselas, fotos sin EXIF, rechazo por *magic bytes* |
+| `tests/mapa-publico.spec.ts` | Mapa público en escritorio y en móvil (proyecto `movil`) |
+| `tests/accesibilidad.spec.ts` | `lang`, `h1`, `alt`, etiquetas de campos, nombres de botones y enlace de salto |
 
-Se implementa en la **tarea 9** de la Fase 1, cuando existan las cinco partes. Hasta entonces `pnpm test:e2e` solo informa que está pendiente.
+## Cómo correrlos
 
-Los E2E propios de cada app (`apps/web-ciudadano`, `apps/panel-admin`) viven dentro de cada app; aquí va solo lo que cruza partes.
+```bash
+pnpm db:local           # terminal 1: PostGIS local sin Docker (127.0.0.1:5433)
+pnpm db:seed:samples    # datos sintéticos + usuarios locales
+pnpm dev                # terminal 2: api-core, geo-service y las dos apps
+pnpm test:e2e           # terminal 3
+```
+
+Si no hay nada escuchando, `webServer` levanta `pnpm dev` solo (hasta 5 minutos la primera vez, por la compilación de Next).
+
+Credenciales: se toman de `E2E_TECNICO_EMAIL` y `E2E_TECNICO_PASSWORD`, y por defecto usan los usuarios sintéticos del seed (ver `packages/db/README.md`).

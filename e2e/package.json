@@ -4,6 +4,11 @@
   "private": true,
   "description": "Pruebas end-to-end transversales (Parte 5): recorrido ciudadano → técnico → mapa público → exportación",
   "scripts": {
-    "test:e2e": "echo 'e2e transversal: pendiente (tarea 9 de la Fase 1)'"
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.13.4",
+    "typescript": "5.9.3"
   }
 }
