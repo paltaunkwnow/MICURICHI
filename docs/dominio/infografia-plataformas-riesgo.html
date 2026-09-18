@@ -1,0 +1,612 @@
+<title>Quién ya mapea el riesgo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700&family=Source+Sans+3:wght@400;600;700&display=swap">
+<style>
+  :root{
+    --tinta:#0F2D43; --tinta-90:#1B3E57; --tinta-60:#5A7386;
+    --papel:#F4F7F3; --superficie:#FFFFFF; --linea:#DCE5DD; --linea-fuerte:#C3D2C6;
+    --verde:#1B6B38; --verde-claro:#28934D;
+    --agua:#0D6189; --fuego:#B3200A; --via:#8A5A00; --multi:#3F4A57;
+    --agua-tenue:#E3EFF5; --fuego-tenue:#FBE7E2; --via-tenue:#F8EEDA; --multi-tenue:#E7EBEF; --verde-tenue:#E2F0E6;
+    --texto:#0F2D43; --texto-suave:#4A6376; --sombra:0 1px 2px rgba(15,45,67,.06), 0 8px 24px rgba(15,45,67,.05);
+    --display:'Sora',system-ui,sans-serif; --cuerpo:'Source Sans 3',system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --tinta:#E8EFF4; --tinta-90:#CBD8E1; --tinta-60:#8FA3B2;
+      --papel:#0B1E2C; --superficie:#12293A; --linea:#224054; --linea-fuerte:#2E5065;
+      --verde:#5BC47C; --verde-claro:#3FAE68;
+      --agua:#6BB8DC; --fuego:#F0836A; --via:#E0AE45; --multi:#A7B8C6;
+      --agua-tenue:#123A4D; --fuego-tenue:#43221C; --via-tenue:#42361B; --multi-tenue:#22333F; --verde-tenue:#1A3A26;
+      --texto:#E8EFF4; --texto-suave:#A7BCC9; --sombra:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+    }
+  }
+  :root[data-theme="dark"]{
+    --tinta:#E8EFF4; --tinta-90:#CBD8E1; --tinta-60:#8FA3B2;
+    --papel:#0B1E2C; --superficie:#12293A; --linea:#224054; --linea-fuerte:#2E5065;
+    --verde:#5BC47C; --verde-claro:#3FAE68;
+    --agua:#6BB8DC; --fuego:#F0836A; --via:#E0AE45; --multi:#A7B8C6;
+    --agua-tenue:#123A4D; --fuego-tenue:#43221C; --via-tenue:#42361B; --multi-tenue:#22333F; --verde-tenue:#1A3A26;
+    --texto:#E8EFF4; --texto-suave:#A7BCC9; --sombra:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--papel); color:var(--texto);
+    font-family:var(--cuerpo); font-size:17px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .envoltura{max-width:1140px; margin:0 auto; padding-inline:20px; padding-block:0}
+  h1,h2,h3{font-family:var(--display); text-wrap:balance; margin:0}
+  a{color:var(--agua); text-decoration-thickness:1px; text-underline-offset:3px}
+  a:focus-visible, .tarjeta:focus-within{outline:3px solid var(--verde-claro); outline-offset:3px; border-radius:14px}
+
+  /* ---------- cabecera ---------- */
+  .portada{padding-block:56px 40px; border-bottom:1px solid var(--linea)}
+  .cinta{display:inline-flex; align-items:center; gap:10px; font-size:13px; font-weight:600;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--verde); background:var(--verde-tenue);
+    padding:7px 16px; border-radius:999px}
+  .cinta::before{content:""; width:9px; height:9px; border-radius:50%; background:var(--verde-claro)}
+  h1{font-size:clamp(34px,6.2vw,58px); line-height:1.05; font-weight:700; margin-top:22px; letter-spacing:-.02em}
+  .bajada{font-size:clamp(18px,2.4vw,21px); color:var(--texto-suave); max-width:60ch; margin-top:18px}
+  .meta{display:flex; flex-wrap:wrap; gap:10px 28px; margin-top:26px; font-size:14px; color:var(--tinta-60)}
+  .meta b{font-family:var(--display); font-weight:600; color:var(--texto); font-variant-numeric:tabular-nums}
+
+  /* ---------- leyenda ---------- */
+  .leyenda{display:flex; flex-wrap:wrap; gap:10px; margin-top:30px}
+
+  .chip{display:inline-flex; align-items:center; gap:7px; font-size:13px; font-weight:600;
+    padding:5px 12px 5px 9px; border-radius:999px; border:1px solid transparent; white-space:nowrap}
+  .chip .forma{width:0;height:0;flex:none}
+  .c-agua{background:var(--agua-tenue); color:var(--agua); border-color:var(--agua)}
+  .c-agua .forma{width:10px;height:10px;border-radius:50%;background:currentColor}
+  .c-fuego{background:var(--fuego-tenue); color:var(--fuego); border-color:var(--fuego)}
+  .c-fuego .forma{border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid currentColor}
+  .c-via{background:var(--via-tenue); color:var(--via); border-color:var(--via)}
+  .c-via .forma{width:10px;height:10px;background:currentColor;transform:rotate(45deg)}
+  .c-multi{background:var(--multi-tenue); color:var(--multi); border-color:var(--multi)}
+  .c-multi .forma{width:10px;height:10px;background:currentColor;clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%)}
+  .c-cdn{background:var(--verde-tenue); color:var(--verde); border-color:var(--verde)}
+  .c-cdn .forma{width:10px;height:10px;background:currentColor;clip-path:polygon(50% 0,100% 38%,82% 100%,18% 100%,0 38%)}
+
+  /* ---------- secciones ---------- */
+  .estrato{padding-block:44px; border-bottom:1px solid var(--linea)}
+  .encabezado-estrato{display:flex; align-items:baseline; gap:16px; flex-wrap:wrap; margin-bottom:6px}
+  .orden{font-family:var(--display); font-weight:700; font-size:13px; letter-spacing:.14em;
+    color:var(--verde); border:1px solid var(--linea-fuerte); border-radius:999px; padding:4px 12px}
+  .encabezado-estrato h2{font-size:clamp(24px,3.4vw,32px); letter-spacing:-.015em}
+  .entrada{color:var(--texto-suave); max-width:72ch; margin:10px 0 26px; font-size:17px}
+
+  .rejilla{display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(305px,1fr))}
+  .tarjeta{background:var(--superficie); border:1px solid var(--linea); border-radius:16px;
+    padding:18px; display:flex; flex-direction:column; gap:11px; box-shadow:var(--sombra)}
+  .fila-marca{display:flex; align-items:flex-start; gap:13px}
+  .marca{width:46px; height:46px; flex:none; border-radius:13px; display:grid; place-items:center;
+    font-family:var(--display); font-weight:700; font-size:15px; letter-spacing:-.01em; color:#fff;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.16)}
+  .marca.mn{font-size:13px}
+  .titulo-tarjeta{display:flex; flex-direction:column; gap:2px; min-width:0}
+  .titulo-tarjeta h3{font-size:18px; font-weight:600; line-height:1.25; overflow-wrap:anywhere}
+  .org{font-size:13.5px; color:var(--tinta-60); line-height:1.35}
+  .tarjeta p{margin:0; font-size:15.5px; color:var(--texto-suave); line-height:1.5}
+  .chips{display:flex; flex-wrap:wrap; gap:6px}
+  .chips .chip{font-size:11.5px; padding:3px 9px 3px 7px}
+  .chips .chip .forma{width:8px;height:8px}
+  .chips .c-fuego .forma{width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:8px solid currentColor}
+  .enlace{margin-top:auto; font-size:14px; font-weight:600; word-break:break-word}
+  .enlace::after{content:" →"; font-weight:400}
+  .dato{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:13.5px;
+    background:var(--multi-tenue); color:var(--texto); padding:2px 7px; border-radius:6px}
+
+  /* ---------- matriz ---------- */
+  .marco-tabla{overflow-x:auto; border:1px solid var(--linea); border-radius:16px; background:var(--superficie)}
+  table{border-collapse:collapse; width:100%; min-width:720px; font-size:15px}
+  th,td{text-align:left; padding:12px 14px; border-bottom:1px solid var(--linea)}
+  thead th{font-family:var(--display); font-size:12px; font-weight:600; letter-spacing:.09em;
+    text-transform:uppercase; color:var(--tinta-60); background:var(--papel); position:sticky; top:0}
+  tbody th{font-weight:600; font-family:var(--display); font-size:15px; white-space:nowrap}
+  td.si{color:var(--verde); font-weight:700}
+  td.no{color:var(--tinta-60)}
+  td.parcial{color:var(--via); font-weight:600}
+  tr.nuestra{background:var(--verde-tenue)}
+  tr.nuestra th{color:var(--verde)}
+  tbody tr:last-child th, tbody tr:last-child td{border-bottom:none}
+
+  /* ---------- lecciones ---------- */
+  .lecciones{display:grid; gap:14px; grid-template-columns:repeat(auto-fill,minmax(330px,1fr))}
+  .leccion{border-left:3px solid var(--verde-claro); padding:2px 0 2px 18px}
+  .leccion h3{font-size:17px; font-weight:600; margin-bottom:6px}
+  .leccion p{margin:0; color:var(--texto-suave); font-size:15.5px}
+  .leccion .fuente{font-size:13.5px; color:var(--tinta-60); display:block; margin-top:7px}
+
+  .nota{background:var(--superficie); border:1px dashed var(--linea-fuerte); border-radius:14px;
+    padding:18px 20px; font-size:15px; color:var(--texto-suave); margin-top:30px}
+  .nota strong{color:var(--texto); font-family:var(--display); font-weight:600}
+
+  footer{padding-block:34px 52px; font-size:14px; color:var(--tinta-60)}
+  footer p{margin:0 0 8px}
+</style>
+
+<div class="envoltura">
+  <header class="portada">
+    <span class="cinta">Mi Curichi · investigación de referencia</span>
+    <h1>Quién ya mapea el riesgo</h1>
+    <p class="bajada">Plataformas, apps y sitios que detectan, previenen o informan sobre inundaciones, incendios y fallas de la vía pública. Primero Bolivia, después la región y el mundo — y qué hueco deja cada una.</p>
+    <div class="meta">
+      <span><b>32</b> plataformas relevadas</span>
+      <span><b>11</b> en Bolivia</span>
+      <span><b>4</b> estratos: nacional · subnacional · región · mundo</span>
+      <span>Relevamiento: <b>18-09-2026</b></span>
+    </div>
+    <div class="leyenda">
+      <span class="chip c-agua"><i class="forma"></i>Inundación / hidrología</span>
+      <span class="chip c-fuego"><i class="forma"></i>Incendio / focos de calor</span>
+      <span class="chip c-via"><i class="forma"></i>Vía pública / baches</span>
+      <span class="chip c-multi"><i class="forma"></i>Multiamenaza</span>
+      <span class="chip c-cdn"><i class="forma"></i>Recibe reportes de la ciudadanía</span>
+    </div>
+  </header>
+
+  <!-- ============ 1. BOLIVIA NACIONAL ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Estrato 1</span>
+      <h2>Bolivia · nivel nacional</h2>
+    </div>
+    <p class="entrada">El Estado boliviano observa el riesgo desde arriba: satélite, estaciones meteorológicas y cuencas. Todo es <em>alerta descendente</em> — la información baja del organismo al vecino. Ninguna de estas plataformas recibe el reporte de un vecino como dato georreferenciado.</p>
+
+    <div class="rejilla">
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca" style="background:#1B5E8C">SEN</div>
+          <div class="titulo-tarjeta"><h3>SENAMHI — Alertas</h3><span class="org">Servicio Nacional de Meteorología e Hidrología · Bolivia</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-multi"><i class="forma"></i>Meteorología</span></div>
+        <p>Avisos meteorológicos e hidrológicos oficiales y el Sistema de Alerta Temprana hidrológico: red de estaciones que vigila lluvia y nivel de ríos, con pronóstico de hasta cinco días.</p>
+        <a class="enlace" href="https://senamhi.gob.bo/index.php/alertas">senamhi.gob.bo/alertas</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca" style="background:#8A1F1F">VDC</div>
+          <div class="titulo-tarjeta"><h3>VIDECI / Defensa Civil</h3><span class="org">Viceministerio de Defensa Civil · Ministerio de Defensa</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span></div>
+        <p>Cabeza del SISRADE. Publica seguimiento de alertas y reportes de eventos por municipio, y opera el sistema Dewetra para monitoreo integrado de amenazas.</p>
+        <a class="enlace" href="https://defensacivil.gob.bo/">defensacivil.gob.bo</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca" style="background:#2E7D32">SIMB</div>
+          <div class="titulo-tarjeta"><h3>SIMB</h3><span class="org">Sistema de Información y Monitoreo de Bosques · Min. de Planificación</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Geovisor oficial de focos de calor, incendios activos, cicatrices de quema y deforestación. Se actualiza cada tres horas, con reporte a las 09:00 y a las 16:00.</p>
+        <a class="enlace" href="https://simb.planificacion.gob.bo/simb/">simb.planificacion.gob.bo</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#12325E">ABE</div>
+          <div class="titulo-tarjeta"><h3>SOTS — Agencia Boliviana Espacial</h3><span class="org">Laboratorio de Procesamiento y Análisis de Imágenes Satelitales (LPAIS)</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Plataforma satelital que integra imágenes de alta precisión para seguir focos de calor y áreas quemadas casi en tiempo real, con operación 24 horas.</p>
+        <a class="enlace" href="https://sots.abe.bo/">sots.abe.bo</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca" style="background:#4E7B2A">ABT</div>
+          <div class="titulo-tarjeta"><h3>ABT</h3><span class="org">Autoridad de Fiscalización y Control Social de Bosques y Tierra</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Autoridad que fiscaliza quemas y desmontes y publica el Plan de Acción de Gestión del Fuego. Es el destinatario institucional de una denuncia de quema ilegal.</p>
+        <a class="enlace" href="https://www.abt.gob.bo/">abt.gob.bo</a>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 2. BOLIVIA SUBNACIONAL ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Estrato 2</span>
+      <h2>Bolivia · departamental y municipal</h2>
+    </div>
+    <p class="entrada">Acá aparece por primera vez el vecino como emisor. Dos casos importan directamente para Mi Curichi: la app <b>Alertas La Paz</b>, que abrió un canal de reporte ciudadano dentro de un SAT municipal, y el <b>chatbot de baches</b> de la Alcaldía cruceña, que ya pide foto y GPS por WhatsApp.</p>
+
+    <div class="rejilla">
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#0D6189">SEA</div>
+          <div class="titulo-tarjeta"><h3>SEARPI</h3><span class="org">Servicio de Encauzamiento de Aguas y Regularización del Río Piraí · Gobernación de Santa Cruz</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span></div>
+        <p>Brazo técnico-operativo del departamento. Su SAT vigila las cuencas del Piraí, Ichilo, Yapacaní, Surutú y Parapetí, emite alertas por nivel de río y las difunde vía los COEM municipales.</p>
+        <a class="enlace" href="https://searpi.gob.bo/">searpi.gob.bo</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#C0392B">ALP</div>
+          <div class="titulo-tarjeta"><h3>Alertas La Paz</h3><span class="org">Gobierno Autónomo Municipal de La Paz · app iOS y Android</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El referente boliviano más cercano. Sensores, estaciones y satélite alimentan alertas de deslizamiento, inundación y sismo; y el quinto pilar del SAT abrió dentro de la app un espacio para que la población reporte eventos de emergencia.</p>
+        <a class="enlace" href="https://apps.apple.com/us/app/alertas-la-paz/id6738353943">App Store · Alertas La Paz</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1B6B38">GAM</div>
+          <div class="titulo-tarjeta"><h3>Chatbot de baches</h3><span class="org">Gobierno Autónomo Municipal de Santa Cruz de la Sierra</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El vecino manda foto y ubicación GPS al WhatsApp <span class="dato">78 096 126</span> y el sistema incorpora el reporte a un mapa interno. Es el antecedente directo de Mi Curichi: mismo gesto, sin mapa público, sin estados y sin exportación.</p>
+        <a class="enlace" href="https://eldeber.com.bo/santa-cruz/alcaldia-habilita-chatbot-vecino-pueda-reportar-baches-capital-crucena_1781200584">El Deber · cobertura del lanzamiento</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#0F2D43">800</div>
+          <div class="titulo-tarjeta"><h3>Línea 800-12-5050</h3><span class="org">Emergencias municipales · Santa Cruz de la Sierra</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>Canal telefónico gratuito de emergencias del municipio, el que se satura en cada temporal — más de cien emergencias por lluvias movilizaron al municipio en abril de 2026. Voz, sin georreferencia ni histórico consultable.</p>
+        <a class="enlace" href="https://www.gmsantacruz.gob.bo/">gmsantacruz.gob.bo</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#B3200A">TSF</div>
+          <div class="titulo-tarjeta"><h3>Tunari Sin Fuego</h3><span class="org">Plataforma ciudadana y de voluntarios · Cochabamba</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>Iniciativa no estatal que difunde la alerta temprana de incendios en el Parque Nacional Tunari y coordina el despliegue de voluntarios con herramientas. En varios incendios de 2026 la alerta salió de esta plataforma antes que del Estado.</p>
+        <a class="enlace" href="https://www.reduno.com.bo/noticias/alerta-en-cochabamba-incendio-afecta-el-parque-tunari-y-el-humo-llega-a-la-ciudad-2026719173234">Red Uno · caso de uso</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#8A5A00">CBA</div>
+          <div class="titulo-tarjeta"><h3>Cochabamba Reporta</h3><span class="org">Proyecto abierto en GitHub · Cochabamba</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>Plataforma para reportar baches, basura, alumbrado e infraestructura con foto, ubicación exacta y trazabilidad completa: reportado → verificación → asignación → resuelto, con notificación en cada cambio de estado.</p>
+        <a class="enlace" href="https://github.com/dgschahvqvc17/Cochabamba-Reporta">github.com/…/Cochabamba-Reporta</a>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 3. AMÉRICA LATINA ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Estrato 3</span>
+      <h2>América Latina</h2>
+    </div>
+    <p class="entrada">La región ya resolvió lo que a Bolivia le falta: sistemas municipales que combinan sensores propios con «sensor ciudadano», y apps de reporte urbano con ciclo de vida del reporte.</p>
+
+    <div class="rejilla">
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#00707A">SIA</div>
+          <div class="titulo-tarjeta"><h3>SIATA</h3><span class="org">Sistema de Alerta Temprana de Medellín y el Valle de Aburrá · Colombia</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-fuego"><i class="forma"></i>Incendio</span><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El mejor modelo de la región: radar, red de sensores y drones para 2,5 millones de habitantes, operación 24/7, app pública y una figura explícita de <em>sensor ciudadano</em> que integra la observación del vecino al sistema técnico.</p>
+        <a class="enlace" href="https://siata.gov.co/">siata.gov.co</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1565C0">CMD</div>
+          <div class="titulo-tarjeta"><h3>CEMADEN</h3><span class="org">Centro Nacional de Monitoramento e Alertas de Desastres Naturais · Brasil</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span></div>
+        <p>Creado tras la tragedia de la Região Serrana en 2011. Monitorea condiciones geo-hidrometeorológicas de todo el país y emite alertas de deslizamiento y crecida; su mapa interactivo es público.</p>
+        <a class="enlace" href="https://mapainterativo.cemaden.gov.br/">mapainterativo.cemaden.gov.br</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#C0400F">SNP</div>
+          <div class="titulo-tarjeta"><h3>SENAPRED</h3><span class="org">Servicio Nacional de Prevención y Respuesta ante Desastres · Chile</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span></div>
+        <p>Sucesor de la ONEMI por la Ley 21.364 de 2021. Coordina la gestión del riesgo y difunde el Sistema de Alerta de Emergencia directo a los celulares del área afectada.</p>
+        <a class="enlace" href="https://senapred.cl/">senapred.cl</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1A237E">ECU</div>
+          <div class="titulo-tarjeta"><h3>Alertas Ecuador</h3><span class="org">Servicio Nacional de Gestión de Riesgos y Emergencias · Ecuador</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span></div>
+        <p>Portal único de alertas por amenaza —lluvia, deslizamiento, volcán, oleaje— con vista por provincia y cantón. Buen ejemplo de comunicación pública simple sobre una división administrativa.</p>
+        <a class="enlace" href="https://alertasecuador.gob.ec/">alertasecuador.gob.ec</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#C62828">SKY</div>
+          <div class="titulo-tarjeta"><h3>SkyAlert</h3><span class="org">Empresa privada · México</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Sismo</span></div>
+        <p>Red privada de sensores sísmicos con más de diez millones de usuarios y aviso en menos de dos segundos. Demuestra que una plataforma no estatal puede sostener infraestructura de alerta a escala nacional.</p>
+        <a class="enlace" href="https://skyalert.mx/">skyalert.mx</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#6A1B9A">CDN</div>
+          <div class="titulo-tarjeta"><h3>Ciudadano</h3><span class="org">Plataforma cívica para municipios · México</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>Reporte de problemas urbanos en tiempo real —baches, fugas, apagones, inundaciones— con foto y ubicación, pensada como producto que el municipio adopta en lugar de construir.</p>
+        <a class="enlace" href="https://www.ciudadano.app/">ciudadano.app</a>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ 4. GLOBAL ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Estrato 4</span>
+      <h2>Internacional</h2>
+    </div>
+    <p class="entrada">Dos familias distintas. Las de <b>reporte ciudadano</b> (PetaBencana, Ushahidi, FixMyStreet, SeeClickFix) resolvieron el mismo problema que Mi Curichi y su código o su modelo es consultable. Las de <b>observación</b> (FIRMS, Flood Hub, GDACS, Copernicus) son capas que se consumen, no competencia.</p>
+
+    <div class="rejilla">
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#D6202A">PB</div>
+          <div class="titulo-tarjeta"><h3>PetaBencana.id</h3><span class="org">CogniCity, avalada por la BNPB · Indonesia</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El referente mundial del mapa de inundación colaborativo. Un bot conversacional pide al vecino altura del agua, ubicación y foto; el mapa cruza esos reportes con alertas oficiales y sensores hidráulicos. La agencia nacional de desastres la adoptó como plataforma oficial.</p>
+        <a class="enlace" href="https://petabencana.id/">petabencana.id</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#18908F">USH</div>
+          <div class="titulo-tarjeta"><h3>Ushahidi</h3><span class="org">Organización sin fines de lucro · Kenia · código abierto</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El software que inventó el crowdmapping de crisis. En el terremoto de Haití mapeó más de 3.500 eventos casi en tiempo real. Aporta el patrón de verificación de reportes de fuentes heterogéneas.</p>
+        <a class="enlace" href="https://www.ushahidi.com/">ushahidi.com</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1A7D3A">FMS</div>
+          <div class="titulo-tarjeta"><h3>FixMyStreet</h3><span class="org">mySociety · Reino Unido · código abierto</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>Veinte años reportando baches, luminarias y basura. Su aporte no es el mapa sino el ciclo: el reporte se enruta al organismo competente, queda público y su estado es auditable por cualquiera.</p>
+        <a class="enlace" href="https://www.fixmystreet.com/">fixmystreet.com</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#0B72B9">SCF</div>
+          <div class="titulo-tarjeta"><h3>SeeClickFix</h3><span class="org">CivicPlus 311 CRM · Estados Unidos</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>El 311 convertido en producto: foto y coordenadas GPS desde el lugar del problema, y del otro lado un CRM municipal con cola de trabajo. Hoy se comercializa integrado a la gestión interna del municipio.</p>
+        <a class="enlace" href="https://seeclickfix.com/">seeclickfix.com</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#B8420E">WD</div>
+          <div class="titulo-tarjeta"><h3>Watch Duty</h3><span class="org">ONG 501(c)(3) · Estados Unidos</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span><span class="chip c-agua"><i class="forma"></i>Inundación</span></div>
+        <p>Alertas de incendio e inundación en tiempo real sostenidas por bomberos y despachadores retirados que escuchan frecuencias de radio. Su tesis: la alerta oficial llega tarde, y la verificación humana es el producto.</p>
+        <a class="enlace" href="https://www.watchduty.org/">watchduty.org</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#0B3D91">NASA</div>
+          <div class="titulo-tarjeta"><h3>NASA FIRMS</h3><span class="org">Fire Information for Resource Management System · NASA</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Focos de calor MODIS y VIIRS casi en tiempo real, descargables y con suscripción a alertas por área de interés. Es la fuente que alimenta a SIMB y a media docena de plataformas nacionales, Bolivia incluida.</p>
+        <a class="enlace" href="https://firms.modaps.eosdis.nasa.gov/map/">firms.modaps.eosdis.nasa.gov</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#5C7C1E">GFW</div>
+          <div class="titulo-tarjeta"><h3>Global Forest Watch</h3><span class="org">World Resources Institute + Google Earth Engine</span></div>
+        </div>
+        <div class="chips"><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Monitoreo forestal interactivo con alertas de fuego y deforestación sobre imágenes Landsat, áreas protegidas y uso del suelo. Permite ver no solo dónde arde sino qué está en juego.</p>
+        <a class="enlace" href="https://www.globalforestwatch.org/">globalforestwatch.org</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1A73E8">FH</div>
+          <div class="titulo-tarjeta"><h3>Google Flood Hub</h3><span class="org">Google Research · cobertura global</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span></div>
+        <p>Pronóstico fluvial con IA en más de 240.000 puntos de unos 150 países —toda Sudamérica desde 2024—, hasta siete días de anticipación. Gratuito y público; cubre el río, no la calle.</p>
+        <a class="enlace" href="https://sites.research.google/floods/">sites.research.google/floods</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#B07415">GD</div>
+          <div class="titulo-tarjeta"><h3>GDACS</h3><span class="org">Global Disaster Alert and Coordination System · ONU y Comisión Europea</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span></div>
+        <p>Alertas globales de sismo, tsunami, ciclón, inundación, volcán y sequía con estimación automática de población afectada. Es la primera señal que ve la comunidad humanitaria.</p>
+        <a class="enlace" href="https://www.gdacs.org/">gdacs.org</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#003399">CEM</div>
+          <div class="titulo-tarjeta"><h3>Copernicus EMS</h3><span class="org">Emergency Management Service · Unión Europea</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-fuego"><i class="forma"></i>Incendio</span></div>
+        <p>Cartografía satelital rápida activable por cualquier Estado tras un desastre, más los sistemas de alerta de crecida EFAS y GloFAS. Produce el mapa de extensión de la inundación, no el reporte del vecino.</p>
+        <a class="enlace" href="https://emergency.copernicus.eu/">emergency.copernicus.eu</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#C63B3B">HOT</div>
+          <div class="titulo-tarjeta"><h3>Humanitarian OpenStreetMap Team</h3><span class="org">HOT · mapeo colaborativo abierto</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-cdn"><i class="forma"></i>Mapeo comunitario</span></div>
+        <p>Moviliza voluntarios para mapear zonas de crisis sin datos geográficos. Es la razón por la que Mi Curichi puede usar una capa base libre y con atribución en vez de un servicio propietario.</p>
+        <a class="enlace" href="https://www.hotosm.org/">hotosm.org</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1D70B8">GOV</div>
+          <div class="titulo-tarjeta"><h3>Check for flooding</h3><span class="org">Environment Agency · GOV.UK · Inglaterra</span></div>
+        </div>
+        <div class="chips"><span class="chip c-agua"><i class="forma"></i>Inundación</span></div>
+        <p>Consulta de riesgo por dirección y suscripción gratuita a avisos por SMS, correo o llamada. Referencia de accesibilidad y lenguaje claro: la misma exigencia que se fijó para la vista pública de Mi Curichi.</p>
+        <a class="enlace" href="https://check-for-flooding.service.gov.uk/">check-for-flooding.service.gov.uk</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#6B008C">YBS</div>
+          <div class="titulo-tarjeta"><h3>Yahoo! 防災速報</h3><span class="org">Yahoo! JAPAN · app de prevención</span></div>
+        </div>
+        <div class="chips"><span class="chip c-multi"><i class="forma"></i>Multiamenaza</span><span class="chip c-agua"><i class="forma"></i>Inundación</span></div>
+        <p>Avisos de sismo, tsunami, lluvia intensa y desborde de ríos para la ubicación actual y hasta tres zonas elegidas por la persona. El patrón de «mis zonas» es exactamente el de unidad vecinal seguida.</p>
+        <a class="enlace" href="https://play.google.com/store/apps/details?id=jp.co.yahoo.android.emg">Google Play · 防災速報</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#00607E">VAI</div>
+          <div class="titulo-tarjeta"><h3>Vaisala RoadAI</h3><span class="org">Vaisala · Finlandia · y RoadBotics en EE.UU.</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span></div>
+        <p>Detección automática de baches, fisuras, ahuellamiento y asentamiento filmando con un celular montado en un vehículo de recorrido habitual, con puntaje por segmento de 10 m. La alternativa técnica al reporte humano — cara, pero objetiva.</p>
+        <a class="enlace" href="https://www.vaisala.com/en/products/road-ai">vaisala.com/road-ai</a>
+      </article>
+
+      <article class="tarjeta">
+        <div class="fila-marca">
+          <div class="marca mn" style="background:#1E88C7">WZ</div>
+          <div class="titulo-tarjeta"><h3>Waze</h3><span class="org">Google · reportes viales colaborativos</span></div>
+        </div>
+        <div class="chips"><span class="chip c-via"><i class="forma"></i>Vía pública</span><span class="chip c-agua"><i class="forma"></i>Inundación</span><span class="chip c-cdn"><i class="forma"></i>Reporte ciudadano</span></div>
+        <p>La mayor base de reportes viales del mundo, bache y calle inundada incluidos, y el programa <em>Waze for Cities</em> que devuelve esos datos al municipio. El reporte es efímero: sirve para esquivar hoy, no para inventariar.</p>
+        <a class="enlace" href="https://www.waze.com/">waze.com</a>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============ MATRIZ ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Comparación</span>
+      <h2>Las que hacen lo mismo que Mi Curichi</h2>
+    </div>
+    <p class="entrada">Solo las plataformas que reciben el reporte de una persona. Se comparan las cinco capacidades que definen el MVP: captura georreferenciada, mapa público, moderación previa, historial del punto y datos abiertos.</p>
+
+    <div class="marco-tabla">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Plataforma</th>
+            <th scope="col">Captura con GPS y foto</th>
+            <th scope="col">Mapa público</th>
+            <th scope="col">Moderación antes de publicar</th>
+            <th scope="col">Historial y recurrencia del punto</th>
+            <th scope="col">Exportación / datos abiertos</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">PetaBencana.id</th><td class="si">Sí</td><td class="si">Sí</td><td class="parcial">Confirmación por ventana de tiempo</td><td class="no">No, el reporte expira</td><td class="si">Sí, API abierta</td></tr>
+          <tr><th scope="row">Ushahidi</th><td class="si">Sí</td><td class="si">Sí</td><td class="si">Sí</td><td class="no">No nativo</td><td class="si">Sí</td></tr>
+          <tr><th scope="row">FixMyStreet</th><td class="si">Sí</td><td class="si">Sí</td><td class="parcial">Posterior</td><td class="parcial">Por reporte, no por punto</td><td class="si">Sí, código abierto</td></tr>
+          <tr><th scope="row">SeeClickFix</th><td class="si">Sí</td><td class="si">Sí</td><td class="si">Sí</td><td class="parcial">Por ticket</td><td class="parcial">Según el municipio</td></tr>
+          <tr><th scope="row">SIATA</th><td class="parcial">Sensor ciudadano</td><td class="si">Sí</td><td class="si">Sí</td><td class="si">Sí, serie histórica</td><td class="si">Sí</td></tr>
+          <tr><th scope="row">Cochabamba Reporta</th><td class="si">Sí</td><td class="si">Sí</td><td class="si">Sí, con estados</td><td class="no">No</td><td class="no">Sin definir</td></tr>
+          <tr><th scope="row">Alertas La Paz</th><td class="parcial">Reporte de emergencia</td><td class="parcial">Alertas, no reportes</td><td class="si">Sí, personal municipal</td><td class="no">No</td><td class="no">No</td></tr>
+          <tr><th scope="row">Chatbot de baches · GAMSCS</th><td class="si">Sí, por WhatsApp</td><td class="no">No, mapa interno</td><td class="parcial">Interna</td><td class="no">No</td><td class="no">No</td></tr>
+          <tr class="nuestra"><th scope="row">Mi Curichi (Misión 1)</th><td class="si">Sí</td><td class="si">Sí, con precisión degradada</td><td class="si">Sí, nada se publica en «nuevo»</td><td class="si">Sí, puntos críticos por DBSCAN 25 m</td><td class="si">Sí, CSV y GeoJSON con nota metodológica</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="nota">
+      <strong>Sobre los logotipos.</strong> Las marcas de esta página son tipográficas, dibujadas con el color institucional aproximado de cada plataforma. El entorno de publicación bloquea la carga de imágenes de terceros, y reproducir logotipos ajenos en un documento del proyecto abriría una cuestión de marcas que no hace falta abrir: el logotipo oficial de cada una está en su propio enlace.
+    </div>
+  </section>
+
+  <!-- ============ LECCIONES ============ -->
+  <section class="estrato">
+    <div class="encabezado-estrato">
+      <span class="orden">Conclusión</span>
+      <h2>Qué deja este relevamiento para Mi Curichi</h2>
+    </div>
+    <p class="entrada">Siete lecturas que afectan decisiones ya tomadas en <span class="dato">CLAUDE.md</span> o que abren una pregunta para el usuario.</p>
+
+    <div class="lecciones">
+      <div class="leccion">
+        <h3>El hueco boliviano es exactamente el nuestro</h3>
+        <p>Bolivia tiene detección satelital madura y alerta descendente sólida. Lo que no tiene es un inventario georreferenciado de anegamientos alimentado por vecinos, validado por técnicos y consultable. Mi Curichi no duplica nada de lo relevado a nivel nacional.</p>
+        <span class="fuente">SENAMHI · VIDECI · SIMB · SOTS/ABE · SEARPI</span>
+      </div>
+
+      <div class="leccion">
+        <h3>El chatbot cruceño ya educó el gesto</h3>
+        <p>La Alcaldía de Santa Cruz ya pide foto + GPS por WhatsApp para baches. El vecino conoce la mecánica; falta lo que sigue. Vale evaluar WhatsApp como segunda vía de entrada al mismo modelo de datos — hoy está fuera del alcance de la Misión 1.</p>
+        <span class="fuente">Chatbot 78 096 126 · GAMSCS</span>
+      </div>
+
+      <div class="leccion">
+        <h3>La moderación previa es práctica estándar</h3>
+        <p>PetaBencana confirma cada reporte antes de publicarlo; Ushahidi y SeeClickFix moderan. La regla de que nada se publica en estado «nuevo» coincide con lo que hacen las plataformas que sobrevivieron.</p>
+        <span class="fuente">PetaBencana · Ushahidi · SeeClickFix</span>
+      </div>
+
+      <div class="leccion">
+        <h3>Nadie más acumula recurrencia por punto</h3>
+        <p>FixMyStreet y SeeClickFix trazan el <em>ticket</em>; el charco que se repite veinte veces son veinte tickets. El punto crítico por DBSCAN es la diferencia real de Mi Curichi frente a un 311 clásico, y conviene defenderla como tal.</p>
+        <span class="fuente">Comparación, columna «historial y recurrencia»</span>
+      </div>
+
+      <div class="leccion">
+        <h3>El sensor ciudadano necesita respaldo institucional</h3>
+        <p>PetaBencana escaló cuando la agencia nacional la adoptó como plataforma oficial; SIATA existe porque el Área Metropolitana la sostiene. El aval del GAMSCS o de SEARPI vale más que cualquier funcionalidad.</p>
+        <span class="fuente">BNPB · Área Metropolitana del Valle de Aburrá</span>
+      </div>
+
+      <div class="leccion">
+        <h3>Hay capas gratuitas listas para integrar</h3>
+        <p>FIRMS, Global Forest Watch, Flood Hub y GloFAS publican datos abiertos. Si en el futuro se quiere contrastar «llovió mucho» contra «drena mal», el insumo externo ya existe y no hay que construirlo.</p>
+        <span class="fuente">Backlog · cruce con lluvia registrada</span>
+      </div>
+
+      <div class="leccion">
+        <h3>Ninguna expone al reportante</h3>
+        <p>En todas las plataformas relevadas la identidad de quien reporta queda fuera del mapa público. La regla de <em>jitter</em> para ubicaciones de vivienda y el reporte anónimo no son cautela excesiva: son el mínimo de la categoría.</p>
+        <span class="fuente">FixMyStreet · SeeClickFix · PetaBencana</span>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p><strong>Método.</strong> Relevamiento documental del 18 de septiembre de 2026 sobre fuentes públicas: sitios oficiales de cada plataforma, prensa boliviana y documentación técnica. Las descripciones resumen lo que cada fuente declara de sí misma; no hay verificación en terreno del funcionamiento de cada sistema.</p>
+    <p><strong>A confirmar.</strong> El estado operativo real del chatbot de baches del GAMSCS, la existencia de una API pública en SEARPI y la disponibilidad de datos abiertos del SIMB requieren contacto directo con cada institución.</p>
+    <p>Documento de trabajo del proyecto Mi Curichi · Fase 1.</p>
+  </footer>
+</div>
