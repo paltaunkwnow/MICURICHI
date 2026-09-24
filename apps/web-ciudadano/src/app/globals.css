@@ -1,8 +1,23 @@
 @import "tailwindcss";
-@import "@fontsource/sora/600.css";
+/* Solo el subconjunto `latin`: la interfaz es en español y latin-ext/cyrillic/greek no se usan.
+   Sora en 600 (titulares) y 700 (cifras y códigos, como en el prototipo). */
+@import "@fontsource/sora/latin-600.css";
+@import "@fontsource/sora/latin-700.css";
 @import "@fontsource-variable/source-sans-3";
 
-/* Sistema de diseño Mi Curichi (CLAUDE.md §14.4): paleta del logotipo, Sora + Source Sans 3. */
+/* ===========================================================================================
+   Sistema de diseño Mi Curichi.
+
+   Los valores de este archivo salen del prototipo funcional que entregó el usuario
+   («Mi Curichi · Prototipo (compartible).html»), que es la fuente de verdad visual, y coinciden
+   con la paleta y la tipografía fijadas en CLAUDE.md §14.4. Las clases replican las del
+   prototipo; los nombres que ya usaban los componentes (.btn-primario, .tarjeta, .campo…) se
+   conservan como alias para no romper nada.
+
+   Las clases viven FUERA de @layer a propósito: así los utilitarios de Tailwind no pisan sus
+   propiedades y una clase del kit se comporta igual la ponga quien la ponga.
+   =========================================================================================== */
+
 @theme {
   --font-titular: "Sora", ui-sans-serif, system-ui, sans-serif;
   --font-interfaz: "Source Sans 3 Variable", "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
@@ -26,6 +41,7 @@
   --color-tinta-900: #0f2d43;
 
   --color-fondo: #eef3ef;
+  --color-crema: #fbfbf9;
   --color-superficie: #ffffff;
   --color-filete: #d7dfda;
 
@@ -52,14 +68,28 @@
 
 :root {
   color-scheme: light;
+  --sh-sm: 0 1px 2px rgb(15 45 67 / 0.06), 0 8px 24px rgb(15 45 67 / 0.06);
+  --sh: 0 4px 10px rgb(15 45 67 / 0.07), 0 18px 40px rgb(15 45 67 / 0.1);
+  --sh-lg: 0 8px 20px rgb(15 45 67 / 0.12), 0 30px 70px rgb(15 45 67 / 0.18);
+  /*
+   * Altura máxima de la hoja de detalle en móvil.
+   *
+   * Era 82dvh, es decir casi la pantalla entera. Con el detalle abierto no quedaba mapa que
+   * mirar y, peor, la hoja se comía los botones de zoom: en un teléfono, abrir un punto
+   * significaba no poder mover el mapa hasta cerrarlo. Ahora el detalle se queda fijo mientras
+   * el vecino explora (esa es justamente la idea), así que tiene que dejar mapa debajo y los
+   * controles a mano. Lo que no entra se lee desplazando la hoja.
+   */
+  --alto-hoja: 58dvh;
 }
 
 html {
-  background: var(--color-fondo);
+  background: var(--color-crema);
   color: var(--color-tinta-900);
   font-family: var(--font-interfaz);
   font-size: 16px;
   line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -71,11 +101,13 @@ body {
 h1,
 h2,
 h3,
+h4,
 .titular {
   font-family: var(--font-titular);
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
+  letter-spacing: -0.015em;
+  line-height: 1.14;
+  margin: 0;
 }
 
 :focus-visible {
@@ -83,26 +115,54 @@ h3,
   outline-offset: 2px;
 }
 
-/* Botones en pastilla, 48 px de alto mínimo (objetivo táctil) */
+/* ============================ botones ============================ */
+
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
+  gap: 9px;
   min-height: 48px;
-  padding: 0 1.5rem;
+  padding: 0 22px;
+  border: 0;
   border-radius: var(--radius-pastilla);
-  font-weight: 600;
-  font-size: 1rem;
-  border: 1.5px solid transparent;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 16px;
+  background: var(--color-verde-700);
+  color: #fff;
   cursor: pointer;
-  transition:
-    transform 120ms ease,
-    background-color 120ms ease;
   text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    transform 100ms ease;
+}
+.btn:hover {
+  background: var(--color-verde-900);
 }
 .btn:active {
-  transform: scale(0.98);
+  transform: scale(0.985);
+}
+.btn:disabled,
+.btn[disabled],
+.btn[aria-disabled="true"] {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.btn:disabled:hover {
+  background: var(--color-verde-700);
+}
+
+/* Fantasma: blanco con filete. `.btn-secundario` es el nombre con el que ya se usaba. */
+.btn-fantasma,
+.btn-secundario {
+  background: #fff;
+  color: var(--color-tinta-900);
+  box-shadow: inset 0 0 0 1.5px var(--color-filete);
+}
+.btn-fantasma:hover,
+.btn-secundario:hover {
+  background: var(--color-fondo);
 }
 .btn-primario {
   background: var(--color-verde-700);
@@ -111,18 +171,6 @@ h3,
 .btn-primario:hover {
   background: var(--color-verde-900);
 }
-.btn-primario:disabled {
-  background: #9dc9ac;
-  cursor: not-allowed;
-}
-.btn-secundario {
-  background: var(--color-superficie);
-  color: var(--color-tinta-900);
-  border-color: var(--color-tinta-300);
-}
-.btn-secundario:hover {
-  border-color: var(--color-tinta-900);
-}
 .btn-tinta {
   background: var(--color-tinta-900);
   color: #fff;
@@ -130,47 +178,136 @@ h3,
 .btn-tinta:hover {
   background: var(--color-tinta-800);
 }
-.btn-circular {
-  width: 48px;
-  height: 48px;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--color-superficie);
-  color: var(--color-tinta-900);
-  box-shadow: 0 2px 8px rgb(15 45 67 / 0.15);
+.btn-bloque {
+  width: 100%;
 }
+.btn-sm {
+  min-height: 42px;
+  padding: 0 16px;
+  font-size: 14.5px;
+}
+
+/* Botón circular con ícono. */
+.bico,
+.btn-circular {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.96);
+  color: var(--color-tinta-900);
+  box-shadow: var(--sh);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.bico:hover,
+.btn-circular:hover {
+  background: #fff;
+}
+.bico-verde,
 .btn-circular-verde {
   background: var(--color-verde-500);
   color: #fff;
 }
+.bico-verde:hover,
+.btn-circular-verde:hover {
+  background: var(--color-verde-700);
+}
+.bico-sm {
+  width: 40px;
+  height: 40px;
+  min-height: 40px;
+  box-shadow: var(--sh-sm);
+}
+
+/* Botón «atrás» de las cabeceras. */
+.atras {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 50%;
+  background: #fff;
+  color: inherit;
+  box-shadow: var(--sh-sm);
+  cursor: pointer;
+}
+.atras:hover {
+  background: var(--color-fondo);
+}
+
+/* ============================ chips y pastillas ============================ */
 
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 7px;
   min-height: 40px;
-  padding: 0 0.9rem;
+  padding: 0 14px;
   border-radius: var(--radius-pastilla);
-  background: var(--color-superficie);
+  background: #fff;
   color: var(--color-tinta-900);
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 14.5px;
   border: 1.5px solid var(--color-filete);
   cursor: pointer;
+  text-decoration: none;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.chip:hover {
+  border-color: var(--color-tinta-300);
 }
 .chip[aria-pressed="true"],
+.chip[aria-current="page"],
 .chip-activo {
   background: var(--color-tinta-900);
   color: #fff;
   border-color: var(--color-tinta-900);
 }
+.chip .d {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+/* Pastilla informativa pequeña, no interactiva. */
+.mini,
 .chip-suave {
-  min-height: 32px;
-  padding: 0 0.7rem;
-  font-size: 0.875rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: var(--radius-pastilla);
   background: var(--color-tinta-100);
-  border-color: transparent;
+  color: var(--color-tinta-600);
+  font-size: 12.5px;
+  font-weight: 600;
   cursor: default;
+}
+
+/* Contador de puntos/aportes. */
+.pts {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border-radius: var(--radius-pastilla);
+  background: var(--color-verde-100);
+  color: var(--color-verde-700);
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .punto {
@@ -181,29 +318,222 @@ h3,
   flex: none;
 }
 
-.tarjeta {
-  background: var(--color-superficie);
-  border-radius: var(--radius-tarjeta);
-  box-shadow:
-    0 1px 2px rgb(15 45 67 / 0.06),
-    0 8px 24px rgb(15 45 67 / 0.06);
+/* Severidad: color + nombre + barras. Nunca solo color (CLAUDE.md §14.1). */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pastilla);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.sev-grande {
+  padding: 8px 16px;
+  font-size: 15px;
+}
+.sev .barras {
+  display: flex;
+  gap: 2px;
+}
+.barras i {
+  display: inline-block;
+  width: 6px;
+  height: 12px;
+  border-radius: 2px;
 }
 
-.campo {
-  width: 100%;
-  min-height: 48px;
-  padding: 0.75rem 1rem;
-  border-radius: var(--radius-campo);
-  border: 1.5px solid var(--color-filete);
+/* ============================ superficies ============================ */
+
+.tarjeta,
+.tarj {
   background: #fff;
+  border-radius: var(--radius-tarjeta);
+  box-shadow: var(--sh-sm);
+}
+
+/* Fila de lista: ícono, texto y chevron. */
+.fila {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  min-height: 54px;
+  padding: 13px 16px;
+  border: 0;
+  border-radius: var(--radius-campo);
+  background: #fff;
+  box-shadow: var(--sh-sm);
+  font-size: 15.5px;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+button.fila,
+a.fila {
+  cursor: pointer;
+}
+button.fila:hover,
+a.fila:hover {
+  box-shadow: var(--sh);
+}
+.fila .fl {
+  margin-left: auto;
+  color: var(--color-tinta-300);
+  flex: 0 0 auto;
+}
+.grupo {
+  background: #fff;
+  border-radius: var(--radius-tarjeta);
+  box-shadow: var(--sh-sm);
+  overflow: hidden;
+}
+.grupo .fila {
+  box-shadow: none;
+  border-radius: 0;
+  background: transparent;
+}
+.grupo .fila + .fila {
+  border-top: 1.5px solid var(--color-filete);
+}
+.ico {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex: 0 0 auto;
+}
+.glbl {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-tinta-600);
+  margin: 20px 0 9px;
+}
+
+/* Pares clave/valor con separadores de 1 px. */
+.kv {
+  display: grid;
+  gap: 1px;
+  background: var(--color-filete);
+  border-radius: var(--radius-campo);
+  overflow: hidden;
+  margin-top: 14px;
+}
+.kv > div {
+  background: #fff;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  font-size: 15px;
+}
+.kv dt,
+.kv span {
+  color: var(--color-tinta-600);
+}
+.kv dd,
+.kv b {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+.foto {
+  border-radius: var(--radius-campo);
+  overflow: hidden;
+  background: #edf1ee;
+}
+.foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.placeholder-foto {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  background: repeating-linear-gradient(135deg, #e8edf1 0 9px, #f3f6f4 9px 18px);
+  color: var(--color-tinta-300);
+}
+
+/* Bloque destacado en degradado. */
+.hero {
+  border-radius: var(--radius-tarjeta);
+  padding: 20px;
+  color: #fff;
+  background: linear-gradient(138deg, #0a4a69 0%, #0d6189 48%, #1b6b38 100%);
+}
+.hero-azul {
+  background: linear-gradient(138deg, #06324a 0%, #0a4a69 58%, #0d6189 100%);
+}
+
+/* Avisos. */
+.av {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  border-radius: var(--radius-campo);
+  padding: 12px 15px;
+  font-size: 14.5px;
+  line-height: 1.45;
+}
+.av > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+.av-info {
+  background: var(--color-agua-100);
+  color: var(--color-agua-700);
+}
+.av-ok {
+  background: var(--color-verde-100);
+  color: var(--color-verde-900);
+}
+.av-alerta {
+  background: var(--color-sev-media-fondo);
+  color: var(--color-sev-media-texto);
+}
+.av-err {
+  background: #fbe1dc;
+  color: #8a1908;
+}
+.av-tinta {
+  display: block;
+  background: var(--color-tinta-900);
+  color: #c7d3db;
+}
+
+/* ============================ formularios ============================ */
+
+.lbl {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+.campo,
+.inp {
+  width: 100%;
   font: inherit;
-  font-size: 1.125rem;
+  font-size: 16.5px;
+  background: #fff;
+  border: 1.5px solid var(--color-filete);
+  border-radius: var(--radius-campo);
+  padding: 12px 15px;
+  min-height: 48px;
+  outline: 0;
   color: var(--color-tinta-900);
 }
-.campo:focus {
+.campo:focus,
+.inp:focus {
   border-color: var(--color-verde-500);
-  outline: none;
-  box-shadow: 0 0 0 3px rgb(40 147 77 / 0.25);
+  box-shadow: 0 0 0 3px rgb(40 147 77 / 0.22);
 }
 .campo[aria-invalid="true"] {
   border-color: var(--color-error);
@@ -211,7 +541,7 @@ h3,
 }
 .ayuda {
   color: var(--color-tinta-600);
-  font-size: 0.875rem;
+  font-size: 13.5px;
 }
 .error {
   color: var(--color-error);
@@ -219,121 +549,584 @@ h3,
   font-size: 0.95rem;
 }
 
+/* Opción tipo radio en tarjeta (tirante, duración, frecuencia…). */
+.opc,
 .opcion-radio {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  min-height: 56px;
-  padding: 0 1rem;
-  border-radius: 14px;
-  border: 1.5px solid var(--color-filete);
+  gap: 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 13px 15px;
   background: #fff;
+  border: 1.5px solid var(--color-filete);
+  border-radius: 14px;
+  font-family: inherit;
+  font-size: 15.5px;
+  color: inherit;
+  text-align: left;
   cursor: pointer;
-  font-size: 1.125rem;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
 }
+.opc:hover,
+.opcion-radio:hover {
+  border-color: var(--color-tinta-300);
+}
+.opc .r {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #c9d2cd;
+  flex: 0 0 auto;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+/**
+ * El control real es un `input` de tipo radio transparente que cubre TODA la tarjeta o pastilla.
+ * Así el teclado y los lectores de pantalla ven un grupo de radios de verdad, y cualquier clic
+ * dentro cae sobre el control.
+ *
+ * No va con `sr-only`: eso lo deja de 1×1 px en la esquina, y entonces el punto que queda encima
+ * (el círculo del radio dibujado) intercepta el clic. Se veía en el E2E: el `check()` reintentaba
+ * hasta agotar el plazo con «<span class="r"> intercepts pointer events».
+ */
+.control-invisible {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  appearance: none;
+  cursor: pointer;
+}
+.opc,
+.chip {
+  position: relative;
+}
+.opc[aria-pressed="true"],
+.opc.on,
+.opc:has(input:checked),
 .opcion-radio:has(input:checked) {
   border-color: var(--color-verde-500);
-  box-shadow: 0 0 0 2px rgb(40 147 77 / 0.35);
+  background: var(--color-verde-100);
+}
+.opc[aria-pressed="true"] .r,
+.opc.on .r,
+.opc:has(input:checked) .r {
+  border-color: var(--color-verde-700);
+  background: var(--color-verde-700);
+}
+.opc[aria-pressed="true"] .r::after,
+.opc.on .r::after,
+.opc:has(input:checked) .r::after {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #fff;
+}
+.opc:has(input:focus-visible),
+.chip:has(input:focus-visible) {
+  outline: 3px solid var(--color-verde-500);
+  outline-offset: 2px;
+}
+.chip:has(input:checked) {
+  background: var(--color-tinta-900);
+  color: #fff;
+  border-color: var(--color-tinta-900);
 }
 .opcion-radio input {
   accent-color: var(--color-verde-700);
   width: 20px;
   height: 20px;
 }
-
-.maplibregl-ctrl-attrib {
-  font-size: 11px;
-}
-
-/* --- Complementos de la Parte 1 ---------------------------------------------------------
-   Las clases del kit (.btn, .chip, .campo…) viven fuera de @layer, así que los utilitarios
-   de Tailwind no pueden sobreescribir sus propiedades. Las variantes responsivas se definen acá. */
-
-/* Cuerpo del flujo de reporte: 18/28 (CLAUDE.md §14.4). */
-.cuerpo-reporte {
-  font-size: 1.125rem;
-  line-height: 1.55;
-}
-
-/* Chips de filtro con objetivo táctil de 48 px. */
-.chip-filtro {
-  min-height: 48px;
-}
-
-/* Tarjeta de reporte seleccionada. */
-.tarjeta-reporte {
-  border: 1.5px solid transparent;
-  cursor: pointer;
-  transition:
-    border-color 120ms ease,
-    transform 120ms ease;
-}
-.tarjeta-reporte:hover {
-  border-color: var(--color-tinta-300);
-}
-.tarjeta-reporte[aria-pressed="true"] {
-  border-color: var(--color-tinta-900);
-}
-
-/* Placeholder rayado cuando el vecino no adjuntó foto. */
-.placeholder-foto {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  padding: 0.5rem;
-  background: repeating-linear-gradient(135deg, #e8edf1 0 8px, #f5f7f9 8px 16px);
+.opc .cm {
+  margin-left: auto;
+  font-size: 13.5px;
   color: var(--color-tinta-600);
-  font-family: var(--font-titular);
-  font-size: 0.7rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  flex: 0 0 auto;
 }
 
-/* Botón "Reportar un punto": pastilla fija al alcance del pulgar en móvil, "+" circular verde
-   sobre el mapa en escritorio. */
-.boton-reportar {
-  position: fixed;
-  left: 1rem;
-  right: 1rem;
-  bottom: calc(1rem + env(safe-area-inset-bottom));
-  z-index: 20;
-  min-height: 56px;
-  font-size: 1.125rem;
-  box-shadow: 0 8px 24px rgb(15 45 67 / 0.25);
+/* Indicador de paso del flujo de reporte. */
+.pasos {
+  display: flex;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.pasos i {
+  flex: 1;
+  height: 5px;
+  border-radius: var(--radius-pastilla);
+  background: #dce3df;
+  transition: background-color 300ms ease;
+}
+.pasos i.on {
+  background: var(--color-verde-500);
+}
+.pno {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-verde-700);
+}
+.preg {
+  font-family: var(--font-titular);
+  font-weight: 600;
+  font-size: 25px;
+  line-height: 1.14;
+  margin: 8px 0 0;
+}
+
+/* Pestañas. */
+.tabs {
+  display: flex;
+  gap: 3px;
+  background: var(--color-fondo);
+  border-radius: var(--radius-pastilla);
+  padding: 4px;
+}
+.tabs button {
+  flex: 1;
+  min-width: 0;
+  min-height: 46px;
+  padding: 10px 6px;
+  border: 0;
+  border-radius: var(--radius-pastilla);
+  background: none;
+  font: inherit;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--color-tinta-600);
+  text-align: center;
+  cursor: pointer;
+}
+.tabs button[aria-selected="true"] {
+  background: #fff;
+  color: var(--color-tinta-900);
+  box-shadow: var(--sh-sm);
+}
+
+/* Tablas. */
+.tabla,
+.tabla-simple {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15.5px;
+}
+.tabla th,
+.tabla-simple th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--color-tinta-600);
+  padding: 11px;
+  border-bottom: 1.5px solid var(--color-filete);
+  white-space: nowrap;
+}
+.tabla td,
+.tabla-simple td {
+  padding: 11px;
+  border-bottom: 1px solid var(--color-filete);
+  vertical-align: top;
+}
+.tabla tbody tr {
+  transition: background-color 120ms ease;
+}
+.tabla tbody tr[data-clicable] {
+  cursor: pointer;
+}
+.tabla tbody tr[data-clicable]:hover {
+  background: var(--color-fondo);
+}
+.tabla tbody tr.on {
+  background: var(--color-verde-100);
+}
+.tabla .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================ app: barras y pantallas ============================ */
+
+/* Barra superior de escritorio.
+   Ojo: las clases del kit viven fuera de @layer, así que un `display` escrito acá le gana a los
+   utilitarios `hidden`/`md:flex` de Tailwind. Por eso el comportamiento responsive de las barras
+   y de la columna lateral se declara acá y no en el marcado: si no, la barra inferior de móvil
+   aparecía también en escritorio. */
+.topnav {
+  display: none;
+  align-items: center;
+  gap: 16px;
+  padding: 13px 22px;
+  background: #fff;
+  border-bottom: 1.5px solid var(--color-filete);
 }
 @media (min-width: 768px) {
-  .boton-reportar {
-    position: absolute;
-    left: auto;
-    right: 1rem;
-    top: 1rem;
-    bottom: auto;
-    width: 56px;
-    height: 56px;
-    min-height: 56px;
-    padding: 0;
-    border-radius: 50%;
-    background: var(--color-verde-500);
-  }
-  .boton-reportar:hover {
-    background: var(--color-verde-700);
+  .topnav {
+    display: flex;
   }
 }
+.topnav .mrc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-titular);
+  font-weight: 600;
+  font-size: 18px;
+  color: inherit;
+  text-decoration: none;
+}
+.topnav .mrc img {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  object-fit: cover;
+  display: block;
+}
+.topnav nav {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+/* Los enlaces de las dos barras llevan clase propia en vez de apuntarse por elemento: dos barras
+   con reglas sobre `a` terminan en especificidades descendentes que se pisan sin avisar. */
+.enlace-nav {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 15px;
+  border-radius: var(--radius-pastilla);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-tinta-600);
+  text-decoration: none;
+}
+.enlace-nav:hover {
+  background: var(--color-fondo);
+  color: var(--color-tinta-900);
+}
+.enlace-nav[aria-current="page"] {
+  background: var(--color-verde-100);
+  color: var(--color-verde-700);
+}
 
-/* Hoja de detalle: sube desde abajo en móvil (radio 30 px arriba); tarjeta en escritorio. */
+/* Barra inferior de móvil: cuatro destinos al alcance del pulgar. */
+.barrainf {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 7px 12px calc(4px + env(safe-area-inset-bottom));
+  background: #fff;
+  box-shadow: 0 -6px 18px rgb(15 45 67 / 0.06);
+}
+@media (min-width: 768px) {
+  .barrainf {
+    display: none;
+  }
+}
+.enlace-inf {
+  flex: 1;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  min-height: 52px;
+  padding: 7px 2px 6px;
+  border-radius: var(--radius-campo);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-tinta-300);
+  text-align: center;
+  text-decoration: none;
+}
+.enlace-inf:hover {
+  background: var(--color-fondo);
+}
+.enlace-inf[aria-current="page"] {
+  color: var(--color-verde-700);
+}
+
+/* Cabecera de pantalla interior. */
+.cab {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 16px 20px 12px;
+}
+.cab h1,
+.cab h2 {
+  font-size: 20px;
+}
+
+/* Pie fijo con la acción principal, difuminado sobre el contenido que pasa por debajo. */
+.pie {
+  flex: 0 0 auto;
+  padding: 13px 20px calc(6px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--color-crema) 72%, rgb(251 251 249 / 0));
+}
+
+/* ============================ mapa ============================ */
+
+/* La clase va doblada con la de MapLibre porque su hoja de estilos declara
+   `.maplibregl-map { position: relative }` y se carga después: sin esto el contenedor perdía el
+   posicionamiento absoluto, se quedaba en altura de contenido (cero) y el mapa no se veía. */
+.map,
+.map.maplibregl-map {
+  position: absolute;
+  inset: 0;
+}
+.flot {
+  position: absolute;
+  z-index: 20;
+}
+/*
+ * Controles que tienen que seguir al alcance del pulgar con la hoja de detalle levantada. Sin
+ * esto quedan debajo de la hoja: visibles en el árbol pero imposibles de tocar, que es peor que
+ * no estar. Solo en móvil; en escritorio la hoja es una tarjeta de la columna y no tapa nada.
+ */
+@media (max-width: 767px) {
+  .flot.sobre-hoja {
+    bottom: calc(var(--alto-hoja) + 12px);
+  }
+  /* Lo que sí se aparta: con el detalle abierto, las capas del mapa no son lo que se busca. */
+  .flot.bajo-hoja {
+    display: none;
+  }
+}
+/*
+ * Aviso de que el mapa todavía está trayendo sus teselas. Solo aparece al arrancar y se apaga en
+ * cuanto MapLibre se queda quieto por primera vez: es una pastilla del kit, no una cortina, para
+ * que lo que ya se dibujó siga viéndose por detrás.
+ */
+.cargando-mapa {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 25;
+  transform: translate(-50%, -50%);
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.94);
+  box-shadow: var(--sh);
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--color-tinta-600);
+  pointer-events: none;
+}
+/* Marcador en pastilla: punto de color + nombre de la severidad escrito. */
+.pin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  border: 0;
+  border-radius: var(--radius-pastilla);
+  padding: 4px 10px 4px 6px;
+  box-shadow:
+    0 2px 6px rgb(15 45 67 / 0.2),
+    0 8px 20px rgb(15 45 67 / 0.16);
+  font-family: var(--font-interfaz);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-tinta-900);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 160ms ease;
+}
+.pin .d {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.pin.on {
+  background: var(--color-tinta-900);
+  color: #fff;
+  transform: scale(1.09);
+}
+.pin.nuevo {
+  animation: pulso 1.4s ease-in-out 3;
+}
+@keyframes pulso {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.14);
+  }
+}
+.buscar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgb(255 255 255 / 0.96);
+  border-radius: var(--radius-pastilla);
+  padding: 0 16px;
+  min-height: 46px;
+  box-shadow: var(--sh);
+}
+.buscar input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  /* El anillo no va en el input sino en la pastilla entera (regla de abajo): dentro de la
+     pastilla, un recuadro pegado al texto se ve como un error de dibujo. */
+  outline: 0;
+  background: none;
+  font: inherit;
+  font-size: 15.5px;
+}
+/* Sin esto el buscador era el único control de la aplicación que recibía el foco SIN marcarlo:
+   `.buscar input { outline: 0 }` le ganaba en especificidad a la regla global `:focus-visible`
+   y no ponía nada en su lugar. Con el teclado no había forma de saber dónde estabas (WCAG 2.4.7).
+   Mismo patrón que `.opc:has(input:focus-visible)`: marca el contenedor, no el campo. */
+.buscar:has(input:focus-visible) {
+  outline: 3px solid var(--color-verde-500);
+  outline-offset: 2px;
+}
+.buscar input::placeholder {
+  color: #93a0a5;
+}
+
+/* MapLibre: atribución en pastilla, como en el prototipo. La clase va doblada para ganarle en
+   especificidad a la hoja de estilos de MapLibre sin recurrir a !important. */
+.maplibregl-ctrl-attrib.maplibregl-ctrl-attrib {
+  font-size: 10px;
+  border-radius: var(--radius-pastilla);
+  background: rgb(255 255 255 / 0.82);
+  color: var(--color-tinta-600);
+  padding: 2px 8px;
+}
+.maplibregl-ctrl-attrib.maplibregl-ctrl-attrib a {
+  color: var(--color-agua-700);
+}
+.maplibregl-canvas:focus-visible {
+  outline: 3px solid var(--color-verde-500);
+  outline-offset: -3px;
+}
+
+/* ============================ escritorio: panel + mapa ============================ */
+
+.split {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+.lado {
+  display: none;
+  background: var(--color-crema);
+  border-right: 1.5px solid var(--color-filete);
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+@media (min-width: 768px) {
+  .lado {
+    display: flex;
+  }
+}
+.lado .cima {
+  padding: 18px 20px 12px;
+  flex: 0 0 auto;
+}
+.lado .lista {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px 20px;
+  scrollbar-width: thin;
+}
+.mapcol {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Tarjeta de resultado de la lista lateral: miniatura + datos. */
+.res {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 13px;
+  padding: 11px;
+  width: 100%;
+  background: #fff;
+  border-radius: var(--radius-tarjeta);
+  box-shadow: var(--sh-sm);
+  border: 1.5px solid transparent;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+.res + .res {
+  margin-top: 11px;
+}
+.res:hover {
+  border-color: var(--color-tinta-300);
+}
+.res[aria-pressed="true"],
+.res.on {
+  border-color: var(--color-verde-500);
+  box-shadow: 0 0 0 3px rgb(40 147 77 / 0.2);
+}
+.res .ph {
+  height: 74px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #edf1ee;
+}
+.res .ph img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ============================ hoja inferior ============================ */
+
+/* Móvil: sube desde abajo sobre el mapa. Escritorio: tarjeta en la columna. */
 .hoja {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 30;
-  max-height: 82dvh;
+  max-height: var(--alto-hoja);
   overflow-y: auto;
-  border-radius: var(--radius-hoja) var(--radius-hoja) 0 0;
-  background: var(--color-superficie);
-  box-shadow: 0 -8px 30px rgb(15 45 67 / 0.25);
-  padding-bottom: calc(1.25rem + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+  background: #fff;
+  border-radius: 28px 28px 0 0;
+  padding: 16px 20px calc(18px + env(safe-area-inset-bottom));
+  box-shadow: 0 -12px 34px rgb(15 45 67 / 0.16);
+  animation: sube 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes sube {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.asa {
+  width: 44px;
+  height: 5px;
+  border-radius: var(--radius-pastilla);
+  background: #dce3df;
+  margin: 0 auto 14px;
 }
 @media (min-width: 768px) {
   .hoja {
@@ -341,57 +1134,120 @@ h3,
     max-height: none;
     overflow: visible;
     border-radius: var(--radius-tarjeta);
-    box-shadow:
-      0 1px 2px rgb(15 45 67 / 0.06),
-      0 8px 24px rgb(15 45 67 / 0.06);
-    padding-bottom: 1.5rem;
+    box-shadow: var(--sh-sm);
+    padding-bottom: 18px;
+    animation: none;
+  }
+  .asa {
+    display: none;
   }
 }
 
-/* Tarjetas de indicadores sobre el mapa. */
+/* ============================ avisos efímeros ============================ */
+
+.toast {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(78px + env(safe-area-inset-bottom));
+  z-index: 60;
+  background: var(--color-tinta-900);
+  color: #fff;
+  border-radius: 14px;
+  padding: 13px 16px;
+  font-size: 14.5px;
+  font-weight: 600;
+  box-shadow: var(--sh-lg);
+  animation: tin 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@media (min-width: 768px) {
+  .toast {
+    left: auto;
+    right: 20px;
+    bottom: 20px;
+    max-width: 380px;
+  }
+}
+@keyframes tin {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.brillo {
+  animation: brillo 900ms ease both;
+}
+@keyframes brillo {
+  0% {
+    transform: scale(0.86);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Quien pide menos movimiento no recibe ninguno (WCAG 2.2, 2.3.3). Acá `!important` no es un
+   atajo: la regla tiene que ganarle a cualquier animación declarada después, venga de este
+   archivo, de un utilitario o de un estilo en línea. Es el único uso en todo el kit. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: la preferencia del sistema manda sobre todo */
+    animation-duration: 0.01ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: la preferencia del sistema manda sobre todo */
+    animation-iteration-count: 1 !important;
+    /* biome-ignore lint/complexity/noImportantStyles: la preferencia del sistema manda sobre todo */
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================ utilidades del flujo ============================ */
+
+/* Cuerpo del flujo de reporte: 18/28 (CLAUDE.md §14.4). */
+.cuerpo-reporte {
+  font-size: 1.125rem;
+  line-height: 1.55;
+}
+/* Chips de filtro con objetivo táctil de 48 px. */
+.chip-filtro {
+  min-height: 48px;
+}
+.chip-mapa {
+  background: rgb(255 255 255 / 0.94);
+  border-color: transparent;
+  box-shadow: var(--sh);
+  cursor: default;
+}
 .kpi {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
-  padding: 0.75rem 1rem;
-  background: rgb(255 255 255 / 0.94);
+  padding: 14px 16px;
+  background: #fff;
   border-radius: 14px;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
+  box-shadow: var(--sh-sm);
 }
 .kpi-valor {
   font-family: var(--font-titular);
-  font-weight: 600;
-  font-size: 1.5rem;
-  line-height: 1.1;
+  font-weight: 700;
+  font-size: 24px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--color-tinta-900);
 }
 .kpi-etiqueta {
-  font-size: 0.8125rem;
+  font-size: 13.5px;
+  line-height: 1.3;
   color: var(--color-tinta-600);
-}
-
-/* Chip flotante sobre el mapa oscuro. */
-.chip-mapa {
-  background: rgb(255 255 255 / 0.94);
-  border-color: transparent;
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.25);
-  cursor: default;
-}
-
-/* Tarjeta destacada del "Cómo funciona". */
-.tabla-simple {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 1rem;
-}
-.tabla-simple th,
-.tabla-simple td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--color-filete);
-  text-align: left;
-  vertical-align: top;
-}
-.tabla-simple th {
-  font-weight: 600;
-  color: var(--color-tinta-600);
+  margin-top: 5px;
 }

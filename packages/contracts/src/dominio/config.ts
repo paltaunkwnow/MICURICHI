@@ -20,6 +20,22 @@ export const CONFIG_DOMINIO = {
   FOTO_MIME_PERMITIDOS: ['image/jpeg', 'image/png', 'image/webp'] as const,
   FOTO_ANCHO_MAX_PX: 1600,
   RATE_LIMIT_REPORTES_POR_HORA: 10,
+  /**
+   * Minutos que una CUENTA debe esperar entre dos reportes aceptados (§13, antiabuso).
+   *
+   * Es una ventana deslizante desde el último reporte aceptado, no una ventana horaria de reloj:
+   * con ventanas de reloj, quien envía a las 10:59 puede volver a enviar a las 11:00 y sacar dos
+   * reportes en un minuto. El límite por IP de arriba sigue existiendo y es independiente: uno
+   * acota a la persona y el otro a la conexión, y ninguno sustituye al otro.
+   */
+  MINUTOS_ENTRE_REPORTES_POR_CUENTA: 60,
+  /**
+   * Longitud mínima de una contraseña nueva. OWASP pide 8 como mínimo absoluto; se piden 10
+   * porque el coste para quien se registra es nulo y el espacio de búsqueda crece mucho.
+   * El login acepta desde 8 para no dejar fuera a las cuentas creadas antes de esta regla.
+   */
+  PASSWORD_MIN_LONGITUD: 10,
+  PASSWORD_MAX_LONGITUD: 200,
   DESCRIPCION_MIN: 10,
   DESCRIPCION_MAX: 1000,
   /** Días que se conserva ip_hash para antispam (§13) <a confirmar>. */

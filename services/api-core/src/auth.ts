@@ -1,18 +1,16 @@
-/** Sesiones con cookie httpOnly y contraseñas con scrypt (Node, sin dependencias nativas). */
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+/** Sesiones con cookie httpOnly. El hash de contraseñas vive en `db` (packages/db/src/password.ts). */
+import { randomBytes } from 'node:crypto';
 import type { Rol, Usuario } from 'contracts';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type pg from 'pg';
 
 export const COOKIE_SESION = 'curichi_sesion';
 
-export function verificarPassword(password: string, almacenado: string): boolean {
-  const [alg, sal, hash] = almacenado.split('$');
-  if (alg !== 'scrypt' || !sal || !hash) return false;
-  const calculado = scryptSync(password, sal, 64, { N: 16384, r: 8, p: 1 });
-  const esperado = Buffer.from(hash, 'hex');
-  return calculado.length === esperado.length && timingSafeEqual(calculado, esperado);
-}
+/**
+ * Cada cuánto se refresca `ultimo_uso_en`. Sin este margen habría un UPDATE por petición: con el
+ * mapa pidiendo datos constantemente, la tabla de sesiones se convertiría en un punto caliente.
+ */
+const REFRESCO_USO_MS = 60_000;
 
 export async function crearSesion(
   pool: pg.Pool,
@@ -29,28 +27,50 @@ export async function crearSesion(
   return { id, expira };
 }
 
+/**
+ * Usuario de la sesión, si sigue viva. Dos caducidades a la vez:
+ *  - `expira_en`: tope absoluto desde el inicio de sesión;
+ *  - `ultimo_uso_en`: inactividad. Una cookie robada de un equipo compartido servía hasta 7 días;
+ *    con el corte por inactividad deja de valer al poco de dejar de usarse.
+ */
 export async function usuarioDeSesion(
   pool: pg.Pool,
   sesionId: string | undefined,
+  idleHoras: number,
 ): Promise<Usuario | null> {
   if (!sesionId || !/^[a-f0-9]{64}$/.test(sesionId)) return null;
-  const r = await pool.query<Usuario>(
-    `SELECT u.id, u.email, u.nombre, u.rol FROM sesion s JOIN usuario u ON u.id = s.usuario_id
-     WHERE s.id = $1 AND s.expira_en > now() AND u.activo`,
-    [sesionId],
+  const r = await pool.query<Usuario & { refrescar: boolean }>(
+    `SELECT u.id, u.email, u.nombre, u.rol,
+            (s.ultimo_uso_en < now() - ($3 || ' milliseconds')::interval) AS refrescar
+     FROM sesion s JOIN usuario u ON u.id = s.usuario_id
+     WHERE s.id = $1
+       AND s.expira_en > now()
+       AND s.ultimo_uso_en > now() - ($2 || ' hours')::interval
+       AND u.activo`,
+    [sesionId, String(idleHoras), String(REFRESCO_USO_MS)],
   );
-  return r.rows[0] ?? null;
+  const fila = r.rows[0];
+  if (!fila) return null;
+  if (fila.refrescar) {
+    // Sin await: refrescar la marca no debe añadir latencia a la petición del usuario.
+    void pool
+      .query('UPDATE sesion SET ultimo_uso_en = now() WHERE id = $1', [sesionId])
+      .catch(() => {});
+  }
+  const { refrescar: _omitido, ...usuario } = fila;
+  return usuario;
 }
 
 export interface OpcionesAuth {
   pool: pg.Pool;
+  idleHoras: number;
 }
 
 /** Se registra sobre la instancia raíz (sin encapsular) para que el hook aplique a todas las rutas. */
 export function instalarAuth(app: FastifyInstance, o: OpcionesAuth) {
   app.decorateRequest('usuario', null);
   app.addHook('onRequest', async (req) => {
-    req.usuario = await usuarioDeSesion(o.pool, req.cookies[COOKIE_SESION]);
+    req.usuario = await usuarioDeSesion(o.pool, req.cookies[COOKIE_SESION], o.idleHoras);
   });
 }
 

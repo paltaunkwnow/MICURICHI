@@ -12,6 +12,12 @@
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "panel-admin", "dev"],
       "port": 3100
+    },
+    {
+      "name": "web-ciudadano-produccion",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "web-ciudadano", "start"],
+      "port": 3000
     }
   ]
 }

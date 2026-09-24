@@ -3,7 +3,9 @@ import type { ReporteFeature } from './api';
 import {
   contadorDescripcion,
   distanciaDesde,
+  etiquetaDistrito,
   etiquetaTirante,
+  etiquetaUnidadVecinal,
   subtituloReporte,
   textoCapaOficial,
   tituloPuntos,
@@ -59,9 +61,25 @@ describe('formato', () => {
 
   it('arma el chip de capa oficial', () => {
     expect(textoCapaOficial(props.distrito, props.unidad_vecinal)).toBe(
-      'Distrito 7 · UV-123 · capa oficial vigente',
+      'Distrito 7 · UV 123 · capa oficial vigente',
     );
     expect(textoCapaOficial(null, null)).toBe('Fuera de la cobertura municipal');
+  });
+
+  it('no repite el prefijo cuando el código ya lo trae', () => {
+    // Los códigos que entrega el municipio pueden venir con prefijo o sin él; con la capa
+    // sintética son «UV-106» y con otra podrían ser «106». Las dos formas tienen que leerse bien.
+    expect(etiquetaUnidadVecinal('UV-106')).toBe('UV-106');
+    expect(etiquetaUnidadVecinal('uv-106')).toBe('UV-106');
+    expect(etiquetaUnidadVecinal('106')).toBe('UV 106');
+    expect(etiquetaUnidadVecinal(null)).toBe('Sin unidad vecinal');
+  });
+
+  it('normaliza el código de distrito', () => {
+    expect(etiquetaDistrito('D02')).toBe('Distrito 02');
+    expect(etiquetaDistrito('DM-11')).toBe('Distrito 11');
+    expect(etiquetaDistrito('7')).toBe('Distrito 7');
+    expect(etiquetaDistrito(undefined)).toBe('Sin distrito');
   });
 
   it('cuenta los caracteres de la descripción', () => {

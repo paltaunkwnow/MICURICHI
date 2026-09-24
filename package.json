@@ -17,6 +17,9 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "test:e2e": "turbo run test:e2e",
+    "secretos": "node scripts/buscar-secretos.mjs --todos",
+    "auditoria": "pnpm audit --audit-level high",
+    "db:local": "pnpm --filter db local",
     "db:generate": "pnpm --filter db generate",
     "db:migrate": "pnpm --filter db migrate",
     "db:seed:samples": "pnpm --filter db seed:samples",
@@ -26,7 +29,8 @@
     "etl:all": "pnpm --filter geodata-etl all",
     "etl:test": "pnpm --filter geodata-etl test",
     "contracts:build": "pnpm --filter contracts build",
-    "prepare": "husky"
+    "prepare": "husky",
+    "privilegios": "pnpm --filter db privilegios"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.13",

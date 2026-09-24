@@ -46,7 +46,15 @@ export const ConfigSchema = z.object({
     manzana: z.number(),
   }),
   umbral_teselas_bytes: z.number().int().positive(),
+  /** Cambio máximo aceptable del área TOTAL de la capa tras la reparación. */
   tolerancia_cambio_area: z.number().positive(),
+  /**
+   * Cambio máximo aceptable del área de UNA feature. Es necesariamente mayor que el de la capa:
+   * resolver un solape mueve área de un polígono a su vecino, así que el total apenas varía
+   * mientras los dos implicados cambian bastante. Usar el mismo número para ambos convertía
+   * cualquier solape real en un falso "reparación no segura" que abortaba el ETL.
+   */
+  tolerancia_cambio_area_feature: z.number().positive().default(0.01),
 });
 export type Config = z.infer<typeof ConfigSchema>;
 

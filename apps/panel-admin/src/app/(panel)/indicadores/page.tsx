@@ -28,10 +28,22 @@ function Barra({ n, total }: { n: number; total: number }) {
 }
 
 export default function Indicadores() {
-  const consulta = useQuery({ queryKey: ['indicadores'], queryFn: obtenerIndicadores });
+  const consulta = useQuery({
+    queryKey: ['indicadores'],
+    queryFn: ({ signal }) => obtenerIndicadores(signal),
+  });
   const d = consulta.data;
   const maxDistrito = Math.max(1, ...(d?.por_distrito ?? []).map((x) => x.n));
   const maxUv = Math.max(1, ...(d?.por_unidad_vecinal ?? []).map((x) => x.n));
+  /**
+   * Nombre de cada distrito, para que la tabla de unidades vecinales no muestre el identificador
+   * interno. La respuesta trae el nombre en `por_distrito` y solo el id en `por_unidad_vecinal`,
+   * y toda unidad vecinal con reportes tiene su distrito en la otra lista, así que se cruzan acá
+   * en lugar de pedirle un campo más a la API.
+   */
+  const nombreDistrito = new Map(
+    (d?.por_distrito ?? []).filter((x) => x.nombre).map((x) => [x.distrito_id, x.nombre as string]),
+  );
 
   return (
     <div className="space-y-6">
@@ -140,7 +152,11 @@ export default function Indicadores() {
                 {d.por_unidad_vecinal.map((x) => (
                   <tr key={x.unidad_vecinal_id} className="border-b border-filete last:border-0">
                     <td className="py-2 font-semibold">{x.nombre ?? x.unidad_vecinal_id}</td>
-                    <td className="py-2 text-tinta-600">{x.distrito_id ?? '—'}</td>
+                    <td className="py-2 text-tinta-600">
+                      {(x.distrito_id ? nombreDistrito.get(x.distrito_id) : null) ??
+                        x.distrito_id ??
+                        '—'}
+                    </td>
                     <td className="py-2 text-right">{x.n}</td>
                     <td className="w-2/5 py-2">
                       <Barra n={x.n} total={maxUv} />

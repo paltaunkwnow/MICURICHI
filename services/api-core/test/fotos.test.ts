@@ -8,17 +8,41 @@ import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
 import { detectarMime } from '../src/rutas/fotos.js';
-import { multipart, reporteValido, resolverDePrueba } from './ayudas.js';
+import {
+  CUENTAS,
+  crearUsuarios,
+  iniciarSesion,
+  liberarCuota,
+  multipart,
+  reporteValido,
+  resolverDePrueba,
+  sesion,
+} from './ayudas.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
 let app: FastifyInstance;
+let cookieVecina: string;
+let ex: ReturnType<typeof ejecutorPg>;
 const almacen = new AlmacenMemoria();
+
+/** Crea un reporte como vecina devolviéndole antes el turno: aquí se prueba otra cosa. */
+async function crear(payload: Record<string, unknown> = reporteValido) {
+  await liberarCuota(ex);
+  return app.inject({
+    method: 'POST',
+    url: '/api/v1/reportes',
+    payload,
+    cookies: sesion(cookieVecina),
+  });
+}
 
 beforeAll(async () => {
   base = await levantarBaseEfimera();
   pool = new pg.Pool({ connectionString: base.url, max: 3 });
-  await cargarCapasDePrueba(ejecutorPg(pool));
+  ex = ejecutorPg(pool);
+  await cargarCapasDePrueba(ex);
+  await crearUsuarios(ex);
   app = await crearApp({
     pool,
     cfg: {
@@ -29,6 +53,7 @@ beforeAll(async () => {
     resolver: resolverDePrueba,
     almacen,
   });
+  cookieVecina = await iniciarSesion(app, CUENTAS.vecina);
 }, 120_000);
 
 afterAll(async () => {
@@ -65,7 +90,13 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
       'image/jpeg',
       await jpegConGps(),
     );
-    const r = await app.inject({ method: 'POST', url: '/api/v1/fotos', payload, headers });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      payload,
+      headers,
+      cookies: sesion(cookieVecina),
+    });
     expect(r.statusCode).toBe(201);
     const foto = r.json();
     expect(foto.exif_sanitizado).toBe(true);
@@ -82,10 +113,9 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
     expect(get.headers['content-type']).toBe('image/jpeg');
     expect(get.headers['x-content-type-options']).toBe('nosniff');
     // y se asocia al reporte al crearlo
-    const rep = await app.inject({
-      method: 'POST',
-      url: '/api/v1/reportes',
-      payload: { ...reporteValido, fotos: [foto.objeto_key] },
+    const rep = await crear({
+      ...reporteValido,
+      fotos: [foto.objeto_key],
     });
     expect(rep.statusCode).toBe(201);
     expect(rep.json().properties.fotos[0]).toContain(foto.objeto_key);
@@ -97,16 +127,44 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
       'image/jpeg',
       Buffer.from('<html><script>alert(1)</script></html>'),
     );
-    const r = await app.inject({ method: 'POST', url: '/api/v1/fotos', payload, headers });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      payload,
+      headers,
+      cookies: sesion(cookieVecina),
+    });
     expect(r.statusCode).toBe(415);
     expect(detectarMime(Buffer.from('GIF89a......'))).toBeNull();
   });
   it('rechaza archivos por encima del límite', async () => {
     const grande = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff]), Buffer.alloc(9 * 1024 * 1024)]);
     const { payload, headers } = multipart('archivo', 'grande.jpg', 'image/jpeg', grande);
-    const r = await app.inject({ method: 'POST', url: '/api/v1/fotos', payload, headers });
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      payload,
+      headers,
+      cookies: sesion(cookieVecina),
+    });
     expect(r.statusCode).toBe(413);
   });
+  /**
+   * Subir una foto es escribir, y escribir exige cuenta desde la Fase 5. Era el último camino
+   * abierto a cualquiera para hacer trabajar al servicio —decodificar y reescribir hasta 8 MB de
+   * imagen es lo más caro que hace este proceso— y para dejar bytes en el almacén sin que nadie
+   * respondiera por ellos.
+   */
+  it('sin sesión no se puede subir una foto', async () => {
+    const jpeg = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#123' } })
+      .jpeg()
+      .toBuffer();
+    const { payload, headers } = multipart('archivo', 'f.jpg', 'image/jpeg', jpeg);
+    const r = await app.inject({ method: 'POST', url: '/api/v1/fotos', payload, headers });
+    expect(r.statusCode).toBe(401);
+    expect(r.json().codigo).toBe('SIN_SESION');
+  });
+
   it('404 para claves inexistentes o inválidas', async () => {
     expect(
       (await app.inject({ method: 'GET', url: '/api/v1/fotos/../../etc/passwd' })).statusCode,
@@ -119,5 +177,66 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
         })
       ).statusCode,
     ).toBe(404);
+  });
+});
+
+describe('moderación previa de las fotos (§13)', () => {
+  /** Sube una foto y la asocia a un reporte que queda en el estado pedido. */
+  async function fotoDeReporteEn(estado: string): Promise<string> {
+    const jpeg = await sharp({ create: { width: 40, height: 30, channels: 3, background: '#123' } })
+      .jpeg()
+      .toBuffer();
+    const sub = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      cookies: sesion(cookieVecina),
+      ...multipart('archivo', 'f.jpg', 'image/jpeg', jpeg),
+    });
+    expect(sub.statusCode).toBe(201);
+    const key = sub.json().objeto_key as string;
+    const creado = await crear({
+      ...reporteValido,
+      fotos: [key],
+    });
+    expect(creado.statusCode).toBe(201);
+    if (estado !== 'nuevo')
+      await pool.query('UPDATE reporte_inundacion SET estado = $2::estado_reporte WHERE id = $1', [
+        creado.json().id,
+        estado,
+      ]);
+    return key;
+  }
+
+  it('no sirve la foto de un reporte que todavía no se publicó', async () => {
+    const key = await fotoDeReporteEn('nuevo');
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
+    expect(r.statusCode, 'un reporte en "nuevo" no se publica: su foto tampoco').toBe(404);
+  });
+
+  it('no sirve la foto de un reporte rechazado', async () => {
+    const key = await fotoDeReporteEn('rechazado');
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('sí sirve la de un reporte validado, y con caché pública', async () => {
+    const key = await fotoDeReporteEn('validado');
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toContain('public');
+  });
+
+  it('la foto recién subida y aún sin reporte se sirve: el formulario muestra la miniatura', async () => {
+    const jpeg = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#456' } })
+      .jpeg()
+      .toBuffer();
+    const sub = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      cookies: sesion(cookieVecina),
+      ...multipart('archivo', 'f.jpg', 'image/jpeg', jpeg),
+    });
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${sub.json().objeto_key}` });
+    expect(r.statusCode).toBe(200);
   });
 });

@@ -6,28 +6,44 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
-import { crearUsuarios, reporteValido, resolverDePrueba } from './ayudas.js';
+import {
+  CUENTAS,
+  crearUsuarios,
+  iniciarSesion,
+  liberarCuota,
+  reporteValido,
+  resolverDePrueba,
+  sesion,
+} from './ayudas.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
 let app: FastifyInstance;
 let cookieTecnico: string;
 let cookieAdmin: string;
+let cookieVecina: string;
+let ex: ReturnType<typeof ejecutorPg>;
 
-async function login(email: string) {
-  const r = await app.inject({
+/**
+ * Crea un reporte como vecina. Desde la migración 0009 reportar exige sesión y cada cuenta tiene
+ * un reporte por hora; aquí se le devuelve el turno antes de cada envío porque lo que prueban
+ * estas suites es el dominio (severidad, estados, fotos, filtros, exportación), no la cuota. La
+ * cuota se prueba entera, concurrencia incluida, en `cuentas-y-cuota.test.ts`.
+ */
+async function crear(payload: Record<string, unknown> = reporteValido) {
+  await liberarCuota(ex);
+  return app.inject({
     method: 'POST',
-    url: '/api/v1/auth/login',
-    payload: { email, password: 'contrasena-test-123' },
+    url: '/api/v1/reportes',
+    payload,
+    cookies: sesion(cookieVecina),
   });
-  expect(r.statusCode).toBe(200);
-  return r.cookies.find((c) => c.name === 'curichi_sesion')!.value;
 }
 
 beforeAll(async () => {
   base = await levantarBaseEfimera();
   pool = new pg.Pool({ connectionString: base.url, max: 3 });
-  const ex = ejecutorPg(pool);
+  ex = ejecutorPg(pool);
   await cargarCapasDePrueba(ex);
   await crearUsuarios(ex);
   app = await crearApp({
@@ -40,8 +56,9 @@ beforeAll(async () => {
     resolver: resolverDePrueba,
     almacen: new AlmacenMemoria(),
   });
-  cookieTecnico = await login('tecnico@test.local');
-  cookieAdmin = await login('admin@test.local');
+  cookieTecnico = await iniciarSesion(app, CUENTAS.tecnico);
+  cookieAdmin = await iniciarSesion(app, CUENTAS.admin);
+  cookieVecina = await iniciarSesion(app, CUENTAS.vecina);
 }, 120_000);
 
 afterAll(async () => {
@@ -53,7 +70,7 @@ afterAll(async () => {
 describe('camino crítico: crear → resolver UV → severidad → nuevo', () => {
   let id: string;
   it('crea el reporte con UV resuelta y severidad calculada', async () => {
-    const r = await app.inject({ method: 'POST', url: '/api/v1/reportes', payload: reporteValido });
+    const r = await crear();
     expect(r.statusCode).toBe(201);
     const f = r.json();
     id = f.id;
@@ -73,7 +90,7 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
   it('el técnico sí lo ve, con coordenada exacta y campos de moderación', async () => {
     const det = await app.inject({
       method: 'GET',
-      url: `/api/v1/reportes/${id}`,
+      url: `/api/v1/tecnico/reportes/${id}`,
       cookies: { curichi_sesion: cookieTecnico },
     });
     expect(det.statusCode).toBe(200);
@@ -113,9 +130,7 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
       cookies: { curichi_sesion: cookieTecnico },
     });
     expect(mal.statusCode).toBe(409);
-    const otro = (
-      await app.inject({ method: 'POST', url: '/api/v1/reportes', payload: reporteValido })
-    ).json().id as string;
+    const otro = (await crear()).json().id as string;
     const sinMotivo = await app.inject({
       method: 'PATCH',
       url: `/api/v1/reportes/${otro}/estado`,
@@ -146,9 +161,7 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(reabrirAdmin.statusCode).toBe(200);
   });
   it('fusiona duplicados y reclasifica severidad con motivo', async () => {
-    const dup = (
-      await app.inject({ method: 'POST', url: '/api/v1/reportes', payload: reporteValido })
-    ).json().id as string;
+    const dup = (await crear()).json().id as string;
     const f = await app.inject({
       method: 'POST',
       url: `/api/v1/reportes/${dup}/fusionar`,
@@ -179,39 +192,23 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
 
 describe('validación, cobertura, privacidad y exportación', () => {
   it('rechaza payloads inválidos y el honeypot', async () => {
-    const corto = await app.inject({
-      method: 'POST',
-      url: '/api/v1/reportes',
-      payload: { ...reporteValido, descripcion: 'agua' },
-    });
+    const corto = await crear({ ...reporteValido, descripcion: 'agua' });
     expect(corto.statusCode).toBe(400);
     expect(corto.json().detalles[0].campo).toBe('descripcion');
-    const bot = await app.inject({
-      method: 'POST',
-      url: '/api/v1/reportes',
-      payload: { ...reporteValido, sitio_web: 'http://spam' },
-    });
+    const bot = await crear({ ...reporteValido, sitio_web: 'http://spam' });
     expect(bot.statusCode).toBe(400);
   });
   it('rechaza puntos fuera de cobertura con 422', async () => {
-    const r = await app.inject({
-      method: 'POST',
-      url: '/api/v1/reportes',
-      payload: { ...reporteValido, lat: -17.5, lon: -63.0 },
-    });
+    const r = await crear({ ...reporteValido, lat: -17.5, lon: -63.0 });
     expect(r.statusCode).toBe(422);
     expect(r.json().codigo).toBe('FUERA_DE_COBERTURA');
   });
   it('degrada la precisión en público cuando la ubicación es una vivienda, pero no para el técnico', async () => {
-    const c = await app.inject({
-      method: 'POST',
-      url: '/api/v1/reportes',
-      payload: {
-        ...reporteValido,
-        ubicacion_tipo: 'vivienda_o_predio',
-        lat: -17.791,
-        lon: -63.196,
-      },
+    const c = await crear({
+      ...reporteValido,
+      ubicacion_tipo: 'vivienda_o_predio',
+      lat: -17.791,
+      lon: -63.196,
     });
     const idCasa = c.json().id;
     await app.inject({
@@ -226,7 +223,7 @@ describe('validación, cobertura, privacidad y exportación', () => {
     const tec = (
       await app.inject({
         method: 'GET',
-        url: `/api/v1/reportes/${idCasa}`,
+        url: `/api/v1/tecnico/reportes/${idCasa}`,
         cookies: { curichi_sesion: cookieTecnico },
       })
     ).json();
@@ -295,11 +292,23 @@ describe('validación, cobertura, privacidad y exportación', () => {
       almacen: new AlmacenMemoria(),
     });
     const codigos: number[] = [];
-    for (let i = 0; i < 3; i++)
+    for (let i = 0; i < 3; i++) {
+      // El turno se devuelve en cada vuelta: lo que se prueba acá es el límite por IP, que es
+      // independiente de la cuota por cuenta y sigue existiendo (uno acota la conexión, el otro
+      // a la persona). Si no se devolviera, el segundo envío daría 429 por el motivo equivocado
+      // y el test pasaría sin haber comprobado nada del rate limit.
+      await liberarCuota(ex);
       codigos.push(
-        (await limitada.inject({ method: 'POST', url: '/api/v1/reportes', payload: reporteValido }))
-          .statusCode,
+        (
+          await limitada.inject({
+            method: 'POST',
+            url: '/api/v1/reportes',
+            payload: reporteValido,
+            cookies: sesion(cookieVecina),
+          })
+        ).statusCode,
       );
+    }
     expect(codigos).toEqual([201, 201, 429]);
     await limitada.close();
   });
@@ -310,7 +319,7 @@ describe('validación, cobertura, privacidad y exportación', () => {
       payload: { email: 'tecnico@test.local', password: 'incorrecta-123' },
     });
     expect(mal.statusCode).toBe(401);
-    const c = await login('tecnico@test.local');
+    const c = await iniciarSesion(app, CUENTAS.tecnico);
     const yo = await app.inject({
       method: 'GET',
       url: '/api/v1/auth/yo',
@@ -329,5 +338,107 @@ describe('validación, cobertura, privacidad y exportación', () => {
       cookies: { curichi_sesion: c },
     });
     expect(yo2.statusCode).toBe(401);
+  });
+});
+
+describe('fotos asociadas al reporte', () => {
+  async function subirFoto() {
+    const png = await import('sharp').then((s) =>
+      s
+        .default({ create: { width: 8, height: 8, channels: 3, background: '#123456' } })
+        .png()
+        .toBuffer(),
+    );
+    const { multipart } = await import('./ayudas.js');
+    const m = multipart('archivo', 'f.png', 'image/png', png);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/fotos',
+      cookies: sesion(cookieVecina),
+      payload: m.payload,
+      headers: m.headers,
+    });
+    expect(r.statusCode).toBe(201);
+    return r.json().objeto_key as string;
+  }
+
+  it('asocia la foto subida y la publica en el reporte', async () => {
+    const key = await subirFoto();
+    const r = await crear({ ...reporteValido, fotos: [key] });
+    expect(r.statusCode).toBe(201);
+    expect(r.json().properties.fotos).toHaveLength(1);
+  });
+
+  it('rechaza claves inexistentes en vez de guardar el reporte sin fotos', async () => {
+    const antes = await pool.query<{ n: string }>(
+      'SELECT count(*)::text AS n FROM reporte_inundacion',
+    );
+    const r = await crear({
+      ...reporteValido,
+      fotos: ['00000000-0000-0000-0000-000000000000.jpg'],
+    });
+    expect(r.statusCode).toBe(400);
+    expect(r.json().codigo).toBe('FOTOS_INVALIDAS');
+    // Y la transacción se revirtió: no quedó un reporte a medias.
+    const despues = await pool.query<{ n: string }>(
+      'SELECT count(*)::text AS n FROM reporte_inundacion',
+    );
+    expect(despues.rows[0]?.n).toBe(antes.rows[0]?.n);
+  });
+
+  it('una foto ya usada por otro reporte no se puede volver a reclamar', async () => {
+    const key = await subirFoto();
+    const primero = await crear({ ...reporteValido, fotos: [key] });
+    expect(primero.statusCode).toBe(201);
+    const segundo = await crear({ ...reporteValido, fotos: [key] });
+    expect(segundo.statusCode).toBe(400);
+    expect(segundo.json().codigo).toBe('FOTOS_INVALIDAS');
+  });
+
+  it('una clave caducada ya no sirve', async () => {
+    const key = await subirFoto();
+    await pool.query(
+      `UPDATE reporte_foto SET creado_en = now() - interval '48 hours' WHERE objeto_key = $1`,
+      [key],
+    );
+    const r = await crear({ ...reporteValido, fotos: [key] });
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('login: no delata qué cuentas existen', () => {
+  it('email desconocido y contraseña incorrecta responden igual', async () => {
+    const desconocido = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'nadie@test.local', password: 'contrasena-test-123' },
+    });
+    const malPassword = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'tecnico@test.local', password: 'contrasena-incorrecta' },
+    });
+    expect(desconocido.statusCode).toBe(401);
+    expect(malPassword.statusCode).toBe(401);
+    expect(desconocido.json()).toEqual(malPassword.json());
+  });
+});
+
+describe('exportación CSV: contenido del vecino', () => {
+  it('neutraliza una descripción que empieza por = antes de que Excel la ejecute', async () => {
+    const r = await crear({
+      ...reporteValido,
+      descripcion: '=HYPERLINK("http://malicioso.test","Cobrar aquí") agua en la esquina',
+    });
+    expect(r.statusCode).toBe(201);
+    const csv = await app.inject({
+      method: 'GET',
+      url: '/api/v1/exportar?formato=csv',
+      cookies: { curichi_sesion: cookieTecnico },
+    });
+    expect(csv.statusCode).toBe(200);
+    expect(csv.body).toContain("'=HYPERLINK");
+    // Nunca una celda que empiece por = sin neutralizar.
+    for (const linea of csv.body.split('\n')) expect(linea.startsWith('=')).toBe(false);
   });
 });

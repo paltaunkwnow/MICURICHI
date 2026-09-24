@@ -6,10 +6,21 @@ import { requerirRol } from '../auth.js';
 import { listarReportes } from '../consultas.js';
 import { aFeature, vistaTecnica } from '../vistas.js';
 
-function csvCelda(v: unknown): string {
+/**
+ * Caracteres con los que Excel, LibreOffice y Sheets interpretan la celda como fórmula.
+ * La descripción la escribe cualquier vecino: sin neutralizarlos, un reporte que empiece por
+ * `=HYPERLINK(...)` o `@SUM(...)` se ejecuta al abrir la exportación en el municipio.
+ */
+const INICIO_FORMULA = /^[=+\-@\t\r]/;
+
+export function csvCelda(v: unknown): string {
   if (v === null || v === undefined) return '';
   const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
-  return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  // Los números se dejan tal cual: las latitudes y longitudes empiezan por `-` y deben
+  // seguir siendo numéricas en la hoja.
+  const esNumero = typeof v === 'number' || (s !== '' && Number.isFinite(Number(s)));
+  const seguro = !esNumero && INICIO_FORMULA.test(s) ? `'${s}` : s;
+  return /[",\n;]/.test(seguro) ? `"${seguro.replace(/"/g, '""')}"` : seguro;
 }
 
 export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
@@ -104,6 +115,9 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
     '/api/v1/indicadores',
     { preHandler: requerirRol('tecnico', 'admin') },
     async (): Promise<Indicadores> => {
+      // Los nombres de distrito y unidad vecinal salen de la versión de capa con la que se
+      // resolvió CADA reporte, no de la vigente: si no, al activar una entrega nueva los
+      // reportes anteriores aparecen sin nombre en el panel (ver el comentario de SELECT_REPORTE).
       const [total, porEstado, porSev, porDistrito, porUv, pc, capas] = await Promise.all([
         dep.pool.query<{ n: string }>('SELECT count(*)::text AS n FROM reporte_inundacion'),
         dep.pool.query<{ estado: string; n: string }>(
@@ -113,7 +127,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
           'SELECT COALESCE(severidad_manual, severidad_calculada)::text AS severidad, count(*)::text AS n FROM reporte_inundacion GROUP BY 1',
         ),
         dep.pool.query<{ distrito_id: string; nombre: string | null; n: string }>(
-          `SELECT r.distrito_id, d.nombre, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.distrito_municipal_vigente d ON d.id = r.distrito_id GROUP BY r.distrito_id, d.nombre ORDER BY count(*) DESC`,
+          `SELECT r.distrito_id, d.nombre, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.distrito_municipal d ON d.id = r.distrito_id AND d.version_capa = r.version_capa GROUP BY r.distrito_id, d.nombre ORDER BY count(*) DESC`,
         ),
         dep.pool.query<{
           unidad_vecinal_id: string;
@@ -121,7 +135,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
           distrito_id: string | null;
           n: string;
         }>(
-          `SELECT r.unidad_vecinal_id, u.nombre, u.distrito_id, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.unidad_vecinal_vigente u ON u.id = r.unidad_vecinal_id GROUP BY r.unidad_vecinal_id, u.nombre, u.distrito_id ORDER BY count(*) DESC LIMIT 50`,
+          `SELECT r.unidad_vecinal_id, u.nombre, u.distrito_id, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.unidad_vecinal u ON u.id = r.unidad_vecinal_id AND u.version_capa = r.version_capa GROUP BY r.unidad_vecinal_id, u.nombre, u.distrito_id ORDER BY count(*) DESC LIMIT 50`,
         ),
         dep.pool.query<{ n: string }>(
           'SELECT count(*)::text AS n FROM punto_critico WHERE n_reportes >= 2',
@@ -198,7 +212,9 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
         );
         await cliente.query('COMMIT');
       } catch (e) {
-        await cliente.query('ROLLBACK');
+        // Con .catch(): si el ROLLBACK también falla (conexión ya caída), el error que sube
+        // tiene que seguir siendo el original, no el del rollback, que no explica nada.
+        await cliente.query('ROLLBACK').catch(() => {});
         throw e;
       } finally {
         cliente.release();

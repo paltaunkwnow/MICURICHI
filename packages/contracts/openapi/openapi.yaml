@@ -632,6 +632,8 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+        total_exacto:
+          type: boolean
         pagina:
           type: integer
           minimum: -9007199254740991
@@ -1006,15 +1008,29 @@ components:
       properties:
         email:
           type: string
-          maxLength: 200
-          format: email
-          pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
         password:
           type: string
           minLength: 8
           maxLength: 200
       required:
         - email
+        - password
+    Registro:
+      type: object
+      properties:
+        email:
+          type: string
+        nombre:
+          type: string
+          minLength: 2
+          maxLength: 80
+        password:
+          type: string
+          minLength: 10
+          maxLength: 200
+      required:
+        - email
+        - nombre
         - password
     Usuario:
       type: object
@@ -1040,6 +1056,37 @@ components:
         - email
         - nombre
         - rol
+    SesionActual:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+        email:
+          type: string
+          format: email
+          pattern: ^(?:[A-Za-z0-9_'+\-]+\.)*[A-Za-z0-9_'+\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\-]*\.)+[A-Za-z]{2,}$
+        nombre:
+          type: string
+        rol:
+          type: string
+          enum:
+            - ciudadano
+            - tecnico
+            - admin
+        puede_reportar_desde:
+          anyOf:
+            - type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            - type: "null"
+      required:
+        - id
+        - email
+        - nombre
+        - rol
+        - puede_reportar_desde
     CapaVersion:
       type: object
       properties:
@@ -1470,12 +1517,6 @@ components:
           type:
             - string
             - "null"
-        radio_m:
-          type: number
-        diametro_m:
-          type: number
-        advertencia_diametro:
-          type: boolean
         calculado_en:
           type: string
           format: date-time
@@ -1490,9 +1531,6 @@ components:
         - severidad_max
         - distrito_id
         - unidad_vecinal_id
-        - radio_m
-        - diametro_m
-        - advertencia_diametro
         - calculado_en
     AgregadoUv:
       type: object
@@ -1538,9 +1576,14 @@ components:
 paths:
   /api/v1/reportes:
     post:
-      summary: Crear un reporte (público, con rate limit y honeypot)
+      summary: "Crear un reporte. EXIGE SESIÓN (cualquier rol). El autor se toma de la
+        sesión: el cuerpo no tiene ni puede tener un campo de autor. Además del
+        rate limit por IP, cada cuenta solo puede crear un reporte cada 60
+        minutos."
       tags:
         - reportes
+      security: &a1
+        - cookieSesion: []
       requestBody:
         required: true
         content:
@@ -1560,6 +1603,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
+        "401":
+          description: "SIN_SESION: hay que iniciar sesión para reportar"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
         "422":
           description: "FUERA_DE_COBERTURA: el punto no cae en el municipio"
           content:
@@ -1567,14 +1616,17 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "429":
-          description: Rate limit
+          description: CUOTA_DE_REPORTES (un reporte por cuenta cada 60 min, con
+            Retry-After) o rate limit por IP
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
     get:
-      summary: "Listar reportes (público: solo validados/resueltos con jitter;
-        técnico: todos, exactos)"
+      summary: "Listar reportes publicados (SIEMPRE vista pública: validados y
+        resueltos, con la ubicación degradada que corresponda). La
+        representación no cambia aunque la petición traiga cookie de sesión;
+        para la vista técnica está /api/v1/tecnico/reportes."
       tags:
         - reportes
       parameters:
@@ -1676,14 +1728,16 @@ paths:
             pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))$
       responses:
         "200":
-          description: FeatureCollection
+          description: "FeatureCollection pública (Cache-Control: public, no-cache)"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReporteFeatureCollection"
   /api/v1/reportes/{id}:
     get:
-      summary: Detalle de un reporte
+      summary: "Detalle público de un reporte. Devuelve 404 si aún no está publicado,
+        también para técnicos: la vista técnica vive en
+        /api/v1/tecnico/reportes/{id}."
       tags:
         - reportes
       parameters:
@@ -1695,13 +1749,176 @@ paths:
             format: uuid
       responses:
         "200":
-          description: Feature (propiedades técnicas si hay sesión de técnico/admin)
+          description: "Feature pública (Cache-Control: public, no-cache)"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReporteFeature"
         "404":
-          description: No existe o no es público
+          description: No existe o no está publicado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+  /api/v1/tecnico/reportes:
+    get:
+      summary: "Listar reportes con la vista técnica: coordenada exacta, todos los
+        estados y las propiedades de moderación. Exige rol tecnico o admin; la
+        intención va en la ruta para que ninguna caché ni ninguna cookie
+        residual pueda producir esta representación desde una URL pública."
+      tags:
+        - reportes
+      security: *a1
+      parameters:
+        - name: pagina
+          in: query
+          required: false
+          schema:
+            default: 1
+            type: integer
+            minimum: 1
+            maximum: 9007199254740991
+        - name: limite
+          in: query
+          required: false
+          schema:
+            default: 100
+            type: integer
+            minimum: 1
+            maximum: 500
+        - name: bbox
+          in: query
+          required: false
+          schema:
+            description: minLon,minLat,maxLon,maxLat
+            type: string
+            pattern: ^-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?,-?\d+(\.\d+)?$
+        - name: estado
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                enum:
+                  - nuevo
+                  - validado
+                  - duplicado
+                  - rechazado
+                  - resuelto
+              - type: array
+                items:
+                  type: string
+                  enum:
+                    - nuevo
+                    - validado
+                    - duplicado
+                    - rechazado
+                    - resuelto
+              - type: string
+        - name: severidad
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                enum:
+                  - baja
+                  - media
+                  - alta
+                  - critica
+              - type: array
+                items:
+                  type: string
+                  enum:
+                    - baja
+                    - media
+                    - alta
+                    - critica
+              - type: string
+        - name: distrito_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: unidad_vecinal_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: punto_critico_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+        - name: desde
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))$
+        - name: hasta
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))$
+      responses:
+        "200":
+          description: "FeatureCollection técnica (Cache-Control: private, no-store)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReporteFeatureCollection"
+        "401":
+          description: SIN_SESION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "403":
+          description: "SIN_PERMISO: el rol no permite la vista técnica"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+  /api/v1/tecnico/reportes/{id}:
+    get:
+      summary: Detalle técnico de un reporte, en cualquier estado
+      tags:
+        - reportes
+      security: *a1
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: "Feature técnica (Cache-Control: private, no-store)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReporteFeature"
+        "401":
+          description: SIN_SESION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "403":
+          description: SIN_PERMISO
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "404":
+          description: No existe
           content:
             application/json:
               schema:
@@ -1711,8 +1928,7 @@ paths:
       summary: Cambiar estado (máquina de estados §7.3)
       tags:
         - reportes
-      security: &a1
-        - cookieSesion: []
+      security: *a1
       parameters:
         - name: id
           in: path
@@ -1793,10 +2009,12 @@ paths:
                 $ref: "#/components/schemas/ReporteTecnico"
   /api/v1/fotos:
     post:
-      summary: Subir una foto (multipart). Se reprocesa y se eliminan metadatos EXIF
-        antes de guardarla.
+      summary: Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte al
+        que va pegada. Se reprocesa y se eliminan metadatos EXIF antes de
+        guardarla.
       tags:
         - fotos
+      security: *a1
       requestBody:
         required: true
         content:
@@ -1814,6 +2032,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FotoSubida"
+        "401":
+          description: SIN_SESION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
         "413":
           description: Archivo demasiado grande
           content:
@@ -1968,9 +2192,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Indicadores"
+  /api/v1/auth/registro:
+    post:
+      summary: "Crear una cuenta ciudadana. La respuesta es la MISMA exista o no ese
+        correo: no revela quién tiene cuenta. No inicia sesión (devolver cookie
+        solo en el caso nuevo delataría lo anterior). El rol siempre es
+        «ciudadano» y no se puede pedir otro."
+      tags:
+        - auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Registro"
+      responses:
+        "201":
+          description: CUENTA_LISTA. Respuesta idéntica para correo nuevo y correo ya
+            existente.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "400":
+          description: Payload inválido
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "429":
+          description: "DEMASIADAS_CUENTAS: demasiadas altas desde la misma IP"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /api/v1/auth/login:
     post:
-      summary: Iniciar sesión (técnico/admin)
+      summary: Iniciar sesión (ciudadano, técnico o admin)
       tags:
         - auth
       requestBody:
@@ -2003,17 +2261,19 @@ paths:
           description: Sesión cerrada
   /api/v1/auth/yo:
     get:
-      summary: Usuario de la sesión
+      summary: "Usuario de la sesión, más `puede_reportar_desde` (ISO 8601 o null):
+        cuándo vuelve a tener turno de reporte esta cuenta. Es información para
+        la interfaz; la cuota la aplica el servidor al crear."
       tags:
         - auth
       security: *a1
       responses:
         "200":
-          description: Usuario
+          description: Usuario y estado de su cuota
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Usuario"
+                $ref: "#/components/schemas/SesionActual"
         "401":
           description: Sin sesión
           content:

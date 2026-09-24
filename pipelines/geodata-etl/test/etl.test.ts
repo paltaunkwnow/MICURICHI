@@ -4,8 +4,13 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type Config, ConfigSchema, type VersionConfig } from '../src/config.js';
 import { geojsonAShapefile } from '../src/mapshaper.js';
-import { detectarHuecos, detectarSolapes, validarGeometrias } from '../src/pasos/calidad.js';
-import { autodetectarCampo, snakeCase } from '../src/pasos/normalizar.js';
+import {
+  asignarPadre,
+  detectarHuecos,
+  detectarSolapes,
+  validarGeometrias,
+} from '../src/pasos/calidad.js';
+import { autodetectarCampo, snakeCase, soloCamposDeRender } from '../src/pasos/normalizar.js';
 import { ErrorEtl, inspeccionar, procesarVersion, resolverCapas } from '../src/pipeline.js';
 import { detectarCapa, leerCrs, listarShapefiles } from '../src/shapefile.js';
 
@@ -195,6 +200,107 @@ describe('calidad', () => {
     };
     const h = validarGeometrias(fc);
     expect(h.map((x) => x.tipo)).toEqual(['invalida', 'duplicada']);
+  });
+  it('cuando el padre declarado no existe en su capa, usa la contención espacial', () => {
+    // Caso real de la entrega del municipio: 879 manzanas declaran una UV que no está en UV.shp.
+    // Guardar esa referencia deja una clave foránea que no resuelve; el polígono que sí contiene
+    // al hijo está verificado y es mejor dato.
+    const padres = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 'unidad_vecinal:10',
+          properties: { id: 'unidad_vecinal:10', tipo: 'unidad_vecinal' },
+          geometry: poly(0, 0, 0.002, 0.002),
+        },
+      ],
+    };
+    const hijos = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 'manzana:1',
+          properties: { UV: '999' },
+          geometry: poly(0.0005, 0.0005, 0.001, 0.001),
+        },
+      ],
+    };
+    const r = asignarPadre(hijos, padres, 'UV');
+    expect(r.asignacion.get(0)).toBe('unidad_vecinal:10');
+    expect(r.inferidos.has(0)).toBe(true);
+    expect(r.hallazgos.map((h) => h.tipo)).toEqual(['padre_inexistente']);
+  });
+  it('respeta el padre declarado cuando sí existe, aunque no lo contenga', () => {
+    const padres = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 'unidad_vecinal:10',
+          properties: { id: 'unidad_vecinal:10', tipo: 'unidad_vecinal' },
+          geometry: poly(0, 0, 0.002, 0.002),
+        },
+        {
+          type: 'Feature' as const,
+          id: 'unidad_vecinal:11',
+          properties: { id: 'unidad_vecinal:11', tipo: 'unidad_vecinal' },
+          geometry: poly(0.01, 0.01, 0.012, 0.012),
+        },
+      ],
+    };
+    const hijos = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 'manzana:1',
+          properties: { UV: '11' },
+          geometry: poly(0.0005, 0.0005, 0.001, 0.001),
+        },
+      ],
+    };
+    const r = asignarPadre(hijos, padres, 'UV');
+    expect(r.asignacion.get(0)).toBe('unidad_vecinal:11');
+    expect(r.inferidos.has(0)).toBe(false);
+    expect(r.hallazgos.map((h) => h.tipo)).toEqual(['fuera_de_padre']);
+  });
+  it('el geojson de render se queda solo con los campos que dibuja el mapa', () => {
+    const fc = {
+      type: 'FeatureCollection' as const,
+      features: [
+        {
+          type: 'Feature' as const,
+          id: 'manzana:1',
+          properties: {
+            id: 'manzana:1',
+            codigo: '1',
+            nombre: 'Manzana 1',
+            tipo: 'manzana',
+            version_capa: 'V',
+            distrito_id: 'distrito_municipal:7',
+            unidad_vecinal_id: 'unidad_vecinal:10',
+            fuente: 'Gobierno Autónomo Municipal',
+            fecha_vigencia: null,
+            orig_shape_star: 10513.03,
+            orig_created_da: '2021-10-08T00:00:00.000Z',
+          },
+          geometry: poly(0, 0, 0.001, 0.001),
+        },
+      ],
+    };
+    const web = soloCamposDeRender(fc);
+    expect(Object.keys(web.features[0]!.properties!).sort()).toEqual([
+      'codigo',
+      'distrito_id',
+      'id',
+      'nombre',
+      'tipo',
+      'unidad_vecinal_id',
+      'version_capa',
+    ]);
+    expect(web.features[0]!.geometry).toEqual(fc.features[0]!.geometry);
   });
   it('normaliza nombres de campo y autodetecta roles', () => {
     expect(snakeCase('Nombre UV Ñandú')).toBe('nombre_uv_nandu');

@@ -137,6 +137,8 @@ export const usuario = pgTable('usuario', {
   passwordHash: text('password_hash').notNull(),
   activo: boolean('activo').notNull().default(true),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  /** Último reporte aceptado: estado de la cuota de 1 por hora y por cuenta (migración 0009). */
+  ultimoReporteEn: timestamp('ultimo_reporte_en', { withTimezone: true }),
 });
 
 export const sesion = pgTable('sesion', {

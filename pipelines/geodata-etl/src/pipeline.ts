@@ -22,7 +22,12 @@ import {
   resumir,
   validarGeometrias,
 } from './pasos/calidad.js';
-import { autodetectarCampo, normalizar, redondearCoordenadas } from './pasos/normalizar.js';
+import {
+  autodetectarCampo,
+  normalizar,
+  redondearCoordenadas,
+  soloCamposDeRender,
+} from './pasos/normalizar.js';
 import {
   type ConjuntoShapefile,
   detectarCapa,
@@ -325,7 +330,7 @@ export async function procesarVersion(
           if (a0 === undefined) return; // feature nueva o sin par: se refleja en el área total
           const a1 = f.geometry ? turf.area(f) : 0;
           const cambio = a0 ? Math.abs(a1 - a0) / a0 : 0;
-          if (cambio > cfg.tolerancia_cambio_area) {
+          if (cambio > cfg.tolerancia_cambio_area_feature) {
             noSeguras++;
             hallazgos.push({
               tipo: 'reparacion_no_segura',
@@ -356,13 +361,14 @@ export async function procesarVersion(
         no_seguras: clavesUnicas ? noSeguras : 'no evaluable por feature (claves no únicas)',
       };
       const limite = cfg.tolerancia_cambio_area;
+      const limiteFeature = cfg.tolerancia_cambio_area_feature;
       if (cambioTotal > limite && !o.forzar)
         throw new ErrorEtl(
           `${cr.capa}: la reparación cambia el área total de la capa un ${(cambioTotal * 100).toFixed(3)} % (límite ${limite * 100} %). Revisá ${join(salidaDir, cr.capa, 'reporte_calidad.md')} y reejecutá con --forzar si es aceptable.`,
         );
       if (noSeguras && !o.forzar)
         throw new ErrorEtl(
-          `${cr.capa}: ${noSeguras} features cambian de área más de ${limite * 100} %. Revisá el reporte y reejecutá con --forzar si es aceptable.`,
+          `${cr.capa}: ${noSeguras} features cambian de área más de ${limiteFeature * 100} %. Revisá el reporte y reejecutá con --forzar si es aceptable.`,
         );
       // `-clean` puede dejar polígonos con anillos vacíos: se descartan para que turf no falle después
       const sanas = limpio.features.filter((f) => !geometriaVacia(f));
@@ -381,15 +387,18 @@ export async function procesarVersion(
     }
 
     // 6) jerarquía y normalización
-    let distritoInferido: Map<number, string> | undefined;
-    let uvInferida: Map<number, string> | undefined;
+    let padreResuelto: Map<number, string> | undefined;
+    let distritoInferido: Set<number> | undefined;
+    let uvResuelta: Map<number, string> | undefined;
     if (cr.capa !== 'distrito_municipal') {
       const padres = procesadas.get('distrito_municipal');
       if (padres) {
         const campoDistrito = cr.campos.distrito ?? autodetectarCampo(campos, 'distrito', cr.capa);
         const r = asignarPadre(fc, padres, campoDistrito);
-        // asignarPadre devuelve ids normalizados del padre (distrito_municipal:XX); se pasan tal cual
-        distritoInferido = new Map([...r.asignacion.entries()].filter(([i]) => r.inferidos.has(i)));
+        // asignarPadre devuelve ids ya normalizados del padre (distrito_municipal:XX) y resuelve
+        // por su cuenta declarado vs. contención, así que su resultado es el que manda.
+        padreResuelto = r.asignacion;
+        distritoInferido = r.inferidos;
         hallazgos.push(...r.hallazgos);
         proceso.distrito = {
           campo: campoDistrito ?? 'inferido espacialmente',
@@ -403,7 +412,7 @@ export async function procesarVersion(
         const campoUv =
           cr.campos.unidad_vecinal ?? autodetectarCampo(campos, 'unidad_vecinal', cr.capa);
         const r = asignarPadre(fc, uvs, campoUv);
-        uvInferida = new Map([...r.asignacion.entries()].filter(([i]) => r.inferidos.has(i)));
+        uvResuelta = r.asignacion;
         hallazgos.push(...r.hallazgos);
         proceso.unidad_vecinal = {
           campo: campoUv ?? 'inferida espacialmente',
@@ -421,8 +430,9 @@ export async function procesarVersion(
         campoNombre,
         campoDistrito: cr.campos.distrito ?? autodetectarCampo(campos, 'distrito', cr.capa),
         campoUv: cr.campos.unidad_vecinal ?? autodetectarCampo(campos, 'unidad_vecinal', cr.capa),
+        padreResuelto,
+        uvResuelta,
         distritoInferido,
-        uvInferida,
         campoRespaldo: cr.campos.respaldo,
         plantillaNombre: cr.campos.plantilla_nombre,
         alResolverId: (aviso) =>
@@ -446,7 +456,9 @@ export async function procesarVersion(
     mkdirSync(dirCapa, { recursive: true });
     const bytesFull = escribirJson(join(dirCapa, `${cr.capa}.full.geojson`), normalizado);
     const intervalo = cfg.simplificacion[cr.capa];
-    const web = redondearCoordenadas(await simplificar(normalizado, intervalo), 6);
+    const web = soloCamposDeRender(
+      redondearCoordenadas(await simplificar(normalizado, intervalo), 6),
+    );
     const bytesWeb = escribirJson(join(dirCapa, `${cr.capa}.web.geojson`), web);
     proceso.simplificacion = {
       herramienta: 'mapshaper visvalingam keep-shapes',

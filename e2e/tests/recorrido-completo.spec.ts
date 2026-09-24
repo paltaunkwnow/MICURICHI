@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   API,
   CREDENCIALES_TECNICO,
+  crearCuentaYEntrarPorUi,
   esperarPila,
   loginTecnico,
   PANEL,
@@ -20,11 +21,20 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await esperarPila(request);
   });
 
-  test('un vecino crea un reporte desde la app pública', async ({ page }) => {
+  test('un vecino crea una cuenta, entra y reporta desde la app pública', async ({ page }) => {
+    // El mapa se ve sin cuenta; enviar un reporte no. Al entrar a reportar sin sesión, la app
+    // no da un 401 pelado: explica qué hace falta y ofrece las dos puertas.
     await page.goto('/reportar');
+    const panel = page.locator('#contenido');
+    await expect(panel.getByRole('heading', { name: 'Necesitás una cuenta' })).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'Iniciar sesión' })).toBeVisible();
+    await expect(panel.getByRole('link', { name: 'Crear cuenta' })).toBeVisible();
+
+    await crearCuentaYEntrarPorUi(page, '/reportar');
+    await page.waitForURL('**/reportar');
     await expect(page.getByRole('heading', { name: 'Reportar un punto' })).toBeVisible();
 
-    // Alternativa accesible al mapa: escribir las coordenadas
+    // Paso 1 · dónde. Alternativa accesible al mapa: escribir las coordenadas.
     await page.getByTestId('opcion-coordenadas').click();
     await page.locator('#lat').fill(String(PUNTO_CENTRO.lat));
     await page.locator('#lon').fill(String(PUNTO_CENTRO.lon));
@@ -34,18 +44,29 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await expect(resuelta).toBeVisible();
     await expect(resuelta).toContainText('UV');
     await expect(resuelta).toContainText('Distrito');
-
-    await page.locator('input[name="ubicacion_tipo"][value="via_publica"]').check();
     await page.getByTestId('boton-siguiente').click();
 
+    // Paso 2 · hasta dónde llegó el agua y cuánto tardó en irse.
     await page.locator('input[name="tirante_estimado"][value="rodilla"]').check();
     await page.locator('input[name="duracion_estimada"][value="2h_12h"]').check();
+    await page.getByTestId('boton-siguiente').click();
+
+    // Paso 3 · cada cuánto pasa y a quién afecta. Acá queda determinada la severidad.
     await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
     await page.locator('input[name="afectacion"][value="vehicular"]').check();
+    // 2×2 (rodilla) + 3 (2 a 12 h) + 3 (cada lluvia fuerte) + 2 (vehicular) = 12 → media.
+    await expect(page.getByText('Severidad media')).toBeVisible();
+    await expect(page.getByText('12/20')).toBeVisible();
+    await page.getByTestId('boton-siguiente').click();
+
+    // Paso 4 · fotos y descripción.
     await page
       .locator('textarea[name="descripcion"]')
       .fill(`Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`);
+    await page.getByTestId('boton-siguiente').click();
 
+    // Paso 5 · revisión y envío.
+    await page.locator('input[name="ubicacion_tipo"][value="via_publica"]').check();
     await page.getByTestId('boton-enviar').click();
 
     const exito = page.getByTestId('reporte-creado');
@@ -89,9 +110,12 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     expect(f.properties.severidad).toBeTruthy();
 
     await page.goto(`/reporte/${idReporte}`);
-    await expect(page.getByTestId('hoja-detalle')).toBeVisible();
-    await expect(page.getByTestId('detalle-uv')).toContainText('UV');
-    await expect(page.getByTestId('detalle-distrito')).toContainText('Distrito');
+    // El detalle se coloca dos veces (columna de escritorio y hoja de móvil) y solo una se ve en
+    // cada tamaño; se consulta dentro de la que corresponde a este proyecto de Playwright.
+    const hoja = page.getByTestId('hoja-detalle');
+    await expect(hoja).toBeVisible();
+    await expect(hoja.getByTestId('detalle-uv')).toContainText('UV');
+    await expect(hoja.getByTestId('detalle-distrito')).toContainText('Distrito');
   });
 
   test('sale en la exportación del técnico, con nota metodológica', async ({ request }) => {

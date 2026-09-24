@@ -1,67 +1,99 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Cabecera } from '@/componentes/Cabecera';
 import { HojaDetalle } from '@/componentes/HojaDetalle';
 import { MapaDiferido } from '@/componentes/MapaDiferido';
 import { ErrorApi, obtenerReporte } from '@/lib/api';
 import { mensajeDeError } from '@/lib/errores';
+import { tituloReporte } from '@/lib/formato';
 
+/**
+ * Detalle de un punto con enlace propio (C-02 en móvil, W-02 en escritorio): el mapa nunca queda
+ * tapado —en escritorio el detalle ocupa la columna izquierda y en móvil sube como hoja—, que es
+ * lo que el prototipo resuelve con `eSplit(detalle)`.
+ */
 export default function DetalleReporte() {
   const params = useParams<{ id: string }>();
   const id = params?.id ?? '';
   const consulta = useQuery({
     queryKey: ['reporte', id],
-    queryFn: () => obtenerReporte(id),
+    queryFn: ({ signal }) => obtenerReporte(id, signal),
     enabled: !!id,
     retry: false,
   });
 
+  if (consulta.isPending) {
+    return (
+      <div className="mx-auto w-full max-w-2xl p-6">
+        <h1 className="titular text-2xl">Cargando el reporte…</h1>
+        <p aria-live="polite" className="ayuda mt-2">
+          Un momento.
+        </p>
+      </div>
+    );
+  }
+
+  if (consulta.isError) {
+    const esFaltante = consulta.error instanceof ErrorApi && consulta.error.estado === 404;
+    return (
+      <div className="mx-auto w-full max-w-2xl p-6">
+        <div className="tarjeta space-y-3 p-6" aria-live="polite">
+          <h1 className="titular text-3xl">
+            {esFaltante
+              ? 'Este reporte no existe o todavía está en revisión'
+              : 'No pudimos mostrar el reporte'}
+          </h1>
+          <p className="text-tinta-600">
+            {esFaltante
+              ? 'Los reportes nuevos se publican recién cuando un técnico municipal los valida.'
+              : mensajeDeError(consulta.error)}
+          </p>
+          <Link href="/" className="btn no-underline">
+            Volver al mapa
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const reporte = consulta.data;
+  const detalle = (testId: string) => (
+    <HojaDetalle reporte={reporte} conEnlace={false} testId={testId} />
+  );
+
   return (
-    <>
-      <Cabecera />
-      <main id="contenido" className="mx-auto max-w-3xl space-y-4 p-4 md:p-6">
-        {consulta.isPending ? (
-          <p aria-live="polite">Cargando el reporte…</p>
-        ) : consulta.isError ? (
-          <div className="tarjeta space-y-3 p-6" aria-live="polite">
-            <h1 className="titular text-3xl">
-              {consulta.error instanceof ErrorApi && consulta.error.estado === 404
-                ? 'Este reporte no existe o todavía está en revisión'
-                : 'No pudimos mostrar el reporte'}
-            </h1>
-            <p className="text-tinta-600">
-              {consulta.error instanceof ErrorApi && consulta.error.estado === 404
-                ? 'Los reportes nuevos se publican recién cuando un técnico municipal los valida.'
-                : mensajeDeError(consulta.error)}
-            </p>
-            <Link href="/" className="btn-primario btn no-underline">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <h1 className="sr-only">Punto de inundación en {tituloReporte(reporte.properties)}</h1>
+      <div className="split min-h-0 flex-1 md:grid-cols-[400px_minmax(0,1fr)]">
+        <div className="lado">
+          <div className="lista pt-[18px]">
+            <Link href="/" className="btn btn-fantasma btn-sm mb-4 no-underline">
+              <ChevronLeft size={16} aria-hidden="true" />
               Volver al mapa
+            </Link>
+            {detalle('hoja-detalle')}
+          </div>
+        </div>
+        <div className="mapcol">
+          <MapaDiferido
+            className="map"
+            ariaLabel="Ubicación del reporte en el mapa"
+            reportes={[reporte]}
+            seleccionado={reporte.properties.id}
+            centro={reporte.geometry.coordinates as [number, number]}
+            zoom={16}
+          />
+          <div className="flot top-3 left-3 md:hidden">
+            <Link href="/" className="atras no-underline" aria-label="Volver al mapa">
+              <ChevronLeft size={19} aria-hidden="true" />
             </Link>
           </div>
-        ) : (
-          <>
-            <div className="relative h-64 overflow-hidden rounded-3xl">
-              <MapaDiferido
-                className="h-full w-full"
-                ariaLabel="Ubicación del reporte en el mapa"
-                reportes={[consulta.data]}
-                seleccionado={consulta.data.properties.id}
-                centro={consulta.data.geometry.coordinates as [number, number]}
-                zoom={16}
-              />
-            </div>
-            <div className="tarjeta">
-              <HojaDetalle reporte={consulta.data} conEnlace={false} />
-            </div>
-            <Link href="/" className="btn-secundario btn no-underline">
-              Volver al mapa
-            </Link>
-          </>
-        )}
-      </main>
-    </>
+        </div>
+      </div>
+      <div className="hoja md:hidden">{detalle('hoja-detalle-movil')}</div>
+    </div>
   );
 }

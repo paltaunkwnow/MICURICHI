@@ -3,11 +3,13 @@ import {
   avisosResolucion,
   coordenadas,
   etiquetaCapa,
+  etiquetaDistrito,
   etiquetaEstado,
   etiquetaMetodo,
   etiquetaSeveridad,
   etiquetaSiNo,
   etiquetaTirante,
+  etiquetaUnidadVecinal,
   fechaCorta,
   fechaHora,
   idCorto,
@@ -98,5 +100,22 @@ describe('avisosResolucion', () => {
     expect(avisosResolucion({ asignado_por_proximidad: true })).toEqual([
       'Asignado por proximidad',
     ]);
+  });
+});
+
+describe('etiquetas de unidad administrativa', () => {
+  it('no repite el prefijo cuando el código ya lo trae', () => {
+    // Los códigos que entrega el municipio pueden venir con prefijo o sin él: con la capa
+    // sintética son «UV-106» y con otra podrían ser «106».
+    expect(etiquetaUnidadVecinal('UV-106')).toBe('UV-106');
+    expect(etiquetaUnidadVecinal('106')).toBe('UV 106');
+    expect(etiquetaUnidadVecinal(null)).toBe('—');
+  });
+
+  it('normaliza el código de distrito', () => {
+    expect(etiquetaDistrito('D02')).toBe('Distrito 02');
+    expect(etiquetaDistrito('DM-11')).toBe('Distrito 11');
+    expect(etiquetaDistrito('7')).toBe('Distrito 7');
+    expect(etiquetaDistrito(undefined)).toBe('—');
   });
 });

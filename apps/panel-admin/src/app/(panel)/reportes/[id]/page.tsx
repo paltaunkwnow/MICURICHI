@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
+import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
 import { ErrorApi, obtenerCapasMapa, obtenerReporte } from '@/lib/api';
@@ -52,10 +53,13 @@ function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
 export default function PaginaDetalleReporte() {
   const { id } = useParams<{ id: string }>();
   const usuario = useUsuarioActual();
-  const reporte = useQuery({ queryKey: ['reporte', id], queryFn: () => obtenerReporte(id) });
+  const reporte = useQuery({
+    queryKey: ['reporte', id],
+    queryFn: ({ signal }) => obtenerReporte(id, signal),
+  });
   const capas = useQuery({
     queryKey: ['geo', 'capas'],
-    queryFn: obtenerCapasMapa,
+    queryFn: ({ signal }) => obtenerCapasMapa(signal),
     staleTime: Number.POSITIVE_INFINITY,
   });
 
@@ -141,8 +145,16 @@ export default function PaginaDetalleReporte() {
               <Dato etiqueta="Tipo de lugar">{etiquetaUbicacionTipo(p.ubicacion_tipo)}</Dato>
               <Dato etiqueta="Dirección aproximada">{p.direccion_aprox}</Dato>
               <Dato etiqueta="Versión de capa">{p.version_capa}</Dato>
-              <Dato etiqueta="Precisión pública degradada">
-                {etiquetaSiNo(p.precision_degradada)}
+              {/*
+                No se usa `precision_degradada`: ese campo describe la coordenada de ESTA
+                respuesta, y la del técnico es siempre la exacta, así que acá valía "No" incluso
+                para una vivienda cuyo punto público sí sale desplazado. Lo que el técnico
+                necesita saber es qué ve el vecino, y eso lo decide `ubicacion_tipo` (§13).
+              */}
+              <Dato etiqueta="En el mapa público se ve">
+                {p.ubicacion_tipo === 'vivienda_o_predio'
+                  ? 'Desplazado hasta 30 m para no señalar la vivienda'
+                  : 'En su sitio, redondeado a 5 decimales'}
               </Dato>
             </dl>
           </Bloque>
@@ -222,6 +234,7 @@ export default function PaginaDetalleReporte() {
                 <span className="font-mono">{p.id}</span>
               </Dato>
             </dl>
+            <FactoresSeveridad reporte={p} />
           </Bloque>
         </div>
 

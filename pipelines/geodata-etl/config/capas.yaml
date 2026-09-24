@@ -3,10 +3,10 @@
 # Para ver archivos, CRS, campos y nulos antes de fijar esto: pnpm etl:inspect -- --version <v>
 versiones:
   # Entrega oficial del municipio (2025-03-05), CRS EPSG:32720 declarado en los .prj, encoding UTF-8.
-  # Campos verificados con etl:inspect el 2026-09-13:
-  #   DM.shp  16 features    · FID_, DIS
+  # Campos verificados con etl:inspect sobre la entrega real (2026-09-17):
+  #   DM.shp  16 features    · FID_, DIS (sin nulos)
   #   UV.shp  582 features   · OBJECTID, DM, UV, Area_m2  (5 y 7 nulos en DM/UV; 3 geometrías nulas)
-  #   MZ.shp  27 817 features· OBJECTID, DM, UV, Mz, CodigoManz (23 508 nulos), CodigoOrig (58 geometrías nulas)
+  #   MZ.shp  27 817 features· OBJECTID, DM, UV, Mz, CodigoManz, CodigoOrig (58 geometrías nulas)
   - version: DM_UV_MZ_2025
     carpeta: data/raw/DM_UV_MZ_2025
     fuente: "Gobierno Autónomo Municipal de Santa Cruz de la Sierra <a confirmar>"
@@ -32,9 +32,18 @@ versiones:
       manzana:
         archivo: MZ.shp
         campos:
-          # CodigoManz está vacío en 23 508 de 27 817 filas: se usa OBJECTID, que es único y sin nulos
+          # La capa de manzanas NO trae un identificador único. Medido sobre la entrega real:
+          #   CodigoManz  4 300 de 27 817 filas con valor (4 146 distintos)
+          #   Mz          19 012 con valor, 1 001 distintos: es el número dentro de la UV
+          #   DM+UV+Mz    17 420 combinaciones distintas
+          #   OBJECTID    20 001 distintos; vale 0 en 6 596 filas
+          # Se usa OBJECTID por ser el que deja menos códigos sintéticos, y el ETL desambigua los
+          # repetidos con un sufijo -2, -3… estable por orden de archivo. Quedan contados en
+          # reporte_calidad.md como "codigo_repetido". La solución de fondo es que el municipio
+          # entregue un código de manzana único; hasta entonces el id es un subrogado del ETL.
           codigo: OBJECTID
           nombre: null
+          plantilla_nombre: "Manzana {codigo}"
           unidad_vecinal: UV
           distrito: DM
           respaldo: OBJECTID
@@ -63,4 +72,15 @@ simplificacion:
   unidad_vecinal: 4
   manzana: 2
 umbral_teselas_bytes: 5242880
+
+# Verificación de la reparación topológica (§6.4). Son DOS umbrales distintos a propósito:
+#  - tolerancia_cambio_area: cambio del área TOTAL de la capa. Es el control duro; si se mueve,
+#    la reparación creó o destruyó superficie y hay que mirarla.
+#  - tolerancia_cambio_area_feature: cambio del área de UNA feature. Al resolver un solape el
+#    área pasa de un polígono a su vecino: el total casi no varía y los dos implicados sí.
+#    Con un único número, cualquier solape legítimo abortaba el ETL y obligaba a --forzar.
+# El 1 % por feature busca detectar una geometría destrozada por `-clean`, no la redistribución
+# normal. Todo cambio, pase o no el umbral, queda listado en reporte_calidad.md.
+# <valor a confirmar con la primera corrida sobre los datos reales>
 tolerancia_cambio_area: 0.001
+tolerancia_cambio_area_feature: 0.01

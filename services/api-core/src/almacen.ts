@@ -5,6 +5,13 @@ import { join } from 'node:path';
 export interface Almacen {
   guardar(key: string, datos: Buffer, mime: string): Promise<void>;
   leer(key: string): Promise<{ datos: Buffer; mime: string } | null>;
+  /** Borra el objeto si existe. No falla si ya no está (mantenimiento, §13). */
+  borrar(key: string): Promise<void>;
+  /**
+   * Sonda barata para la readiness. Lanza si el almacén no responde. Opcional: el disco y la
+   * memoria están donde está el proceso, así que para ellos no hay nada que comprobar.
+   */
+  comprobar?(): Promise<void>;
 }
 
 const MIME_POR_EXT: Record<string, string> = {
@@ -36,6 +43,9 @@ export class AlmacenDisco implements Almacen {
       return null;
     }
   }
+  async borrar(key: string) {
+    await fs.rm(this.ruta(key), { force: true });
+  }
 }
 
 export class AlmacenMemoria implements Almacen {
@@ -45,5 +55,8 @@ export class AlmacenMemoria implements Almacen {
   }
   async leer(key: string) {
     return this.mapa.get(key) ?? null;
+  }
+  async borrar(key: string) {
+    this.mapa.delete(key);
   }
 }

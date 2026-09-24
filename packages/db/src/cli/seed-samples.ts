@@ -8,7 +8,7 @@ try {
   const r = await sembrarSamples(ejecutorPg(pool));
   console.log('[db] seeds SINTÉTICOS cargados:', JSON.stringify(r));
   console.log(
-    '[db] usuarios locales: admin@curichi.local / tecnico@curichi.local (contraseñas: ver packages/db/README.md)',
+    '[db] usuarios locales: admin@curichi.local / tecnico@curichi.local / vecina@curichi.local (contraseñas: ver packages/db/README.md)',
   );
 } finally {
   await pool.end();

@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Usuario } from 'contracts';
 import { useRouter } from 'next/navigation';
 import { createContext, type ReactNode, useContext, useEffect } from 'react';
-import { ErrorApi, obtenerYo } from '@/lib/api';
+import { ErrorApi, EVENTO_SESION_CADUCADA, obtenerYo } from '@/lib/api';
 
 export const CLAVE_YO = ['yo'] as const;
 
@@ -33,6 +33,10 @@ export function Protegido({ children }: { children: ReactNode }) {
   const cliente = useQueryClient();
   const { data, error, isPending } = useUsuario();
   const sinSesion = error instanceof ErrorApi && error.estado === 401;
+  // El login de api-core acepta cualquier usuario activo, también uno con rol `ciudadano`.
+  // La API le devolvería 403 en cada acción, pero sin esto entraba igual al panel y solo veía
+  // errores. El permiso real lo sigue aplicando el servidor (`requerirRol`); esto es la puerta.
+  const sinPermiso = !!data && data.rol !== 'tecnico' && data.rol !== 'admin';
 
   useEffect(() => {
     if (sinSesion) {
@@ -40,6 +44,20 @@ export function Protegido({ children }: { children: ReactNode }) {
       router.replace('/login');
     }
   }, [sinSesion, router, cliente]);
+
+  /**
+   * Sesión caducada a mitad de trabajo. Cualquier llamada a api-core que reciba 401 lo anuncia
+   * (ver `EVENTO_SESION_CADUCADA`), y acá se resuelve una sola vez: se tira la caché —que puede
+   * tener reportes que este usuario ya no debería ver— y se manda al login diciendo por qué.
+   */
+  useEffect(() => {
+    const alCaducar = () => {
+      cliente.clear();
+      router.replace('/login?caducada=1');
+    };
+    window.addEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+    return () => window.removeEventListener(EVENTO_SESION_CADUCADA, alCaducar);
+  }, [router, cliente]);
 
   if (isPending) {
     return (
@@ -53,6 +71,14 @@ export function Protegido({ children }: { children: ReactNode }) {
       <p className="p-8 text-tinta-600" role="status">
         Redirigiendo al inicio de sesión…
       </p>
+    );
+  }
+  if (sinPermiso) {
+    return (
+      <div className="p-8" role="alert">
+        <p className="error">Tu cuenta no tiene acceso al panel técnico.</p>
+        <p className="ayuda">Pedí a un administrador que te asigne el rol de técnico.</p>
+      </div>
     );
   }
   if (error || !data) {

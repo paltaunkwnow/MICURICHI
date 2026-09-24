@@ -11,11 +11,10 @@ export function ChipSeveridad({
 }) {
   const c = colorSeveridad(severidad);
   const critica = severidad === 'critica';
+  const vacia = critica ? 'rgba(255,255,255,.25)' : '#d7dfda';
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full font-semibold ${
-        grande ? 'px-4 py-2 text-base' : 'px-3 py-1 text-sm'
-      }`}
+      className={`sev ${grande ? 'sev-grande' : ''}`}
       style={{
         background: critica ? '#0F2D43' : `var(--color-sev-${severidad}-fondo)`,
         color: critica ? '#fff' : c.texto,
@@ -27,15 +26,9 @@ export function ChipSeveridad({
           ? `Severidad ${etiquetaSeveridad(severidad).toLowerCase()}`
           : etiquetaSeveridad(severidad)}
       </span>
-      <span className="flex gap-0.5" aria-hidden="true">
+      <span className="barras" aria-hidden="true">
         {[1, 2, 3, 4].map((i) => (
-          <span
-            key={i}
-            className="inline-block h-3 w-1.5 rounded-sm"
-            style={{
-              background: i <= c.barras ? c.relleno : critica ? 'rgba(255,255,255,.25)' : '#d7dfda',
-            }}
-          />
+          <i key={i} style={{ background: i <= c.barras ? c.relleno : vacia }} />
         ))}
       </span>
     </span>
@@ -50,7 +43,10 @@ const ESTILOS_ESTADO: Record<EstadoReporte, { bg: string; fg: string }> = {
   rechazado: { bg: '#fbe1dc', fg: '#b3200a' },
 };
 
-/** Estado de moderación con el texto oficial de contracts ("Nuevo", "Validado", …). */
+/**
+ * Estado de moderación con el texto oficial de contracts («Nuevo», «Validado», …). El técnico
+ * trabaja con la máquina de estados, así que acá NO se traducen a las palabras del vecino.
+ */
 export function ChipEstado({
   estado,
   grande = false,
@@ -59,10 +55,8 @@ export function ChipEstado({
   const e = ESTILOS_ESTADO[estado];
   return (
     <span
-      className={`inline-flex items-center rounded-full font-semibold ${
-        grande ? 'px-4 py-2 text-base' : 'px-3 py-1 text-sm'
-      }`}
-      style={{ background: e.bg, color: e.fg }}
+      className={`mini ${grande ? 'px-4 py-2 text-base' : ''}`}
+      style={{ background: e.bg, color: e.fg, fontWeight: 700 }}
       {...resto}
     >
       {etiquetaEstado(estado)}

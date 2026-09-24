@@ -1,9 +1,30 @@
+'use client';
+
 import Link from 'next/link';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import type { ReporteTecnicoFeature } from '@/lib/api';
-import { etiquetaFrecuencia, etiquetaTirante, fechaCorta, numero } from '@/lib/formato';
+import {
+  etiquetaDistrito,
+  etiquetaFrecuencia,
+  etiquetaTirante,
+  etiquetaUnidadVecinal,
+  fechaCorta,
+  numero,
+} from '@/lib/formato';
 
-export function TablaReportes({ reportes }: { reportes: ReporteTecnicoFeature[] }) {
+interface Props {
+  reportes: ReporteTecnicoFeature[];
+  /** Fila resaltada; su pastilla en el mapa se pinta en tinta (M-02 del prototipo). */
+  seleccionado?: string | null;
+  onSeleccionar?: (id: string | null) => void;
+}
+
+/**
+ * Bandeja de triaje. La fila entera responde al puntero para sincronizarse con el mapa, pero el
+ * enlace de la fecha sigue siendo lo que abre el reporte: así el teclado y los lectores de
+ * pantalla tienen un control con nombre y destino, en vez de una fila «clicable» invisible.
+ */
+export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) {
   return (
     <div className="overflow-x-auto">
       <table className="tabla">
@@ -26,7 +47,15 @@ export function TablaReportes({ reportes }: { reportes: ReporteTecnicoFeature[] 
           {reportes.map((f) => {
             const p = f.properties;
             return (
-              <tr key={p.id} data-testid="fila-reporte" data-id={p.id}>
+              <tr
+                key={p.id}
+                data-testid="fila-reporte"
+                data-id={p.id}
+                className={seleccionado === p.id ? 'on' : ''}
+                onMouseEnter={() => onSeleccionar?.(p.id)}
+                onMouseLeave={() => onSeleccionar?.(null)}
+                onFocus={() => onSeleccionar?.(p.id)}
+              >
                 <td>
                   <Link
                     href={`/reportes/${p.id}`}
@@ -37,8 +66,8 @@ export function TablaReportes({ reportes }: { reportes: ReporteTecnicoFeature[] 
                     <span className="sr-only"> · abrir reporte</span>
                   </Link>
                 </td>
-                <td>{p.unidad_vecinal ? `UV ${p.unidad_vecinal.codigo}` : '—'}</td>
-                <td>{p.distrito ? `Distrito ${p.distrito.codigo}` : '—'}</td>
+                <td>{etiquetaUnidadVecinal(p.unidad_vecinal?.codigo)}</td>
+                <td>{etiquetaDistrito(p.distrito?.codigo)}</td>
                 <td>
                   <ChipSeveridad severidad={p.severidad} />
                 </td>

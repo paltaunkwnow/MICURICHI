@@ -79,9 +79,16 @@ export interface OpcionesNormalizacion {
   }) => void;
   campoDistrito?: string | null;
   campoUv?: string | null;
-  /** Padre inferido espacialmente cuando el campo no existe (índice → id del padre). */
-  distritoInferido?: Map<number, string>;
-  uvInferida?: Map<number, string>;
+  /**
+   * Padre ya resuelto por `asignarPadre` (índice → id del padre): el declarado si existe en la
+   * capa padre, y si no el que contiene al hijo. Cuando viene, manda sobre el campo declarado.
+   * Hace falta porque la entrega real trae hijos que declaran un padre que no está en su capa:
+   * copiarlo tal cual dejaría una clave foránea que no resuelve.
+   */
+  padreResuelto?: Map<number, string>;
+  uvResuelta?: Map<number, string>;
+  /** Índices cuyo padre se dedujo por contención, para marcar `distrito_inferido`. */
+  distritoInferido?: Set<number>;
 }
 
 export function idCapa(capa: TipoCapa, codigo: string): string {
@@ -128,32 +135,22 @@ export function normalizar(fc: FeatureCollection, o: OpcionesNormalizacion): Fea
       fuente: o.fuente,
       fecha_vigencia: o.fecha_vigencia,
     };
+    const idPadre = (tipo: TipoCapa, valor: string | null): string | null =>
+      valor ? (valor.startsWith(`${tipo}:`) ? valor : idCapa(tipo, valor)) : null;
+    const declaradoDe = (campo: string | null | undefined): string | null => {
+      const v = campo ? p[campo] : null;
+      return v !== null && v !== undefined && v !== '' ? String(v).trim() : null;
+    };
     if (o.capa !== 'distrito_municipal') {
-      const declarado = o.campoDistrito ? p[o.campoDistrito] : null;
-      const inferido = o.distritoInferido?.get(i);
-      const codigoDistrito =
-        declarado !== null && declarado !== undefined && declarado !== ''
-          ? String(declarado).trim()
-          : (inferido ?? null);
-      props.distrito_id = codigoDistrito
-        ? codigoDistrito.startsWith('distrito_municipal:')
-          ? codigoDistrito
-          : idCapa('distrito_municipal', codigoDistrito)
-        : null;
-      if (o.capa === 'unidad_vecinal') props.distrito_inferido = !!inferido && !declarado;
+      const codigoDistrito = o.padreResuelto
+        ? (o.padreResuelto.get(i) ?? null)
+        : declaradoDe(o.campoDistrito);
+      props.distrito_id = idPadre('distrito_municipal', codigoDistrito);
+      if (o.capa === 'unidad_vecinal') props.distrito_inferido = !!o.distritoInferido?.has(i);
     }
     if (o.capa === 'manzana') {
-      const declarada = o.campoUv ? p[o.campoUv] : null;
-      const inferida = o.uvInferida?.get(i);
-      const codigoUv =
-        declarada !== null && declarada !== undefined && declarada !== ''
-          ? String(declarada).trim()
-          : (inferida ?? null);
-      props.unidad_vecinal_id = codigoUv
-        ? codigoUv.startsWith('unidad_vecinal:')
-          ? codigoUv
-          : idCapa('unidad_vecinal', codigoUv)
-        : null;
+      const codigoUv = o.uvResuelta ? (o.uvResuelta.get(i) ?? null) : declaradoDe(o.campoUv);
+      props.unidad_vecinal_id = idPadre('unidad_vecinal', codigoUv);
     }
     // Atributos originales conservados en snake_case bajo `orig_` para trazabilidad (sin tildes)
     for (const [k, v] of Object.entries(p)) props[`orig_${snakeCase(k)}`] = v;
@@ -179,5 +176,43 @@ export function redondearCoordenadas(fc: FeatureCollection, decimales: number): 
           } as Feature['geometry'])
         : f.geometry,
     })),
+  };
+}
+
+/**
+ * Campos que necesita el render y nada más. `geo-service` construye exactamente estos mismos
+ * cuando tiene que leer la capa de PostGIS en vez del archivo, así que las dos rutas coinciden.
+ */
+const CAMPOS_WEB = [
+  'id',
+  'codigo',
+  'nombre',
+  'tipo',
+  'version_capa',
+  'distrito_id',
+  'unidad_vecinal_id',
+] as const;
+
+/**
+ * Deja en el GeoJSON de render solo los campos que el mapa usa.
+ *
+ * Medido sobre la entrega real: de los 25 MB del `web.geojson` de manzanas, 16 MB eran
+ * propiedades y solo 9 MB geometría. El grueso no lo usa nadie para dibujar —la cadena de
+ * `fuente` repetida 27 000 veces, las fechas de edición del origen, `SHAPE_STAr`…— pero sí lo
+ * paga el navegador: esas propiedades viajan dentro de cada feature de cada tesela MVT, y
+ * geo-service las mantiene en memoria junto con el índice de teselas.
+ *
+ * Los atributos originales no se pierden: siguen enteros en `<capa>.full.geojson`, que es lo que
+ * se carga a PostGIS, y de ahí salen las consultas y las exportaciones.
+ */
+export function soloCamposDeRender(fc: FeatureCollection): FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: fc.features.map((f) => {
+      const p = f.properties ?? {};
+      const props: Record<string, unknown> = {};
+      for (const k of CAMPOS_WEB) if (k in p) props[k] = p[k];
+      return { ...f, properties: props };
+    }),
   };
 }
