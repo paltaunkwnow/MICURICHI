@@ -168,11 +168,14 @@ jobs:
       - name: Migraciones desde cero
         run: pnpm db:migrate
 
+      # Se afirma lo positivo: la segunda pasada tiene que decir «ninguna». Antes se buscaba solo
+      # «migraciones aplicadas:», pero el mensaje de «ninguna (al día)» también lo contiene, así
+      # que el paso fallaba justo cuando las migraciones SÍ eran idempotentes (primer PR, 2026-09-24).
       - name: Migraciones idempotentes (segunda pasada no aplica nada)
         run: |
           salida=$(pnpm db:migrate 2>&1)
           echo "$salida"
-          if echo "$salida" | grep -q "migraciones aplicadas:"; then
+          if ! echo "$salida" | grep -q "migraciones aplicadas: ninguna"; then
             echo "::error::La segunda pasada aplicó migraciones: no son idempotentes."
             exit 1
           fi

@@ -1,0 +1,28 @@
+# Configuración de gitleaks para Mi Curichi (CI: trabajo «gitleaks (historial)»).
+#
+# Se usan TODAS las reglas por defecto de gitleaks. Lo único que se añade es una lista corta de
+# contraseñas FALSAS de las pruebas, escritas en el código a propósito:
+#
+#   contrasena-de-prueba-e2e     la usan los E2E para crear cuentas nuevas en cada caso
+#                                (e2e/tests/ayudas.ts, e2e/tests/cuenta-ciudadana.spec.ts)
+#   contrasena-incorrecta-123    contraseña equivocada a propósito en el banco de carga del
+#                                login: se mide el rechazo, no el acceso (scripts/banco-carga.mjs)
+#
+# Ninguna da acceso a nada: la primera solo existe en bases efímeras de prueba y la segunda no es
+# la contraseña de ninguna cuenta.
+#
+# Se permite la CADENA EXACTA, no una ruta ni un tipo de regla. Un secreto de verdad que alguien
+# pegue en esos mismos archivos sigue saltando. Si se añade otra contraseña de prueba, va aquí con
+# su motivo; no se amplía con comodines.
+title = "Mi Curichi"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Contraseñas falsas de las pruebas, escritas a propósito"
+regexTarget = "secret"
+regexes = [
+  '''^contrasena-de-prueba-e2e$''',
+  '''^contrasena-incorrecta-123$''',
+]
