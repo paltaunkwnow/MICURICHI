@@ -162,6 +162,12 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      # `db` importa `contracts` y los dos se consumen por su `dist/` (las réplicas concurrentes,
+      # los seeds y la prueba de la cuota). Sin construir `contracts` primero, `pnpm build` de
+      # `db` fallaba con «Cannot find module 'contracts'» (primer PR, 2026-09-24).
+      - name: Construir contracts y db
+        run: pnpm --filter contracts build && pnpm --filter db build
+
       - name: Extensiones de PostGIS
         run: psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
 
@@ -182,16 +188,17 @@ jobs:
 
       # Ocho procesos arrancando a la vez contra la MISMA base, como un despliegue con réplicas.
       # Ninguno puede fallar y las migraciones tienen que quedar registradas exactamente una vez.
+      # El script de réplica se escribe DENTRO de packages/db y no en /tmp: Node resuelve `pg`
+      # desde la carpeta del archivo, y en /tmp no hay node_modules (las ocho réplicas morían con
+      # ERR_MODULE_NOT_FOUND antes de tocar la base).
       - name: Arranque concurrente de réplicas
         run: |
-          psql "$DATABASE_URL" -c 'DROP DATABASE IF EXISTS carrera;' -d postgres || true
           psql "postgresql://curichi:curichi@127.0.0.1:5432/postgres" -c 'DROP DATABASE IF EXISTS carrera;'
           psql "postgresql://curichi:curichi@127.0.0.1:5432/postgres" -c 'CREATE DATABASE carrera;'
           psql "postgresql://curichi:curichi@127.0.0.1:5432/carrera" -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
-          cd packages/db && pnpm build && cd ../..
-          cat > /tmp/replica.mjs <<'FIN'
+          cat > packages/db/replica-ci.mjs <<'FIN'
           import pg from 'pg';
-          import { aplicarMigraciones, ejecutorPg } from './packages/db/dist/index.js';
+          import { aplicarMigraciones, ejecutorPg } from './dist/index.js';
           const pool = new pg.Pool({ connectionString: process.env.CARRERA_URL, max: 2 });
           try {
             const r = await aplicarMigraciones(ejecutorPg(pool));
@@ -202,7 +209,7 @@ jobs:
           } finally { await pool.end(); }
           FIN
           export CARRERA_URL=postgresql://curichi:curichi@127.0.0.1:5432/carrera
-          for i in 1 2 3 4 5 6 7 8; do node /tmp/replica.mjs "$i" & done
+          for i in 1 2 3 4 5 6 7 8; do node packages/db/replica-ci.mjs "$i" & done
           fallos=0
           for job in $(jobs -p); do wait "$job" || fallos=$((fallos+1)); done
           if [ "$fallos" -ne 0 ]; then
