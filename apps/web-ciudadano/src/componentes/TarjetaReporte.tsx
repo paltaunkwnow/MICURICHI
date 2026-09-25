@@ -14,8 +14,8 @@ interface Props {
 
 /**
  * Tarjeta de la lista lateral (`.res` del prototipo): miniatura a la izquierda, severidad,
- * calle, unidad vecinal y dos datos del agua. El vecino reconoce su calle antes que un punto,
- * así que la lista manda sobre el mapa en escritorio.
+ * unidad vecinal y dos datos del agua. El vecino reconoce su barrio antes que un punto, así que
+ * la lista manda sobre el mapa en escritorio.
  */
 export function TarjetaReporte({ reporte, distanciaM, seleccionado, onSeleccionar }: Props) {
   const p = reporte.properties;

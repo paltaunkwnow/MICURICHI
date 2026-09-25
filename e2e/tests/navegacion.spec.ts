@@ -39,7 +39,9 @@ test.describe('navegación de la app pública', () => {
     await expect(page).toHaveURL(/\/$/);
   });
 
-  test('«Cómo funciona» cambia de pestaña sin recargar', async ({ page }) => {
+  test('CA-X2: «Cómo funciona» cambia de pestaña sin recargar y muestra la fórmula v2', async ({
+    page,
+  }) => {
     await page.goto('/como-funciona');
     const pasos = page.getByRole('tab', { name: 'Los pasos' });
     await expect(pasos).toHaveAttribute('aria-selected', 'true');
@@ -50,8 +52,10 @@ test.describe('navegación de la app pública', () => {
       await colores.click();
       await expect(colores).toHaveAttribute('aria-selected', 'true');
     }).toPass({ timeout: 15_000 });
+    // Severidad v2 (spec 2026-09-25, D1 y CA-C6): solo tirante y frecuencia. Texto exacto: la
+    // fórmula v1 contiene más términos y no debe pasar por una coincidencia parcial.
     await expect(
-      page.getByText('puntaje = 2 × tirante + duración + frecuencia + afectación'),
+      page.getByText('puntaje = 2 × tirante + frecuencia', { exact: true }),
     ).toBeVisible();
 
     await page.getByRole('tab', { name: 'Qué no es' }).click();

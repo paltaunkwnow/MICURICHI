@@ -13,8 +13,8 @@ Aplicar a todo PR que toque `services/api-core`, manejo de fotos, autenticación
 - [ ] Nombres de objeto generados por el servidor, nunca el nombre original.
 
 ## Privacidad
-- [ ] La vista pública no expone identidad del reportante (ni `autor_id`, ni correo, ni nombre) ni
-      `direccion_aprox` cuando aplica jitter.
+- [ ] La vista pública no expone identidad del reportante (ni `autor_id`, ni correo, ni nombre)
+      (el reporte no guarda dirección ni manzana desde 2026-09-25).
 - [ ] Con sesión de ciudadano, el listado público devuelve exactamente lo mismo que sin ella.
 - [ ] Las coordenadas exactas solo llegan a técnico/admin.
 - [ ] `ip_hash` con sal y borrado programado; sin IP en claro en logs.

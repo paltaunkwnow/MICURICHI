@@ -110,6 +110,42 @@ describe('borrador del formulario de reporte', () => {
     expect(() => guardarBorrador(BASE)).not.toThrow();
   });
 
+  it('CA-W4: un borrador guardado antes del cambio se restaura sin duración ni afectación', () => {
+    const almacen = almacenFalso();
+    instalar(almacen);
+    // Así quedaba el borrador con el formulario anterior, que preguntaba las dos cosas.
+    almacen.setItem(
+      CLAVE,
+      JSON.stringify({
+        ...BASE,
+        paso: 3,
+        valores: {
+          descripcion: 'Se junta el agua en la esquina',
+          tirante_estimado: 'rodilla',
+          duracion_estimada: '2h_12h',
+          frecuencia: 'cada_lluvia_fuerte',
+          afectacion: 'vehicular',
+        },
+        guardado_en: Date.now(),
+      }),
+    );
+    let b: Borrador | null = null;
+    expect(() => {
+      b = leerBorrador();
+    }).not.toThrow();
+    const restaurado = b as Borrador | null;
+    expect(restaurado).not.toBeNull();
+    // El paso 3 del asistente viejo (tirante y duración) equivale al 2 del nuevo (tirante y
+    // frecuencia juntos): PASO_VIEJO_A_NUEVO[3] = 2.
+    expect(restaurado?.paso).toBe(2);
+    expect(Object.keys(restaurado?.valores ?? {})).not.toContain('duracion_estimada');
+    expect(Object.keys(restaurado?.valores ?? {})).not.toContain('afectacion');
+    // Lo que sigue existiendo se conserva: el vecino no pierde lo que ya contestó.
+    expect(restaurado?.valores.tirante_estimado).toBe('rodilla');
+    expect(restaurado?.valores.frecuencia).toBe('cada_lluvia_fuerte');
+    expect(restaurado?.valores.descripcion).toBe('Se junta el agua en la esquina');
+  });
+
   it('un borrador recién abierto no cuenta como algo que retomar', () => {
     const vacio: Borrador = {
       guardado_en: Date.now(),

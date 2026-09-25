@@ -93,7 +93,7 @@ test.describe('la interfaz no inventa cuando la API falla', () => {
 });
 
 test.describe('el formulario no pierde lo escrito', () => {
-  test('al recargar, retoma el borrador en el paso donde iba', async ({ page }) => {
+  test('CA-X1: al recargar, retoma el borrador en el paso donde iba', async ({ page }) => {
     // Reportar exige cuenta desde la Fase 5, así que el formulario ni se monta sin sesión. Una
     // cuenta nueva por caso: cada una solo puede enviar un reporte por hora y compartir la del
     // seed haría que el resultado dependiera del orden en que corrieron los tests.
@@ -104,21 +104,31 @@ test.describe('el formulario no pierde lo escrito', () => {
     await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('boton-siguiente').click();
 
-    // Paso 2: dos respuestas, suficientes para que haya algo que perder.
+    // Paso 2: el tirante (y la frecuencia, si P-4 las junta en el mismo paso), suficiente para
+    // que haya algo que perder. Duración y afectación ya no existen (severidad v2).
     await page.locator('input[name="tirante_estimado"][value="rodilla"]').check();
-    await page.locator('input[name="duracion_estimada"][value="2h_12h"]').check();
+    const frecuenciaEnPaso2 = (await page.locator('input[name="frecuencia"]').count()) > 0;
+    if (frecuenciaEnPaso2)
+      await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
 
     await page.reload();
 
     await expect(page.getByTestId('borrador-retomado')).toBeVisible();
-    // `.pno` es el rótulo del paso; hay otro igual solo para lectores de pantalla.
-    await expect(page.locator('p.pno')).toHaveText('Paso 2 de 5');
+    // `.pno` es el rótulo del paso; hay otro igual solo para lectores de pantalla. El total de
+    // pasos (4 o 5) lo fija P-4; lo que no puede cambiar es que sea el mismo en todo el recorrido.
+    const rotulo = page.locator('p.pno');
+    await expect(rotulo).toHaveText(/^Paso 2 de [45]$/);
+    const total = ((await rotulo.textContent()) ?? '').replace(/^Paso 2 de /, '');
     await expect(page.locator('input[name="tirante_estimado"][value="rodilla"]')).toBeChecked();
+    if (frecuenciaEnPaso2)
+      await expect(
+        page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]'),
+      ).toBeChecked();
 
     // Y se puede descartar a propósito, que es la otra mitad del trato.
     await page.getByRole('button', { name: 'Empezar de nuevo' }).click();
     await expect(page.getByTestId('borrador-retomado')).toHaveCount(0);
-    await expect(page.locator('p.pno')).toHaveText('Paso 1 de 5');
+    await expect(rotulo).toHaveText(`Paso 1 de ${total}`);
   });
 });
 

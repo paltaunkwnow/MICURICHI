@@ -236,9 +236,9 @@ describe('el autor lo decide el servidor: no hay forma de reportar en nombre de 
     );
     const f = rows[0]!;
     expect(f.estado).toBe('nuevo');
-    // La severidad la calcula el servidor con la tabla del contrato: rodilla + 2h_12h +
-    // cada_lluvia_fuerte + ingreso_viviendas = 13 puntos = alta.
-    expect(f.severidad_calculada).toBe('alta');
+    // La severidad la calcula el servidor con la tabla del contrato (v2, spec CA-A1):
+    // rodilla(2)·2 + cada_lluvia_fuerte(3) = 7 puntos = media, no la «baja» del cuerpo.
+    expect(f.severidad_calculada).toBe('media');
     expect(new Date(f.creado_en).getFullYear()).toBeGreaterThan(2020);
     expect(f.validado_por).toBeNull();
   });

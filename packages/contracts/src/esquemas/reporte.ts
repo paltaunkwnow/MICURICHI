@@ -1,9 +1,7 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import {
-  AFECTACIONES,
   CAUSAS_PRESUNTAS,
-  DURACIONES,
   ESTADOS_REPORTE,
   FRECUENCIAS,
   SEVERIDADES,
@@ -38,9 +36,7 @@ export const ReporteCrearSchema = z.object({
     )
     .max(CONFIG_DOMINIO.DESCRIPCION_MAX, `Máximo ${CONFIG_DOMINIO.DESCRIPCION_MAX} caracteres.`),
   tirante_estimado: z.enum(TIRANTES),
-  duracion_estimada: z.enum(DURACIONES),
   frecuencia: z.enum(FRECUENCIAS),
-  afectacion: z.enum(AFECTACIONES),
   causa_presunta: z.enum(CAUSAS_PRESUNTAS).default('desconocida'),
   sumidero_cercano: z.enum(SUMIDERO_CERCANO).nullable().optional(),
   sumidero_estado: z.enum(SUMIDERO_ESTADOS).nullable().optional(),
@@ -73,14 +69,10 @@ export const ReportePublicoSchema = z.object({
   evento_en: z.iso.datetime({ offset: true }).nullable(),
   distrito: UnidadAdministrativaSchema.nullable(),
   unidad_vecinal: UnidadAdministrativaSchema.nullable(),
-  manzana_id: z.string().nullable(),
-  direccion_aprox: z.string().nullable(),
   descripcion: z.string(),
   fotos: z.array(z.string()).meta({ description: 'URLs servidas por api-core, ya sin EXIF' }),
   tirante_estimado: z.enum(TIRANTES),
-  duracion_estimada: z.enum(DURACIONES),
   frecuencia: z.enum(FRECUENCIAS),
-  afectacion: z.enum(AFECTACIONES),
   causa_presunta: z.enum(CAUSAS_PRESUNTAS),
   severidad: z
     .enum(SEVERIDADES)

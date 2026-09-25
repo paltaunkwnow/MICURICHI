@@ -20,14 +20,8 @@ export function etiquetaTirante(t: ReporteFeature['properties']['tirante_estimad
   const e = ETIQUETAS.tirante[t];
   return `${e.corta} · ${e.rango}`;
 }
-export function etiquetaDuracion(d: ReporteFeature['properties']['duracion_estimada']) {
-  return ETIQUETAS.duracion[d];
-}
 export function etiquetaFrecuencia(f: ReporteFeature['properties']['frecuencia']) {
   return ETIQUETAS.frecuencia[f];
-}
-export function etiquetaAfectacion(a: ReporteFeature['properties']['afectacion']) {
-  return ETIQUETAS.afectacion[a];
 }
 export function etiquetaCausa(c: ReporteFeature['properties']['causa_presunta']) {
   return ETIQUETAS.causa_presunta[c];
@@ -52,10 +46,13 @@ export function etiquetaDistrito(codigo: string | null | undefined): string {
   return `Distrito ${limpio}`;
 }
 
+/**
+ * El título es el nombre de la UV. La dirección aproximada ya no existe en el reporte (corrida
+ * 2026-09-25-quitar-campos-del-reporte); una respuesta vieja en la caché de la PWA todavía puede
+ * traerla, y no se usa: el título tiene que ser el mismo venga de donde venga.
+ */
 export function tituloReporte(p: ReporteFeature['properties']) {
-  if (p.direccion_aprox) return p.direccion_aprox;
-  const uv = p.unidad_vecinal?.nombre ?? 'Unidad vecinal sin datos';
-  return uv;
+  return p.unidad_vecinal?.nombre ?? 'Unidad vecinal sin datos';
 }
 
 export function subtituloReporte(p: ReporteFeature['properties'], distanciaM?: number | null) {

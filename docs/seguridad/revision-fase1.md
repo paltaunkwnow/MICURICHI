@@ -31,7 +31,7 @@
 |---|---|---|
 | Sin identidad del reportante en público | ✅ | `ReportePublico` no incluye `autor_id`; solo `ReporteTecnico` lo expone. Test "degrada la precisión en público…". |
 | Jitter no reversible | ✅ | La semilla es `id + JITTER_SAL`; la sal no sale nunca al cliente. Antes la semilla era solo el `id`, que viaja en la respuesta: con el algoritmo del repositorio se podía deshacer el desplazamiento. Tests en `test/seguridad.test.ts`. |
-| `direccion_aprox` oculta cuando hay jitter | ✅ | `vistaPublica` la anula si `degradar`. |
+| `direccion_aprox` oculta cuando hay jitter | ✅ (histórico) | Campo eliminado del reporte el 2026-09-25; ya no se guarda ni se publica. |
 | Coordenada exacta solo para técnico/admin | ✅ | E2E "el reporte no se publica hasta que lo validan" + tests de vista pública/técnica. |
 | `ip_hash` con sal y borrado programado | ✅ | Sal por variable de entorno y rotación diaria en el hash. El borrado a los 30 días **ahora existe**: `ejecutarMantenimiento` en `packages/db`, programado cada 6 h desde `api-core/servidor.ts`. Test de retención en `packages/db/test/db.test.ts`. |
 | Sin IP en claro en logs | 🟡 | El único `req.log` con IP es el aviso de login fallido, y registra `req.ip`. Queda anotado como riesgo: en producción conviene registrar el hash, no la IP. |

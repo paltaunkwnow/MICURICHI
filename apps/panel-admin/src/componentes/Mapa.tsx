@@ -311,19 +311,19 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
   > = {
     distrito_municipal: { color: '#0A4A69', ancho: 2.5, minzoom: 9, opacidad: 0.85 },
     unidad_vecinal: { color: '#0D6189', ancho: 1.2, minzoom: 11, opacidad: 0.75 },
-    manzana: { color: '#3e5468', ancho: 0.6, minzoom: 14, opacidad: 0.6 },
   };
   const origen = typeof window !== 'undefined' ? window.location.origin : '';
   for (const c of capas) {
     const id = `capa-${c.capa}`;
     if (m.getSource(id)) continue;
-    const e = estilos[c.capa] ?? estilos.manzana;
+    // Solo se dibujan las capas con estilo. La de manzanas se sigue sirviendo y listando, pero
+    // el panel dejó de pintarla (corrida 2026-09-25-quitar-campos-del-reporte): no volver a
+    // darle un estilo por defecto, porque eso la haría pedir sus teselas otra vez.
+    const e = estilos[c.capa];
     if (!e) continue;
     if (c.modo === 'teselas') {
-      // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre puede pedir la tesela z0 de
-      // las manzanas, que son 27 434 polígonos metidos en un solo .mvt. Medido contra el
-      // servicio con los datos reales: 2,0 MB en z10 y 515 KB en z12, frente a 42 KB en z14,
-      // que es donde de verdad se dibujan. Una capa que no se pinta por debajo de cierto zoom
+      // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre puede pedir teselas de zooms
+      // en los que la capa no se pinta. Una capa que no se dibuja por debajo de cierto zoom
       // tampoco tiene nada que servir por debajo de ese zoom.
       m.addSource(id, {
         type: 'vector',
@@ -335,18 +335,6 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
       m.addSource(id, { type: 'geojson', data: `${origen}${c.url}` });
     }
     const base = c.modo === 'teselas' ? { source: id, 'source-layer': c.capa } : { source: id };
-    if (c.capa === 'manzana') {
-      m.addLayer(
-        {
-          id: `${id}-relleno`,
-          type: 'fill',
-          ...base,
-          minzoom: e.minzoom,
-          paint: { 'fill-color': '#C9D6CE', 'fill-opacity': 0.55 },
-        } as maplibregl.LayerSpecification,
-        'puntos-halo',
-      );
-    }
     m.addLayer(
       {
         id: `${id}-linea`,
@@ -357,27 +345,25 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
       } as maplibregl.LayerSpecification,
       'puntos-halo',
     );
-    if (c.capa !== 'manzana') {
-      m.addLayer(
-        {
-          id: `${id}-nombre`,
-          type: 'symbol',
-          ...base,
-          minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
-          layout: {
-            'text-field': ['get', 'nombre'],
-            'text-font': ['NotoSans-Bold'],
-            'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
-            'symbol-placement': 'point',
-          },
-          paint: {
-            'text-color': '#0F2D43',
-            'text-halo-color': 'rgba(255,255,255,.92)',
-            'text-halo-width': 2,
-          },
-        } as maplibregl.LayerSpecification,
-        'puntos-halo',
-      );
-    }
+    m.addLayer(
+      {
+        id: `${id}-nombre`,
+        type: 'symbol',
+        ...base,
+        minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
+        layout: {
+          'text-field': ['get', 'nombre'],
+          'text-font': ['NotoSans-Bold'],
+          'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
+          'symbol-placement': 'point',
+        },
+        paint: {
+          'text-color': '#0F2D43',
+          'text-halo-color': 'rgba(255,255,255,.92)',
+          'text-halo-width': 2,
+        },
+      } as maplibregl.LayerSpecification,
+      'puntos-halo',
+    );
   }
 }

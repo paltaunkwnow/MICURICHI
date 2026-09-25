@@ -18,7 +18,7 @@ vivienda.
 
 **Lo que este sistema NO es**: ni un modelo hidráulico, ni un estudio de drenaje, ni un
 diagnóstico de pavimento. Los datos son de **percepción**, no medidos: el tirante se estima por
-referencia corporal, la duración es recordada, la ubicación tiene el error del GPS de un celular.
+referencia corporal, la ubicación tiene el error del GPS de un celular.
 Sirve para saber **dónde** y **cuánto se repite**. Cualquier decisión de obra necesita un estudio
 técnico formal. Esa advertencia va en la interfaz y en cada exportación, no solo aquí.
 
@@ -86,7 +86,8 @@ desplegada en ningún sitio.**
   alta de cuenta **no verifica el correo** y que no hay recuperación de contraseña: quien la
   pierde necesita que un administrador se la cambie en la base.
 - **Reporte sin conexión** con cola de envío. La PWA solo cachea lectura.
-- **Geocodificación inversa** robusta: `direccion_aprox` queda vacío salvo que se rellene a mano.
+- **Geocodificación inversa**: el reporte no guarda dirección; se ubica por coordenadas, distrito y
+  unidad vecinal.
 - Analítica avanzada, cruce con datos de lluvia, órdenes de trabajo, app nativa, multi-municipio.
   El backlog completo está en [CLAUDE.md §15](CLAUDE.md).
 

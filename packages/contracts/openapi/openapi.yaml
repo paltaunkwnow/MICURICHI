@@ -77,13 +77,6 @@ components:
             - rodilla
             - muslo
             - mas_70
-        duracion_estimada:
-          type: string
-          enum:
-            - menos_30min
-            - 30min_2h
-            - 2h_12h
-            - mas_12h
         frecuencia:
           type: string
           enum:
@@ -91,13 +84,6 @@ components:
             - ocasional
             - cada_lluvia_fuerte
             - permanente
-        afectacion:
-          type: string
-          enum:
-            - peatonal
-            - vehicular
-            - ingreso_viviendas
-            - corte_total_via
         causa_presunta:
           default: desconocida
           type: string
@@ -154,9 +140,7 @@ components:
         - ubicacion_tipo
         - descripcion
         - tirante_estimado
-        - duracion_estimada
         - frecuencia
-        - afectacion
     ReporteFiltros:
       type: object
       properties:
@@ -306,14 +290,6 @@ components:
                     - codigo
                     - nombre
                 - type: "null"
-            manzana_id:
-              type:
-                - string
-                - "null"
-            direccion_aprox:
-              type:
-                - string
-                - "null"
             descripcion:
               type: string
             fotos:
@@ -328,13 +304,6 @@ components:
                 - rodilla
                 - muslo
                 - mas_70
-            duracion_estimada:
-              type: string
-              enum:
-                - menos_30min
-                - 30min_2h
-                - 2h_12h
-                - mas_12h
             frecuencia:
               type: string
               enum:
@@ -342,13 +311,6 @@ components:
                 - ocasional
                 - cada_lluvia_fuerte
                 - permanente
-            afectacion:
-              type: string
-              enum:
-                - peatonal
-                - vehicular
-                - ingreso_viviendas
-                - corte_total_via
             causa_presunta:
               type: string
               enum:
@@ -403,14 +365,10 @@ components:
             - evento_en
             - distrito
             - unidad_vecinal
-            - manzana_id
-            - direccion_aprox
             - descripcion
             - fotos
             - tirante_estimado
-            - duracion_estimada
             - frecuencia
-            - afectacion
             - causa_presunta
             - severidad
             - severidad_calculada
@@ -511,14 +469,6 @@ components:
                           - codigo
                           - nombre
                       - type: "null"
-                  manzana_id:
-                    type:
-                      - string
-                      - "null"
-                  direccion_aprox:
-                    type:
-                      - string
-                      - "null"
                   descripcion:
                     type: string
                   fotos:
@@ -533,13 +483,6 @@ components:
                       - rodilla
                       - muslo
                       - mas_70
-                  duracion_estimada:
-                    type: string
-                    enum:
-                      - menos_30min
-                      - 30min_2h
-                      - 2h_12h
-                      - mas_12h
                   frecuencia:
                     type: string
                     enum:
@@ -547,13 +490,6 @@ components:
                       - ocasional
                       - cada_lluvia_fuerte
                       - permanente
-                  afectacion:
-                    type: string
-                    enum:
-                      - peatonal
-                      - vehicular
-                      - ingreso_viviendas
-                      - corte_total_via
                   causa_presunta:
                     type: string
                     enum:
@@ -608,14 +544,10 @@ components:
                   - evento_en
                   - distrito
                   - unidad_vecinal
-                  - manzana_id
-                  - direccion_aprox
                   - descripcion
                   - fotos
                   - tirante_estimado
-                  - duracion_estimada
                   - frecuencia
-                  - afectacion
                   - causa_presunta
                   - severidad
                   - severidad_calculada
@@ -695,14 +627,6 @@ components:
                 - codigo
                 - nombre
             - type: "null"
-        manzana_id:
-          type:
-            - string
-            - "null"
-        direccion_aprox:
-          type:
-            - string
-            - "null"
         descripcion:
           type: string
         fotos:
@@ -717,13 +641,6 @@ components:
             - rodilla
             - muslo
             - mas_70
-        duracion_estimada:
-          type: string
-          enum:
-            - menos_30min
-            - 30min_2h
-            - 2h_12h
-            - mas_12h
         frecuencia:
           type: string
           enum:
@@ -731,13 +648,6 @@ components:
             - ocasional
             - cada_lluvia_fuerte
             - permanente
-        afectacion:
-          type: string
-          enum:
-            - peatonal
-            - vehicular
-            - ingreso_viviendas
-            - corte_total_via
         causa_presunta:
           type: string
           enum:
@@ -886,14 +796,10 @@ components:
         - evento_en
         - distrito
         - unidad_vecinal
-        - manzana_id
-        - direccion_aprox
         - descripcion
         - fotos
         - tirante_estimado
-        - duracion_estimada
         - frecuencia
-        - afectacion
         - causa_presunta
         - severidad
         - severidad_calculada

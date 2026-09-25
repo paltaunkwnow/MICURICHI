@@ -152,9 +152,7 @@ export function MisReportes() {
                         ) : (
                           <ChipEstado estado={p?.estado ?? 'nuevo'} />
                         )}
-                        <span className="titular mt-[7px] block text-[16px]">
-                          {p?.direccion_aprox ?? local.titulo}
-                        </span>
+                        <span className="titular mt-[7px] block text-[16px]">{local.titulo}</span>
                         <span className="mt-1 block text-[14px] text-tinta-600">
                           {p
                             ? `${fechaCorta(p.creado_en)} · severidad ${etiquetaSeveridad(p.severidad).toLowerCase()}`

@@ -52,7 +52,7 @@ export function SeguimientoReporte({ id }: { id: string }) {
    */
   const desconocido = !cargando && !p && local === null && esFaltante;
 
-  const titulo = p?.direccion_aprox ?? local?.titulo ?? 'Tu reporte';
+  const titulo = local?.titulo ?? 'Tu reporte';
   const estado = p?.estado ?? 'nuevo';
   const publicado = estado === 'validado' || estado === 'resuelto';
 

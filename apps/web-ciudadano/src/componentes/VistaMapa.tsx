@@ -122,7 +122,7 @@ export function VistaMapa() {
   const todas = reportes.data?.features ?? SIN_REPORTES;
 
   /**
-   * La búsqueda escrita filtra lo que ya está cargado (calle, unidad vecinal, distrito) sin
+   * La búsqueda escrita filtra lo que ya está cargado (unidad vecinal, distrito) sin
    * pedir nada: es instantánea y no gasta cuota. Para saltar a una unidad vecinal que no está
    * en la vista actual están las sugerencias de abajo, que sí usan el filtro del servidor.
    */
@@ -132,7 +132,6 @@ export function VistaMapa() {
       ? todas.filter((f) => {
           const p = f.properties;
           return [
-            p.direccion_aprox,
             p.unidad_vecinal?.codigo,
             p.unidad_vecinal?.nombre,
             p.distrito?.codigo,
@@ -345,8 +344,8 @@ export function VistaMapa() {
           type="search"
           value={texto}
           onChange={(e) => alTeclear(e.target.value)}
-          placeholder="Buscar dirección, UV o barrio"
-          aria-label="Buscar dirección, unidad vecinal o barrio"
+          placeholder="Buscar UV, barrio o distrito"
+          aria-label="Buscar unidad vecinal, barrio o distrito"
         />
       </div>
       {sugerencias.length ? (

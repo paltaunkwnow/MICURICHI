@@ -1,8 +1,6 @@
 import {
-  type Afectacion,
   type CausaPresunta,
   COLORES_SEVERIDAD,
-  type Duracion,
   type EstadoReporte,
   ETIQUETAS,
   type Frecuencia,
@@ -41,14 +39,8 @@ export function etiquetaTirante(t: Tirante) {
   const e = ETIQUETAS.tirante[t];
   return `${e.corta} · ${e.rango}`;
 }
-export function etiquetaDuracion(d: Duracion) {
-  return ETIQUETAS.duracion[d];
-}
 export function etiquetaFrecuencia(f: Frecuencia) {
   return ETIQUETAS.frecuencia[f];
-}
-export function etiquetaAfectacion(a: Afectacion) {
-  return ETIQUETAS.afectacion[a];
 }
 export function etiquetaCausa(c: CausaPresunta) {
   return ETIQUETAS.causa_presunta[c];

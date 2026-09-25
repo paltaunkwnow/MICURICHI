@@ -25,6 +25,12 @@ export const CREDENCIALES_VECINA = {
   password: process.env.E2E_VECINA_PASSWORD ?? 'curichi-vecina-local',
 };
 
+/**
+ * Payload mínimo válido de `POST /api/v1/reportes`. Desde la severidad v2 (corrida
+ * 2026-09-25-quitar-campos-del-reporte) el reporte solo pregunta tirante y frecuencia: ya no lleva
+ * duración ni afectación, y la severidad de este payload es 2·2 (rodilla) + 3 (cada lluvia fuerte)
+ * = 7 → media.
+ */
 export function reporteValido(marca: string) {
   return {
     lat: PUNTO_CENTRO.lat,
@@ -33,9 +39,7 @@ export function reporteValido(marca: string) {
     ubicacion_tipo: 'via_publica' as const,
     descripcion: `Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`,
     tirante_estimado: 'rodilla' as const,
-    duracion_estimada: '2h_12h' as const,
     frecuencia: 'cada_lluvia_fuerte' as const,
-    afectacion: 'vehicular' as const,
     causa_presunta: 'sumidero_tapado' as const,
     sitio_web: '',
   };

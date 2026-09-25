@@ -85,9 +85,7 @@ function rng(semilla: number) {
 }
 
 const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
-const DURACIONES = ['menos_30min', '30min_2h', '2h_12h', 'mas_12h'] as const;
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
-const AFECTACIONES = ['peatonal', 'vehicular', 'ingreso_viviendas', 'corte_total_via'] as const;
 const CAUSAS = [
   'sumidero_tapado',
   'falta_sumidero',
@@ -211,9 +209,7 @@ export async function sembrarSamples(
   for (const [i, p] of puntos.entries()) {
     const entrada = {
       tirante_estimado: elegir(TIRANTES),
-      duracion_estimada: elegir(DURACIONES),
       frecuencia: elegir(FRECUENCIAS),
-      afectacion: elegir(AFECTACIONES),
     };
     const sev = calcularSeveridad(entrada);
     const estado =
@@ -221,22 +217,21 @@ export async function sembrarSamples(
     const diasAtras = Math.floor(al() * 120);
     const desc = `${elegir(DESCRIPCIONES)} [muestra sintética]`;
     await ex.consultar(
-      `INSERT INTO reporte_inundacion (geom, creado_en, evento_en, distrito_id, unidad_vecinal_id, manzana_id, version_capa, resolucion_flags,
-         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, duracion_estimada, frecuencia, afectacion, causa_presunta,
+      `INSERT INTO reporte_inundacion (geom, creado_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, frecuencia, causa_presunta,
          sumidero_cercano, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, validado_por, validado_en)
        SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval, now() - ($3 || ' days')::interval - interval '3 hours',
          COALESCE((SELECT distrito_id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_distrito'),
          COALESCE((SELECT id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_uv'),
-         (SELECT id FROM geo.manzana_vigente m WHERE ST_Contains(m.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1),
          -- version_capa es la versión con la que se RESOLVIÓ el punto (§7.1), no la de la muestra:
          -- si las capas reales están vigentes, el reporte se ubicó contra ellas y eso es lo que
          -- hay que guardar, o el dato de trazabilidad miente.
          COALESCE((SELECT version_capa FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), $4),
          '{"seed": true}'::jsonb,
-         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::tirante_estimado, $10::duracion_estimada, $11::frecuencia, $12::afectacion, $13::causa_presunta,
-         $14::sumidero_cercano, $15::severidad, $16, $17, $18::estado_reporte, $19,
-         CASE WHEN $18 IN ('validado', 'resuelto') THEN $20::uuid END,
-         CASE WHEN $18 IN ('validado', 'resuelto') THEN now() - ($3 || ' days')::interval + interval '1 day' END`,
+         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::tirante_estimado, $10::frecuencia, $11::causa_presunta,
+         $12::sumidero_cercano, $13::severidad, $14, $15, $16::estado_reporte, $17,
+         CASE WHEN $16 IN ('validado', 'resuelto') THEN $18::uuid END,
+         CASE WHEN $16 IN ('validado', 'resuelto') THEN now() - ($3 || ' days')::interval + interval '1 day' END`,
       [
         p.lon,
         p.lat,
@@ -247,9 +242,7 @@ export async function sembrarSamples(
         al() < 0.8 ? 'via_publica' : 'vivienda_o_predio',
         desc,
         entrada.tirante_estimado,
-        entrada.duracion_estimada,
         entrada.frecuencia,
-        entrada.afectacion,
         elegir(CAUSAS),
         elegir(['si', 'no', 'no_sabe'] as const),
         sev.banda,

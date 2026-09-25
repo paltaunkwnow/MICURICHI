@@ -24,9 +24,7 @@ const dominio = {
   generado_por: 'packages/contracts',
   enums: {
     tirante: enums.TIRANTES,
-    duracion: enums.DURACIONES,
     frecuencia: enums.FRECUENCIAS,
-    afectacion: enums.AFECTACIONES,
     causa_presunta: enums.CAUSAS_PRESUNTAS,
     severidad: enums.SEVERIDADES,
     estado: enums.ESTADOS_REPORTE,

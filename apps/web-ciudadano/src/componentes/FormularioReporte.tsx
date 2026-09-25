@@ -3,6 +3,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import {
+  BANDAS,
   CONFIG_DOMINIO,
   calcularSeveridad,
   ETIQUETAS,
@@ -29,6 +30,7 @@ import {
   guardarBorrador,
   leerBorrador,
   olvidarBorrador,
+  PASOS_REPORTE as PASOS,
 } from '@/lib/borrador';
 import { detallesDeError, mensajeDeEnvio, mensajeDeError } from '@/lib/errores';
 import {
@@ -60,9 +62,7 @@ interface FotoLista {
 }
 
 const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
-const DURACIONES = ['menos_30min', '30min_2h', '2h_12h', 'mas_12h'] as const;
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
-const AFECTACIONES = ['peatonal', 'vehicular', 'ingreso_viviendas', 'corte_total_via'] as const;
 const CAUSAS = [
   'desconocida',
   'sumidero_tapado',
@@ -74,7 +74,8 @@ const CAUSAS = [
 ] as const;
 const UBICACION_TIPOS = ['via_publica', 'vivienda_o_predio', 'otro'] as const;
 
-const PASOS = 5;
+/** Puntaje máximo de la fórmula vigente: el «N/12» del resumen no puede quedarse en otra versión. */
+const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
 /**
  * Quietud del mapa antes de preguntar en qué unidad vecinal cayó el punto. Sin esta pausa, cada
  * sacudida del pulgar sería una llamada a `POST /geo/v1/resolver`, que tiene límite por IP.
@@ -121,7 +122,7 @@ function Opcion({
   );
 }
 
-/** Igual que `Opcion`, pero en pastilla: lo que el prototipo usa para la duración. */
+/** Igual que `Opcion`, pero en pastilla: para respuestas cortas, como el tipo de lugar. */
 function Pastilla({
   nombre,
   valor,
@@ -361,7 +362,7 @@ export function FormularioReporte() {
       recordarReporte({
         id: p.id,
         enviado_en: new Date().toISOString(),
-        titulo: p.direccion_aprox ?? (p.unidad_vecinal?.nombre || 'Punto reportado'),
+        titulo: p.unidad_vecinal?.nombre || 'Punto reportado',
         unidad_vecinal: p.unidad_vecinal?.codigo ?? null,
         distrito: p.distrito?.codigo ?? null,
         severidad: p.severidad,
@@ -417,22 +418,16 @@ export function FormularioReporte() {
   // ---------------------------------------------------------------- pasos
 
   const severidad =
-    valores.tirante_estimado &&
-    valores.duracion_estimada &&
-    valores.frecuencia &&
-    valores.afectacion
+    valores.tirante_estimado && valores.frecuencia
       ? calcularSeveridad({
           tirante_estimado: valores.tirante_estimado,
-          duracion_estimada: valores.duracion_estimada,
           frecuencia: valores.frecuencia,
-          afectacion: valores.afectacion,
         })
       : null;
 
   const puedePaso2 = !!ubicacion && !!resuelto?.dentro_cobertura;
-  const puedePaso3 = !!valores.tirante_estimado && !!valores.duracion_estimada;
-  const puedePaso4 = !!valores.frecuencia && !!valores.afectacion;
-  const puedePaso5 = (valores.descripcion ?? '').trim().length >= CONFIG_DOMINIO.DESCRIPCION_MIN;
+  const puedePaso3 = !!valores.tirante_estimado && !!valores.frecuencia;
+  const puedePaso4 = (valores.descripcion ?? '').trim().length >= CONFIG_DOMINIO.DESCRIPCION_MIN;
 
   const irAdelante = () => setPaso((p) => Math.min(PASOS, p + 1));
   const irAtras = () => setPaso((p) => Math.max(1, p - 1));
@@ -464,13 +459,7 @@ export function FormularioReporte() {
         return;
       }
       const pasoDelError =
-        errores.tirante_estimado || errores.duracion_estimada
-          ? 2
-          : errores.frecuencia || errores.afectacion
-            ? 3
-            : errores.descripcion
-              ? 4
-              : 5;
+        errores.tirante_estimado || errores.frecuencia ? 2 : errores.descripcion ? 3 : 4;
       setPaso(pasoDelError);
       setErrorEnvio('Revisá los campos marcados y volvé a intentar.');
     },
@@ -497,7 +486,7 @@ export function FormularioReporte() {
       </div>
 
       <div className="pasos px-5 pb-3">
-        {[1, 2, 3, 4, 5].map((i) => (
+        {Array.from({ length: PASOS }, (_, k) => k + 1).map((i) => (
           <i key={i} className={i <= paso ? 'on' : ''} />
         ))}
       </div>
@@ -507,7 +496,7 @@ export function FormularioReporte() {
 
       {/* Aviso por adelantado de que el turno de esta cuenta todavía no está disponible. No
           impide escribir —el turno puede llegar antes de que termine— pero evita que alguien
-          complete cinco pantallas para encontrarse un rechazo al final. El que decide sigue
+          complete todas las pantallas para encontrarse un rechazo al final. El que decide sigue
           siendo el servidor al enviar. */}
       {puedeReportarDesde && (
         <div className="px-5 pb-3">
@@ -544,7 +533,7 @@ export function FormularioReporte() {
       {paso === 1 ? (
         <>
           <div className="flex-none px-5 pb-3">
-            <p className="pno">Paso 1 de 5</p>
+            <p className="pno">Paso 1 de {PASOS}</p>
             <p className="preg">¿Dónde se junta el agua?</p>
           </div>
           <div className="relative mx-5 min-h-[260px] flex-1 overflow-hidden rounded-[20px]">
@@ -692,8 +681,8 @@ export function FormularioReporte() {
       {paso === 2 ? (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-            <p className="pno">Paso 2 de 5</p>
-            <p className="preg">¿Cuándo pasó y hasta dónde llegó?</p>
+            <p className="pno">Paso 2 de {PASOS}</p>
+            <p className="preg">¿Hasta dónde llegó y cada cuánto pasa?</p>
 
             <div className="mt-5">
               <label htmlFor="evento" className="lbl">
@@ -736,20 +725,37 @@ export function FormularioReporte() {
             </fieldset>
 
             <fieldset className="mt-5">
-              <legend className="lbl">¿Cuánto tardó en irse?</legend>
-              <div className="flex flex-wrap gap-2">
-                {DURACIONES.map((d) => (
-                  <Pastilla
-                    key={d}
-                    nombre="duracion_estimada"
-                    valor={d}
-                    texto={ETIQUETAS.duracion[d]}
-                    marcado={valores.duracion_estimada === d}
-                    onCambio={() => form.setValue('duracion_estimada', d)}
+              <legend className="lbl">Frecuencia</legend>
+              <div className="grid gap-2.5">
+                {FRECUENCIAS.map((f) => (
+                  <Opcion
+                    key={f}
+                    nombre="frecuencia"
+                    valor={f}
+                    texto={ETIQUETAS.frecuencia[f]}
+                    marcado={valores.frecuencia === f}
+                    onCambio={() => form.setValue('frecuencia', f)}
                   />
                 ))}
               </div>
             </fieldset>
+
+            {severidad ? (
+              <div className="tarjeta mt-4.5 px-[18px] py-4" aria-live="polite">
+                <p className="glbl mt-0">Severidad calculada</p>
+                <div className="mt-2.5 flex items-center gap-3">
+                  <ChipSeveridad severidad={severidad.banda} grande />
+                  <b className="titular ml-auto text-[22px] tabular-nums">
+                    {severidad.puntaje}
+                    <span className="text-[14px] text-tinta-600">/{PUNTAJE_MAX}</span>
+                  </b>
+                </div>
+                <p className="mt-2.5 text-[14px] leading-[1.45] text-tinta-600">
+                  La calcula el sistema con lo que declaraste. El técnico puede corregirla, siempre
+                  dejando el motivo escrito.
+                </p>
+              </div>
+            ) : null}
           </div>
           <div className="pie">
             <button
@@ -769,77 +775,7 @@ export function FormularioReporte() {
       {paso === 3 ? (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-            <p className="pno">Paso 3 de 5</p>
-            <p className="preg">¿Cada cuánto pasa y a quién afecta?</p>
-
-            <fieldset className="mt-5">
-              <legend className="lbl">Frecuencia</legend>
-              <div className="grid gap-2.5">
-                {FRECUENCIAS.map((f) => (
-                  <Opcion
-                    key={f}
-                    nombre="frecuencia"
-                    valor={f}
-                    texto={ETIQUETAS.frecuencia[f]}
-                    marcado={valores.frecuencia === f}
-                    onCambio={() => form.setValue('frecuencia', f)}
-                  />
-                ))}
-              </div>
-            </fieldset>
-
-            <fieldset className="mt-5">
-              <legend className="lbl">Lo más grave que viste ahí</legend>
-              <div className="grid gap-2.5">
-                {AFECTACIONES.map((a) => (
-                  <Opcion
-                    key={a}
-                    nombre="afectacion"
-                    valor={a}
-                    texto={ETIQUETAS.afectacion[a]}
-                    marcado={valores.afectacion === a}
-                    onCambio={() => form.setValue('afectacion', a)}
-                  />
-                ))}
-              </div>
-            </fieldset>
-
-            {severidad ? (
-              <div className="tarjeta mt-4.5 px-[18px] py-4" aria-live="polite">
-                <p className="glbl mt-0">Severidad calculada</p>
-                <div className="mt-2.5 flex items-center gap-3">
-                  <ChipSeveridad severidad={severidad.banda} grande />
-                  <b className="titular ml-auto text-[22px] tabular-nums">
-                    {severidad.puntaje}
-                    <span className="text-[14px] text-tinta-600">/20</span>
-                  </b>
-                </div>
-                <p className="mt-2.5 text-[14px] leading-[1.45] text-tinta-600">
-                  La calcula el sistema con lo que declaraste. El técnico puede corregirla, siempre
-                  dejando el motivo escrito.
-                </p>
-              </div>
-            ) : null}
-          </div>
-          <div className="pie">
-            <button
-              type="button"
-              data-testid="boton-siguiente"
-              className="btn btn-bloque"
-              disabled={!puedePaso4}
-              onClick={irAdelante}
-            >
-              Continuar
-            </button>
-          </div>
-        </>
-      ) : null}
-
-      {/* ---------------------------------------------------------------- paso 4 */}
-      {paso === 4 ? (
-        <>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-            <p className="pno">Paso 4 de 5</p>
+            <p className="pno">Paso 3 de {PASOS}</p>
             <p className="preg">Mostranos cómo se ve</p>
 
             <ul className="mt-4 grid grid-cols-3 gap-2.5">
@@ -1001,7 +937,7 @@ export function FormularioReporte() {
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedePaso5}
+              disabled={!puedePaso4}
               onClick={irAdelante}
             >
               Continuar
@@ -1010,11 +946,11 @@ export function FormularioReporte() {
         </>
       ) : null}
 
-      {/* ---------------------------------------------------------------- paso 5 */}
-      {paso === 5 ? (
+      {/* ---------------------------------------------------------------- paso 4 */}
+      {paso === 4 ? (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
-            <p className="pno">Paso 5 de 5</p>
+            <p className="pno">Paso 4 de {PASOS}</p>
             <p className="preg">Revisá antes de enviar</p>
 
             {ubicacion ? (
@@ -1033,7 +969,9 @@ export function FormularioReporte() {
             {severidad ? (
               <div className="mt-3.5 flex items-center gap-3">
                 <ChipSeveridad severidad={severidad.banda} grande />
-                <b className="titular ml-auto text-[19px] tabular-nums">{severidad.puntaje}/20</b>
+                <b className="titular ml-auto text-[19px] tabular-nums">
+                  {severidad.puntaje}/{PUNTAJE_MAX}
+                </b>
               </div>
             ) : null}
 
@@ -1064,26 +1002,14 @@ export function FormularioReporte() {
                 alEditar={() => setPaso(2)}
               />
               <FilaRevision
-                etiqueta="Duración"
-                valor={
-                  valores.duracion_estimada ? ETIQUETAS.duracion[valores.duracion_estimada] : '—'
-                }
-                alEditar={() => setPaso(2)}
-              />
-              <FilaRevision
                 etiqueta="Frecuencia"
                 valor={valores.frecuencia ? ETIQUETAS.frecuencia[valores.frecuencia] : '—'}
-                alEditar={() => setPaso(3)}
-              />
-              <FilaRevision
-                etiqueta="Afectación"
-                valor={valores.afectacion ? ETIQUETAS.afectacion[valores.afectacion] : '—'}
-                alEditar={() => setPaso(3)}
+                alEditar={() => setPaso(2)}
               />
               <FilaRevision
                 etiqueta="Fotos"
                 valor={`${fotos.length} ${fotos.length === 1 ? 'foto' : 'fotos'}`}
-                alEditar={() => setPaso(4)}
+                alEditar={() => setPaso(3)}
               />
             </dl>
 
@@ -1104,8 +1030,7 @@ export function FormularioReporte() {
             </fieldset>
             {valores.ubicacion_tipo === 'vivienda_o_predio' ? (
               <Aviso tono="alerta" className="mt-3">
-                El mapa público va a desplazar el punto hasta {CONFIG_DOMINIO.JITTER_PUBLICO_M} m y
-                no va a mostrar la dirección.
+                El mapa público va a desplazar el punto hasta {CONFIG_DOMINIO.JITTER_PUBLICO_M} m.
               </Aviso>
             ) : null}
 

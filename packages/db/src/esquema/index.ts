@@ -1,5 +1,5 @@
 /**
- * Esquema Drizzle: espejo tipado de migraciones/0001_inicial.sql para consultas en api-core y geo-service.
+ * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0010) para consultas en api-core y geo-service.
  * La fuente de verdad del DDL son las migraciones SQL; este archivo no genera DDL.
  */
 import { sql } from 'drizzle-orm';
@@ -28,23 +28,11 @@ export const geometry = customType<{ data: string; driverData: string }>({
 });
 
 export const tiranteEnum = pgEnum('tirante_estimado', ['tobillo', 'rodilla', 'muslo', 'mas_70']);
-export const duracionEnum = pgEnum('duracion_estimada', [
-  'menos_30min',
-  '30min_2h',
-  '2h_12h',
-  'mas_12h',
-]);
 export const frecuenciaEnum = pgEnum('frecuencia', [
   'primera_vez',
   'ocasional',
   'cada_lluvia_fuerte',
   'permanente',
-]);
-export const afectacionEnum = pgEnum('afectacion', [
-  'peatonal',
-  'vehicular',
-  'ingreso_viviendas',
-  'corte_total_via',
 ]);
 export const causaEnum = pgEnum('causa_presunta', [
   'sumidero_tapado',
@@ -176,18 +164,14 @@ export const reporteInundacion = pgTable(
     autorId: uuid('autor_id').references(() => usuario.id, { onDelete: 'set null' }),
     distritoId: text('distrito_id').notNull(),
     unidadVecinalId: text('unidad_vecinal_id').notNull(),
-    manzanaId: text('manzana_id'),
     versionCapa: text('version_capa'),
     resolucionFlags: jsonb('resolucion_flags').notNull().default({}),
     ubicacionMetodo: ubicacionMetodoEnum('ubicacion_metodo').notNull(),
     precisionGpsM: numeric('precision_gps_m'),
     ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
-    direccionAprox: text('direccion_aprox'),
     descripcion: text('descripcion').notNull(),
     tiranteEstimado: tiranteEnum('tirante_estimado').notNull(),
-    duracionEstimada: duracionEnum('duracion_estimada').notNull(),
     frecuencia: frecuenciaEnum('frecuencia').notNull(),
-    afectacion: afectacionEnum('afectacion').notNull(),
     causaPresunta: causaEnum('causa_presunta').notNull().default('desconocida'),
     sumideroCercano: sumideroCercanoEnum('sumidero_cercano'),
     sumideroEstado: sumideroEstadoEnum('sumidero_estado'),

@@ -90,9 +90,7 @@ export const reporteValido = {
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte y tarda horas en irse.',
   tirante_estimado: 'rodilla',
-  duracion_estimada: '2h_12h',
   frecuencia: 'cada_lluvia_fuerte',
-  afectacion: 'ingreso_viviendas',
   causa_presunta: 'sumidero_tapado',
 };
 

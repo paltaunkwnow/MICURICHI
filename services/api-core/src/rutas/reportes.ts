@@ -181,11 +181,11 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         }
 
         const ins = await cliente.query<{ id: string }>(
-          `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, manzana_id, version_capa, resolucion_flags,
-           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, duracion_estimada, frecuencia, afectacion, causa_presunta,
+          `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, frecuencia, causa_presunta,
            sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id)
-         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($26, $27), 4326), $3, $4, $5, $6, $7, $8, $9::jsonb,
-           $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, 'nuevo', $25, $28) RETURNING id`,
+         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($23, $24), 4326), $3, $4, $5, $6, $7, $8::jsonb,
+           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25) RETURNING id`,
           [
             d.lon,
             d.lat,
@@ -196,7 +196,6 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             autor.id,
             geo.distrito.id,
             geo.unidad_vecinal.id,
-            geo.manzana?.id ?? null,
             geo.version_capa,
             JSON.stringify({
               en_limite: geo.en_limite,
@@ -209,9 +208,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             d.ubicacion_tipo,
             d.descripcion,
             d.tirante_estimado,
-            d.duracion_estimada,
             d.frecuencia,
-            d.afectacion,
             d.causa_presunta,
             d.sumidero_cercano ?? null,
             d.sumidero_estado ?? null,

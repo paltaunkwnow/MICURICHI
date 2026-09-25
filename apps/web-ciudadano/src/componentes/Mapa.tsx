@@ -745,8 +745,17 @@ function encuadrarEnCapas(m: MapaGl, lista: CapaInfo[]): boolean {
   return true;
 }
 
-/** Ids de las capas administrativas, en el orden en que se dibujan. */
-const CAPAS_ADMIN = ['capa-distrito_municipal', 'capa-unidad_vecinal', 'capa-manzana'] as const;
+/**
+ * Capas oficiales que dibuja el mapa público, en el orden en que se dibujan. geo-service también
+ * ofrece `manzana`, pero el mapa público ya no la dibuja ni la pide (corrida
+ * 2026-09-25-quitar-campos-del-reporte): el reporte dejó de anotar manzana y dibujarla solo
+ * costaba teselas.
+ */
+const CAPAS_DIBUJADAS = ['distrito_municipal', 'unidad_vecinal'] as const;
+const CAPAS_ADMIN = CAPAS_DIBUJADAS.map((c) => `capa-${c}`);
+type CapaDibujada = (typeof CAPAS_DIBUJADAS)[number];
+const esCapaDibujada = (capa: string): capa is CapaDibujada =>
+  (CAPAS_DIBUJADAS as readonly string[]).includes(capa);
 
 /**
  * Distritos y unidades vecinales, con el relleno graduado por número de reportes: la ciudad se
@@ -761,27 +770,26 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
     porDistrito.set(a.distrito_id, (porDistrito.get(a.distrito_id) ?? 0) + a.n_reportes);
   }
 
-  const POR_DEFECTO = { color: '#3e5468', ancho: 0.6, minzoom: 14 };
-  const estilos: Record<string, { color: string; ancho: number; minzoom: number }> = {
+  const estilos: Record<CapaDibujada, { color: string; ancho: number; minzoom: number }> = {
     distrito_municipal: { color: '#0A4A69', ancho: 2.5, minzoom: 0 },
     unidad_vecinal: { color: '#0D6189', ancho: 1.5, minzoom: 11 },
-    manzana: POR_DEFECTO,
   };
 
   for (const c of capas) {
-    const id = `capa-${c.capa}`;
+    const capa = c.capa;
+    if (!esCapaDibujada(capa)) continue;
+    const id = `capa-${capa}`;
     if (m.getSource(id)) {
       actualizarConteos(m, c, porUv, porDistrito);
       continue;
     }
-    const e = estilos[c.capa] ?? POR_DEFECTO;
+    const e = estilos[capa];
     const origen = typeof window !== 'undefined' ? window.location.origin : '';
     if (c.modo === 'teselas')
-      // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre puede pedir la tesela z0 de
-      // las manzanas, que son 27 434 polígonos metidos en un solo .mvt. Medido contra el
-      // servicio con los datos reales: 2,0 MB en z10 y 515 KB en z12, frente a 42 KB en z14,
-      // que es donde de verdad se dibujan. Una capa que no se pinta por debajo de cierto zoom
-      // tampoco tiene nada que servir por debajo de ese zoom.
+      // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre pide teselas de zooms en los que
+      // la capa no se pinta. Con las manzanas (que ya no se dibujan) eso eran 2,0 MB en z10 frente
+      // a 42 KB en z14. Una capa que no se pinta por debajo de cierto zoom tampoco tiene nada que
+      // servir por debajo de ese zoom.
       m.addSource(id, {
         type: 'vector',
         tiles: [`${origen}${c.url}`],
@@ -792,41 +800,28 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
     else m.addSource(id, { type: 'geojson', data: `${origen}${c.url}`, promoteId: 'id' });
     const base = c.modo === 'teselas' ? { source: id, 'source-layer': c.capa } : { source: id };
 
-    if (c.capa === 'manzana') {
-      m.addLayer(
-        {
-          id: `${id}-relleno`,
-          type: 'fill',
-          ...base,
-          minzoom: e.minzoom,
-          paint: { 'fill-color': '#C9D6CE', 'fill-opacity': 0.55 },
-        } as maplibregl.LayerSpecification,
-        'clusters',
-      );
-    } else {
-      // El relleno sube con la cantidad de reportes, del 0,14 al 0,46 de opacidad: mismo salto
-      // que en el prototipo, donde un distrito con puntos se distingue de uno vacío.
-      m.addLayer(
-        {
-          id: `${id}-relleno`,
-          type: 'fill',
-          ...base,
-          minzoom: e.minzoom,
-          paint: {
-            // `color` lo escribe `fusionarConteosEnLaCapa` para que cada distrito tenga el suyo,
-            // como en el prototipo; si no se pudo fusionar, todos comparten el color de la capa.
-            'fill-color': ['coalesce', ['get', 'color'], e.color],
-            'fill-opacity': [
-              'case',
-              ['>', ['coalesce', ['feature-state', 'n'], 0], 0],
-              ['min', 0.46, ['+', 0.26, ['*', 0.045, ['coalesce', ['feature-state', 'n'], 0]]]],
-              0.14,
-            ],
-          },
-        } as maplibregl.LayerSpecification,
-        'clusters',
-      );
-    }
+    // El relleno sube con la cantidad de reportes, del 0,14 al 0,46 de opacidad: mismo salto
+    // que en el prototipo, donde un distrito con puntos se distingue de uno vacío.
+    m.addLayer(
+      {
+        id: `${id}-relleno`,
+        type: 'fill',
+        ...base,
+        minzoom: e.minzoom,
+        paint: {
+          // `color` lo escribe `fusionarConteosEnLaCapa` para que cada distrito tenga el suyo,
+          // como en el prototipo; si no se pudo fusionar, todos comparten el color de la capa.
+          'fill-color': ['coalesce', ['get', 'color'], e.color],
+          'fill-opacity': [
+            'case',
+            ['>', ['coalesce', ['feature-state', 'n'], 0], 0],
+            ['min', 0.46, ['+', 0.26, ['*', 0.045, ['coalesce', ['feature-state', 'n'], 0]]]],
+            0.14,
+          ],
+        },
+      } as maplibregl.LayerSpecification,
+      'clusters',
+    );
     m.addLayer(
       {
         id: `${id}-linea`,
@@ -842,30 +837,28 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
       } as maplibregl.LayerSpecification,
       'clusters',
     );
-    if (c.capa !== 'manzana') {
-      m.addLayer(
-        {
-          id: `${id}-nombre`,
-          type: 'symbol',
-          ...base,
-          minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
-          layout: {
-            // `etiqueta` lleva el conteo («Distrito Centro · 3 reportes») y la escribe
-            // `fusionarConteosEnLaCapa`; si esa fusión no se hace, queda el nombre a secas.
-            'text-field': ['coalesce', ['get', 'etiqueta'], ['get', 'nombre']],
-            'text-font': ['NotoSans-Bold'],
-            'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
-            'symbol-placement': 'point',
-          },
-          paint: {
-            'text-color': '#0F2D43',
-            'text-halo-color': 'rgba(255,255,255,.92)',
-            'text-halo-width': 2,
-          },
-        } as maplibregl.LayerSpecification,
-        'clusters',
-      );
-    }
+    m.addLayer(
+      {
+        id: `${id}-nombre`,
+        type: 'symbol',
+        ...base,
+        minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
+        layout: {
+          // `etiqueta` lleva el conteo («Distrito Centro · 3 reportes») y la escribe
+          // `fusionarConteosEnLaCapa`; si esa fusión no se hace, queda el nombre a secas.
+          'text-field': ['coalesce', ['get', 'etiqueta'], ['get', 'nombre']],
+          'text-font': ['NotoSans-Bold'],
+          'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
+          'symbol-placement': 'point',
+        },
+        paint: {
+          'text-color': '#0F2D43',
+          'text-halo-color': 'rgba(255,255,255,.92)',
+          'text-halo-width': 2,
+        },
+      } as maplibregl.LayerSpecification,
+      'clusters',
+    );
     actualizarConteos(m, c, porUv, porDistrito);
     void fusionarConteosEnLaCapa(m, c, porUv, porDistrito);
   }
@@ -874,8 +867,7 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
 /**
  * Tope para leer una capa entera en el navegador solo por poder escribir el conteo dentro de su
  * etiqueta. Medido con la entrega real del municipio: distritos 34 KB y unidades vecinales
- * 378 KB, las dos por debajo del tope, así que las dos llevan su conteo escrito. La de manzanas
- * son 15,5 MB y ni se plantea: se sirve por teselas y no lleva etiqueta.
+ * 378 KB, las dos por debajo del tope, así que las dos llevan su conteo escrito.
  */
 const MAX_BYTES_ETIQUETA = 600_000;
 const yaFusionadas = new Set<string>();
@@ -905,7 +897,7 @@ async function fusionarConteosEnLaCapa(
   porUv: Map<string, number>,
   porDistrito: Map<string, number>,
 ) {
-  if (c.capa === 'manzana' || c.modo !== 'geojson') return;
+  if (c.modo !== 'geojson') return;
   if ((c.bytes_web ?? Number.POSITIVE_INFINITY) > MAX_BYTES_ETIQUETA) return;
   const tabla = c.capa === 'unidad_vecinal' ? porUv : porDistrito;
   if (tabla.size === 0) return;
@@ -941,7 +933,6 @@ function actualizarConteos(
   porUv: Map<string, number>,
   porDistrito: Map<string, number>,
 ) {
-  if (c.capa === 'manzana') return;
   const tabla = c.capa === 'unidad_vecinal' ? porUv : porDistrito;
   if (tabla.size === 0) return;
   const fuente = `capa-${c.capa}`;

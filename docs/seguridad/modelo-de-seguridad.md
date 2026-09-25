@@ -110,7 +110,7 @@ Una ruta nueva que se olvide del tema cae en `private, no-store`: se pierde cach
 | Jitter determinista hasta 30 m | `packages/contracts/src/geo/jitter.ts` | Publicar la coordenada de una vivienda |
 | Sal secreta del jitter | `JITTER_SAL`, mínimo 32 caracteres | Recalcular el desplazamiento (el hash es FNV-1a, no criptográfico) |
 | Punto publicable guardado (`geom_publico`) | Migración 0005 | Que el filtro por bbox use la exacta y la respuesta la desplazada: eso convertía el bbox en un oráculo por bisección |
-| `manzana_id` y `direccion_aprox` ocultos si hay jitter | `vistas.ts` | Cruzar el disco de 30 m con el polígono de la manzana |
+| El reporte no guarda ni publica manzana ni dirección (quitados el 2026-09-25) | `vistas.ts`, `contracts` | Ya no hay campo que cruzar con el disco de 30 m; si se reincorpora uno derivado de la geometría, debe ocultarse cuando hay jitter |
 | Punto crítico publicado desde `geom_publico` | `puntos-criticos.ts` | Que un grupo de un solo miembro publique su coordenada exacta como centroide |
 | Sin `radio_m`, `diametro_m` ni `advertencia_diametro` en la ruta pública | `geo-service/src/app.ts` | Publicar una medida exacta junto a una posición deliberadamente inexacta |
 

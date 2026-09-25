@@ -33,11 +33,11 @@ beforeEach(async () => {
 async function crear(lon: number, lat: number, estado = 'validado'): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-       descripcion, tirante_estimado, duracion_estimada, frecuencia, afectacion, severidad_calculada,
-       severidad_puntaje, estado)
+       descripcion, tirante_estimado, frecuencia, severidad_calculada,
+       severidad_puntaje, severidad_version, estado)
      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual',
-       'via_publica', 'Reporte de prueba de agrupacion incremental', 'rodilla', '2h_12h', 'ocasional',
-       'vehicular', 'media', 10, $3::estado_reporte) RETURNING id::text`,
+       'via_publica', 'Reporte de prueba de agrupacion incremental', 'rodilla', 'ocasional',
+       'media', 6, 2, $3::estado_reporte) RETURNING id::text`,
     [lon, lat, estado],
   );
   return r.rows[0]!.id;
@@ -212,13 +212,13 @@ describe('el coste no crece con el tamaño de la tabla', () => {
       const lat = -17.7995 + Math.floor(foco / 40) * 0.0005 + (i % 2) * 0.00002;
       const b = params.length;
       filas.push(
-        `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', 'rodilla', '2h_12h', 'ocasional', 'vehicular', 'media', 10, 'validado')`,
+        `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', 'rodilla', 'ocasional', 'media', 6, 2, 'validado')`,
       );
       params.push(lon, lat);
     }
     await pool.query(
       `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-        tirante_estimado, duracion_estimada, frecuencia, afectacion, severidad_calculada, severidad_puntaje, estado)
+        tirante_estimado, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
        VALUES ${filas.join(',')}`,
       params,
     );

@@ -21,7 +21,9 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await esperarPila(request);
   });
 
-  test('un vecino crea una cuenta, entra y reporta desde la app pública', async ({ page }) => {
+  test('CA-X1: un vecino crea una cuenta, entra y reporta desde la app pública sin duración ni afectación', async ({
+    page,
+  }) => {
     // El mapa se ve sin cuenta; enviar un reporte no. Al entrar a reportar sin sesión, la app
     // no da un 401 pelado: explica qué hace falta y ofrece las dos puertas.
     await page.goto('/reportar');
@@ -46,26 +48,28 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await expect(resuelta).toContainText('Distrito');
     await page.getByTestId('boton-siguiente').click();
 
-    // Paso 2 · hasta dónde llegó el agua y cuánto tardó en irse.
+    // Hasta dónde llegó el agua y cada cuánto pasa: son las dos únicas preguntas de la severidad
+    // v2. El formulario ya no pregunta duración ni afectación (CA-W1). Si tirante y frecuencia van
+    // en el mismo paso o en dos seguidos lo decide P-4 de la spec; el recorrido vale para ambos,
+    // porque cada paso se desmonta al avanzar y solo existe en el DOM el que se está viendo.
     await page.locator('input[name="tirante_estimado"][value="rodilla"]').check();
-    await page.locator('input[name="duracion_estimada"][value="2h_12h"]').check();
-    await page.getByTestId('boton-siguiente').click();
-
-    // Paso 3 · cada cuánto pasa y a quién afecta. Acá queda determinada la severidad.
+    if ((await page.locator('input[name="frecuencia"]').count()) === 0)
+      await page.getByTestId('boton-siguiente').click();
     await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
-    await page.locator('input[name="afectacion"][value="vehicular"]').check();
-    // 2×2 (rodilla) + 3 (2 a 12 h) + 3 (cada lluvia fuerte) + 2 (vehicular) = 12 → media.
+    // Severidad v2: 2×2 (rodilla) + 3 (cada lluvia fuerte) = 7 de 12 → media.
     await expect(page.getByText('Severidad media')).toBeVisible();
-    await expect(page.getByText('12/20')).toBeVisible();
+    await expect(page.getByText('7/12')).toBeVisible();
+    // El máximo ya no es 20: ningún «N/20» de la fórmula v1 puede quedar en pantalla.
+    await expect(page.getByText(/\d+\/20\b/)).toHaveCount(0);
     await page.getByTestId('boton-siguiente').click();
 
-    // Paso 4 · fotos y descripción.
+    // Fotos y descripción.
     await page
       .locator('textarea[name="descripcion"]')
       .fill(`Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`);
     await page.getByTestId('boton-siguiente').click();
 
-    // Paso 5 · revisión y envío.
+    // Revisión y envío.
     await page.locator('input[name="ubicacion_tipo"][value="via_publica"]').check();
     await page.getByTestId('boton-enviar').click();
 

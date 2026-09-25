@@ -28,6 +28,16 @@ function tieneCamposTecnicos(props: Record<string, unknown>): boolean {
   return CAMPOS_TECNICOS.some((c) => c in props);
 }
 
+/**
+ * Campos que el reporte dejó de tener (spec 2026-09-25-quitar-campos-del-reporte, «los cuatro
+ * campos»). No pueden salir por ninguna vista: ni la pública ni la técnica.
+ */
+const CAMPOS_QUITADOS = ['manzana_id', 'direccion_aprox', 'duracion_estimada', 'afectacion'];
+
+function camposQuitadosPresentes(props: Record<string, unknown>): string[] {
+  return CAMPOS_QUITADOS.filter((c) => c in props);
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test.describe('la cookie de técnico no cambia lo que ve el público', () => {
@@ -127,6 +137,48 @@ test.describe('la cookie de técnico no cambia lo que ve el público', () => {
       tieneCamposTecnicos(j.features[0].properties),
       'el panel necesita las propiedades de moderación',
     ).toBe(true);
+  });
+
+  test('CA-X3: ni la vista pública (con y sin sesión) ni la técnica traen los cuatro campos quitados', async () => {
+    type Coleccion = { features: Array<{ properties: Record<string, unknown> }> };
+    const listados: Array<[string, string, APIRequestContext]> = [
+      ['pública sin sesión', `${API}/api/v1/reportes?limite=500`, anonimo],
+      ['pública con sesión de técnico', `${API}/api/v1/reportes?limite=500`, conSesion],
+      ['técnica', `${API}/api/v1/tecnico/reportes?limite=500`, conSesion],
+    ];
+    for (const [vista, url, contexto] of listados) {
+      const r = await contexto.get(url);
+      expect(r.status(), vista).toBe(200);
+      const j = (await r.json()) as Coleccion;
+      expect(
+        j.features.length,
+        `hace falta al menos un reporte en la vista ${vista}`,
+      ).toBeGreaterThan(0);
+      for (const f of j.features)
+        expect(
+          camposQuitadosPresentes(f.properties),
+          `vista ${vista}, reporte ${f.properties.id}`,
+        ).toEqual([]);
+    }
+
+    // Detalle de un reporte validado, por las tres puertas.
+    const lista = (await (
+      await anonimo.get(`${API}/api/v1/reportes?limite=50&estado=validado`)
+    ).json()) as Coleccion;
+    const id = lista.features[0]?.properties?.id as string | undefined;
+    expect(id, 'hace falta al menos un reporte validado en el seed').toBeTruthy();
+    const detalles: Array<[string, string, APIRequestContext]> = [
+      ['detalle público sin sesión', `${API}/api/v1/reportes/${id}`, anonimo],
+      ['detalle público con sesión de técnico', `${API}/api/v1/reportes/${id}`, conSesion],
+      ['detalle técnico', `${API}/api/v1/tecnico/reportes/${id}`, conSesion],
+    ];
+    for (const [vista, url, contexto] of detalles) {
+      const r = await contexto.get(url);
+      expect(r.status(), vista).toBe(200);
+      const props = (await r.json()).properties as Record<string, unknown>;
+      expect(props.estado, vista).toBe('validado');
+      expect(camposQuitadosPresentes(props), vista).toEqual([]);
+    }
   });
 
   test('los puntos críticos no publican medidas de la geometría exacta', async ({ request }) => {

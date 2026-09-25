@@ -139,7 +139,7 @@ async function generar(cuantos) {
         INSERT INTO reporte_inundacion (
           geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
           ubicacion_metodo, ubicacion_tipo, descripcion,
-          tirante_estimado, duracion_estimada, frecuencia, afectacion, causa_presunta,
+          tirante_estimado, frecuencia, causa_presunta,
           severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en)
         SELECT
           ST_SetSRID(pt, 4326),
@@ -153,12 +153,12 @@ async function generar(cuantos) {
           CASE WHEN i % 5 = 0 THEN 'vivienda_o_predio' ELSE 'via_publica' END::ubicacion_tipo,
           $2 || ' anegamiento de prueba nº ' || i,
           (ARRAY['tobillo','rodilla','muslo','mas_70'])[1 + (i % 4)]::tirante_estimado,
-          (ARRAY['menos_30min','30min_2h','2h_12h','mas_12h'])[1 + (i % 4)]::duracion_estimada,
           (ARRAY['primera_vez','ocasional','cada_lluvia_fuerte','permanente'])[1 + (i % 4)]::frecuencia,
-          (ARRAY['peatonal','vehicular','ingreso_viviendas','corte_total_via'])[1 + (i % 4)]::afectacion,
           'desconocida'::causa_presunta,
+          -- Severidad v2 (CLAUDE.md §9.1): T = F = 1 + (i % 4), así que puntaje = 2·T + F = 3·T
+          -- (3, 6, 9, 12) y la banda sale baja, media, alta, critica en ese mismo orden.
           (ARRAY['baja','media','alta','critica'])[1 + (i % 4)]::severidad,
-          5 + (i % 16), 1,
+          3 * (1 + (i % 4)), 2,
           -- Tres de cada cuatro publicables: es la proporción que hace que el índice parcial
           -- del listado público tenga una selectividad parecida a la de un sistema en marcha.
           CASE WHEN i % 4 = 0 THEN 'nuevo' ELSE (ARRAY['validado','resuelto'])[1 + (i % 2)] END::estado_reporte,

@@ -77,8 +77,9 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(f.properties.unidad_vecinal.id).toBe('unidad_vecinal:A');
     expect(f.properties.distrito.id).toBe('distrito_municipal:01');
     expect(f.properties.estado).toBe('nuevo');
-    // rodilla(2)*2 + 2h_12h(3) + cada_lluvia_fuerte(3) + ingreso_viviendas(3) = 13 → alta; E2 aplica pero ya es alta
-    expect(f.properties.severidad_calculada).toBe('alta');
+    // Severidad v2 (spec CA-A1): rodilla(2)·2 + cada_lluvia_fuerte(3) = 7 → media. Duración y
+    // afectación ya no cuentan aunque el cliente las mande.
+    expect(f.properties.severidad_calculada).toBe('media');
     expect(f.geometry.coordinates).toEqual([-63.195, -17.79]);
   });
   it('no publica reportes nuevos en el listado público ni en el detalle', async () => {
@@ -94,7 +95,7 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
       cookies: { curichi_sesion: cookieTecnico },
     });
     expect(det.statusCode).toBe(200);
-    expect(det.json().properties.severidad_puntaje).toBe(13);
+    expect(det.json().properties.severidad_puntaje).toBe(7);
     expect(det.json().properties.resolucion_flags).toEqual({
       en_limite: false,
       asignado_por_proximidad: false,
@@ -186,7 +187,7 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     });
     expect(re.statusCode).toBe(200);
     expect(re.json().properties.severidad).toBe('critica');
-    expect(re.json().properties.severidad_calculada).toBe('alta');
+    expect(re.json().properties.severidad_calculada).toBe('media');
   });
 });
 

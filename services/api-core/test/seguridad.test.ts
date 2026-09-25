@@ -95,24 +95,20 @@ function fila(parcial: Partial<FilaReporte> = {}): FilaReporte {
     unidad_vecinal_id: 'unidad_vecinal:A',
     uv_codigo: 'A',
     uv_nombre: 'UV A',
-    manzana_id: null,
     version_capa: 'test',
     resolucion_flags: {},
     ubicacion_metodo: 'manual',
     precision_gps_m: null,
     ubicacion_tipo: 'vivienda_o_predio',
-    direccion_aprox: 'Calle Falsa 123',
     descripcion: 'Se junta agua hasta la rodilla en la puerta de casa cada lluvia.',
     tirante_estimado: 'rodilla',
-    duracion_estimada: '2h_12h',
     frecuencia: 'ocasional',
-    afectacion: 'vehicular',
     causa_presunta: 'desconocida',
     sumidero_cercano: null,
     sumidero_estado: null,
     agua_brota_sumidero: null,
     severidad_calculada: 'media',
-    severidad_puntaje: 10,
+    severidad_puntaje: 6, // v2: rodilla (2·2) + ocasional (2)
     severidad_manual: null,
     severidad_motivo: null,
     estado: 'validado',
@@ -128,11 +124,14 @@ function fila(parcial: Partial<FilaReporte> = {}): FilaReporte {
 }
 
 describe('jitter público (§13)', () => {
-  it('desplaza la vivienda y oculta la dirección', () => {
+  // CA-A6: la dirección aproximada ya no existe en el reporte (migración 0010); la vista sigue
+  // obligada a desplazar la vivienda y ahora a no traer la clave en absoluto.
+  it('CA-A6: desplaza la vivienda y oculta la dirección', () => {
     const f = fila();
     const v = vistaPublica(f, '', 'sal-secreta');
     expect(v.props.precision_degradada).toBe(true);
-    expect(v.props.direccion_aprox).toBeNull();
+    expect(v.props).not.toHaveProperty('direccion_aprox');
+    expect(v.props).not.toHaveProperty('manzana_id');
     expect(v.lat).not.toBe(f.lat);
   });
 
@@ -148,12 +147,14 @@ describe('jitter público (§13)', () => {
     expect([a.lat, a.lon]).not.toEqual([b.lat, b.lon]);
   });
 
-  it('la vía pública no se degrada y el técnico siempre ve la coordenada exacta', () => {
+  it('CA-A6: la vía pública no se degrada y el técnico siempre ve la coordenada exacta', () => {
     const f = fila({ ubicacion_tipo: 'via_publica' });
     expect(vistaPublica(f, '', 'sal-secreta').props.precision_degradada).toBe(false);
     const t = vistaTecnica(fila(), '');
     expect([t.lat, t.lon]).toEqual([fila().lat, fila().lon]);
-    expect(t.props.direccion_aprox).toBe('Calle Falsa 123');
+    // Antes el técnico sí veía la dirección; el campo desaparece también de su vista (CA-A4).
+    expect(t.props).not.toHaveProperty('direccion_aprox');
+    expect(t.props).not.toHaveProperty('manzana_id');
   });
 });
 

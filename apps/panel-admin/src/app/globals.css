@@ -539,7 +539,7 @@ a.fila:hover {
   font-size: 0.95rem;
 }
 
-/* Opción tipo radio en tarjeta (tirante, duración, frecuencia…). */
+/* Opción tipo radio en tarjeta (tirante, frecuencia…). */
 .opc,
 .opcion-radio {
   display: flex;

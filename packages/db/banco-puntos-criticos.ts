@@ -22,13 +22,13 @@ async function sembrar(pool: pg.Pool, n: number, desde: number) {
     const lat = -17.7995 + Math.floor(foco / 60) * 0.0005 + ((desde + i) % 3) * 0.00002;
     const b = params.length;
     filas.push(
-      `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de banco de pruebas automatizado', 'rodilla', '2h_12h', 'ocasional', 'vehicular', 'media', 10, 'validado')`,
+      `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de banco de pruebas automatizado', 'rodilla', 'ocasional', 'media', 6, 2, 'validado')`,
     );
     params.push(lon, lat);
   }
   await pool.query(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-      tirante_estimado, duracion_estimada, frecuencia, afectacion, severidad_calculada, severidad_puntaje, estado)
+      tirante_estimado, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
      VALUES ${filas.join(',')}`,
     params,
   );

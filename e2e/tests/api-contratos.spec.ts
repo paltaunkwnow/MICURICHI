@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import {
   API,
+  crearReportePorApi,
   esperarPila,
   GEO,
   loginCiudadano,
@@ -81,6 +82,22 @@ test.describe('contratos de la API (sin navegador)', () => {
     });
     expect(fuera.status()).toBe(422);
     expect((await fuera.json()).codigo).toBe('FUERA_DE_COBERTURA');
+  });
+
+  test('CA-X1: el payload sin duración ni afectación crea un reporte con severidad v2', async ({
+    request,
+  }) => {
+    // `reporteValido` ya no lleva esos dos campos: si la API todavía los exige, esto es 400.
+    const id = await crearReportePorApi(request, `E2E-X1-${Date.now()}`);
+    await loginTecnico(request);
+    const r = await request.get(`${API}/api/v1/tecnico/reportes/${id}`);
+    expect(r.status()).toBe(200);
+    const p = (await r.json()).properties;
+    expect(p.estado).toBe('nuevo');
+    expect(p.unidad_vecinal?.id).toBeTruthy();
+    // Severidad v2: 2·2 (rodilla) + 3 (cada lluvia fuerte) = 7 → media.
+    expect(p.severidad_calculada).toBe('media');
+    expect(p.severidad_puntaje).toBe(7);
   });
 
   test('la exportación exige sesión de técnico', async ({ request }) => {

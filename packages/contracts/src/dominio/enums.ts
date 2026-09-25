@@ -6,9 +6,6 @@
 export const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
 export type Tirante = (typeof TIRANTES)[number];
 
-export const DURACIONES = ['menos_30min', '30min_2h', '2h_12h', 'mas_12h'] as const;
-export type Duracion = (typeof DURACIONES)[number];
-
 export const FRECUENCIAS = [
   'primera_vez',
   'ocasional',
@@ -16,14 +13,6 @@ export const FRECUENCIAS = [
   'permanente',
 ] as const;
 export type Frecuencia = (typeof FRECUENCIAS)[number];
-
-export const AFECTACIONES = [
-  'peatonal',
-  'vehicular',
-  'ingreso_viviendas',
-  'corte_total_via',
-] as const;
-export type Afectacion = (typeof AFECTACIONES)[number];
 
 export const CAUSAS_PRESUNTAS = [
   'sumidero_tapado',
@@ -74,23 +63,11 @@ export const ETIQUETAS = {
     muslo: { corta: 'Al muslo', rango: '40–70 cm' },
     mas_70: { corta: 'Más arriba de la cintura', rango: '>70 cm' },
   },
-  duracion: {
-    menos_30min: 'Menos de 30 minutos',
-    '30min_2h': '30 minutos a 2 horas',
-    '2h_12h': '2 a 12 horas',
-    mas_12h: 'Más de 12 horas',
-  },
   frecuencia: {
     primera_vez: 'Primera vez',
     ocasional: 'Ocasional',
     cada_lluvia_fuerte: 'Cada lluvia fuerte',
     permanente: 'Permanente',
-  },
-  afectacion: {
-    peatonal: 'Peatonal',
-    vehicular: 'Vehicular',
-    ingreso_viviendas: 'Ingreso de agua a viviendas',
-    corte_total_via: 'Corte total de la vía',
   },
   causa_presunta: {
     sumidero_tapado: 'Sumidero tapado',

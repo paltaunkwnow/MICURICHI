@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReporteFeature } from './api';
+import * as formato from './formato';
 import {
   contadorDescripcion,
   distanciaDesde,
@@ -17,7 +18,6 @@ const props = {
   id: '00000000-0000-0000-0000-000000000001',
   distrito: { id: 'distrito_municipal:7', codigo: '7', nombre: 'Distrito 7' },
   unidad_vecinal: { id: 'unidad_vecinal:123', codigo: '123', nombre: 'Unidad Vecinal 123' },
-  direccion_aprox: null,
   tirante_estimado: 'rodilla',
 } as unknown as ReporteFeature['properties'];
 
@@ -29,11 +29,30 @@ const reporte = {
 } as ReporteFeature;
 
 describe('formato', () => {
-  it('usa el nombre de la UV cuando no hay dirección', () => {
-    expect(tituloReporte(props)).toBe('Unidad Vecinal 123');
-    expect(tituloReporte({ ...props, direccion_aprox: 'Av. Piraí esq. Los Tajibos' })).toBe(
-      'Av. Piraí esq. Los Tajibos',
-    );
+  it('CA-W5: el título es el nombre de la UV, o «Unidad vecinal sin datos» si no hay UV', () => {
+    const losLotes = {
+      ...props,
+      unidad_vecinal: { id: 'unidad_vecinal:9', codigo: '9', nombre: 'Los Lotes' },
+    } as ReporteFeature['properties'];
+    const sinUv = { ...props, unidad_vecinal: null } as unknown as ReporteFeature['properties'];
+    expect(tituloReporte(losLotes)).toBe('Los Lotes');
+    expect(tituloReporte(sinUv)).toBe('Unidad vecinal sin datos');
+  });
+
+  it('CA-W5: el título no usa la dirección aproximada aunque llegue en un objeto viejo', () => {
+    // Una respuesta guardada en la caché de la PWA antes del cambio todavía puede traer
+    // `direccion_aprox`. El campo ya no existe en el contrato: el título no puede depender de él.
+    const viejo = {
+      ...props,
+      unidad_vecinal: { id: 'unidad_vecinal:9', codigo: '9', nombre: 'Los Lotes' },
+      direccion_aprox: 'Av. Piraí esq. Los Tajibos',
+    } as unknown as ReporteFeature['properties'];
+    expect(tituloReporte(viejo)).toBe('Los Lotes');
+  });
+
+  it('CA-W5: formato.ts no exporta etiquetaDuracion ni etiquetaAfectacion', () => {
+    expect(Object.keys(formato)).not.toContain('etiquetaDuracion');
+    expect(Object.keys(formato)).not.toContain('etiquetaAfectacion');
   });
 
   it('arma el subtítulo con UV, distrito y distancia', () => {

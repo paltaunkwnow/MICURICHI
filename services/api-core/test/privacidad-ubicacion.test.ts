@@ -14,7 +14,10 @@
  *     ES su coordenada exacta, publicada por `GET /geo/v1/puntos-criticos`.
  *  3. La vista pública publicaba `manzana_id` junto al punto desplazado. La manzana es un
  *     polígono de unos 100 m de lado y el desplazamiento llega a 30 m: cruzar las dos cosas
- *     recorta la zona posible mucho más que el jitter solo.
+ *     recorta la zona posible mucho más que el jitter solo. Primero se ocultó en vivienda; desde
+ *     la corrida SDD 2026-09-25 (spec CA-A3 y CA-A6) el reporte ya no guarda manzana, así que la
+ *     invariante pasa a ser más fuerte: ni la vista pública ni la técnica traen `manzana_id`,
+ *     aunque geo-service siga informando la manzana del punto al resolver.
  */
 import { CONFIG_DOMINIO } from 'contracts';
 import { ejecutorPg } from 'db';
@@ -134,51 +137,49 @@ describe('la vista pública degrada la ubicación de una vivienda', () => {
   });
 });
 
-describe('la manzana no se publica junto a una coordenada desplazada', () => {
-  it('el público no recibe manzana_id de una vivienda; el técnico sí', async () => {
-    const id = await crearViviendaValidada();
-    // La manzana de las capas de prueba contiene (-17.797, -63.197); se mueve el reporte ahí
-    // para que el resolver le asigne una y el caso no dependa de dónde caiga el punto por azar.
-    await pool.query(`UPDATE reporte_inundacion SET manzana_id = 'manzana:A-1' WHERE id = $1`, [
-      id,
-    ]);
-    const detalle = await app.inject({ method: 'GET', url: `/api/v1/reportes/${id}` });
-    expect(detalle.json().properties.precision_degradada).toBe(true);
-    expect(detalle.json().properties.manzana_id).toBeNull();
-
-    const [f] = await listaPublica('limite=500');
-    expect(f?.properties.manzana_id ?? null).toBeNull();
-
-    const tec = await app.inject({
-      method: 'GET',
-      url: `/api/v1/tecnico/reportes/${id}`,
-      cookies: { curichi_sesion: cookieTecnico },
-    });
-    expect(tec.json().properties.manzana_id).toBe('manzana:A-1');
-  });
-
-  it('en vía pública sí se publica: ahí el punto ya sale en su sitio', async () => {
-    const r = await crear({
-      ...reporteValido,
-      lat: LAT,
-      lon: LON,
-      ubicacion_tipo: 'via_publica',
-    });
+/**
+ * Sustituye a «la manzana no se publica junto a una coordenada desplazada» (spec CA-A6). Antes se
+ * escribía `manzana_id` en la fila con un UPDATE y se comprobaba que el público de una vivienda
+ * no la recibía y el técnico sí. La columna desaparece en la migración 0010, así que la
+ * invariante de privacidad se afirma sobre lo único que queda: ninguna vista la trae, ni en
+ * vivienda ni en vía pública, ni el público ni el técnico.
+ */
+describe('CA-A6: ni la vista pública ni la técnica traen manzana_id', () => {
+  async function crearValidado(ubicacion_tipo: 'vivienda_o_predio' | 'via_publica') {
+    const r = await crear({ ...reporteValido, lat: LAT, lon: LON, ubicacion_tipo });
     expect(r.statusCode).toBe(201);
-    const id = r.json().id;
-    await app.inject({
+    const id = r.json().id as string;
+    const val = await app.inject({
       method: 'PATCH',
       url: `/api/v1/reportes/${id}/estado`,
       payload: { estado: 'validado' },
       cookies: { curichi_sesion: cookieTecnico },
     });
-    await pool.query(`UPDATE reporte_inundacion SET manzana_id = 'manzana:A-1' WHERE id = $1`, [
-      id,
-    ]);
-    const detalle = await app.inject({ method: 'GET', url: `/api/v1/reportes/${id}` });
-    expect(detalle.json().properties.precision_degradada).toBe(false);
-    expect(detalle.json().properties.manzana_id).toBe('manzana:A-1');
-  });
+    expect(val.statusCode).toBe(200);
+    return id;
+  }
+
+  for (const tipo of ['vivienda_o_predio', 'via_publica'] as const) {
+    it(`CA-A6: ${tipo}: ni el público ni el técnico reciben manzana_id`, async () => {
+      const id = await crearValidado(tipo);
+      const detalle = await app.inject({ method: 'GET', url: `/api/v1/reportes/${id}` });
+      expect(detalle.statusCode).toBe(200);
+      expect(detalle.json().properties.precision_degradada).toBe(tipo === 'vivienda_o_predio');
+      expect(detalle.json().properties).not.toHaveProperty('manzana_id');
+
+      const f = (await listaPublica('limite=500')).find((x) => x.id === id);
+      expect(f, 'el reporte validado sale en el listado público').toBeTruthy();
+      expect(f!.properties).not.toHaveProperty('manzana_id');
+
+      const tec = await app.inject({
+        method: 'GET',
+        url: `/api/v1/tecnico/reportes/${id}`,
+        cookies: { curichi_sesion: cookieTecnico },
+      });
+      expect(tec.statusCode).toBe(200);
+      expect(tec.json().properties).not.toHaveProperty('manzana_id');
+    });
+  }
 });
 
 describe('el bbox público no puede usarse como oráculo de la coordenada exacta', () => {
@@ -189,16 +190,19 @@ describe('el bbox público no puede usarse como oráculo de la coordenada exacta
   const EXACTO = { lon: -63.1912345, lat: -17.7898765 };
   const PUBLICADO = { lon: -63.1914345, lat: -17.7899765 };
 
+  // Fixture adaptado a la migración 0010 (spec CA-A6): sin `duracion_estimada` ni `afectacion`,
+  // y con la severidad v2 de rodilla (2) + ocasional (2) = 6 → media. Las aserciones de este
+  // bloque no cambian.
   async function insertarConPuntoPublicable(): Promise<string> {
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO reporte_inundacion
          (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-          descripcion, tirante_estimado, duracion_estimada, frecuencia, afectacion,
-          severidad_calculada, severidad_puntaje, estado)
+          descripcion, tirante_estimado, frecuencia,
+          severidad_calculada, severidad_puntaje, severidad_version, estado)
        VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($3, $4), 4326),
           'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'vivienda_o_predio',
-          'Reporte con punto publicable fijado para la prueba', 'rodilla', '2h_12h', 'ocasional',
-          'vehicular', 'media', 10, 'validado')
+          'Reporte con punto publicable fijado para la prueba', 'rodilla', 'ocasional',
+          'media', 6, 2, 'validado')
        RETURNING id::text`,
       [EXACTO.lon, EXACTO.lat, PUBLICADO.lon, PUBLICADO.lat],
     );

@@ -3,6 +3,8 @@ import { colorSeveridad } from '@/lib/formato';
 
 /** Puntaje máximo de cada variable en la tabla de severidad (CLAUDE.md §9.1). */
 const MAXIMO = 4;
+/** Puntaje máximo de la fórmula (severidad v2: 2·4 + 4 = 12). Sale de los pesos, no se fija. */
+const PUNTAJE_MAXIMO = (PESOS.tirante + PESOS.frecuencia) * MAXIMO;
 
 /**
  * De dónde salió el puntaje (M-03 del prototipo). El técnico que va a validar o a reclasificar
@@ -12,15 +14,15 @@ const MAXIMO = 4;
 export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
   const filas: Array<[string, number, number]> = [
     ['Tirante', PUNTOS.tirante[reporte.tirante_estimado], PESOS.tirante],
-    ['Duración', PUNTOS.duracion[reporte.duracion_estimada], PESOS.duracion],
     ['Frecuencia', PUNTOS.frecuencia[reporte.frecuencia], PESOS.frecuencia],
-    ['Afectación', PUNTOS.afectacion[reporte.afectacion], PESOS.afectacion],
   ];
   const color = colorSeveridad(reporte.severidad_calculada).relleno;
 
   return (
     <div className="mt-4">
-      <h3 className="glbl mt-0">Cómo se llegó a {reporte.severidad_puntaje} de 20 puntos</h3>
+      <h3 className="glbl mt-0">
+        Cómo se llegó a {reporte.severidad_puntaje} de {PUNTAJE_MAXIMO} puntos
+      </h3>
       <dl className="grid gap-2.5">
         {filas.map(([nombre, valor, peso]) => (
           <div
@@ -45,8 +47,8 @@ export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
         ))}
       </dl>
       <p className="ayuda mt-3">
-        puntaje = {PESOS.tirante} × tirante + duración + frecuencia + afectación. El tirante pesa
-        doble porque es lo más ligado al riesgo directo para personas y vehículos.
+        puntaje = {PESOS.tirante} × tirante + frecuencia. El tirante pesa doble porque es lo más
+        ligado al riesgo directo para personas y vehículos.
         {reporte.severidad_manual
           ? ' Este reporte tiene una reclasificación manual, así que la severidad efectiva no es esta.'
           : ' Sin reclasificación manual: se recalcula si el reporte se corrige.'}

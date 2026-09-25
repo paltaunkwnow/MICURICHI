@@ -6,7 +6,7 @@ import type { ReporteCrearEntrada } from 'contracts';
  * El caso que lo justifica no es el descuido: es el teléfono. Al tocar «Agregar» foto, el
  * navegador cede el control a la cámara o al selector de archivos, y en un móvil con poca memoria
  * eso puede descartar la pestaña; al volver, la página se recarga. Sin esto, el vecino que ya
- * había contestado cinco pantallas se encontraba con el paso 1 en blanco. El mismo caso se da al
+ * había contestado varias pantallas se encontraba con el paso 1 en blanco. El mismo caso se da al
  * tocar «atrás» sin querer, o al girar el teléfono en algunos navegadores.
  *
  * Va en `sessionStorage` y no en `localStorage` a propósito: el borrador pertenece a ESTA sesión
@@ -22,6 +22,24 @@ const CLAVE = 'curichi.borrador-reporte.v1';
 
 /** Caduca antes que el vale de las fotos (24 h), para no restaurar un reporte con fotos muertas. */
 export const VALIDEZ_MS = 12 * 60 * 60 * 1000;
+
+/** Pasos del asistente de reporte: ubicación, agua, fotos y descripción, revisión. */
+export const PASOS_REPORTE = 4;
+
+/**
+ * Formato del borrador. Hasta la corrida 2026-09-25-quitar-campos-del-reporte el asistente tenía
+ * cinco pasos (tirante y duración en el 2, frecuencia y afectación en el 3); ahora tirante y
+ * frecuencia van juntos en el 2 y todo lo que seguía se corre uno. Un borrador sin `formato` es
+ * del asistente viejo: sin traducir su paso, quien iba por las fotos caería en la revisión.
+ */
+const FORMATO = 2;
+const PASO_VIEJO_A_NUEVO: Record<number, number> = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 4 };
+
+/**
+ * Respuestas que el formulario ya no pregunta. Un borrador viejo las trae; si se restauraran,
+ * viajarían en el envío y el formulario cargaría con valores que no se ven en ninguna pantalla.
+ */
+const CAMPOS_QUITADOS = ['duracion_estimada', 'afectacion'] as const;
 
 export interface Borrador {
   /** Momento del último guardado, en milisegundos desde época. */
@@ -57,7 +75,7 @@ export function guardarBorrador(b: Omit<Borrador, 'guardado_en'>): void {
   const s = almacen();
   if (!s) return;
   try {
-    s.setItem(CLAVE, JSON.stringify({ ...b, guardado_en: Date.now() }));
+    s.setItem(CLAVE, JSON.stringify({ ...b, guardado_en: Date.now(), formato: FORMATO }));
   } catch {
     // Cuota llena: el formulario sigue funcionando en memoria, que es lo que importa.
   }
@@ -78,19 +96,29 @@ export function leerBorrador(): Borrador | null {
       olvidarBorrador();
       return null;
     }
+    const valores: Record<string, unknown> =
+      typeof d.valores === 'object' && d.valores !== null ? { ...d.valores } : {};
+    for (const c of CAMPOS_QUITADOS) delete valores[c];
     return {
       guardado_en: d.guardado_en,
-      paso: typeof d.paso === 'number' && d.paso >= 1 && d.paso <= 5 ? d.paso : 1,
+      paso: pasoRestaurado(d.paso, (b as { formato?: unknown }).formato === FORMATO),
       ubicacion: d.ubicacion ?? null,
       resuelto: d.resuelto ?? null,
       fotos: Array.isArray(d.fotos) ? d.fotos.filter((f) => typeof f?.objeto_key === 'string') : [],
-      valores: typeof d.valores === 'object' && d.valores !== null ? d.valores : {},
+      valores: valores as Borrador['valores'],
       clave: d.clave,
     };
   } catch {
     // Basura de una versión anterior o JSON roto: se descarta en silencio.
     return null;
   }
+}
+
+/** Paso válido del asistente actual; cualquier valor que no se entienda vuelve al primero. */
+function pasoRestaurado(paso: unknown, formatoActual: boolean): number {
+  if (typeof paso !== 'number' || !Number.isInteger(paso)) return 1;
+  if (!formatoActual) return PASO_VIEJO_A_NUEVO[paso] ?? 1;
+  return paso >= 1 && paso <= PASOS_REPORTE ? paso : 1;
 }
 
 export function olvidarBorrador(): void {

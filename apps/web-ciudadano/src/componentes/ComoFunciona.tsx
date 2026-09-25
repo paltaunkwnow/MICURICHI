@@ -1,6 +1,6 @@
 'use client';
 
-import { CONFIG_DOMINIO, NOTA_METODOLOGICA, type Severidad } from 'contracts';
+import { BANDAS, CONFIG_DOMINIO, NOTA_METODOLOGICA, type Severidad } from 'contracts';
 import {
   ChartColumn,
   CircleQuestionMark,
@@ -172,7 +172,7 @@ export function ComoFunciona() {
               </li>
               <li className="fila">
                 Si el punto está sobre una vivienda o predio, el mapa público lo desplaza hasta{' '}
-                {CONFIG_DOMINIO.JITTER_PUBLICO_M} metros y no muestra la dirección.
+                {CONFIG_DOMINIO.JITTER_PUBLICO_M} metros.
               </li>
               <li className="fila">
                 A las fotos les quitamos los metadatos, incluida la ubicación que graba la cámara.
@@ -226,7 +226,7 @@ export function ComoFunciona() {
               riesgo trae para personas y vehículos.
             </p>
             <p className="mt-2.5 rounded-2xl bg-tinta-100 p-4 text-center font-semibold">
-              puntaje = 2 × tirante + duración + frecuencia + afectación
+              puntaje = 2 × tirante + frecuencia
             </p>
             <table className="tabla mt-3">
               <caption className="sr-only">Bandas de severidad según el puntaje</caption>
@@ -237,24 +237,22 @@ export function ComoFunciona() {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  ['5 a 8', 'Baja'],
-                  ['9 a 12', 'Media'],
-                  ['13 a 16', 'Alta'],
-                  ['17 a 20', 'Crítica'],
-                ].map(([p, s]) => (
-                  <tr key={p}>
-                    <td>{p}</td>
-                    <td className="font-semibold">{s}</td>
+                {/* Las bandas salen de contracts: si la fórmula cambia de versión, esta tabla no
+                    puede quedarse contando la anterior (pasó con la v1, de 5 a 20). */}
+                {BANDAS.map((b) => (
+                  <tr key={b.banda}>
+                    <td>
+                      {b.min} a {b.max}
+                    </td>
+                    <td className="font-semibold">{etiquetaSeveridad(b.banda)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className="mt-3 text-[15px] leading-[1.55] text-tinta-600">
-              Hay tres reglas que solo pueden subir la severidad, nunca bajarla: si el agua pasa la
-              cintura el punto es crítico; si entra a las viviendas o corta la vía y pasa en cada
-              lluvia fuerte es al menos alta; y si el agua está siempre es al menos media, porque
-              eso indica una falla de drenaje.
+              Hay dos reglas que solo pueden subir la severidad, nunca bajarla: si el agua pasa la
+              cintura el punto es crítico; y si el agua está siempre es al menos media, porque eso
+              indica una falla de drenaje.
             </p>
             <Aviso tono="info" className="mt-3.5">
               Un punto marcado como resuelto es uno donde el municipio ya intervino.

@@ -14,9 +14,7 @@ import { ErrorApi, obtenerCapasMapa, obtenerReporte } from '@/lib/api';
 import {
   avisosResolucion,
   coordenadas,
-  etiquetaAfectacion,
   etiquetaCausa,
-  etiquetaDuracion,
   etiquetaFrecuencia,
   etiquetaMetodo,
   etiquetaSeveridad,
@@ -136,14 +134,12 @@ export default function PaginaDetalleReporte() {
                   ? `${p.unidad_vecinal.codigo} · ${p.unidad_vecinal.nombre}`
                   : null}
               </Dato>
-              <Dato etiqueta="Manzana">{p.manzana_id}</Dato>
               <Dato etiqueta="Coordenadas (lat, lon)">
                 <span className="font-mono">{coordenadas(lon, lat)}</span>
               </Dato>
               <Dato etiqueta="Método de ubicación">{etiquetaMetodo(p.ubicacion_metodo)}</Dato>
               <Dato etiqueta="Precisión GPS">{precisionGps(p.precision_gps_m)}</Dato>
               <Dato etiqueta="Tipo de lugar">{etiquetaUbicacionTipo(p.ubicacion_tipo)}</Dato>
-              <Dato etiqueta="Dirección aproximada">{p.direccion_aprox}</Dato>
               <Dato etiqueta="Versión de capa">{p.version_capa}</Dato>
               {/*
                 No se usa `precision_degradada`: ese campo describe la coordenada de ESTA
@@ -163,9 +159,7 @@ export default function PaginaDetalleReporte() {
             <dl className="lista-datos">
               <Dato etiqueta="Fecha del evento">{fechaHora(p.evento_en)}</Dato>
               <Dato etiqueta="Tirante estimado">{etiquetaTirante(p.tirante_estimado)}</Dato>
-              <Dato etiqueta="Duración estimada">{etiquetaDuracion(p.duracion_estimada)}</Dato>
               <Dato etiqueta="Frecuencia">{etiquetaFrecuencia(p.frecuencia)}</Dato>
-              <Dato etiqueta="Afectación">{etiquetaAfectacion(p.afectacion)}</Dato>
               <Dato etiqueta="Causa presunta">{etiquetaCausa(p.causa_presunta)}</Dato>
               <Dato etiqueta="Sumidero cercano">
                 {p.sumidero_cercano ? etiquetaSumideroCercano(p.sumidero_cercano) : 'Sin dato'}

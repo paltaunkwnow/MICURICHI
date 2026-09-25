@@ -23,18 +23,14 @@ export interface FilaReporte {
   unidad_vecinal_id: string;
   uv_codigo: string | null;
   uv_nombre: string | null;
-  manzana_id: string | null;
   version_capa: string | null;
   resolucion_flags: Record<string, unknown>;
   ubicacion_metodo: 'gps' | 'manual';
   precision_gps_m: string | null;
   ubicacion_tipo: 'via_publica' | 'vivienda_o_predio' | 'otro';
-  direccion_aprox: string | null;
   descripcion: string;
   tirante_estimado: ReportePublico['tirante_estimado'];
-  duracion_estimada: ReportePublico['duracion_estimada'];
   frecuencia: ReportePublico['frecuencia'];
-  afectacion: ReportePublico['afectacion'];
   causa_presunta: ReportePublico['causa_presunta'];
   sumidero_cercano: ReporteTecnico['sumidero_cercano'];
   sumidero_estado: ReporteTecnico['sumidero_estado'];
@@ -58,9 +54,9 @@ export const SELECT_REPORTE = `
          ST_X(r.geom_publico) AS lon_publico, ST_Y(r.geom_publico) AS lat_publico,
          r.creado_en, r.actualizado_en, r.evento_en, r.autor_id,
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
-         r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.manzana_id, r.version_capa, r.resolucion_flags,
-         r.ubicacion_metodo, r.precision_gps_m, r.ubicacion_tipo, r.direccion_aprox, r.descripcion,
-         r.tirante_estimado, r.duracion_estimada, r.frecuencia, r.afectacion, r.causa_presunta,
+         r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
+         r.ubicacion_metodo, r.precision_gps_m, r.ubicacion_tipo, r.descripcion,
+         r.tirante_estimado, r.frecuencia, r.causa_presunta,
          r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,
          r.estado, r.estado_motivo, r.fusionado_en_id, r.punto_critico_id, pc.n_reportes AS n_reportes_punto,
@@ -134,21 +130,10 @@ export function vistaPublica(
             nombre: f.uv_nombre ?? f.unidad_vecinal_id,
           }
         : null,
-      // La manzana se oculta exactamente cuando se aplica jitter, y por la misma razón que la
-      // dirección. El desplazamiento público es de hasta 30 m; una manzana real de Santa Cruz
-      // mide del orden de 100 m de lado, así que publicar las dos cosas juntas deja la ubicación
-      // en la intersección de un disco de 30 m con el polígono de la cuadra — bastante más
-      // estrecho que el disco solo, y en una esquina puede quedar en unos pocos metros.
-      // Con las 1 152 manzanas sintéticas la diferencia era teórica; con las 27 527 reales, no.
-      // En vía pública no hay jitter (el punto ya sale en su sitio), así que ahí no se esconde.
-      manzana_id: degradar ? null : f.manzana_id,
-      direccion_aprox: degradar ? null : f.direccion_aprox,
       descripcion: f.descripcion,
       fotos: (f.fotos ?? []).map((k) => urlFoto(urlBase, k)),
       tirante_estimado: f.tirante_estimado,
-      duracion_estimada: f.duracion_estimada,
       frecuencia: f.frecuencia,
-      afectacion: f.afectacion,
       causa_presunta: f.causa_presunta,
       severidad: f.severidad_manual ?? f.severidad_calculada,
       severidad_calculada: f.severidad_calculada,

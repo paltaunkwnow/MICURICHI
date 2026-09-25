@@ -4,10 +4,8 @@ import { X } from 'lucide-react';
 import Link from 'next/link';
 import type { ReporteFeature } from '@/lib/api';
 import {
-  etiquetaAfectacion,
   etiquetaCausa,
   etiquetaDistrito,
-  etiquetaDuracion,
   etiquetaFrecuencia,
   etiquetaTirante,
   etiquetaUnidadVecinal,
@@ -95,16 +93,8 @@ export function HojaDetalle({
           <dd>{etiquetaTirante(p.tirante_estimado)}</dd>
         </div>
         <div>
-          <dt>Duración</dt>
-          <dd>{etiquetaDuracion(p.duracion_estimada)}</dd>
-        </div>
-        <div>
           <dt>Frecuencia</dt>
           <dd>{etiquetaFrecuencia(p.frecuencia)}</dd>
-        </div>
-        <div>
-          <dt>Afectación</dt>
-          <dd>{etiquetaAfectacion(p.afectacion)}</dd>
         </div>
         <div>
           <dt>Causa presunta</dt>
