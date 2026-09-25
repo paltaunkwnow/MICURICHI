@@ -2,7 +2,7 @@ import { type APIRequestContext, expect, type Page } from '@playwright/test';
 
 export const API = 'http://127.0.0.1:3001';
 export const GEO = 'http://127.0.0.1:3002';
-export const PANEL = 'http://localhost:3100';
+export const PANEL = process.env.PANEL_ADMIN_URL ?? 'http://localhost:3100';
 
 /** Punto dentro de la cobertura municipal (plaza 24 de Septiembre, Santa Cruz de la Sierra). */
 export const PUNTO_CENTRO = { lat: -17.7833, lon: -63.1821 };
@@ -12,6 +12,11 @@ export const PUNTO_FUERA = { lat: -17.5, lon: -63.0 };
 export const CREDENCIALES_TECNICO = {
   email: process.env.E2E_TECNICO_EMAIL ?? 'tecnico@curichi.local',
   password: process.env.E2E_TECNICO_PASSWORD ?? 'curichi-tecnico-local',
+};
+
+export const CREDENCIALES_ADMIN = {
+  email: process.env.E2E_ADMIN_EMAIL ?? 'admin@curichi.local',
+  password: process.env.E2E_ADMIN_PASSWORD ?? 'curichi-admin-local',
 };
 
 /** Cuenta ciudadana del seed. Desde la Fase 5, crear un reporte exige sesión. */

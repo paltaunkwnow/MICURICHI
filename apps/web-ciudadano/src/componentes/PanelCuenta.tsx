@@ -1,9 +1,10 @@
 'use client';
 
 import { CONFIG_DOMINIO } from 'contracts';
-import { LogOut, UserRound } from 'lucide-react';
+import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { destinoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
 import { useCerrarSesion, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
 
@@ -28,6 +29,7 @@ export function PanelCuenta() {
   const router = useRouter();
   const { usuario, cargando, puedeReportarDesde } = useSesion();
   const salir = useCerrarSesion();
+  const panel = destinoDelPanel(usuario?.rol, URL_DEL_PANEL);
 
   if (cargando)
     return (
@@ -68,6 +70,21 @@ export function PanelCuenta() {
           <p className="ayuda">{usuario.email}</p>
         </div>
       </div>
+
+      {/* Arriba de todo: quien tiene rol técnico casi siempre viene a esto. En móvil no hay barra
+          superior, así que este es el único camino al panel. */}
+      {panel && (
+        <div className="mb-5">
+          <a href={panel} className="btn btn-tinta btn-bloque no-underline">
+            <LayoutDashboard size={18} aria-hidden="true" className="mr-2" />
+            Ir al panel técnico
+          </a>
+          <p className="ayuda mt-2">
+            Tu cuenta es de {usuario.rol === 'admin' ? 'administrador' : 'técnico'}. Moderar,
+            exportar y ver los indicadores se hace desde el panel.
+          </p>
+        </div>
+      )}
 
       {puedeReportarDesde ? (
         <Aviso tono="alerta">

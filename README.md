@@ -45,8 +45,14 @@ pública como vecino y el panel técnico como administrador.
 - La cuenta de usuario normal **no entra al panel técnico**: el panel lo dice y la API responde 403.
 - Cada cuenta puede enviar **un reporte cada 60 minutos**. Si querés probar varios envíos
   seguidos, usá varias cuentas.
-- El administrador y el técnico también pueden entrar a la app pública, pero ahí ven lo mismo que
-  cualquiera: la vista con coordenadas exactas está solo en el panel.
+- El administrador y el técnico también pueden entrar a la app pública. Ahí ven el mismo mapa que
+  cualquiera —la vista con coordenadas exactas está solo en el panel— más un botón **«Panel
+  técnico»**: en la barra de arriba en escritorio, y en «Cuenta» en el móvil. El panel tiene que
+  estar arrancado (`pnpm --filter panel-admin dev`).
+- En el mismo navegador, `localhost:3000` y `localhost:3100` **comparten la sesión**: el navegador
+  no separa las cookies por puerto. Por eso el botón entra al panel sin volver a pedir la
+  contraseña. Para tener a la vez la vecina en la app pública y el admin en el panel, abrí uno de
+  los dos en una ventana de incógnito.
 
 > **Solo para desarrollo.** Estas contraseñas están escritas aquí a propósito para que el equipo
 > pueda probar. No deben existir en ninguna instalación real: el seed se niega a ejecutarse con

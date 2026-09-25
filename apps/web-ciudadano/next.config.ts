@@ -2,6 +2,9 @@ import type { NextConfig } from 'next';
 
 const API = process.env.API_CORE_URL ?? 'http://127.0.0.1:3001';
 const GEO = process.env.GEO_SERVICE_URL ?? 'http://127.0.0.1:3002';
+// Adónde lleva el botón «Panel técnico» que ven técnico y admin (src/lib/panel.ts). Se fija al
+// compilar, porque el navegador necesita el valor: cambiarlo exige volver a construir la app.
+const PANEL = process.env.PANEL_ADMIN_URL ?? 'http://localhost:3100';
 const desarrollo = process.env.NODE_ENV !== 'production';
 
 /**
@@ -66,6 +69,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   // El manual del repositorio es el CLAUDE.md de la raíz: Next no debe generar los suyos.
   agentRules: false,
+  env: { PANEL_ADMIN_URL: PANEL },
   // Las apps hablan con los servicios por rutas relativas; Next las reenvía (mismo origen → cookies y CORS simples).
   async rewrites() {
     return [

@@ -11,7 +11,9 @@ pnpm --filter web-ciudadano build && pnpm --filter web-ciudadano start   # modo 
 ```
 
 Variables: `API_CORE_URL` y `GEO_SERVICE_URL` (destino de los *rewrites* de Next; la app habla con
-los servicios por rutas relativas, así que el navegador nunca ve otro origen). Ver `.env.example`.
+los servicios por rutas relativas, así que el navegador nunca ve otro origen), y `PANEL_ADMIN_URL`
+(adónde lleva el botón «Panel técnico», que solo ven técnico y admin; por defecto
+`http://localhost:3100` y se fija al construir). Ver `.env.example`.
 
 ## Pantallas
 

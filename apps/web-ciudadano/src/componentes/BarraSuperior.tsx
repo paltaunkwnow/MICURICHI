@@ -1,8 +1,9 @@
 'use client';
 
-import { UserRound } from 'lucide-react';
+import { LayoutDashboard, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { destinoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
 import { useSesion } from '@/lib/sesion';
 
 /**
@@ -23,6 +24,7 @@ const ENLACES = [
 export function BarraSuperior() {
   const ruta = usePathname();
   const { usuario, cargando } = useSesion();
+  const panel = destinoDelPanel(usuario?.rol, URL_DEL_PANEL);
   const activo = (href: string) =>
     href === '/' ? ruta === '/' : ruta === href || ruta.startsWith(`${href}/`);
   return (
@@ -45,6 +47,15 @@ export function BarraSuperior() {
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-2">
+        {/* Solo técnico y admin. Es `<a>` y no `Link`: el panel es otra aplicación, en otro origen.
+            Por debajo de 1280 px queda solo el ícono: con el texto, a 1024 px la barra partía en dos
+            líneas todos sus enlaces. El texto sigue ahí para el lector de pantalla. */}
+        {panel && (
+          <a href={panel} className="btn btn-tinta btn-sm no-underline" title="Panel técnico">
+            <LayoutDashboard size={17} aria-hidden="true" className="xl:mr-2" />
+            <span className="max-xl:sr-only">Panel técnico</span>
+          </a>
+        )}
         {/* Mientras no se sabe si hay sesión no se enseña ninguna de las dos opciones: un
             «Iniciar sesión» que parpadea y se convierte en el nombre de la persona al medio
             segundo es peor que un hueco que se rellena. */}
