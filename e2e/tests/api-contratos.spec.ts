@@ -3,6 +3,7 @@ import {
   API,
   esperarPila,
   GEO,
+  loginCiudadano,
   loginTecnico,
   PNG_1X1,
   PUNTO_CENTRO,
@@ -41,9 +42,27 @@ test.describe('contratos de la API (sin navegador)', () => {
     expect(fuera.unidad_vecinal).toBeNull();
   });
 
+  test('sin sesión no se puede crear un reporte ni subir una foto', async ({ request }) => {
+    // Los dos caminos de escritura de la app pública exigen cuenta desde la Fase 5: el límite
+    // por IP no resiste a una IP dinámica y sin identidad no hay nada estable que limitar.
+    const reporte = await request.post(`${API}/api/v1/reportes`, {
+      data: reporteValido('sin-sesion'),
+    });
+    expect(reporte.status()).toBe(401);
+    expect((await reporte.json()).codigo).toBe('SIN_SESION');
+    const foto = await request.post(`${API}/api/v1/fotos`, {
+      multipart: { archivo: { name: 'x.png', mimeType: 'image/png', buffer: PNG_1X1 } },
+    });
+    expect(foto.status()).toBe(401);
+  });
+
   test('la creación de reportes valida el payload, el honeypot y la cobertura', async ({
     request,
   }) => {
+    await loginCiudadano(request);
+    // Los tres casos se rechazan ANTES de tocar la cuota: dos en la validación del cuerpo y el
+    // tercero al resolver la unidad vecinal, los tres fuera de la transacción. Por eso pueden
+    // ir seguidos con la misma cuenta.
     const corto = await request.post(`${API}/api/v1/reportes`, {
       data: { ...reporteValido('corto'), descripcion: 'agua' },
     });
@@ -94,6 +113,7 @@ test.describe('contratos de la API (sin navegador)', () => {
   });
 
   test('las fotos se guardan sin metadatos EXIF', async ({ request }) => {
+    await loginCiudadano(request);
     const r = await request.post(`${API}/api/v1/fotos`, {
       multipart: { archivo: { name: 'charco.png', mimeType: 'image/png', buffer: PNG_1X1 } },
     });
@@ -106,6 +126,7 @@ test.describe('contratos de la API (sin navegador)', () => {
   });
 
   test('rechaza archivos que no son imágenes aunque la extensión mienta', async ({ request }) => {
+    await loginCiudadano(request);
     const r = await request.post(`${API}/api/v1/fotos`, {
       multipart: {
         archivo: {

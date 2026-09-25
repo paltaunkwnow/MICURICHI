@@ -6,6 +6,7 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,6 +17,20 @@ env:
   DO_NOT_TRACK: 1
 
 jobs:
+  # gitleaks revisa TODO el historial, no solo el árbol actual: un secreto commiteado y luego
+  # borrado sigue estando en los objetos de git y hay que rotarlo igual.
+  secretos-historial:
+    name: gitleaks (historial)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   verificar:
     name: lint · typecheck · test · build
     runs-on: ubuntu-latest
@@ -33,6 +48,29 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      - name: Secretos (escaneo propio sobre el árbol)
+        run: pnpm secretos
+
+      - name: Dependencias vulnerables
+        # Bloquea en alto y crítico. Los avisos moderados de herramientas offline (el ETL) no
+        # deben dejar rojo un PR que no los toca; se revisan con `pnpm audit` a mano.
+        run: pnpm auditoria
+
+      # `openapi.yaml` se GENERA desde los esquemas Zod pero está versionado, porque es lo que
+      # sirve `/docs` y lo que lee quien integra. Si alguien toca un esquema y no regenera, el
+      # contrato publicado deja de describir la API y nadie se entera hasta que un cliente falla.
+      # Ya pasó: `total_exacto` se añadió al esquema en la Fase 2 y el YAML se quedó atrás hasta
+      # que esta comprobación lo detectó en la Fase 3.
+      # (`dist/dominio.json` no se comprueba: está en .gitignore, se genera al construir.)
+      - name: Contratos regenerados (OpenAPI al día)
+        run: |
+          pnpm contracts:build
+          if ! git diff --quiet -- packages/contracts/openapi; then
+            echo "::error::openapi.yaml no está al día. Ejecutá 'pnpm contracts:build' y commiteá el resultado."
+            git diff -- packages/contracts/openapi
+            exit 1
+          fi
+
       - name: Lint (Biome)
         run: pnpm lint
 
@@ -44,3 +82,223 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  e2e:
+    name: e2e (Playwright)
+    # Bajo demanda y en main: levanta la pila local completa (PGlite + PostGIS, servicios y apps).
+    # En los PR no corre para no alargar cada push; se puede lanzar a mano desde la pestaña Actions.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Navegador de Playwright
+        run: pnpm --filter e2e exec playwright install --with-deps chromium
+
+      - name: Base local (PGlite + PostGIS) en segundo plano
+        run: |
+          pnpm db:local > db-local.log 2>&1 &
+          npx --yes wait-on tcp:127.0.0.1:5433 -t 180000
+
+      - name: Datos sintéticos
+        run: pnpm db:seed:samples
+
+      # playwright.config.ts levanta `pnpm dev` por su cuenta y espera a /health.
+      - name: E2E
+        run: pnpm --filter e2e test:e2e
+
+      - name: Informe
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 7
+
+  # Lo que la Fase 4 demostró que hacía falta comprobar en CI y no se comprobaba.
+  #
+  # Las migraciones solo se probaban contra PGlite, que es de conexión única: el entorno donde se
+  # prueban las carreras era justamente uno donde no puede haber carreras. Aquí se aplican contra
+  # PostgreSQL 18 + PostGIS de verdad y se arranca a la vez desde varios procesos, que es cómo un
+  # despliegue con réplicas las ejecuta. Ese fallo existía: una de ocho réplicas moría con
+  # `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`.
+  postgres-real:
+    name: migraciones y seeds contra PostgreSQL real
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgis:
+        image: postgis/postgis:18-3.6
+        env:
+          POSTGRES_USER: curichi
+          POSTGRES_PASSWORD: curichi
+          POSTGRES_DB: curichi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U curichi -d curichi"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql://curichi:curichi@127.0.0.1:5432/curichi
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # `db` importa `contracts` y los dos se consumen por su `dist/` (las réplicas concurrentes,
+      # los seeds y la prueba de la cuota). Sin construir `contracts` primero, `pnpm build` de
+      # `db` fallaba con «Cannot find module 'contracts'» (primer PR, 2026-09-24).
+      - name: Construir contracts y db
+        run: pnpm --filter contracts build && pnpm --filter db build
+
+      - name: Extensiones de PostGIS
+        run: psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
+
+      - name: Migraciones desde cero
+        run: pnpm db:migrate
+
+      # Se afirma lo positivo: la segunda pasada tiene que decir «ninguna». Antes se buscaba solo
+      # «migraciones aplicadas:», pero el mensaje de «ninguna (al día)» también lo contiene, así
+      # que el paso fallaba justo cuando las migraciones SÍ eran idempotentes (primer PR, 2026-09-24).
+      - name: Migraciones idempotentes (segunda pasada no aplica nada)
+        run: |
+          salida=$(pnpm db:migrate 2>&1)
+          echo "$salida"
+          if ! echo "$salida" | grep -q "migraciones aplicadas: ninguna"; then
+            echo "::error::La segunda pasada aplicó migraciones: no son idempotentes."
+            exit 1
+          fi
+
+      # Ocho procesos arrancando a la vez contra la MISMA base, como un despliegue con réplicas.
+      # Ninguno puede fallar y las migraciones tienen que quedar registradas exactamente una vez.
+      # El script de réplica se escribe DENTRO de packages/db y no en /tmp: Node resuelve `pg`
+      # desde la carpeta del archivo, y en /tmp no hay node_modules (las ocho réplicas morían con
+      # ERR_MODULE_NOT_FOUND antes de tocar la base).
+      - name: Arranque concurrente de réplicas
+        run: |
+          psql "postgresql://curichi:curichi@127.0.0.1:5432/postgres" -c 'DROP DATABASE IF EXISTS carrera;'
+          psql "postgresql://curichi:curichi@127.0.0.1:5432/postgres" -c 'CREATE DATABASE carrera;'
+          psql "postgresql://curichi:curichi@127.0.0.1:5432/carrera" -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
+          cat > packages/db/replica-ci.mjs <<'FIN'
+          import pg from 'pg';
+          import { aplicarMigraciones, ejecutorPg } from './dist/index.js';
+          const pool = new pg.Pool({ connectionString: process.env.CARRERA_URL, max: 2 });
+          try {
+            const r = await aplicarMigraciones(ejecutorPg(pool));
+            console.log(JSON.stringify({ replica: process.argv[2], ok: true, aplicadas: r.aplicadas.length }));
+          } catch (e) {
+            console.error(JSON.stringify({ replica: process.argv[2], ok: false, error: e.message }));
+            process.exitCode = 1;
+          } finally { await pool.end(); }
+          FIN
+          export CARRERA_URL=postgresql://curichi:curichi@127.0.0.1:5432/carrera
+          for i in 1 2 3 4 5 6 7 8; do node packages/db/replica-ci.mjs "$i" & done
+          fallos=0
+          for job in $(jobs -p); do wait "$job" || fallos=$((fallos+1)); done
+          if [ "$fallos" -ne 0 ]; then
+            echo "::error::$fallos réplica(s) fallaron al aplicar migraciones concurrentemente."
+            exit 1
+          fi
+          filas=$(psql "$CARRERA_URL" -tAc 'SELECT count(*) FROM _migraciones;')
+          distintas=$(psql "$CARRERA_URL" -tAc 'SELECT count(DISTINCT nombre) FROM _migraciones;')
+          echo "migraciones registradas: $filas (distintas: $distintas)"
+          if [ "$filas" != "$distintas" ]; then
+            echo "::error::Hay migraciones registradas por duplicado."
+            exit 1
+          fi
+
+      # La cuota de un reporte por cuenta y por hora se apoya en un bloqueo de fila de
+      # PostgreSQL. PGlite —donde corre el resto de la suite— es de una sola conexión y no puede
+      # ejercitarlo: una transacción esperando un bloqueo deja al motor entero esperando. Así que
+      # la prueba de concurrencia vive aparte, se omite sola sin esta variable, y este es el único
+      # sitio del CI donde hay un PostgreSQL de verdad para ejecutarla.
+      - name: Concurrencia real de la cuota de reportes
+        env:
+          DATABASE_URL_PG_REAL: postgresql://curichi:curichi@127.0.0.1:5432/postgres
+        run: pnpm --filter api-core exec vitest run test/cuota-concurrencia-pg.test.ts
+
+      - name: Seeds sintéticos
+        run: pnpm db:seed:samples
+
+      # Comprobación de humo sobre los datos: si algo de esto falla, el esquema o los seeds
+      # cambiaron de forma que rompe la vista pública.
+      - name: Humo sobre los datos
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'FIN'
+          DO $$
+          DECLARE n int;
+          BEGIN
+            SELECT count(*) INTO n FROM reporte_inundacion;
+            IF n = 0 THEN RAISE EXCEPTION 'no se sembró ningún reporte'; END IF;
+
+            SELECT count(*) INTO n FROM geo.unidad_vecinal_vigente;
+            IF n = 0 THEN RAISE EXCEPTION 'no hay unidades vecinales vigentes'; END IF;
+
+            -- Fail-closed de la Fase 3: un reporte publicable sin punto publicable no puede salir.
+            SELECT count(*) INTO n FROM reporte_inundacion
+             WHERE estado IN ('validado','resuelto') AND geom_publico IS NULL
+               AND ubicacion_tipo <> 'vivienda_o_predio';
+            IF n > 0 THEN RAISE EXCEPTION 'hay % reportes de vía pública publicables sin geom_publico', n; END IF;
+
+            SELECT count(*) INTO n FROM reporte_inundacion WHERE NOT ST_IsValid(geom);
+            IF n > 0 THEN RAISE EXCEPTION 'hay % geometrías inválidas', n; END IF;
+          END $$;
+          FIN
+
+  # Construir las imágenes en CI. No se ejecutan (harían falta secretos), pero sí se comprueba que
+  # el Dockerfile sigue construyendo: en la Fase 4 se descubrió que `minio/minio` ya no existe en
+  # Docker Hub, y ese tipo de rotura solo aparece cuando alguien intenta construir o levantar.
+  imagenes-docker:
+    name: construcción de las imágenes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - paquete: api-core
+            puerto: 3001
+          - paquete: geo-service
+            puerto: 3002
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+      - name: Construir ${{ matrix.paquete }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: infra/docker/servicio.Dockerfile
+          build-args: |
+            PAQUETE=${{ matrix.paquete }}
+            PUERTO=${{ matrix.puerto }}
+          push: false
+          load: false
+          cache-from: type=gha,scope=${{ matrix.paquete }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.paquete }}
+
+      - name: El Compose sigue siendo válido
+        run: |
+          cp .env.example .env
+          # Valores de relleno solo para que `config` pueda resolver las variables obligatorias.
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/' .env
+          sed -i 's/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=ci/' .env
+          sed -i 's/^IP_HASH_SAL=.*/IP_HASH_SAL=ci/' .env
+          sed -i 's/^JITTER_SAL=.*/JITTER_SAL=ci/' .env
+          sed -i 's/^GEO_TOKEN_INTERNO=.*/GEO_TOKEN_INTERNO=ci/' .env
+          docker compose --profile servicios config > /dev/null

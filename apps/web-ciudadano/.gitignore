@@ -1,0 +1,3 @@
+# Copia del worker de MapLibre: la genera `scripts/copiar-worker-maplibre.mjs` en cada `dev` y
+# `build` a partir del paquete instalado, para que no pueda quedar desincronizada.
+/public/maplibre/

@@ -16,6 +16,7 @@ export interface Hallazgo {
     | 'hueco'
     | 'sin_padre'
     | 'fuera_de_padre'
+    | 'padre_inexistente'
     | 'reparada'
     | 'reparacion_no_segura'
     | 'sin_codigo'
@@ -44,7 +45,7 @@ type Poli = Feature<Polygon | MultiPolygon>;
  */
 export function geometriaVacia(f: Feature): boolean {
   const g = f.geometry as { type?: string; coordinates?: unknown } | null;
-  if (!g || !g.coordinates) return true;
+  if (!g?.coordinates) return true;
   let numeros = 0;
   const recorrer = (c: unknown) => {
     if (typeof c === 'number') {
@@ -222,6 +223,9 @@ export function asignarPadre(
   const asignacion = new Map<number, string>();
   const inferidos = new Set<number>();
   const hallazgos: Hallazgo[] = [];
+  // Ids que la capa padre trae de verdad. Sirve para no propagar referencias a la nada: la
+  // entrega real tiene manzanas que declaran unidades vecinales que no están en UV.shp.
+  const idsPadre = new Set(padres.features.map((p, i) => idDe(p, i)));
   hijos.features.forEach((c, i) => {
     if (!esPoligono(c)) return;
     const punto = turf.pointOnFeature(c);
@@ -243,13 +247,27 @@ export function asignarPadre(
         tipoPadre && !String(declarado).includes(':')
           ? `${tipoPadre}:${String(declarado).trim()}`
           : String(declarado).trim();
-      asignacion.set(i, declaradoId);
-      if (contenedor && contenedor !== declaradoId)
+      if (!idsPadre.has(declaradoId)) {
+        // El padre declarado no existe en su capa. Guardar la referencia rota deja una clave
+        // foránea que no resuelve; la contención espacial sí está verificada, así que manda esa.
         hallazgos.push({
-          tipo: 'fuera_de_padre',
+          tipo: 'padre_inexistente',
           ids: [idHijo],
-          detalle: `declara ${declarado} pero su punto representativo cae en ${contenedor}`,
+          detalle: `declara ${declarado}, que no está en la capa padre${contenedor ? `; se usa ${contenedor} por contención` : '; se deja sin padre'}`,
         });
+        if (contenedor) {
+          asignacion.set(i, contenedor);
+          inferidos.add(i);
+        }
+      } else {
+        asignacion.set(i, declaradoId);
+        if (contenedor && contenedor !== declaradoId)
+          hallazgos.push({
+            tipo: 'fuera_de_padre',
+            ids: [idHijo],
+            detalle: `declara ${declarado} pero su punto representativo cae en ${contenedor}`,
+          });
+      }
     } else if (contenedor) {
       asignacion.set(i, contenedor);
       inferidos.add(i);

@@ -20,22 +20,23 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "dev": "tsx src/local/servidor.ts",
     "local": "tsx src/local/servidor.ts",
     "migrate": "tsx src/cli/migrar.ts",
     "generate": "tsx src/cli/nueva-migracion.ts",
     "seed:samples": "tsx src/cli/seed-samples.ts",
-    "puntos-criticos:recalcular": "tsx src/cli/recalcular-puntos-criticos.ts"
+    "puntos-criticos:recalcular": "tsx src/cli/recalcular-puntos-criticos.ts",
+    "privilegios": "node src/cli/verificar-privilegios.mjs"
   },
   "dependencies": {
-    "@electric-sql/pglite": "0.5.8",
-    "@electric-sql/pglite-postgis": "0.2.8",
-    "@electric-sql/pglite-socket": "0.2.11",
     "contracts": "workspace:*",
     "drizzle-orm": "0.45.2",
+    "hash-wasm": "4.12.0",
     "pg": "8.23.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-postgis": "0.2.8",
+    "@electric-sql/pglite-socket": "0.2.11",
     "@types/geojson": "7946.0.16",
     "@types/node": "24.13.4",
     "@types/pg": "8.23.1",

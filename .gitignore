@@ -31,8 +31,8 @@ __pycache__/
 .ruff_cache/
 
 # playwright (Parte 5)
-e2e/test-results/
-e2e/playwright-report/
+**/test-results/
+**/playwright-report/
 **/playwright/.cache/
 
 # sistema

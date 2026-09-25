@@ -5,11 +5,12 @@
   "description": "Mi Curichi — app pública: mapa, detalle y formulario de reporte (Parte 1)",
   "scripts": {
     "dev": "next dev -p 3000",
+    "predev": "node scripts/copiar-worker-maplibre.mjs",
     "build": "next build",
+    "prebuild": "node scripts/copiar-worker-maplibre.mjs",
     "start": "next start -p 3000",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fontsource-variable/source-sans-3": "5.3.0",
@@ -26,7 +27,6 @@
     "zod": "4.6.4"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
     "@tailwindcss/postcss": "4.3.3",
     "@types/geojson": "7946.0.16",
     "@types/node": "24.13.4",

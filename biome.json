@@ -14,7 +14,8 @@
       "!**/.turbo",
       "!**/coverage",
       "!data",
-      "!pnpm-lock.yaml"
+      "!pnpm-lock.yaml",
+      "!**/next-env.d.ts"
     ]
   },
   "formatter": {
@@ -46,5 +47,17 @@
         "organizeImports": "on"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["scripts/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUndeclaredEnvVars": "off"
+          }
+        }
+      }
+    }
+  ]
 }

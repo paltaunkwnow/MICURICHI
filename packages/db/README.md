@@ -19,6 +19,11 @@ Datos persistentes en `infra/.pglite/` (ignorado por git). `PGLITE_MEMORIA=1 pnp
 |---|---|---|---|
 | `admin@curichi.local` | admin | `curichi-admin-local` | `SEED_ADMIN_PASSWORD` |
 | `tecnico@curichi.local` | técnico | `curichi-tecnico-local` | `SEED_TECNICO_PASSWORD` |
+| `vecina@curichi.local` | ciudadano | `curichi-vecina-local` | `SEED_VECINA_PASSWORD` |
+
+La cuenta ciudadana existe porque desde la migración 0009 **crear un reporte exige sesión**. Ver
+el mapa no: eso sigue siendo público. Estas contraseñas están escritas en el repositorio a
+propósito: son de desarrollo y no deben existir en ninguna instalación real.
 
 ## Comandos
 

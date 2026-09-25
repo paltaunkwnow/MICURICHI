@@ -2,6 +2,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useState } from 'react';
+import { ProveedorToast } from '@/componentes/Toast';
 
 export function Proveedores({ children }: { children: ReactNode }) {
   const [cliente] = useState(
@@ -12,5 +13,9 @@ export function Proveedores({ children }: { children: ReactNode }) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
     }
   }, []);
-  return <QueryClientProvider client={cliente}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={cliente}>
+      <ProveedorToast>{children}</ProveedorToast>
+    </QueryClientProvider>
+  );
 }

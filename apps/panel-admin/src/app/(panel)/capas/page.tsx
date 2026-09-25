@@ -13,7 +13,10 @@ export default function Capas() {
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const consulta = useQuery({ queryKey: ['capas-versiones'], queryFn: obtenerVersionesCapas });
+  const consulta = useQuery({
+    queryKey: ['capas-versiones'],
+    queryFn: ({ signal }) => obtenerVersionesCapas(signal),
+  });
 
   const activar = useMutation({
     mutationFn: activarCapa,

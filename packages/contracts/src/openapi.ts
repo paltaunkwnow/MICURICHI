@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from './dominio/config.js';
 import { CapaVersionSchema, ExportarQuerySchema, IndicadoresSchema } from './esquemas/admin.js';
-import { LoginSchema, UsuarioSchema } from './esquemas/auth.js';
+import { LoginSchema, RegistroSchema, SesionActualSchema, UsuarioSchema } from './esquemas/auth.js';
 import { ErrorApiSchema } from './esquemas/comunes.js';
 import {
   AgregadoUvSchema,
@@ -36,7 +36,9 @@ export const COMPONENTES = {
   ReporteFusionar: ReporteFusionarSchema,
   FotoSubida: FotoSubidaSchema,
   Login: LoginSchema,
+  Registro: RegistroSchema,
   Usuario: UsuarioSchema,
+  SesionActual: SesionActualSchema,
   CapaVersion: CapaVersionSchema,
   ExportarQuery: ExportarQuerySchema,
   Indicadores: IndicadoresSchema,
@@ -73,7 +75,6 @@ export function construirOpenApi(): Record<string, unknown> {
       unrepresentable: 'any',
       io: 'input',
     });
-    // biome-ignore lint/performance/noDelete: el $schema interno no va dentro de components
     delete (js as Record<string, unknown>).$schema;
     schemas[nombre] = js;
   }
@@ -108,26 +109,34 @@ export function construirOpenApi(): Record<string, unknown> {
     },
     paths: {
       '/api/v1/reportes': {
-        post: op('Crear un reporte (público, con rate limit y honeypot)', 'reportes', {
-          requestBody: { required: true, content: json(ref('ReporteCrear')) },
-          responses: {
-            '201': {
-              description: 'Reporte creado en estado nuevo',
-              content: json(ref('ReporteFeature')),
+        post: op(
+          'Crear un reporte. EXIGE SESIÓN (cualquier rol). El autor se toma de la sesión: el cuerpo no tiene ni puede tener un campo de autor. Además del rate limit por IP, cada cuenta solo puede crear un reporte cada 60 minutos.',
+          'reportes',
+          {
+            security: seguridadSesion,
+            requestBody: { required: true, content: json(ref('ReporteCrear')) },
+            responses: {
+              '201': {
+                description: 'Reporte creado en estado nuevo',
+                content: json(ref('ReporteFeature')),
+              },
+              '400': error('Payload inválido'),
+              '401': error('SIN_SESION: hay que iniciar sesión para reportar'),
+              '422': error('FUERA_DE_COBERTURA: el punto no cae en el municipio'),
+              '429': error(
+                'CUOTA_DE_REPORTES (un reporte por cuenta cada 60 min, con Retry-After) o rate limit por IP',
+              ),
             },
-            '400': error('Payload inválido'),
-            '422': error('FUERA_DE_COBERTURA: el punto no cae en el municipio'),
-            '429': error('Rate limit'),
           },
-        }),
+        ),
         get: op(
-          'Listar reportes (público: solo validados/resueltos con jitter; técnico: todos, exactos)',
+          'Listar reportes publicados (SIEMPRE vista pública: validados y resueltos, con la ubicación degradada que corresponda). La representación no cambia aunque la petición traiga cookie de sesión; para la vista técnica está /api/v1/tecnico/reportes.',
           'reportes',
           {
             parameters: parametrosDesde(ReporteFiltrosSchema),
             responses: {
               '200': {
-                description: 'FeatureCollection',
+                description: 'FeatureCollection pública (Cache-Control: public, no-cache)',
                 content: json(ref('ReporteFeatureCollection')),
               },
             },
@@ -135,14 +144,51 @@ export function construirOpenApi(): Record<string, unknown> {
         ),
       },
       '/api/v1/reportes/{id}': {
-        get: op('Detalle de un reporte', 'reportes', {
+        get: op(
+          'Detalle público de un reporte. Devuelve 404 si aún no está publicado, también para técnicos: la vista técnica vive en /api/v1/tecnico/reportes/{id}.',
+          'reportes',
+          {
+            parameters: [idParam()],
+            responses: {
+              '200': {
+                description: 'Feature pública (Cache-Control: public, no-cache)',
+                content: json(ref('ReporteFeature')),
+              },
+              '404': error('No existe o no está publicado'),
+            },
+          },
+        ),
+      },
+      '/api/v1/tecnico/reportes': {
+        get: op(
+          'Listar reportes con la vista técnica: coordenada exacta, todos los estados y las propiedades de moderación. Exige rol tecnico o admin; la intención va en la ruta para que ninguna caché ni ninguna cookie residual pueda producir esta representación desde una URL pública.',
+          'reportes',
+          {
+            security: seguridadSesion,
+            parameters: parametrosDesde(ReporteFiltrosSchema),
+            responses: {
+              '200': {
+                description: 'FeatureCollection técnica (Cache-Control: private, no-store)',
+                content: json(ref('ReporteFeatureCollection')),
+              },
+              '401': error('SIN_SESION'),
+              '403': error('SIN_PERMISO: el rol no permite la vista técnica'),
+            },
+          },
+        ),
+      },
+      '/api/v1/tecnico/reportes/{id}': {
+        get: op('Detalle técnico de un reporte, en cualquier estado', 'reportes', {
+          security: seguridadSesion,
           parameters: [idParam()],
           responses: {
             '200': {
-              description: 'Feature (propiedades técnicas si hay sesión de técnico/admin)',
+              description: 'Feature técnica (Cache-Control: private, no-store)',
               content: json(ref('ReporteFeature')),
             },
-            '404': error('No existe o no es público'),
+            '401': error('SIN_SESION'),
+            '403': error('SIN_PERMISO'),
+            '404': error('No existe'),
           },
         }),
       },
@@ -182,9 +228,10 @@ export function construirOpenApi(): Record<string, unknown> {
       },
       '/api/v1/fotos': {
         post: op(
-          'Subir una foto (multipart). Se reprocesa y se eliminan metadatos EXIF antes de guardarla.',
+          'Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte al que va pegada. Se reprocesa y se eliminan metadatos EXIF antes de guardarla.',
           'fotos',
           {
+            security: seguridadSesion,
             requestBody: {
               required: true,
               content: {
@@ -198,6 +245,7 @@ export function construirOpenApi(): Record<string, unknown> {
             },
             responses: {
               '201': { description: 'Foto guardada', content: json(ref('FotoSubida')) },
+              '401': error('SIN_SESION'),
               '413': error('Archivo demasiado grande'),
               '415': error('Tipo no permitido'),
             },
@@ -223,8 +271,26 @@ export function construirOpenApi(): Record<string, unknown> {
           responses: { '200': { description: 'Indicadores', content: json(ref('Indicadores')) } },
         }),
       },
+      '/api/v1/auth/registro': {
+        post: op(
+          'Crear una cuenta ciudadana. La respuesta es la MISMA exista o no ese correo: no revela quién tiene cuenta. No inicia sesión (devolver cookie solo en el caso nuevo delataría lo anterior). El rol siempre es «ciudadano» y no se puede pedir otro.',
+          'auth',
+          {
+            requestBody: { required: true, content: json(ref('Registro')) },
+            responses: {
+              '201': {
+                description:
+                  'CUENTA_LISTA. Respuesta idéntica para correo nuevo y correo ya existente.',
+                content: json(ref('ErrorApi')),
+              },
+              '400': error('Payload inválido'),
+              '429': error('DEMASIADAS_CUENTAS: demasiadas altas desde la misma IP'),
+            },
+          },
+        ),
+      },
       '/api/v1/auth/login': {
-        post: op('Iniciar sesión (técnico/admin)', 'auth', {
+        post: op('Iniciar sesión (ciudadano, técnico o admin)', 'auth', {
           requestBody: { required: true, content: json(ref('Login')) },
           responses: {
             '200': { description: 'Sesión creada (cookie)', content: json(ref('Usuario')) },
@@ -239,13 +305,20 @@ export function construirOpenApi(): Record<string, unknown> {
         }),
       },
       '/api/v1/auth/yo': {
-        get: op('Usuario de la sesión', 'auth', {
-          security: seguridadSesion,
-          responses: {
-            '200': { description: 'Usuario', content: json(ref('Usuario')) },
-            '401': error('Sin sesión'),
+        get: op(
+          'Usuario de la sesión, más `puede_reportar_desde` (ISO 8601 o null): cuándo vuelve a tener turno de reporte esta cuenta. Es información para la interfaz; la cuota la aplica el servidor al crear.',
+          'auth',
+          {
+            security: seguridadSesion,
+            responses: {
+              '200': {
+                description: 'Usuario y estado de su cuota',
+                content: json(ref('SesionActual')),
+              },
+              '401': error('Sin sesión'),
+            },
           },
-        }),
+        ),
       },
       '/api/v1/admin/capas': {
         get: op('Versiones de capas cargadas', 'admin', {

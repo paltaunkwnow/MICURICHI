@@ -13,13 +13,26 @@ Aplicar a todo PR que toque `services/api-core`, manejo de fotos, autenticación
 - [ ] Nombres de objeto generados por el servidor, nunca el nombre original.
 
 ## Privacidad
-- [ ] La vista pública no expone identidad del reportante ni `direccion_aprox` cuando aplica jitter.
+- [ ] La vista pública no expone identidad del reportante (ni `autor_id`, ni correo, ni nombre) ni
+      `direccion_aprox` cuando aplica jitter.
+- [ ] Con sesión de ciudadano, el listado público devuelve exactamente lo mismo que sin ella.
 - [ ] Las coordenadas exactas solo llegan a técnico/admin.
 - [ ] `ip_hash` con sal y borrado programado; sin IP en claro en logs.
 
+## Autenticación y cuentas
+- [ ] Los mensajes de login y de alta no permiten saber qué cuentas existen.
+- [ ] El alta pública sigue sin aceptar `rol` y sigue creando solo `ciudadano`.
+- [ ] La cookie de sesión sigue siendo `HttpOnly` + `SameSite=Lax` + `Secure` en producción.
+- [ ] Ningún token en `localStorage`, `sessionStorage`, URL ni parámetros de consulta.
+
 ## Autorización y abuso
 - [ ] Cada handler verifica rol; moderación y exportación exigen `tecnico` o `admin`.
-- [ ] Rate limiting y honeypot activos en creación de reportes y subida de fotos.
+- [ ] Toda ruta de ESCRITURA exige sesión (crear reporte y subir foto, incluidas).
+- [ ] El identificador de autor sale de la sesión, nunca del cuerpo de la petición.
+- [ ] Un rol `ciudadano` sigue recibiendo 403 en `/api/v1/tecnico/*` y en `/api/v1/admin/*`.
+- [ ] La cuota por cuenta se aplica con el UPDATE condicional dentro de la transacción; si la
+      tocaste, la prueba de concurrencia contra PostgreSQL real pasa.
+- [ ] Rate limiting y honeypot activos en creación de reportes, subida de fotos, login y altas.
 - [ ] Nada se publica en estado `nuevo`.
 
 ## Auditoría y cabeceras

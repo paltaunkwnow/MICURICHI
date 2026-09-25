@@ -1,7 +1,10 @@
-import type { Severidad } from 'contracts';
+import type { EstadoReporte, Severidad } from 'contracts';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
 
-/** Severidad siempre con color + texto + barras (nunca solo color). */
+/**
+ * Severidad siempre con color + nombre escrito + barras (CLAUDE.md §14.4): quien no distingue
+ * los colores tiene las otras dos señales.
+ */
 export function ChipSeveridad({
   severidad,
   grande = false,
@@ -11,9 +14,10 @@ export function ChipSeveridad({
 }) {
   const c = colorSeveridad(severidad);
   const critica = severidad === 'critica';
+  const vacia = critica ? 'rgba(255,255,255,.25)' : '#d7dfda';
   return (
     <span
-      className={`inline-flex items-center gap-2 rounded-full font-semibold ${grande ? 'px-4 py-2 text-base' : 'px-3 py-1 text-sm'}`}
+      className={`sev ${grande ? 'sev-grande' : ''}`}
       style={{
         background: critica ? '#0F2D43' : `var(--color-sev-${severidad}-fondo)`,
         color: critica ? '#fff' : c.texto,
@@ -25,40 +29,36 @@ export function ChipSeveridad({
           ? `Severidad ${etiquetaSeveridad(severidad).toLowerCase()}`
           : etiquetaSeveridad(severidad)}
       </span>
-      <span className="flex gap-0.5" aria-hidden="true">
+      <span className="barras" aria-hidden="true">
         {[1, 2, 3, 4].map((i) => (
-          <span
-            key={i}
-            className="inline-block h-3 w-1.5 rounded-sm"
-            style={{
-              background: i <= c.barras ? c.relleno : critica ? 'rgba(255,255,255,.25)' : '#d7dfda',
-            }}
-          />
+          <i key={i} style={{ background: i <= c.barras ? c.relleno : vacia }} />
         ))}
       </span>
     </span>
   );
 }
 
-export function ChipEstado({
-  estado,
-}: {
-  estado: 'nuevo' | 'validado' | 'duplicado' | 'rechazado' | 'resuelto';
-}) {
-  const estilos: Record<string, { bg: string; fg: string; texto: string }> = {
-    nuevo: { bg: '#fbf1dc', fg: '#8a5a00', texto: 'En revisión' },
-    validado: { bg: '#e6f2ea', fg: '#1b6b38', texto: 'Validado' },
-    resuelto: { bg: '#e3eef5', fg: '#0a4a69', texto: 'Resuelto' },
-    duplicado: { bg: '#e8edf1', fg: '#3e5468', texto: 'Duplicado' },
-    rechazado: { bg: '#fbe1dc', fg: '#b3200a', texto: 'Rechazado' },
-  };
-  const e = estilos[estado] ?? estilos.nuevo!;
+/**
+ * Estado del reporte con las palabras del vecino, no las del técnico: «Publicado» dice más que
+ * «validado» a quien mandó el reporte y no conoce la máquina de estados.
+ */
+const ESTADOS: Record<EstadoReporte, { fondo: string; texto: string; etiqueta: string }> = {
+  nuevo: { fondo: '#FBF1DC', texto: '#8A5A00', etiqueta: 'En revisión' },
+  validado: { fondo: '#E6F2EA', texto: '#1B6B38', etiqueta: 'Publicado' },
+  resuelto: { fondo: '#E3EEF5', texto: '#0A4A69', etiqueta: 'Resuelto' },
+  rechazado: { fondo: '#FBE1DC', texto: '#B3200A', etiqueta: 'No publicado' },
+  duplicado: { fondo: '#E8EDF1', texto: '#3E5468', etiqueta: 'Sumado a otro punto' },
+};
+
+export function ChipEstado({ estado }: { estado: EstadoReporte }) {
+  const e = ESTADOS[estado] ?? ESTADOS.nuevo;
   return (
-    <span
-      className="inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold"
-      style={{ background: e.bg, color: e.fg }}
-    >
-      {e.texto}
+    <span className="mini" style={{ background: e.fondo, color: e.texto, fontWeight: 700 }}>
+      {e.etiqueta}
     </span>
   );
+}
+
+export function etiquetaEstadoVecino(estado: EstadoReporte): string {
+  return (ESTADOS[estado] ?? ESTADOS.nuevo).etiqueta;
 }

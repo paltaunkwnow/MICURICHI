@@ -7,9 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function Inicio() {
-  return (
-    <main id="contenido">
-      <VistaMapa />
-    </main>
-  );
+  return <VistaMapa />;
 }

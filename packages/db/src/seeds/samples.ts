@@ -3,12 +3,13 @@
  * Lee data/samples/geo/*.geojson (generados por pipelines/geodata-etl `samples:generar`).
  * Idempotente: borra y vuelve a cargar la versión 'samples-sinteticas' y los reportes marcados.
  */
-import { randomBytes, scryptSync } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calcularSeveridad } from 'contracts';
 import type { Ejecutor } from '../ejecutor.js';
+import { rellenarGeometriaPublica } from '../geometria-publica.js';
+import { hashPassword } from '../password.js';
 import { recalcularPuntosCriticos } from '../puntos-criticos.js';
 
 export const VERSION_SAMPLES = 'samples-sinteticas';
@@ -21,12 +22,6 @@ type Feature = {
   properties: Record<string, unknown>;
 };
 type FC = { type: 'FeatureCollection'; features: Feature[] };
-
-export function hashPassword(password: string): string {
-  const sal = randomBytes(16).toString('hex');
-  const hash = scryptSync(password, sal, 64, { N: 16384, r: 8, p: 1 }).toString('hex');
-  return `scrypt$${sal}$${hash}`;
-}
 
 function leerCapa(nombre: string): FC {
   return JSON.parse(readFileSync(resolve(DIR_SAMPLES, `${nombre}.geojson`), 'utf8')) as FC;
@@ -121,8 +116,22 @@ export interface ResumenSeed {
 
 export async function sembrarSamples(
   ex: Ejecutor,
-  opciones: { passwordAdmin?: string; passwordTecnico?: string } = {},
+  opciones: {
+    passwordAdmin?: string;
+    passwordTecnico?: string;
+    passwordVecina?: string;
+    permitirEnProduccion?: boolean;
+  } = {},
 ): Promise<ResumenSeed> {
+  // Los seeds crean dos usuarios con contraseñas por defecto que están escritas en el README, y
+  // además BORRAN los reportes marcados como sintéticos. Ninguna de las dos cosas debe poder
+  // ocurrir contra una base real por un despliegue mal configurado o un comando equivocado.
+  if (process.env.NODE_ENV === 'production' && !opciones.permitirEnProduccion)
+    throw new Error(
+      'Los seeds sintéticos no se cargan con NODE_ENV=production: crean usuarios con contraseñas ' +
+        'conocidas y borran los reportes de muestra. Si de verdad hace falta (una demo), pasá ' +
+        'permitirEnProduccion.',
+    );
   const capas: Record<string, number> = {};
   // Las capas sintéticas solo se cargan si NO hay una capa real vigente (la del municipio manda).
   for (const capa of ['distrito_municipal', 'unidad_vecinal', 'manzana'] as const) {
@@ -144,14 +153,23 @@ export async function sembrarSamples(
     opciones.passwordAdmin ?? process.env.SEED_ADMIN_PASSWORD ?? 'curichi-admin-local';
   const passwordTecnico =
     opciones.passwordTecnico ?? process.env.SEED_TECNICO_PASSWORD ?? 'curichi-tecnico-local';
+  // Cuenta ciudadana de desarrollo: desde la migración 0009, crear un reporte exige sesión, así
+  // que sin una cuenta así no se puede probar el recorrido del vecino recién clonado el repo.
+  const passwordVecina =
+    opciones.passwordVecina ?? process.env.SEED_VECINA_PASSWORD ?? 'curichi-vecina-local';
   await ex.consultar(
-    `DELETE FROM usuario WHERE email IN ('admin@curichi.local', 'tecnico@curichi.local')`,
+    `DELETE FROM usuario WHERE email IN ('admin@curichi.local', 'tecnico@curichi.local', 'vecina@curichi.local')`,
   );
   await ex.consultar(
     `INSERT INTO usuario (email, nombre, rol, password_hash) VALUES
        ('admin@curichi.local', 'Admin local (sintético)', 'admin', $1),
-       ('tecnico@curichi.local', 'Técnico local (sintético)', 'tecnico', $2)`,
-    [hashPassword(passwordAdmin), hashPassword(passwordTecnico)],
+       ('tecnico@curichi.local', 'Técnico local (sintético)', 'tecnico', $2),
+       ('vecina@curichi.local', 'Vecina local (sintética)', 'ciudadano', $3)`,
+    await Promise.all([
+      hashPassword(passwordAdmin),
+      hashPassword(passwordTecnico),
+      hashPassword(passwordVecina),
+    ]),
   );
   const [tecnico] = await ex.consultar<{ id: string }>(
     `SELECT id::text FROM usuario WHERE email = 'tecnico@curichi.local'`,
@@ -210,7 +228,11 @@ export async function sembrarSamples(
          COALESCE((SELECT distrito_id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_distrito'),
          COALESCE((SELECT id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_uv'),
          (SELECT id FROM geo.manzana_vigente m WHERE ST_Contains(m.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1),
-         $4, '{"seed": true}'::jsonb,
+         -- version_capa es la versión con la que se RESOLVIÓ el punto (§7.1), no la de la muestra:
+         -- si las capas reales están vigentes, el reporte se ubicó contra ellas y eso es lo que
+         -- hay que guardar, o el dato de trazabilidad miente.
+         COALESCE((SELECT version_capa FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), $4),
+         '{"seed": true}'::jsonb,
          $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::tirante_estimado, $10::duracion_estimada, $11::frecuencia, $12::afectacion, $13::causa_presunta,
          $14::sumidero_cercano, $15::severidad, $16, $17, $18::estado_reporte, $19,
          CASE WHEN $18 IN ('validado', 'resuelto') THEN $20::uuid END,
@@ -251,6 +273,12 @@ export async function sembrarSamples(
   const [n] = await ex.consultar<{ n: string }>(
     `SELECT count(*)::text AS n FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%'`,
   );
+  // Antes de agrupar: el centroide publicable de un punto crítico se calcula con los puntos ya
+  // degradados de sus miembros, así que estos tienen que existir primero (§13, migración 0005).
+  await rellenarGeometriaPublica(
+    ex,
+    process.env.JITTER_SAL || 'jitter-local-cambiar-en-produccion',
+  );
   const pc = await recalcularPuntosCriticos(ex);
-  return { capas, usuarios: 2, reportes: Number(n?.n ?? insertados), puntosCriticos: pc.puntos };
+  return { capas, usuarios: 3, reportes: Number(n?.n ?? insertados), puntosCriticos: pc.puntos };
 }

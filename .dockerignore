@@ -1,0 +1,46 @@
+# Qué NO se envía al demonio de Docker como contexto de build.
+#
+# Sin este archivo el contexto es el repositorio entero: los `node_modules` de nueve paquetes
+# (PGlite solo ya son ~100 MB de WebAssembly), el historial de git, las capas de `data/` y la
+# base local de `infra/.pglite`. Además del tiempo de subida, `.env` acabaría en el contexto:
+# no llega a la imagen porque el Dockerfile copia rutas concretas, pero no tiene por qué salir
+# de la máquina para nada.
+
+# Dependencias y artefactos: se instalan y se compilan DENTRO de la imagen.
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+**/*.tsbuildinfo
+
+# Historial y metadatos del repositorio.
+.git
+.github
+.husky
+.vscode
+.idea
+
+# Secretos y configuración local.
+.env
+.env.*
+!.env.example
+
+# Datos: `raw` es inmutable y pesado, `processed` se monta como volumen en Compose.
+data/raw
+data/processed
+infra/.pglite
+infra/.storage
+
+# Pruebas e informes: no forman parte de la imagen de producción.
+e2e
+**/test
+**/*.test.ts
+**/playwright-report
+**/test-results
+**/coverage
+scratchpad
+
+# Documentación.
+docs
+**/*.md
+!packages/*/README.md

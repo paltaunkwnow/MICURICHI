@@ -19,37 +19,58 @@ export function listarMigraciones(directorio = DIRECTORIO_MIGRACIONES): string[]
 }
 
 /** Aplica las migraciones pendientes en orden. Registra cada una en _migraciones. */
+/**
+ * Clave del advisory lock que serializa las migraciones. Arbitraria pero estable: lo único que
+ * importa es que todos los procesos usen la misma.
+ */
+const CLAVE_LOCK_MIGRACIONES = 4022;
+
 export async function aplicarMigraciones(
   ex: Ejecutor,
   directorio = DIRECTORIO_MIGRACIONES,
 ): Promise<ResultadoMigracion> {
-  await ex.ejecutar(`CREATE TABLE IF NOT EXISTS _migraciones (
-    nombre text PRIMARY KEY,
-    aplicada_en timestamptz NOT NULL DEFAULT now()
-  )`);
-  const hechas = new Set(
-    (await ex.consultar<{ nombre: string }>('SELECT nombre FROM _migraciones')).map(
-      (r) => r.nombre,
-    ),
-  );
+  // La tabla de control se crea DENTRO del mismo lock que las migraciones. `CREATE TABLE IF NOT
+  // EXISTS` no es atómico: la comprobación y la creación son dos pasos, así que dos sesiones
+  // simultáneas pueden pasar ambas la comprobación y la segunda muere con
+  // `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`, que es el tipo
+  // compuesto de la tabla chocando en el catálogo. Reproducido en la Fase 4 contra PostgreSQL 18
+  // real con seis réplicas arrancando a la vez sobre una base vacía: una de las seis se caía.
+  // Con `restart: unless-stopped` el siguiente intento funciona, pero en un despliegue eso es un
+  // contenedor en CrashLoopBackOff sin ninguna causa real detrás.
+  await ex.transaccion(async (tx) => {
+    await tx.consultar('SELECT pg_advisory_xact_lock($1)', [CLAVE_LOCK_MIGRACIONES]);
+    await tx.ejecutar(`CREATE TABLE IF NOT EXISTS _migraciones (
+      nombre text PRIMARY KEY,
+      aplicada_en timestamptz NOT NULL DEFAULT now()
+    )`);
+  });
   const aplicadas: string[] = [];
   const omitidas: string[] = [];
-  for (const archivo of listarMigraciones(directorio)) {
-    if (hechas.has(archivo)) {
-      omitidas.push(archivo);
-      continue;
-    }
-    const sql = readFileSync(join(directorio, archivo), 'utf8');
-    await ex.ejecutar('BEGIN');
-    try {
-      await ex.ejecutar(sql);
-      await ex.consultar('INSERT INTO _migraciones (nombre) VALUES ($1)', [archivo]);
-      await ex.ejecutar('COMMIT');
-    } catch (e) {
-      await ex.ejecutar('ROLLBACK');
-      throw new Error(`Migración ${archivo} falló: ${(e as Error).message}`);
-    }
-    aplicadas.push(archivo);
+  const archivos = listarMigraciones(directorio);
+  for (const archivo of archivos) {
+    // Cada migración va en su propia transacción CON un advisory lock de transacción. Sin el
+    // lock, dos instancias que arrancan a la vez (un despliegue con varias réplicas, que es lo
+    // normal) intentan aplicar la misma migración: una gana y la otra muere con un error de
+    // "el tipo ya existe" y entra en bucle de reinicio. Con el lock, la segunda espera, vuelve
+    // a leer _migraciones DENTRO de la transacción y ve que ya está hecha.
+    const resultado = await ex.transaccion(async (tx) => {
+      await tx.consultar('SELECT pg_advisory_xact_lock($1)', [CLAVE_LOCK_MIGRACIONES]);
+      const yaEsta = await tx.consultar<{ nombre: string }>(
+        'SELECT nombre FROM _migraciones WHERE nombre = $1',
+        [archivo],
+      );
+      if (yaEsta.length) return 'omitida' as const;
+      const sql = readFileSync(join(directorio, archivo), 'utf8');
+      try {
+        await tx.ejecutar(sql);
+      } catch (e) {
+        throw new Error(`Migración ${archivo} falló: ${(e as Error).message}`);
+      }
+      await tx.consultar('INSERT INTO _migraciones (nombre) VALUES ($1)', [archivo]);
+      return 'aplicada' as const;
+    });
+    if (resultado === 'aplicada') aplicadas.push(archivo);
+    else omitidas.push(archivo);
   }
   return { aplicadas, omitidas };
 }

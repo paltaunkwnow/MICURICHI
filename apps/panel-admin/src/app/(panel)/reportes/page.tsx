@@ -3,7 +3,7 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useMemo } from 'react';
+import { Suspense, useCallback, useMemo, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { FiltrosDeReportes } from '@/componentes/FiltrosReportes';
 import { Mapa } from '@/componentes/Mapa';
@@ -65,7 +65,7 @@ function Reportes() {
 
   const reportes = useQuery({
     queryKey: ['reportes', params],
-    queryFn: () => obtenerReportes(params),
+    queryFn: ({ signal }) => obtenerReportes(params, signal),
     placeholderData: keepPreviousData,
   });
   const distritos = useQuery({
@@ -80,12 +80,30 @@ function Reportes() {
   });
   const capas = useQuery({
     queryKey: ['geo', 'capas'],
-    queryFn: obtenerCapasMapa,
+    queryFn: ({ signal }) => obtenerCapasMapa(signal),
     staleTime: Number.POSITIVE_INFINITY,
+  });
+
+  /**
+   * Dos conteos que la bandeja necesita siempre, con filtros o sin ellos: cuántos esperan
+   * revisión y cuántos de esos son críticos. Se piden con `limite=1` porque lo único que se usa
+   * es el `total` que devuelve la API, no las filas.
+   */
+  const nuevos = useQuery({
+    queryKey: ['reportes', 'conteo', 'nuevo'],
+    queryFn: ({ signal }) => obtenerReportes({ estado: 'nuevo', limite: '1' }, signal),
+    staleTime: 30_000,
+  });
+  const criticos = useQuery({
+    queryKey: ['reportes', 'conteo', 'nuevo-critica'],
+    queryFn: ({ signal }) =>
+      obtenerReportes({ estado: 'nuevo', severidad: 'critica', limite: '1' }, signal),
+    staleTime: 30_000,
   });
 
   const features = reportes.data?.features ?? [];
   const total = reportes.data?.total ?? 0;
+  const [resaltado, setResaltado] = useState<string | null>(null);
   const abrir = useCallback((id: string) => router.push(`/reportes/${id}`), [router]);
 
   return (
@@ -176,7 +194,11 @@ function Reportes() {
               </div>
             ) : (
               <div className={reportes.isFetching ? 'opacity-70 transition-opacity' : ''}>
-                <TablaReportes reportes={features} />
+                <TablaReportes
+                  reportes={features}
+                  seleccionado={resaltado}
+                  onSeleccionar={setResaltado}
+                />
               </div>
             )}
           </div>
@@ -192,17 +214,34 @@ function Reportes() {
         </section>
 
         <aside
-          className="mapa-panel lg:sticky lg:top-8 lg:self-start"
-          aria-label="Mapa de la página actual"
+          className="flex flex-col gap-4 lg:sticky lg:top-8 lg:self-start"
+          aria-label="Mapa e indicadores de la bandeja"
         >
-          <Mapa
-            reportes={features}
-            capas={capas.data ?? []}
-            onSeleccionar={abrir}
-            ajustarAPuntos
-            className="h-[420px] w-full lg:h-[calc(100dvh-4rem)]"
-            ariaLabel="Mapa con los reportes de la página actual; hacé clic en un punto para abrirlo"
-          />
+          <div className="mapa-panel">
+            <Mapa
+              reportes={features}
+              capas={capas.data ?? []}
+              onSeleccionar={abrir}
+              seleccionado={resaltado}
+              ajustarAPuntos
+              className="h-[420px] w-full lg:h-[calc(100dvh-16rem)]"
+              ariaLabel="Mapa con los reportes de la página actual; hacé clic en un punto para abrirlo"
+            />
+          </div>
+          <dl className="grid grid-cols-3 gap-3">
+            {(
+              [
+                [nuevos.data ? numero(nuevos.data.total) : '—', 'sin revisar'],
+                [criticos.data ? numero(criticos.data.total) : '—', 'críticos pendientes'],
+                [reportes.data ? numero(total) : '—', 'con estos filtros'],
+              ] as Array<[string, string]>
+            ).map(([valor, etiqueta]) => (
+              <div key={etiqueta} className="kpi">
+                <dd className="kpi-valor">{valor}</dd>
+                <dt className="kpi-etiqueta">{etiqueta}</dt>
+              </div>
+            ))}
+          </dl>
         </aside>
       </div>
     </div>

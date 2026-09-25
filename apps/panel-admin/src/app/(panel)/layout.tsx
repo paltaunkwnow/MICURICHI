@@ -10,7 +10,7 @@ export default function LayoutPanel({ children }: { children: ReactNode }) {
     <Protegido>
       <div className="min-h-dvh lg:flex">
         <BarraLateral />
-        <main id="contenido" className="min-w-0 flex-1 p-5 lg:p-8">
+        <main id="contenido" className="mainp min-w-0 flex-1">
           {children}
         </main>
       </div>

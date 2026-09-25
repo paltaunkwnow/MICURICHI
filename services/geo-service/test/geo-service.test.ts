@@ -1,3 +1,4 @@
+import { CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES } from 'contracts';
 import { ejecutorPg, recalcularPuntosCriticos } from 'db';
 import {
   type BaseEfimera,
@@ -59,6 +60,17 @@ describe('POST /geo/v1/resolver (§7.4)', () => {
     expect(r.asignado_por_proximidad).toBe(true);
     expect(r.distancia_m).toBeGreaterThan(0);
     expect(r.distancia_m).toBeLessThanOrEqual(20);
+  });
+  it('punto en el hueco pero MÁS ALLÁ de la tolerancia → fuera de cobertura', async () => {
+    // El hueco entre B (termina en −63,18) y C (empieza en −63,1795) mide unos 53 m. Este punto
+    // está a ~25 m de B: dentro del prefiltro por índice que usa el resolver (que trabaja en
+    // grados y es a propósito más ancho, ~40 m) pero fuera de los 20 m de tolerancia real.
+    // Si alguien quitara la comprobación exacta en metros por «simplificar», este caso pasaría a
+    // asignarse a B y el reporte quedaría en una unidad vecinal que no le toca.
+    const r = await resolver(-17.79, -63.179764);
+    expect(r.asignado_por_proximidad).toBe(false);
+    expect(r.dentro_cobertura).toBe(false);
+    expect(r.unidad_vecinal).toBeNull();
   });
   it('punto lejos → fuera de cobertura', async () => {
     const r = await resolver(-17.5, -63.0);
@@ -131,5 +143,95 @@ describe('capas, teselas y agregados', () => {
     expect(pc.json()[0].n_reportes).toBe(2);
     const malo = await app.inject({ method: 'GET', url: '/geo/v1/puntos-criticos?bbox=1,2,3' });
     expect(malo.statusCode).toBe(400);
+  });
+
+  /**
+   * `radio_m`, `diametro_m` y `advertencia_diametro` se calculan sobre las coordenadas EXACTAS de
+   * los miembros del grupo: `diametro_m` es la distancia entre los dos más separados, redondeada a
+   * 0,1 m. Esta ruta es pública y publica el centroide ya degradado, así que soltar además una
+   * medida exacta sobre las posiciones reales es dar una ecuación que acota dónde están de verdad
+   * (CLAUDE.md §13, dato mínimo). Siguen en la tabla para el análisis del técnico (§9.2).
+   */
+  it('no publica ninguna medida derivada de la geometría exacta', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/geo/v1/puntos-criticos?bbox=-63.3,-17.9,-63.1,-17.7',
+    });
+    expect(r.statusCode).toBe(200);
+    const puntos = r.json() as Array<Record<string, unknown>>;
+    expect(puntos.length).toBeGreaterThan(0);
+    for (const p of puntos)
+      for (const campo of CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES)
+        expect(p, `«${campo}» no puede salir por una ruta pública`).not.toHaveProperty(campo);
+    // Y el cuerpo entero, por si algún día vuelven con otro nombre en un objeto anidado.
+    for (const campo of CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES) expect(r.body).not.toContain(campo);
+  });
+
+  it('sigue publicando lo que el mapa necesita', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: '/geo/v1/puntos-criticos?bbox=-63.3,-17.9,-63.1,-17.7',
+    });
+    const [p] = r.json() as Array<Record<string, unknown>>;
+    for (const campo of [
+      'id',
+      'lat',
+      'lon',
+      'n_reportes',
+      'severidad_max',
+      'unidad_vecinal_id',
+      'calculado_en',
+    ])
+      expect(p).toHaveProperty(campo);
+  });
+});
+
+describe('ruta interna /geo/v1/capas/invalidar', () => {
+  it('sin token configurado solo la acepta desde loopback', async () => {
+    const r = await app.inject({ method: 'POST', url: '/geo/v1/capas/invalidar' });
+    expect(r.statusCode).toBe(200);
+    // remoteAddress falsificado: una petición que no venga de la propia máquina se rechaza.
+    const fuera = await app.inject({
+      method: 'POST',
+      url: '/geo/v1/capas/invalidar',
+      remoteAddress: '203.0.113.7',
+    });
+    expect(fuera.statusCode).toBe(403);
+  });
+
+  it('con token configurado exige la cabecera correcta', async () => {
+    const conToken = await crearApp({
+      pool,
+      cfg: { ...leerConfig({ DATABASE_URL: base.url }), tokenInterno: 'secreto-compartido' },
+    });
+    const sin = await conToken.inject({ method: 'POST', url: '/geo/v1/capas/invalidar' });
+    expect(sin.statusCode).toBe(403);
+    const malo = await conToken.inject({
+      method: 'POST',
+      url: '/geo/v1/capas/invalidar',
+      headers: { 'x-token-interno': 'otro' },
+    });
+    expect(malo.statusCode).toBe(403);
+    const bueno = await conToken.inject({
+      method: 'POST',
+      url: '/geo/v1/capas/invalidar',
+      headers: { 'x-token-interno': 'secreto-compartido' },
+    });
+    expect(bueno.statusCode).toBe(200);
+    await conToken.close();
+  });
+});
+
+describe('caché de capas', () => {
+  it('varias peticiones simultáneas de una capa fría hacen UNA sola carga', async () => {
+    app.capas.invalidar();
+    const antes = (await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM geo.manzana'))
+      .rows[0]!.n;
+    expect(Number(antes)).toBeGreaterThan(0);
+    const respuestas = await Promise.all(
+      Array.from({ length: 5 }, () => app.capas.obtener('unidad_vecinal')),
+    );
+    // Todas comparten exactamente el mismo objeto: una única construcción del índice.
+    for (const r of respuestas) expect(r).toBe(respuestas[0]);
   });
 });

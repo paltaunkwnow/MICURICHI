@@ -1,18 +1,90 @@
-# Entorno local de Mi Curichi (Fase 1). Parte 5.
+# Entorno local de Mi Curichi con Docker (alternativa al modo sin Docker del ADR 0002). Parte 5.
 # Uso: cp .env.example .env && docker compose up -d
-# Los servicios api-core y geo-service se agregan bajo el perfil `apps` cuando existan (tareas 5 y 6).
+#
+# VERIFICADO EN EJECUCIÓN (Fase 4, 2026-09-15): imágenes construidas, pila levantada, todos los
+# healthchecks en `healthy`, migraciones aplicadas contra PostgreSQL 18.6 + PostGIS 3.6.4, y
+# respaldo/restauración cronometrados. Lo que NO se ha podido probar sigue anotado en
+# `infra/docker/README.md`.
 name: mi-curichi
+
+# Anclas comunes: los servicios de larga vida comparten política de logs y de reinicio.
+x-comun: &comun
+  restart: unless-stopped
+  # Sin esto, el log de un contenedor crece sin límite hasta llenar el disco del host. Es el
+  # fallo de operación más aburrido y más frecuente que existe.
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  # Reducción del radio de daño si alguien llega a ejecutar código dentro del contenedor.
+  # `no-new-privileges`: ningún binario setuid puede escalar. Sin esto, un binario con el bit
+  # puesto que llegara a la imagen serviría para volver a root dentro del contenedor.
+  # El tope de procesos va en `deploy.resources.limits.pids` de cada servicio: Compose no acepta
+  # `pids_limit` y `deploy` a la vez, y todos los servicios ya usan `deploy`.
+  security_opt:
+    - no-new-privileges:true
+
+# Los servicios Node no escriben en su sistema de archivos: el código va en /app en solo lectura y
+# lo único que necesitan escribir son los temporales. Con `read_only` y un tmpfs pequeño, una
+# ejecución de código arbitrario no puede dejar nada persistente en la imagen.
+#  - cap_drop ALL: Node no necesita ninguna capability de Linux. No abre puertos por debajo del
+#    1024, no monta nada, no cambia de usuario. Quitarlas todas no rompe nada y elimina de golpe
+#    los caminos de escape que dependen de CAP_SYS_ADMIN, CAP_DAC_OVERRIDE o CAP_CHOWN.
+x-servicio-node: &servicio-node
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=64m
+  cap_drop:
+    - ALL
 
 services:
   postgis:
+    <<: *comun
     image: postgis/postgis:18-3.6
     container_name: curichi-postgis
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-curichi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
       POSTGRES_DB: ${POSTGRES_DB:-curichi}
+      # Contraseñas de los roles de aplicación con privilegios mínimos. Las lee
+      # `infra/sql/01-roles.sh` al inicializar el volumen; sin ellas el init falla y el contenedor
+      # no queda a medias fingiendo que está listo.
+      API_DB_PASSWORD: ${API_DB_PASSWORD:?Definir API_DB_PASSWORD en .env}
+      GEO_DB_PASSWORD: ${GEO_DB_PASSWORD:?Definir GEO_DB_PASSWORD en .env}
+    # Parámetros de arranque en vez de un postgresql.conf propio: son pocos y así se ven aquí.
+    #  - max_connections: techo de conexiones. Cada réplica de api-core abre hasta DB_POOL_MAX
+    #    y geo-service otras tantas; 100 deja sitio para unas diez réplicas más las sesiones de
+    #    mantenimiento y psql. Subirlo no es gratis: cada conexión reserva memoria de trabajo,
+    #    así que primero se ajusta el pool y solo después esto.
+    #  - statement_timeout: ninguna consulta se queda colgada para siempre. 30 s es holgado para
+    #    todo lo que hace la aplicación y corta las patológicas.
+    #  - idle_in_transaction_session_timeout: una transacción abierta y olvidada bloquea el VACUUM
+    #    de las tablas que tocó y retiene filas muertas indefinidamente.
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=768MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - statement_timeout=30s
+      - -c
+      - idle_in_transaction_session_timeout=60s
+      - -c
+      - log_min_duration_statement=1000
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # Solo loopback: publicar en 0.0.0.0 deja la base accesible desde toda la red local con la
+      # contraseña de desarrollo. Para llegar desde otra máquina, un túnel SSH.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       # PostgreSQL 18 mueve el directorio de datos: el volumen se monta en /var/lib/postgresql
       - postgis-data:/var/lib/postgresql
@@ -23,29 +95,68 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    # Una parada brusca deja el clúster en recuperación al arrancar; 30 s dan margen al
+    # checkpoint de apagado.
+    stop_grace_period: 30s
+    # La base es el componente que limita, y por bastante. Medido en la Fase 4 con un millón de
+    # reportes y el listado por bbox que pide el mapa:
+    #
+    #   postgis con 2 CPU →  21 rps (conc 10) ·  20 rps (conc 100), p95 5,9 s, 433 respuestas 503
+    #   postgis con 6 CPU → 142 rps (conc 10) · 117 rps (conc 100), p95 1,7 s, ningún 503
+    #
+    # Mientras tanto api-core y geo-service estaban al 0,03 % de CPU. Es decir: el límite que
+    # tenía puesto aquí ERA el cuello de botella, no la consulta ni el pool. Las métricas lo
+    # confirmaron desde dentro: el 83 % del tiempo de cada petición se iba esperando a la base.
+    #
+    # 4.0 es un punto medio razonable en una máquina de desarrollo de 12 núcleos. En producción
+    # este número sale del dimensionado real, no de aquí; lo que no hay que hacer es ahogar a la
+    # base para "repartir" CPU entre servicios que están ociosos.
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 1536M
+          pids: 512
 
   minio:
-    # <tag a confirmar>: fijar una versión RELEASE.YYYY-MM-DD concreta al primer arranque real
-    image: minio/minio:latest
+    <<: *comun
+    # quay.io y NO docker.io: `minio/minio` ya no se puede descargar de Docker Hub
+    # ("pull access denied ... repository does not exist"), comprobado en la Fase 4 al levantar
+    # la pila por primera vez. Y versión fijada en lugar de `latest`: con `latest` dos personas
+    # pueden estar corriendo binarios distintos sin saberlo y una actualización silenciosa rompe
+    # un entorno que ayer funcionaba.
+    #
+    # `api-core` sabe hablar con MinIO desde la Fase 5 (`src/almacen-s3.ts`, firma SigV4 sin SDK).
+    # No lo usa por defecto: hace falta poner `S3_ENDPOINT_DOCKER=http://minio:9000` en el .env.
+    # Con eso las fotos dejan de vivir en el disco de una réplica y varias pueden servirlas.
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
     container_name: curichi-minio
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
     ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
+      # `mc` viene en la propia imagen del servidor; no hace falta añadir curl.
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 10s
       timeout: 5s
       retries: 12
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 256
 
   minio-init:
     # Crea el bucket de fotos una vez y termina.
-    image: minio/mc:latest
+    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: curichi-minio-init
     depends_on:
       minio:
@@ -54,14 +165,148 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
       S3_BUCKET: ${S3_BUCKET:-fotos}
-    entrypoint: >
-      /bin/sh -c "
-        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD &&
-        mc mb --ignore-existing local/$$S3_BUCKET &&
-        echo 'bucket listo: '$$S3_BUCKET
-      "
+    # Sigue reintentando aunque el healthcheck ya haya pasado: `mc ready` comprueba el servidor,
+    # no que la API acepte ya una operación de administración.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for i in $$(seq 1 30); do
+          if mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; then
+            mc mb --ignore-existing "local/$$S3_BUCKET" && echo "bucket listo: $$S3_BUCKET" && exit 0
+          fi
+          echo "esperando a minio..." && sleep 2
+        done
+        echo "minio no respondio a tiempo" >&2 && exit 1
     restart: "no"
+
+  # Los dos servicios Node van bajo el perfil `servicios`: `docker compose up -d` a secas levanta
+  # solo la base y MinIO, que es lo que hace falta para desarrollar con `pnpm dev`.
+  #   docker compose --profile servicios up -d --build
+  api-core:
+    <<: [*comun, *servicio-node]
+    profiles: ["servicios"]
+    build:
+      context: .
+      dockerfile: infra/docker/servicio.Dockerfile
+      args:
+        PAQUETE: api-core
+        PUERTO: 3001
+    container_name: curichi-api-core
+    depends_on:
+      postgis:
+        condition: service_healthy
+      # `service_started` decía solo "el contenedor arrancó", que no es lo mismo que "responde":
+      # api-core llama a geo-service en cada POST /reportes. Ahora espera a que esté sano.
+      geo-service:
+        condition: service_healthy
+      # Aunque las fotos vayan al disco, esperar a MinIO no cuesta nada y evita el caso feo:
+      # con S3 activado y MinIO todavía arrancando, api-core se niega a arrancar (comprueba el
+      # bucket antes de escuchar) y el contenedor entra en bucle de reinicio.
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Rol de aplicación, NO el dueño del esquema: api-core solo necesita DML sobre sus tablas
+      # (migración 0008). Arrancar con el rol dueño o con un superusuario está prohibido y el
+      # servicio lo comprueba al arrancar (`verificarPrivilegios`).
+      DATABASE_URL: ${API_DATABASE_URL:-postgresql://curichi_api:${API_DB_PASSWORD:?Definir API_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
+      GEO_SERVICE_URL: http://geo-service:3002
+      API_CORE_PORT: 3001
+      DB_POOL_MAX: ${DB_POOL_MAX:-8}
+      # Las sales y los tokens NO tienen valor por defecto a propósito: en producción el servicio
+      # se niega a arrancar con los de ejemplo (services/api-core/src/config.ts).
+      IP_HASH_SAL: ${IP_HASH_SAL:?Definir IP_HASH_SAL en .env}
+      JITTER_SAL: ${JITTER_SAL:?Definir JITTER_SAL en .env}
+      GEO_TOKEN_INTERNO: ${GEO_TOKEN_INTERNO:?Definir GEO_TOKEN_INTERNO en .env}
+      # Los dos van juntos: o se expone /metrics CON token, o se deja la ruta vacía y no se
+      # expone. Arrancar en producción con ruta y sin token es un error de configuración y el
+      # servicio se niega a hacerlo (services/api-core/src/config.ts).
+      METRICAS_RUTA: ${METRICAS_RUTA-/metrics}
+      METRICAS_TOKEN: ${METRICAS_TOKEN:-}
+      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:3000,http://localhost:3100}
+      COOKIE_SEGURA: ${COOKIE_SEGURA:-0}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      # Límites ajustables sin reconstruir la imagen. Hacían falta para poder medir la capacidad
+      # real (subiéndolos) y para que el municipio pueda apretarlos o aflojarlos según lo que vea.
+      RATE_LIMIT_REPORTES_POR_HORA: ${RATE_LIMIT_REPORTES_POR_HORA:-10}
+      RATE_LIMIT_LECTURAS_POR_MINUTO: ${RATE_LIMIT_LECTURAS_POR_MINUTO:-240}
+      LOGIN_PETICIONES_POR_VENTANA: ${LOGIN_PETICIONES_POR_VENTANA:-20}
+      LOGIN_MAX_FALLOS_EMAIL: ${LOGIN_MAX_FALLOS_EMAIL:-}
+      LOGIN_MAX_FALLOS_IP: ${LOGIN_MAX_FALLOS_IP:-}
+      LOGIN_VENTANA_MINUTOS: ${LOGIN_VENTANA_MINUTOS:-}
+      PASSWORD_WORKERS: ${PASSWORD_WORKERS:-2}
+      STORAGE_DIR: /datos/fotos
+      # Almacén de fotos. Sin `S3_ENDPOINT_DOCKER` en el .env, api-core usa `STORAGE_DIR`, que es
+      # el volumen de ABAJO: correcto con una sola réplica y solo con una. Poniendo
+      # `S3_ENDPOINT_DOCKER=http://minio:9000` las fotos pasan a MinIO y varias réplicas ven las
+      # mismas. Es la variable "de dentro": desde el contenedor, localhost es el contenedor.
+      S3_ENDPOINT: ${S3_ENDPOINT_DOCKER:-}
+      S3_BUCKET: ${S3_BUCKET:-fotos}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ESTILO_RUTA: ${S3_ESTILO_RUTA:-1}
+    volumes:
+      - fotos-data:/datos/fotos
+    ports:
+      - "127.0.0.1:${API_CORE_PORT:-3001}:3001"
+    # Node cierra el servidor y el pool al recibir SIGTERM; 20 s le sobran y evitan el SIGKILL a
+    # los 10 s por defecto, que corta peticiones en vuelo.
+    stop_grace_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 768M
+          pids: 512
+
+  geo-service:
+    <<: [*comun, *servicio-node]
+    profiles: ["servicios"]
+    build:
+      context: .
+      dockerfile: infra/docker/servicio.Dockerfile
+      args:
+        PAQUETE: geo-service
+        PUERTO: 3002
+    container_name: curichi-geo-service
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      # Solo lectura (§4.6). El servicio comprueba al arrancar que este rol NO puede escribir en
+      # reporte_inundacion y en producción se niega a servir si puede.
+      DATABASE_URL: ${GEO_DATABASE_URL:-postgresql://curichi_geo:${GEO_DB_PASSWORD:?Definir GEO_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
+      GEO_SERVICE_PORT: 3002
+      DB_POOL_MAX: ${DB_POOL_MAX:-8}
+      GEO_TOKEN_INTERNO: ${GEO_TOKEN_INTERNO:?Definir GEO_TOKEN_INTERNO en .env}
+      # geo-service también expone /metrics desde la Fase 4, y también se niega a arrancar en
+      # producción con la ruta puesta y sin token. Faltaban aquí: el contenedor moría en bucle.
+      METRICAS_RUTA: ${METRICAS_RUTA-/metrics}
+      METRICAS_TOKEN: ${METRICAS_TOKEN:-}
+      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:3000,http://localhost:3100}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+      GEO_RATE_LIMIT_POR_MINUTO: ${GEO_RATE_LIMIT_POR_MINUTO:-600}
+      GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO: ${GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO:-120}
+      GEO_CACHE_AGREGADOS_MS: ${GEO_CACHE_AGREGADOS_MS:-30000}
+      # Solo lectura: geo-service sirve las capas que genera el ETL, nunca las escribe (§4.6).
+      DIR_PROCESSED: /datos/processed
+    volumes:
+      - ./data/processed:/datos/processed:ro
+    ports:
+      - "127.0.0.1:${GEO_SERVICE_PORT:-3002}:3002"
+    stop_grace_period: 20s
+    # Más memoria que api-core: el índice de teselas de la capa de manzanas vive en el proceso.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1024M
+          pids: 512
 
 volumes:
   postgis-data:
   minio-data:
+  fotos-data:

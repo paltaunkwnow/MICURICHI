@@ -5,18 +5,46 @@ packages:
   - pipelines/*
   - e2e
 
-# Paquetes con scripts de instalación permitidos (pnpm los bloquea por defecto)
-allowBuilds:
-  better-sqlite3: set this to true or false
-  esbuild: set this to true or false
-  msgpackr-extract: set this to true or false
+# Cuarentena de versiones recién publicadas (minutos). Es la defensa contra el patrón habitual de
+# los ataques a la cadena de suministro de npm: alguien se hace con la cuenta de un mantenedor,
+# publica una versión con código malicioso y la retiran a las pocas horas; el daño lo sufre quien
+# instaló en esa ventana. Con 24 h de cuarentena, una versión comprometida ya suele estar retirada
+# antes de que este proyecto la pueda instalar.
+#
+# No retrasa de forma apreciable un parche de seguridad legítimo: cuando haga falta uno urgente, se
+# añade esa versión concreta a `minimumReleaseAgeExclude` de abajo, que es para lo que existe la
+# lista. Estaba escrita pero la protección que excluye no estaba activada, así que no hacía nada.
+minimumReleaseAge: 1440
 
 minimumReleaseAgeExclude:
   - zod@4.6.4
+  - image-size@2.0.4
 
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
-  - "@tailwindcss/oxide"
-  - unrs-resolver
-  - protobufjs
+# pnpm bloquea por defecto los scripts de instalación. Cada paquete con script debe declararse
+# aquí con true (se ejecuta) o false (se omite a propósito); si falta alguno, `pnpm install`
+# aborta con ERR_PNPM_IGNORED_BUILDS y el CI cae en el primer paso.
+allowBuilds:
+  # Binarios nativos que el proyecto SÍ necesita compilar o descargar.
+  esbuild: true
+  sharp: true
+  '@tailwindcss/oxide': true
+  unrs-resolver: true
+  protobufjs: true
+  # Omitidos a propósito:
+  #   better-sqlite3   → llega por mapshaper (GeoPackage) y por el driver SQLite opcional de
+  #                      drizzle-orm; ninguno se usa (el ETL lee shapefiles y la base es PostGIS).
+  #   msgpackr-extract → acelerador nativo opcional de msgpackr (mapshaper), con fallback en JS.
+  better-sqlite3: false
+  msgpackr-extract: false
+
+# Versiones forzadas de dependencias transitivas con avisos de seguridad.
+# Las cuatro llegan por `mapshaper`, que solo usa el ETL (offline, sobre los shapefiles del
+# municipio) y nunca corre dentro de un servicio HTTP. Los avisos son de parsers de ZIP y de
+# imágenes en formatos que este proyecto no abre, así que no eran alcanzables desde ninguna
+# petición; aun así se fuerzan las versiones corregidas en vez de silenciar el aviso.
+# Con ellas, `pnpm audit` pasa de 6 avisos (3 altos) a ninguno. Verificado con `pnpm etl:test`.
+overrides:
+  adm-zip: '>=0.6.1'
+  image-size: '>=2.0.4'
+  fflate: '>=0.8.3'
+  file-type: '>=21.3.1'

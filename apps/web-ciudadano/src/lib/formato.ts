@@ -36,6 +36,22 @@ export function etiquetaEstado(e: ReporteFeature['properties']['estado']) {
   return ETIQUETAS.estado[e];
 }
 
+/**
+ * «UV-105», no «UV UV-105»: los códigos de las capas ya pueden traer el prefijo, y depende de lo
+ * que entregue el municipio. Estas dos funciones lo normalizan en un solo sitio.
+ */
+export function etiquetaUnidadVecinal(codigo: string | null | undefined): string {
+  if (!codigo) return 'Sin unidad vecinal';
+  return /^uv/i.test(codigo) ? codigo.toUpperCase() : `UV ${codigo}`;
+}
+
+/** «Distrito 02» a partir de `D02`, `DM-2` o `2`. */
+export function etiquetaDistrito(codigo: string | null | undefined): string {
+  if (!codigo) return 'Sin distrito';
+  const limpio = codigo.replace(/^(dm|d)[\s-]*(?=\d)/i, '');
+  return `Distrito ${limpio}`;
+}
+
 export function tituloReporte(p: ReporteFeature['properties']) {
   if (p.direccion_aprox) return p.direccion_aprox;
   const uv = p.unidad_vecinal?.nombre ?? 'Unidad vecinal sin datos';
@@ -44,8 +60,8 @@ export function tituloReporte(p: ReporteFeature['properties']) {
 
 export function subtituloReporte(p: ReporteFeature['properties'], distanciaM?: number | null) {
   const partes = [
-    p.unidad_vecinal ? `UV ${p.unidad_vecinal.codigo}` : null,
-    p.distrito ? `Distrito ${p.distrito.codigo}` : null,
+    p.unidad_vecinal ? etiquetaUnidadVecinal(p.unidad_vecinal.codigo) : null,
+    p.distrito ? etiquetaDistrito(p.distrito.codigo) : null,
   ];
   if (distanciaM != null)
     partes.push(
@@ -79,12 +95,25 @@ export function tituloPuntos(n: number | undefined) {
   return n === 1 ? '1 punto cerca de vos' : `${n} puntos cerca de vos`;
 }
 
+/**
+ * Cifra exacta con separador de miles en castellano: `3488` → `3.488`.
+ *
+ * Es para los titulares, donde el número importa entero. Dentro del mapa manda `numeroCompacto`,
+ * que resume en miles porque ahí lo que falta es sitio.
+ */
+export function numeroConMiles(n: number): string {
+  return Number.isFinite(n) ? Math.round(n).toLocaleString('es-BO') : '';
+}
+
 /** Chip flotante del mapa: "Distrito 07 · UV-123 · capa oficial vigente". */
 export function textoCapaOficial(
   distrito: UnidadAdministrativa | null | undefined,
   uv: UnidadAdministrativa | null | undefined,
 ) {
-  const partes = [distrito ? `Distrito ${distrito.codigo}` : null, uv ? `UV-${uv.codigo}` : null];
+  const partes = [
+    distrito ? etiquetaDistrito(distrito.codigo) : null,
+    uv ? etiquetaUnidadVecinal(uv.codigo) : null,
+  ];
   const base = partes.filter(Boolean).join(' · ');
   return base ? `${base} · capa oficial vigente` : 'Fuera de la cobertura municipal';
 }

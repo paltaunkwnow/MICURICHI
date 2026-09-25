@@ -137,3 +137,18 @@ export function avisosResolucion(flags: Record<string, unknown> | null | undefin
   if (flags.distrito_discrepante === true) avisos.push('Distrito discrepante');
   return avisos;
 }
+
+/**
+ * «UV-105», no «UV UV-105»: los códigos de las capas pueden traer ya el prefijo, y eso depende de
+ * lo que entregue el municipio. Se normaliza en un solo sitio, igual que en la app pública.
+ */
+export function etiquetaUnidadVecinal(codigo: string | null | undefined): string {
+  if (!codigo) return '—';
+  return /^uv/i.test(codigo) ? codigo.toUpperCase() : `UV ${codigo}`;
+}
+
+/** «Distrito 02» a partir de `D02`, `DM-2` o `2`. */
+export function etiquetaDistrito(codigo: string | null | undefined): string {
+  if (!codigo) return '—';
+  return `Distrito ${codigo.replace(/^(dm|d)[\s-]*(?=\d)/i, '')}`;
+}

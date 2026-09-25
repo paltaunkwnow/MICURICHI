@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { Cabecera } from '@/componentes/Cabecera';
+import { Suspense } from 'react';
 import { FormularioReporte } from '@/componentes/FormularioReporte';
 
 export const metadata: Metadata = {
@@ -8,12 +8,11 @@ export const metadata: Metadata = {
 };
 
 export default function Reportar() {
+  // `useSearchParams` obliga a un límite de suspensión: sin él, Next no puede prerenderizar
+  // nada de esta ruta y falla el build.
   return (
-    <>
-      <Cabecera />
-      <main id="contenido">
-        <FormularioReporte />
-      </main>
-    </>
+    <Suspense fallback={<p className="p-6">Cargando el formulario…</p>}>
+      <FormularioReporte />
+    </Suspense>
   );
 }

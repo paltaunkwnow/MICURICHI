@@ -1,1 +1,4 @@
 pnpm exec lint-staged
+# Nada con pinta de secreto debe entrar al repositorio (CLAUDE.md §13). En CI corre además
+# gitleaks sobre todo el historial; esto es la barrera rápida sobre lo que se va a commitear.
+node scripts/buscar-secretos.mjs

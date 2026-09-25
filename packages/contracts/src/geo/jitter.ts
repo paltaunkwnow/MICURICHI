@@ -56,3 +56,32 @@ export function distanciaAproximadaM(
   const dLon = (lon2 - lon1) * METROS_POR_GRADO_LAT * Math.cos(latMedia);
   return Math.sqrt(dLat * dLat + dLon * dLon);
 }
+
+/**
+ * Coordenada tal como la ve el público (CLAUDE.md §13). Es **la única** definición de la regla:
+ * jitter determinista si la ubicación es una vivienda o predio, y redondeo a 5 decimales siempre.
+ *
+ * Existe como función aparte porque el valor no se puede calcular solo al serializar la respuesta:
+ * el listado público también **filtra** por bbox, y si el filtro mira la geometría exacta mientras
+ * la respuesta devuelve la desplazada, encoger el bbox revela la coordenada real por bisección.
+ * Por eso se calcula una vez al crear el reporte y se guarda en `geom_publico`, de modo que filtro
+ * y respuesta salgan siempre del mismo punto.
+ */
+export function coordenadaPublica(
+  lat: number,
+  lon: number,
+  id: string,
+  salJitter: string,
+  ubicacionTipo: string,
+  radioM: number,
+  decimales: number,
+): { lat: number; lon: number } {
+  const base =
+    ubicacionTipo === 'vivienda_o_predio'
+      ? aplicarJitter(lat, lon, `${id}|${salJitter}`, radioM)
+      : { lat, lon };
+  return {
+    lat: redondearCoordenada(base.lat, decimales),
+    lon: redondearCoordenada(base.lon, decimales),
+  };
+}

@@ -1,6 +1,6 @@
 {
   "name": "contracts",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Mi Curichi — contratos compartidos: enums, severidad, esquemas Zod, OpenAPI (transversal, custodia Parte 3)",
   "type": "module",

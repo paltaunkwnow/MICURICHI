@@ -41,11 +41,17 @@ async function main() {
   const pgv = await db.query<{ v: string }>('SELECT postgis_version() AS v');
   console.log(`[db:local] PostGIS ${pgv.rows[0]?.v}`);
 
+  /**
+   * api-core y geo-service abren 4 conexiones cada uno; las apps de Next y los E2E reinician
+   * los servicios a menudo y las conexiones viejas tardan en cerrarse. Con 12 el cupo se
+   * agotaba en cuanto dos arranques se solapaban y todo fallaba con `read ECONNRESET`.
+   */
+  const maxConexiones = Number(process.env.PGLITE_MAX_CONEXIONES ?? 40);
   const server = new PGLiteSocketServer({
     db,
     port: puerto,
     host: '127.0.0.1',
-    maxConnections: 12,
+    maxConnections: maxConexiones,
   });
   await server.start();
   console.log(

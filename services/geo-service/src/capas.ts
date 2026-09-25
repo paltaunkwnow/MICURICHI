@@ -12,6 +12,7 @@ import geojsonvt, { type Indice } from 'geojson-vt';
 import type pg from 'pg';
 import { fromGeojsonVt } from 'vt-pbf';
 import type { ConfigGeo } from './config.js';
+import type { MetricasGeo } from './observabilidad.js';
 
 interface CapaEnCache {
   version: string;
@@ -25,11 +26,28 @@ interface CapaEnCache {
 export class CacheCapas {
   private cache = new Map<TipoCapa, CapaEnCache>();
   private vigentes: { valor: Record<TipoCapa, string | null>; en: number } | null = null;
+  /**
+   * Cargas en vuelo. Sin esto, N peticiones simultáneas de una capa fría lanzan N cargas
+   * completas a la vez (la de manzanas son ~27 MB de GeoJSON más su índice de teselas):
+   * memoria multiplicada por N y N consultas pesadas a PostGIS para el mismo resultado.
+   */
+  private cargando = new Map<TipoCapa, Promise<CapaEnCache>>();
 
   constructor(
     private pool: pg.Pool,
     private cfg: ConfigGeo,
-  ) {}
+    private metricas?: MetricasGeo,
+  ) {
+    // Bytes retenidos por el GeoJSON en texto de cada capa. No es el consumo total del proceso
+    // (el índice de teselas de geojson-vt pesa aparte y no se puede medir sin recorrerlo), pero
+    // es la parte que crece con el tamaño de las capas y la que conviene vigilar.
+    this.metricas?.medidor('curichi_geo_cache_capas_bytes', () => {
+      let total = 0;
+      for (const c of this.cache.values()) total += c.bytes;
+      return total;
+    });
+    this.metricas?.medidor('curichi_geo_cache_capas_cargadas', () => this.cache.size);
+  }
 
   async versionesVigentes(): Promise<Record<TipoCapa, string | null>> {
     if (this.vigentes && Date.now() - this.vigentes.en < 10_000) return this.vigentes.valor;
@@ -48,13 +66,32 @@ export class CacheCapas {
   invalidar() {
     this.vigentes = null;
     this.cache.clear();
+    this.cargando.clear();
   }
 
   async obtener(capa: TipoCapa): Promise<CapaEnCache | null> {
     const version = (await this.versionesVigentes())[capa];
     if (!version) return null;
     const c = this.cache.get(capa);
-    if (c && c.version === version) return c;
+    if (c && c.version === version) {
+      this.metricas?.contar('curichi_geo_cache_aciertos_total', { cache: 'capas' });
+      return c;
+    }
+    // Un fallo aquí no es "una consulta más": obliga a releer la capa entera y a reconstruir su
+    // índice de teselas. Si este contador no es prácticamente plano, algo está invalidando de más.
+    this.metricas?.contar('curichi_geo_cache_fallos_total', { cache: 'capas' });
+    const enVuelo = this.cargando.get(capa);
+    if (enVuelo) {
+      this.metricas?.contar('curichi_geo_cache_en_vuelo_total', { cache: 'capas' });
+      return enVuelo;
+    }
+    const promesa = this.construir(capa, version).finally(() => this.cargando.delete(capa));
+    this.cargando.set(capa, promesa);
+    return promesa;
+  }
+
+  private async construir(capa: TipoCapa, version: string): Promise<CapaEnCache> {
+    const inicio = process.hrtime.bigint();
     const geojson = await this.cargar(capa, version);
     const texto = JSON.stringify(geojson);
     const indice = geojsonvt(geojson, {
@@ -69,6 +106,11 @@ export class CacheCapas {
     const bbox = calcularBbox(geojson);
     const nuevo = { version, geojson, texto, bytes: Buffer.byteLength(texto), indice, bbox };
     this.cache.set(capa, nuevo);
+    this.metricas?.observar(
+      'curichi_geo_cache_construccion_segundos',
+      { capa },
+      Number(process.hrtime.bigint() - inicio) / 1e9,
+    );
     return nuevo;
   }
 
@@ -136,7 +178,7 @@ export class CacheCapas {
 
   tesela(c: CapaEnCache, capa: TipoCapa, z: number, x: number, y: number): Uint8Array | null {
     const t = c.indice.getTile(z, x, y);
-    if (!t || !t.features.length) return null;
+    if (!t?.features.length) return null;
     return fromGeojsonVt({ [capa]: t }, { version: 2 });
   }
 }

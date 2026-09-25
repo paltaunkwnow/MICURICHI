@@ -132,6 +132,11 @@ export const ReporteFeatureCollectionSchema = z.object({
   type: z.literal('FeatureCollection'),
   features: z.array(ReporteFeatureSchema),
   total: z.number().int(),
+  /**
+   * false cuando el listado tiene más resultados de los que se cuentan (el conteo está acotado
+   * para no escanear la tabla entera en cada carga). En ese caso `total` es el tope.
+   */
+  total_exacto: z.boolean().optional(),
   pagina: z.number().int(),
   limite: z.number().int(),
 });
