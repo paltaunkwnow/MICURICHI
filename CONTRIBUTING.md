@@ -57,6 +57,10 @@ plan corto → aprobación → código → pruebas → resumen
 Sin excepciones. El plan dice a qué parte pertenece la tarea, qué carpeta toca y si hay cambio de
 contrato.
 
+Con Claude Code, ese ciclo se ejecuta con el comando `/sdd <descripción>`: clasifica el cambio,
+escribe la spec que aprobás, las pruebas que fallan, el código y la verificación con subagentes.
+Detalle en [`docs/proceso/sdd.md`](docs/proceso/sdd.md).
+
 ---
 
 ## 4. Antes de abrir un PR
