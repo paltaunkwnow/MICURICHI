@@ -103,6 +103,9 @@ línea cómo levantar la pila para probarlo (`pnpm db:local`, `pnpm dev`) o leva
 
 ## Si algo del entorno falla
 
+- Los agentes de `.claude/agents/` se registran al **arrancar la sesión**. Si el Agent tool dice
+  `Agent type 'sdd-…' not found`, lanzá `general-purpose` con el modelo del agente y empezá el
+  prompt con «Primero leé `.claude/agents/sdd-<rol>.md` y actuá exactamente con ese rol».
 - `pnpm` roto en la shell (`.tools\pnpm\12.4.1` no ejecutable): usar `npx -y pnpm@12.4.1 …` o un
   shim en el scratchpad que lo llame; nunca `--no-verify` en el commit.
 - PGlite degradada (`ECONNRESET`, PIP que devuelve `dentro_cobertura: false` donde antes `true`):
