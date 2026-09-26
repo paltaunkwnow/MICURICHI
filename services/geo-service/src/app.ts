@@ -10,7 +10,7 @@ import {
   TIPOS_CAPA,
   type TipoCapa,
 } from 'contracts';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { CacheCorta } from './cache-corta.js';
@@ -47,6 +47,28 @@ function esLoopback(ip: string | undefined): boolean {
   return limpia === '127.0.0.1' || limpia === '::1' || limpia.startsWith('127.');
 }
 
+/**
+ * «Interno» = trae el token compartido con api-core (cabecera `x-token-interno`, comparada en
+ * tiempo constante), o si no hay token configurado, viene de la propia máquina (solo pasa en el
+ * modo local sin Docker). Mismo criterio que ya usaba en solitario `/geo/v1/capas/invalidar`;
+ * ahora también decide qué tráfico queda fuera del cupo del resolver (ver `limiteResolver`).
+ */
+function esPeticionInterna(req: FastifyRequest, cfg: ConfigGeo): boolean {
+  return cfg.tokenInterno
+    ? igualEnTiempoConstante(req.headers['x-token-interno'], cfg.tokenInterno)
+    : esLoopback(req.socket.remoteAddress);
+}
+
+/** If-None-Match puede traer varios valores separados por coma, o `*` (cualquier representación). */
+function etagCoincide(cabecera: string | string[] | undefined, etag: string): boolean {
+  if (!cabecera) return false;
+  const valor = Array.isArray(cabecera) ? cabecera.join(',') : cabecera;
+  return valor
+    .split(',')
+    .map((v) => v.trim())
+    .some((v) => v === etag || v === '*');
+}
+
 export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   const app = Fastify({
     logger: dep.logger ?? false,
@@ -73,6 +95,23 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   const limiteConsulta = {
     config: { rateLimit: { max: dep.cfg.rateLimitConsultasPorMinuto, timeWindow: '1 minute' } },
   };
+  /**
+   * api-core llama a este endpoint UNA vez por cada `POST /reportes`, siempre desde el mismo
+   * origen: con el cupo compartido de `limiteConsulta`, una tormenta bastaba para que todas las
+   * creaciones de reporte de la ciudad agotaran entre todas el mismo cupo de 120/min y geo-service
+   * respondiera 429 a cualquier vecino (que api-core traduce en un 503 al crear el reporte). Quien
+   * trae el token interno válido queda fuera del cupo; la previsualización pública (sin token,
+   * desde el navegador del vecino) sigue limitada por IP con el mismo cupo de antes.
+   */
+  const limiteResolver = {
+    config: {
+      rateLimit: {
+        max: dep.cfg.rateLimitConsultasPorMinuto,
+        timeWindow: '1 minute',
+        allowList: (req: FastifyRequest) => esPeticionInterna(req, dep.cfg),
+      },
+    },
+  };
   const metricas = dep.metricas ?? new MetricasGeo();
   app.decorate('metricas', metricas);
   instrumentarPool(dep.pool as unknown as Parameters<typeof instrumentarPool>[0], metricas);
@@ -93,6 +132,25 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   app.addHook('onSend', async (_req, res) => {
     res.header('X-Content-Type-Options', 'nosniff');
     res.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  });
+  /**
+   * 57014 = query_canceled: la consulta se cortó por el `statement_timeout` propio de este pool
+   * (`GEO_DB_STATEMENT_TIMEOUT_MS`), no por un defecto del servicio. api-core ya trata cualquier
+   * 503/429 de geo-service como transitorio y reintentable (`GeoNoDisponible`); un 500 en cambio
+   * le llega como error a investigar. Todo lo demás sigue el camino normal de Fastify, incluidos
+   * los `res.badRequest/notFound/forbidden` de las rutas de abajo.
+   */
+  app.setErrorHandler((err, req, res) => {
+    const e = err as Error & { code?: string };
+    if (e.code === '57014') {
+      req.log.warn({ err: e }, 'consulta cancelada por statement_timeout');
+      res.header('Retry-After', '2');
+      return res.status(503).send({
+        codigo: 'NO_DISPONIBLE',
+        mensaje: 'El servicio está saturado. Probá de nuevo en unos segundos.',
+      });
+    }
+    return res.send(err);
   });
   const capas = new CacheCapas(dep.pool, dep.cfg, metricas);
   app.decorate('capas', capas);
@@ -115,7 +173,7 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     }
   });
 
-  app.post('/geo/v1/resolver', limiteConsulta, async (req, res) => {
+  app.post('/geo/v1/resolver', limiteResolver, async (req, res) => {
     const p = ResolverEntradaSchema.safeParse(req.body);
     if (!p.success) return res.badRequest(p.error.issues.map((i) => i.message).join('; '));
     return resolverPunto(dep.pool, p.data.lat, p.data.lon);
@@ -129,11 +187,7 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
    * el índice de teselas, así que bastaba repetirla para tumbar el servicio.
    */
   app.post('/geo/v1/capas/invalidar', async (req, res) => {
-    const token = req.headers['x-token-interno'];
-    const autorizado = dep.cfg.tokenInterno
-      ? igualEnTiempoConstante(token, dep.cfg.tokenInterno)
-      : esLoopback(req.socket.remoteAddress);
-    if (!autorizado) return res.forbidden('Ruta interna.');
+    if (!esPeticionInterna(req, dep.cfg)) return res.forbidden('Ruta interna.');
     capas.invalidar();
     return { ok: true };
   });
@@ -151,9 +205,13 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
         url: `/geo/v1/teselas/${p.data.capa}/{z}/{x}/{y}.mvt`,
       };
     }
-    res.header('Content-Type', 'application/geo+json; charset=utf-8');
+    const etag = `"${p.data.capa}-${c.version}"`;
     res.header('Cache-Control', 'public, max-age=300');
-    res.header('ETag', `"${p.data.capa}-${c.version}"`);
+    res.header('ETag', etag);
+    // Con ETag pero sin comparar If-None-Match, cada recarga del mapa reenviaba la capa entera
+    // (varios MB de GeoJSON) aunque el navegador ya la tuviera igual.
+    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
+    res.header('Content-Type', 'application/geo+json; charset=utf-8');
     return c.texto;
   });
 
@@ -164,8 +222,10 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     if (!c) return res.notFound(`No hay versión vigente de ${p.data.capa}`);
     const y = Number(p.data.y.replace(/\.mvt$/, ''));
     const buf = capas.tesela(c, p.data.capa, p.data.z, p.data.x, y);
+    const etag = `"${p.data.capa}-${c.version}-${p.data.z}-${p.data.x}-${y}"`;
     res.header('Cache-Control', 'public, max-age=300');
-    res.header('ETag', `"${p.data.capa}-${c.version}-${p.data.z}-${p.data.x}-${y}"`);
+    res.header('ETag', etag);
+    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
     if (!buf) return res.status(204).send();
     res.header('Content-Type', 'application/vnd.mapbox-vector-tile');
     return res.send(Buffer.from(buf));

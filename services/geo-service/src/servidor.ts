@@ -3,12 +3,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { crearPool, esperarBaseDeDatos, puedeEscribir, verificarPrivilegios } from 'db';
 import { crearApp } from './app.js';
-import { leerConfig } from './config.js';
+import { leerConfig, opcionesPool } from './config.js';
 
 const cfg = leerConfig();
 if (!cfg.dirProcessed)
   cfg.dirProcessed = resolve(dirname(fileURLToPath(import.meta.url)), '../../../data/processed');
-const pool = crearPool(cfg.databaseUrl, { max: cfg.poolMax });
+const pool = crearPool(cfg.databaseUrl, opcionesPool(cfg));
 /**
  * Igual que api-core: el serializador por defecto de Fastify escribe `remoteAddress` —la IP del
  * cliente en claro— en cada petición, y aquí pasa el tráfico del mapa público entero. geo-service

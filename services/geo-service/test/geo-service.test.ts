@@ -186,6 +186,120 @@ describe('capas, teselas y agregados', () => {
   });
 });
 
+describe('cupo del resolver: exención con token interno (hallazgo 1)', () => {
+  it('sin token comparte el cupo público; con el token interno válido queda fuera del cupo', async () => {
+    // Cupo de 1 por minuto para que la segunda petición pública ya caiga en 429, como pasaría en
+    // una tormenta real con el cupo de producción agotado por el propio tráfico de api-core.
+    const cfg = {
+      ...leerConfig({ DATABASE_URL: base.url }),
+      rateLimitConsultasPorMinuto: 1,
+      tokenInterno: 'secreto-resolver-test',
+    };
+    const appLimitado = await crearApp({ pool, cfg });
+    try {
+      const payload = { lat: -17.79, lon: -63.195 };
+      const primero = await appLimitado.inject({
+        method: 'POST',
+        url: '/geo/v1/resolver',
+        payload,
+      });
+      expect(primero.statusCode).toBe(200);
+      // Cupo agotado: la siguiente petición pública (sin cabecera) cae en 429.
+      const segundo = await appLimitado.inject({
+        method: 'POST',
+        url: '/geo/v1/resolver',
+        payload,
+      });
+      expect(segundo.statusCode).toBe(429);
+      // api-core manda el token interno: no cuenta contra el cupo ya agotado.
+      const conToken = await appLimitado.inject({
+        method: 'POST',
+        url: '/geo/v1/resolver',
+        payload,
+        headers: { 'x-token-interno': 'secreto-resolver-test' },
+      });
+      expect(conToken.statusCode).toBe(200);
+      // Un token incorrecto no exime a nadie: sigue tratándose como tráfico público agotado.
+      const tokenMalo = await appLimitado.inject({
+        method: 'POST',
+        url: '/geo/v1/resolver',
+        payload,
+        headers: { 'x-token-interno': 'otro' },
+      });
+      expect(tokenMalo.statusCode).toBe(429);
+    } finally {
+      await appLimitado.close();
+    }
+  });
+});
+
+describe('timeout de consultas: 503 con Retry-After, no 500 (hallazgo 2)', () => {
+  it('si la consulta del resolver se cancela por statement_timeout (57014), responde 503 con Retry-After', async () => {
+    // Pool falso: sin abrir una conexión real, reproduce lo que hace `pg` cuando PostGIS cancela
+    // la consulta por `statement_timeout` (SQLSTATE 57014 / query_canceled).
+    const poolQueExpira = {
+      query: async () => {
+        throw Object.assign(new Error('canceling statement due to statement timeout'), {
+          code: '57014',
+        });
+      },
+      totalCount: 0,
+      idleCount: 0,
+      waitingCount: 0,
+    } as unknown as pg.Pool;
+    const appConTimeout = await crearApp({
+      pool: poolQueExpira,
+      cfg: leerConfig({ DATABASE_URL: base.url }),
+    });
+    try {
+      const r = await appConTimeout.inject({
+        method: 'POST',
+        url: '/geo/v1/resolver',
+        payload: { lat: -17.79, lon: -63.195 },
+      });
+      expect(r.statusCode).toBe(503);
+      expect(r.headers['retry-after']).toBeDefined();
+      expect(r.json().codigo).toBe('NO_DISPONIBLE');
+    } finally {
+      await appConTimeout.close();
+    }
+  });
+});
+
+describe('ETag / If-None-Match: 304 sin cuerpo (hallazgo 3)', () => {
+  it('/geo/v1/capas/:capa responde 304 sin cuerpo cuando If-None-Match coincide', async () => {
+    const primero = await app.inject({ method: 'GET', url: '/geo/v1/capas/unidad_vecinal' });
+    expect(primero.statusCode).toBe(200);
+    const etag = primero.headers.etag as string;
+    const segundo = await app.inject({
+      method: 'GET',
+      url: '/geo/v1/capas/unidad_vecinal',
+      headers: { 'if-none-match': etag },
+    });
+    expect(segundo.statusCode).toBe(304);
+    expect(segundo.body).toBe('');
+    expect(segundo.headers.etag).toBe(etag);
+    expect(segundo.headers['cache-control']).toBe('public, max-age=300');
+  });
+
+  it('una tesela responde 304 sin cuerpo cuando If-None-Match coincide', async () => {
+    const z = 14;
+    const x = Math.floor(((-63.19 + 180) / 360) * 2 ** z);
+    const latRad = (-17.79 * Math.PI) / 180;
+    const y = Math.floor(
+      ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** z,
+    );
+    const url = `/geo/v1/teselas/unidad_vecinal/${z}/${x}/${y}.mvt`;
+    const primero = await app.inject({ method: 'GET', url });
+    expect(primero.statusCode).toBe(200);
+    const etag = primero.headers.etag as string;
+    const segundo = await app.inject({ method: 'GET', url, headers: { 'if-none-match': etag } });
+    expect(segundo.statusCode).toBe(304);
+    expect(segundo.rawPayload.length).toBe(0);
+    expect(segundo.headers.etag).toBe(etag);
+  });
+});
+
 describe('ruta interna /geo/v1/capas/invalidar', () => {
   it('sin token configurado solo la acepta desde loopback', async () => {
     const r = await app.inject({ method: 'POST', url: '/geo/v1/capas/invalidar' });
