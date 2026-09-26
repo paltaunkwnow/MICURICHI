@@ -197,7 +197,7 @@ describe('el bbox público no puede usarse como oráculo de la coordenada exacta
     const { rows } = await pool.query<{ id: string }>(
       `INSERT INTO reporte_inundacion
          (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-          descripcion, tirante_estimado, frecuencia,
+          descripcion, profundidad_estimada, frecuencia,
           severidad_calculada, severidad_puntaje, severidad_version, estado)
        VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($3, $4), 4326),
           'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'vivienda_o_predio',

@@ -1,4 +1,4 @@
-import { LoginSchema, RegistroSchema } from 'contracts';
+import { LoginSchema, RegistroSchema, type Rol } from 'contracts';
 import {
   anotarRegistro,
   ejecutorPg,
@@ -180,7 +180,7 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
         id: string;
         email: string;
         nombre: string;
-        rol: 'ciudadano' | 'tecnico' | 'admin';
+        rol: Rol;
         password_hash: string;
       }>(
         'SELECT id, email, nombre, rol, password_hash FROM usuario WHERE lower(email) = lower($1) AND activo',

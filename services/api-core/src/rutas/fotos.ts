@@ -156,7 +156,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
       config: {
         rateLimit: { max: dep.cfg.rateLimitMax * 3, timeWindow: dep.cfg.rateLimitVentanaMs },
       },
-      preHandler: requerirRol('ciudadano', 'tecnico', 'admin'),
+      preHandler: requerirRol('ciudadano', 'tecnico', 'admin', 'ejecutivo'),
     },
     async (req, res) => {
       // `req.file()` lanza si la petición no es multipart, y el manejador general publicaba el

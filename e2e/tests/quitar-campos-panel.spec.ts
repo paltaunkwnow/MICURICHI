@@ -13,16 +13,16 @@ import {
  * Corrida `2026-09-25-quitar-campos-del-reporte`, criterios del panel técnico (CA-P1, CA-P2, CA-P4).
  *
  * El reporte dejó de tener manzana, dirección aproximada, duración y afectación, y la severidad
- * pasó a la v2 (`puntaje = 2·T + F`, sobre 12). El detalle del panel no debe mostrar esos cuatro
+ * pasó a la v2 (`puntaje = 2·P + F`, sobre 12). El detalle del panel no debe mostrar esos cuatro
  * datos, pero sí conserva «En el mapa público se ve» (decisión del usuario). El mapa del panel deja
  * de dibujar las manzanas aunque la capa se siga sirviendo.
  */
 
-/** Crea un reporte `nuevo` con T = muslo y F = permanente (10 de 12 puntos en la v2). */
+/** Crea un reporte `nuevo` con P = muslo y F = permanente (10 de 12 puntos en la v2). */
 async function crearReporteMusloPermanente(request: APIRequestContext, marca: string) {
   await cuentaNuevaConSesion(request, 'panel-');
   const r = await request.post(`${API}/api/v1/reportes`, {
-    data: { ...reporteValido(marca), tirante_estimado: 'muslo', frecuencia: 'permanente' },
+    data: { ...reporteValido(marca), profundidad_estimada: 'muslo', frecuencia: 'permanente' },
   });
   expect(r.status(), await r.text()).toBe(201);
   return (await r.json()).id as string;
@@ -62,7 +62,7 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     for (const sigue of [
       'Distrito',
       'Unidad vecinal',
-      'Tirante estimado',
+      'Profundidad estimada',
       'Frecuencia',
       'En el mapa público se ve',
     ]) {
@@ -87,9 +87,9 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     const desglose = titulo.locator('xpath=..');
     const filas = desglose.locator('dl > div > dt');
     await expect(filas).toHaveCount(2);
-    await expect(filas.nth(0)).toHaveText(/^Tirante\s*×2$/);
+    await expect(filas.nth(0)).toHaveText(/^Profundidad\s*×2$/);
     await expect(filas.nth(1)).toHaveText('Frecuencia');
-    await expect(desglose).toContainText('puntaje = 2 × tirante + frecuencia');
+    await expect(desglose).toContainText('puntaje = 2 × profundidad + frecuencia');
     await expect(desglose).not.toContainText(/duración|afectación/i);
   });
 

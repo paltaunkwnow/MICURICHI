@@ -1,5 +1,6 @@
 'use client';
 
+import { ETIQUETAS } from 'contracts';
 import { X } from 'lucide-react';
 import Link from 'next/link';
 import type { ReporteFeature } from '@/lib/api';
@@ -7,7 +8,7 @@ import {
   etiquetaCausa,
   etiquetaDistrito,
   etiquetaFrecuencia,
-  etiquetaTirante,
+  etiquetaProfundidad,
   etiquetaUnidadVecinal,
   fechaCorta,
   subtituloReporte,
@@ -89,8 +90,8 @@ export function HojaDetalle({
 
       <dl className="kv">
         <div>
-          <dt>Tirante</dt>
-          <dd>{etiquetaTirante(p.tirante_estimado)}</dd>
+          <dt>{ETIQUETAS.campos.profundidad}</dt>
+          <dd>{etiquetaProfundidad(p.profundidad_estimada)}</dd>
         </div>
         <div>
           <dt>Frecuencia</dt>
@@ -148,7 +149,8 @@ export function HojaDetalle({
       ) : null}
 
       <Aviso tono="tinta" className="mt-3.5">
-        Dato de percepción, no medido: el tirante es estimado y la ubicación tiene el error del GPS.
+        Dato de percepción, no medido: la profundidad se estima por referencia corporal y la
+        ubicación tiene el error del GPS.
       </Aviso>
     </section>
   );

@@ -8,7 +8,9 @@ import type {
   ReporteFusionar,
   ReporteReclasificar,
   ReporteTecnico,
+  ResumenEjecutivo,
   Usuario,
+  VentanaResumen,
 } from 'contracts';
 
 /** Error devuelto por api-core o geo-service ({ codigo, mensaje, detalles }) con el status HTTP. */
@@ -206,6 +208,13 @@ export function fusionarReporte(id: string, cuerpo: ReporteFusionar) {
 /** Enlace de descarga con los filtros actuales; se usa en un <a download>. */
 export function urlExportar(formato: 'csv' | 'geojson', params: ParametrosConsulta) {
   return `/api/v1/exportar?${aQuery({ ...params, formato })}`;
+}
+
+// --- Panel ejecutivo ------------------------------------------------------
+
+/** Resumen por distrito para secretarios, concejales y alcalde (roles ejecutivo, tecnico, admin). */
+export function obtenerResumenEjecutivo(ventana: VentanaResumen, signal?: AbortSignal) {
+  return pedir<ResumenEjecutivo>(`/api/v1/ejecutivo/resumen?${aQuery({ ventana })}`, { signal });
 }
 
 // --- Indicadores y capas -------------------------------------------------

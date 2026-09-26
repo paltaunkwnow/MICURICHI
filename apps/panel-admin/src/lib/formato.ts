@@ -4,12 +4,12 @@ import {
   type EstadoReporte,
   ETIQUETAS,
   type Frecuencia,
+  type Profundidad,
   type Rol,
   type Severidad,
   type SumideroCercano,
   type SumideroEstado,
   type TipoCapa,
-  type Tirante,
   type UbicacionMetodo,
   type UbicacionTipo,
 } from 'contracts';
@@ -35,8 +35,8 @@ export function colorSeveridad(s: Severidad) {
 export function etiquetaEstado(e: EstadoReporte) {
   return ETIQUETAS.estado[e];
 }
-export function etiquetaTirante(t: Tirante) {
-  const e = ETIQUETAS.tirante[t];
+export function etiquetaProfundidad(p: Profundidad) {
+  const e = ETIQUETAS.profundidad[p];
   return `${e.corta} · ${e.rango}`;
 }
 export function etiquetaFrecuencia(f: Frecuencia) {
@@ -61,7 +61,7 @@ export function etiquetaMetodo(m: UbicacionMetodo) {
   return m === 'gps' ? 'GPS del dispositivo' : 'Selección manual en el mapa';
 }
 export function etiquetaRol(r: Rol) {
-  return r === 'admin' ? 'Administrador' : r === 'tecnico' ? 'Técnico' : 'Ciudadano';
+  return ETIQUETAS.rol[r];
 }
 export function etiquetaSiNo(v: boolean | null | undefined) {
   if (v === null || v === undefined) return 'Sin dato';

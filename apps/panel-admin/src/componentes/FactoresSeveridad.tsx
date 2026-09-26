@@ -4,16 +4,16 @@ import { colorSeveridad } from '@/lib/formato';
 /** Puntaje máximo de cada variable en la tabla de severidad (CLAUDE.md §9.1). */
 const MAXIMO = 4;
 /** Puntaje máximo de la fórmula (severidad v2: 2·4 + 4 = 12). Sale de los pesos, no se fija. */
-const PUNTAJE_MAXIMO = (PESOS.tirante + PESOS.frecuencia) * MAXIMO;
+const PUNTAJE_MAXIMO = (PESOS.profundidad + PESOS.frecuencia) * MAXIMO;
 
 /**
  * De dónde salió el puntaje (M-03 del prototipo). El técnico que va a validar o a reclasificar
- * necesita ver qué variable empujó la severidad, no solo el número final; y que el tirante pesa
- * doble, que es lo que más sorprende cuando se mira por primera vez.
+ * necesita ver qué variable empujó la severidad, no solo el número final; y que la profundidad
+ * pesa doble, que es lo que más sorprende cuando se mira por primera vez.
  */
 export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
   const filas: Array<[string, number, number]> = [
-    ['Tirante', PUNTOS.tirante[reporte.tirante_estimado], PESOS.tirante],
+    ['Profundidad', PUNTOS.profundidad[reporte.profundidad_estimada], PESOS.profundidad],
     ['Frecuencia', PUNTOS.frecuencia[reporte.frecuencia], PESOS.frecuencia],
   ];
   const color = colorSeveridad(reporte.severidad_calculada).relleno;
@@ -47,8 +47,8 @@ export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
         ))}
       </dl>
       <p className="ayuda mt-3">
-        puntaje = {PESOS.tirante} × tirante + frecuencia. El tirante pesa doble porque es lo más
-        ligado al riesgo directo para personas y vehículos.
+        puntaje = {PESOS.profundidad} × profundidad + frecuencia. La profundidad pesa doble porque
+        es lo más ligado al riesgo directo para personas y vehículos.
         {reporte.severidad_manual
           ? ' Este reporte tiene una reclasificación manual, así que la severidad efectiva no es esta.'
           : ' Sin reclasificación manual: se recalcula si el reporte se corrige.'}

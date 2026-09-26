@@ -33,7 +33,7 @@ beforeEach(async () => {
 async function crear(lon: number, lat: number, estado = 'validado'): Promise<string> {
   const r = await pool.query<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-       descripcion, tirante_estimado, frecuencia, severidad_calculada,
+       descripcion, profundidad_estimada, frecuencia, severidad_calculada,
        severidad_puntaje, severidad_version, estado)
      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual',
        'via_publica', 'Reporte de prueba de agrupacion incremental', 'rodilla', 'ocasional',
@@ -218,7 +218,7 @@ describe('el coste no crece con el tamaño de la tabla', () => {
     }
     await pool.query(
       `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-        tirante_estimado, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
+        profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
        VALUES ${filas.join(',')}`,
       params,
     );

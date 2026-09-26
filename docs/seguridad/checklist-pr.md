@@ -30,6 +30,8 @@ Aplicar a todo PR que toque `services/api-core`, manejo de fotos, autenticación
 - [ ] Toda ruta de ESCRITURA exige sesión (crear reporte y subir foto, incluidas).
 - [ ] El identificador de autor sale de la sesión, nunca del cuerpo de la petición.
 - [ ] Un rol `ciudadano` sigue recibiendo 403 en `/api/v1/tecnico/*` y en `/api/v1/admin/*`.
+- [ ] Un rol `ejecutivo` recibe 403 en `/api/v1/tecnico/*`, `/api/v1/exportar`,
+      `/api/v1/indicadores` y `/api/v1/admin/*`, y 200 solo en `/api/v1/ejecutivo/resumen`.
 - [ ] La cuota por cuenta se aplica con el UPDATE condicional dentro de la transacción; si la
       tocaste, la prueba de concurrencia contra PostgreSQL real pasa.
 - [ ] Rate limiting y honeypot activos en creación de reportes, subida de fotos, login y altas.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { ETIQUETAS } from 'contracts';
 import { ArrowLeft, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -17,11 +18,11 @@ import {
   etiquetaCausa,
   etiquetaFrecuencia,
   etiquetaMetodo,
+  etiquetaProfundidad,
   etiquetaSeveridad,
   etiquetaSiNo,
   etiquetaSumideroCercano,
   etiquetaSumideroEstado,
-  etiquetaTirante,
   etiquetaUbicacionTipo,
   fechaHora,
   idCorto,
@@ -158,13 +159,15 @@ export default function PaginaDetalleReporte() {
           <Bloque titulo="Evento reportado">
             <dl className="lista-datos">
               <Dato etiqueta="Fecha del evento">{fechaHora(p.evento_en)}</Dato>
-              <Dato etiqueta="Tirante estimado">{etiquetaTirante(p.tirante_estimado)}</Dato>
+              <Dato etiqueta={ETIQUETAS.campos.profundidad_estimada}>
+                {etiquetaProfundidad(p.profundidad_estimada)}
+              </Dato>
               <Dato etiqueta="Frecuencia">{etiquetaFrecuencia(p.frecuencia)}</Dato>
               <Dato etiqueta="Causa presunta">{etiquetaCausa(p.causa_presunta)}</Dato>
-              <Dato etiqueta="Sumidero cercano">
+              <Dato etiqueta={ETIQUETAS.campos.sumidero_cercano}>
                 {p.sumidero_cercano ? etiquetaSumideroCercano(p.sumidero_cercano) : 'Sin dato'}
               </Dato>
-              <Dato etiqueta="Estado del sumidero">
+              <Dato etiqueta={ETIQUETAS.campos.sumidero_estado}>
                 {p.sumidero_estado ? etiquetaSumideroEstado(p.sumidero_estado) : 'Sin dato'}
               </Dato>
               <Dato etiqueta="Agua brota del sumidero">{etiquetaSiNo(p.agua_brota_sumidero)}</Dato>

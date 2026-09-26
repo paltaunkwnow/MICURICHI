@@ -33,7 +33,7 @@ const SELECT_REPORTE = `
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre,
          r.version_capa, r.resolucion_flags, r.ubicacion_metodo, r.precision_gps_m,
-         r.ubicacion_tipo, r.descripcion, r.tirante_estimado,
+         r.ubicacion_tipo, r.descripcion, r.profundidad_estimada,
          r.frecuencia, r.causa_presunta,
          r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,

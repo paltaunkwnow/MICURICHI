@@ -11,7 +11,14 @@ import type { SesionActual } from 'contracts';
  * protege el panel es el propio panel, que comprueba el rol al cargar, y api-core, que responde
  * 403 a cualquier acción técnica sin rol técnico.
  */
-const ROLES_DEL_PANEL: ReadonlySet<SesionActual['rol']> = new Set(['tecnico', 'admin']);
+const ROLES_DEL_PANEL: ReadonlySet<SesionActual['rol']> = new Set([
+  'tecnico',
+  'admin',
+  'ejecutivo',
+]);
+
+/** El ejecutivo no modera (contracts 0.5.0): su herramienta es el resumen, no la bandeja. */
+const RUTA_EJECUTIVO = 'ejecutivo';
 
 /**
  * Solo `http(s)` y sin usuario ni contraseña en la URL. Con cualquier otra cosa no hay botón: un
@@ -35,8 +42,13 @@ export function destinoDelPanel(
   rol: SesionActual['rol'] | undefined,
   url: string | null,
 ): string | null {
-  if (!rol || !ROLES_DEL_PANEL.has(rol)) return null;
-  return url;
+  if (!rol || !ROLES_DEL_PANEL.has(rol) || !url) return null;
+  return rol === 'ejecutivo' ? new URL(RUTA_EJECUTIVO, url).href : url;
+}
+
+/** Texto del botón: al ejecutivo no se le ofrece un «panel técnico» que no es el suyo. */
+export function textoDelPanel(rol: SesionActual['rol'] | undefined): string {
+  return rol === 'ejecutivo' ? 'Panel ejecutivo' : 'Panel técnico';
 }
 
 /** Fijada al compilar desde `PANEL_ADMIN_URL` (ver `next.config.ts`): viaja en el JavaScript. */

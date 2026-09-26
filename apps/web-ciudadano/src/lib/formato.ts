@@ -16,8 +16,8 @@ export function etiquetaSeveridad(s: Severidad) {
 export function colorSeveridad(s: Severidad) {
   return COLORES_SEVERIDAD[s];
 }
-export function etiquetaTirante(t: ReporteFeature['properties']['tirante_estimado']) {
-  const e = ETIQUETAS.tirante[t];
+export function etiquetaProfundidad(p: ReporteFeature['properties']['profundidad_estimada']) {
+  const e = ETIQUETAS.profundidad[p];
   return `${e.corta} · ${e.rango}`;
 }
 export function etiquetaFrecuencia(f: ReporteFeature['properties']['frecuencia']) {

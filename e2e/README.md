@@ -10,10 +10,12 @@ Pruebas end-to-end **transversales**: las que cruzan varias partes. Los E2E prop
 | `tests/mapa-seleccion.spec.ts` | El reporte elegido sobrevive al zoom, al arrastre y al cambio de consulta; las agrupaciones cuentan sus reportes y se abren al acercar; el 404 del detalle se dice. También en móvil |
 | `tests/separacion-publica-tecnica.spec.ts` | Que la vista pública siga siendo pública aunque el navegador lleve cookie de técnico; que la vista técnica exija rol; cabeceras de caché; y que los puntos críticos no publiquen medidas de la geometría exacta |
 | `tests/responsive.spec.ts` | Que ninguna pantalla se desborde a lo ancho, de 320 a 1920 px |
-| `tests/accesibilidad.spec.ts` | `lang`, `h1`, `alt`, etiquetas de campos, nombres de botones y enlace de salto |
+| `tests/accesibilidad.spec.ts` | `lang`, `h1`, `alt`, etiquetas de campos, nombres de botones y enlace de salto; también en `/ejecutivo` con sesión de ejecutivo |
 | `tests/datos-reales.spec.ts` | Las capas vigentes son las del municipio y se usan de verdad: nombres, bbox, point-in-polygon y búsqueda |
 | `tests/navegacion.spec.ts` | Los cuatro destinos de la barra, cambio de pestaña sin recargar y capas del mapa |
 | `tests/resiliencia-interfaz.spec.ts` | Que la interfaz no invente cuando la API falla, y que el borrador del formulario sobreviva a una recarga |
+| `tests/panel-ejecutivo.spec.ts` | Rol ejecutivo (contracts 0.5.0): `GET /api/v1/ejecutivo/resumen` responde 401 sin sesión, 403 a un ciudadano y 200 al ejecutivo; el ejecutivo recibe 403 en `/tecnico/reportes`, `/exportar` e `/indicadores`. En el panel: aterriza en `/ejecutivo`, total, pestañas por severidad, dos gráficas, ventana de tiempo (`?ventana=7d`) y redirección desde `/reportes` |
+| `tests/formulario-sumidero-y-fotos.spec.ts` | El sumidero se pregunta con Sí/No y Tapado/No tapado, sin «No sé»; en el paso de fotos, «¿Querés añadir otro detalle?» abre un input de cámara |
 
 ## Cómo correrlos
 
@@ -48,7 +50,16 @@ de Next) y le pasa `RATE_LIMIT_REPORTES_POR_HORA=1000`.
 > (en PowerShell: `$env:RATE_LIMIT_REPORTES_POR_HORA=1000; pnpm dev`), o simplemente cerralo y
 > dejá que Playwright lo levante.
 
-Credenciales: se toman de `E2E_TECNICO_EMAIL` y `E2E_TECNICO_PASSWORD`, y por defecto usan los usuarios sintéticos del seed (ver `packages/db/README.md`).
+Credenciales: se toman de variables de entorno y, si no están, usan los usuarios sintéticos del seed (ver `packages/db/README.md`):
+
+| Rol | Variables | Por defecto |
+|---|---|---|
+| Técnico | `E2E_TECNICO_EMAIL`, `E2E_TECNICO_PASSWORD` | `tecnico@curichi.local` |
+| Administrador | `E2E_ADMIN_EMAIL`, `E2E_ADMIN_PASSWORD` | `admin@curichi.local` |
+| Ejecutivo | `E2E_EJECUTIVO_EMAIL`, `E2E_EJECUTIVO_PASSWORD` | `ejecutivo@curichi.local` (migración 0011) |
+| Ciudadana | `E2E_VECINA_EMAIL`, `E2E_VECINA_PASSWORD` | `vecina@curichi.local` |
+
+La contraseña del ejecutivo la fija el seed con `SEED_EJECUTIVO_PASSWORD` (por defecto la local de desarrollo). Si la cambiás al sembrar, pasá la misma en `E2E_EJECUTIVO_PASSWORD`: el seed corre aparte, no dentro de `webServer`.
 
 ## Fallos que no son del código
 

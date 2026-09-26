@@ -19,6 +19,16 @@ export const CREDENCIALES_ADMIN = {
   password: process.env.E2E_ADMIN_PASSWORD ?? 'curichi-admin-local',
 };
 
+/**
+ * Cuenta ejecutiva del seed (migración 0011 de `packages/db`). Solo ve el panel ejecutivo
+ * (`/ejecutivo` y `GET /api/v1/ejecutivo/resumen`): no modera ni exporta. El seed toma la
+ * contraseña de `SEED_EJECUTIVO_PASSWORD`; si se cambia allí, hay que pasar la misma aquí.
+ */
+export const CREDENCIALES_EJECUTIVO = {
+  email: process.env.E2E_EJECUTIVO_EMAIL ?? 'ejecutivo@curichi.local',
+  password: process.env.E2E_EJECUTIVO_PASSWORD ?? 'curichi-ejecutivo-local',
+};
+
 /** Cuenta ciudadana del seed. Desde la Fase 5, crear un reporte exige sesión. */
 export const CREDENCIALES_VECINA = {
   email: process.env.E2E_VECINA_EMAIL ?? 'vecina@curichi.local',
@@ -27,7 +37,7 @@ export const CREDENCIALES_VECINA = {
 
 /**
  * Payload mínimo válido de `POST /api/v1/reportes`. Desde la severidad v2 (corrida
- * 2026-09-25-quitar-campos-del-reporte) el reporte solo pregunta tirante y frecuencia: ya no lleva
+ * 2026-09-25-quitar-campos-del-reporte) el reporte solo pregunta profundidad y frecuencia: ya no lleva
  * duración ni afectación, y la severidad de este payload es 2·2 (rodilla) + 3 (cada lluvia fuerte)
  * = 7 → media.
  */
@@ -38,7 +48,7 @@ export function reporteValido(marca: string) {
     ubicacion_metodo: 'manual' as const,
     ubicacion_tipo: 'via_publica' as const,
     descripcion: `Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`,
-    tirante_estimado: 'rodilla' as const,
+    profundidad_estimada: 'rodilla' as const,
     frecuencia: 'cada_lluvia_fuerte' as const,
     causa_presunta: 'sumidero_tapado' as const,
     sitio_web: '',
@@ -68,6 +78,16 @@ export async function esperarPila(request: APIRequestContext) {
 export async function loginTecnico(request: APIRequestContext) {
   const r = await request.post(`${API}/api/v1/auth/login`, { data: CREDENCIALES_TECNICO });
   expect(r.status(), 'el técnico debe poder iniciar sesión con los usuarios del seed').toBe(200);
+  return r.json();
+}
+
+/** Inicia sesión como ejecutivo sobre el contexto de request (guarda la cookie de sesión). */
+export async function loginEjecutivo(request: APIRequestContext) {
+  const r = await request.post(`${API}/api/v1/auth/login`, { data: CREDENCIALES_EJECUTIVO });
+  expect(
+    r.status(),
+    'el ejecutivo debe poder iniciar sesión (¿migración 0011 aplicada y `pnpm db:seed:samples`?)',
+  ).toBe(200);
   return r.json();
 }
 

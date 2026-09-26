@@ -104,9 +104,9 @@ test.describe('el formulario no pierde lo escrito', () => {
     await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible({ timeout: 30_000 });
     await page.getByTestId('boton-siguiente').click();
 
-    // Paso 2: el tirante (y la frecuencia, si P-4 las junta en el mismo paso), suficiente para
+    // Paso 2: la profundidad (y la frecuencia, si P-4 las junta en el mismo paso), suficiente para
     // que haya algo que perder. Duración y afectación ya no existen (severidad v2).
-    await page.locator('input[name="tirante_estimado"][value="rodilla"]').check();
+    await page.locator('input[name="profundidad_estimada"][value="rodilla"]').check();
     const frecuenciaEnPaso2 = (await page.locator('input[name="frecuencia"]').count()) > 0;
     if (frecuenciaEnPaso2)
       await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
@@ -119,7 +119,7 @@ test.describe('el formulario no pierde lo escrito', () => {
     const rotulo = page.locator('p.pno');
     await expect(rotulo).toHaveText(/^Paso 2 de [45]$/);
     const total = ((await rotulo.textContent()) ?? '').replace(/^Paso 2 de /, '');
-    await expect(page.locator('input[name="tirante_estimado"][value="rodilla"]')).toBeChecked();
+    await expect(page.locator('input[name="profundidad_estimada"][value="rodilla"]')).toBeChecked();
     if (frecuenciaEnPaso2)
       await expect(
         page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]'),

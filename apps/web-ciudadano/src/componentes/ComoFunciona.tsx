@@ -67,7 +67,8 @@ const LIMITES: Array<{ Icono: LucideIcon; fuerte: string; texto: string; rojo?: 
   {
     Icono: WavesHorizontal,
     fuerte: 'No es un estudio hidráulico.',
-    texto: 'Son datos de percepción de vecinos, no mediciones de campo.',
+    texto:
+      'Son datos de percepción de vecinos, no mediciones de campo: la profundidad se estima por referencia corporal.',
   },
   {
     Icono: CircleQuestionMark,
@@ -222,11 +223,11 @@ export function ComoFunciona() {
 
             <h2 className="glbl">De dónde sale el número</h2>
             <p className="text-[15.5px] leading-[1.55] text-tinta-600">
-              Cada respuesta vale de 1 a 4 puntos y el tirante pesa doble, porque es lo que más
+              Cada respuesta vale de 1 a 4 puntos y la profundidad pesa doble, porque es lo que más
               riesgo trae para personas y vehículos.
             </p>
             <p className="mt-2.5 rounded-2xl bg-tinta-100 p-4 text-center font-semibold">
-              puntaje = 2 × tirante + frecuencia
+              puntaje = 2 × profundidad + frecuencia
             </p>
             <table className="tabla mt-3">
               <caption className="sr-only">Bandas de severidad según el puntaje</caption>

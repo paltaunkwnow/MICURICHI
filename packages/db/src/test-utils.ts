@@ -92,7 +92,7 @@ export async function insertarReporte(
     // `via_publica` no lleva jitter, así que el punto publicable es la coordenada redondeada a
     // 5 decimales (§13). Sin él, el reporte no saldría en las consultas públicas.
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-       tirante_estimado, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
+       profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326),
        ST_SetSRID(ST_MakePoint(round($1::numeric, 5)::float8, round($2::numeric, 5)::float8), 4326),
        'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba automatizada',

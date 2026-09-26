@@ -52,10 +52,10 @@ test.describe('navegación de la app pública', () => {
       await colores.click();
       await expect(colores).toHaveAttribute('aria-selected', 'true');
     }).toPass({ timeout: 15_000 });
-    // Severidad v2 (spec 2026-09-25, D1 y CA-C6): solo tirante y frecuencia. Texto exacto: la
+    // Severidad v2 (spec 2026-09-25, D1 y CA-C6): solo profundidad y frecuencia. Texto exacto: la
     // fórmula v1 contiene más términos y no debe pasar por una coincidencia parcial.
     await expect(
-      page.getByText('puntaje = 2 × tirante + frecuencia', { exact: true }),
+      page.getByText('puntaje = 2 × profundidad + frecuencia', { exact: true }),
     ).toBeVisible();
 
     await page.getByRole('tab', { name: 'Qué no es' }).click();

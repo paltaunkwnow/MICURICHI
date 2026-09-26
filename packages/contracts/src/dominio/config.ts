@@ -44,7 +44,7 @@ export const CONFIG_DOMINIO = {
 
 export const NOTA_METODOLOGICA =
   'Mi Curichi es un inventario de reportes ciudadanos. Los datos son de percepción, no medidos: ' +
-  'el tirante se estima por referencia corporal y la ubicación tiene el error ' +
+  'la profundidad se estima por referencia corporal y la ubicación tiene el error ' +
   'del GPS del celular o de la mano del usuario. No es un modelo hidráulico ni un estudio de drenaje. ' +
   'Cualquier decisión de inversión requiere estudio técnico formal. La ausencia de reportes en una zona ' +
   'no significa ausencia de anegamiento.';

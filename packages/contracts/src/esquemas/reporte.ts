@@ -4,10 +4,10 @@ import {
   CAUSAS_PRESUNTAS,
   ESTADOS_REPORTE,
   FRECUENCIAS,
+  PROFUNDIDADES,
   SEVERIDADES,
   SUMIDERO_CERCANO,
   SUMIDERO_ESTADOS,
-  TIRANTES,
   UBICACION_METODOS,
   UBICACION_TIPOS,
 } from '../dominio/enums.js';
@@ -35,7 +35,7 @@ export const ReporteCrearSchema = z.object({
       `Escribí al menos ${CONFIG_DOMINIO.DESCRIPCION_MIN} caracteres para poder enviar.`,
     )
     .max(CONFIG_DOMINIO.DESCRIPCION_MAX, `Máximo ${CONFIG_DOMINIO.DESCRIPCION_MAX} caracteres.`),
-  tirante_estimado: z.enum(TIRANTES),
+  profundidad_estimada: z.enum(PROFUNDIDADES),
   frecuencia: z.enum(FRECUENCIAS),
   causa_presunta: z.enum(CAUSAS_PRESUNTAS).default('desconocida'),
   sumidero_cercano: z.enum(SUMIDERO_CERCANO).nullable().optional(),
@@ -71,7 +71,7 @@ export const ReportePublicoSchema = z.object({
   unidad_vecinal: UnidadAdministrativaSchema.nullable(),
   descripcion: z.string(),
   fotos: z.array(z.string()).meta({ description: 'URLs servidas por api-core, ya sin EXIF' }),
-  tirante_estimado: z.enum(TIRANTES),
+  profundidad_estimada: z.enum(PROFUNDIDADES),
   frecuencia: z.enum(FRECUENCIAS),
   causa_presunta: z.enum(CAUSAS_PRESUNTAS),
   severidad: z

@@ -49,10 +49,10 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await page.getByTestId('boton-siguiente').click();
 
     // Hasta dónde llegó el agua y cada cuánto pasa: son las dos únicas preguntas de la severidad
-    // v2. El formulario ya no pregunta duración ni afectación (CA-W1). Si tirante y frecuencia van
+    // v2. El formulario ya no pregunta duración ni afectación (CA-W1). Si profundidad y frecuencia van
     // en el mismo paso o en dos seguidos lo decide P-4 de la spec; el recorrido vale para ambos,
     // porque cada paso se desmonta al avanzar y solo existe en el DOM el que se está viendo.
-    await page.locator('input[name="tirante_estimado"][value="rodilla"]').check();
+    await page.locator('input[name="profundidad_estimada"][value="rodilla"]').check();
     if ((await page.locator('input[name="frecuencia"]').count()) === 0)
       await page.getByTestId('boton-siguiente').click();
     await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();

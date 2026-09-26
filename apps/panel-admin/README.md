@@ -22,6 +22,7 @@ La interfaz reproduce el prototipo funcional que entregó el usuario
 | `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal |
 | `/capas` | A-02 | Versiones cargadas por el ETL y activación de la vigente |
 | `/plano` | A-06 | Plano oficial de zonificación como referencia, con su advertencia |
+| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin): total, pestañas Crítica (crítica + alta) / Media / Baja, coropleta por distrito y dos gráficas; se refresca cada 60 s. El rol ejecutivo solo ve esta ruta |
 
 El texto de estado usa las palabras del técnico («Validado», «Duplicado»), no las del vecino: acá
 se trabaja con la máquina de estados de `CLAUDE.md` §7.3.

@@ -59,7 +59,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     '/api/v1/reportes',
     {
       config: { rateLimit: { max: dep.cfg.rateLimitMax, timeWindow: dep.cfg.rateLimitVentanaMs } },
-      preHandler: requerirRol('ciudadano', 'tecnico', 'admin'),
+      preHandler: requerirRol('ciudadano', 'tecnico', 'admin', 'ejecutivo'),
     },
     async (req, res) => {
       // `requerirRol` ya cortó si no hay sesión; esto es para el compilador y por si alguien
@@ -182,7 +182,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
 
         const ins = await cliente.query<{ id: string }>(
           `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
-           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, frecuencia, causa_presunta,
+           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
            sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id)
          VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($23, $24), 4326), $3, $4, $5, $6, $7, $8::jsonb,
            $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25) RETURNING id`,
@@ -207,7 +207,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             d.precision_gps_m ?? null,
             d.ubicacion_tipo,
             d.descripcion,
-            d.tirante_estimado,
+            d.profundidad_estimada,
             d.frecuencia,
             d.causa_presunta,
             d.sumidero_cercano ?? null,

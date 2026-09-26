@@ -1,0 +1,288 @@
+import { ResumenEjecutivoSchema } from 'contracts';
+import { ejecutorPg } from 'db';
+import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
+import type { FastifyInstance } from 'fastify';
+import pg from 'pg';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { AlmacenMemoria } from '../src/almacen.js';
+import { crearApp } from '../src/app.js';
+import { leerConfig } from '../src/config.js';
+import {
+  CUENTAS,
+  crearUsuarios,
+  iniciarSesion,
+  liberarCuota,
+  reporteValido,
+  resolverDePrueba,
+  sesion,
+} from './ayudas.js';
+
+let base: BaseEfimera;
+let pool: pg.Pool;
+let app: FastifyInstance;
+let ex: ReturnType<typeof ejecutorPg>;
+let cookieEjecutivo: string;
+let cookieTecnico: string;
+let cookieVecina: string;
+let idCualquiera: string;
+
+const HORA = 3_600_000;
+const DIA = 24 * HORA;
+const ahora = Date.now();
+const hace = (ms: number) => new Date(ahora - ms).toISOString();
+
+/** Reporte sembrado directamente en la base, con fecha de creación controlada. */
+async function sembrar(o: {
+  distrito: string;
+  estado: string;
+  severidad: string;
+  manual?: string;
+  creado: string;
+}) {
+  const [r] = await ex.consultar<{ id: string }>(
+    `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo,
+       ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
+       severidad_version, severidad_manual, severidad_motivo, estado, creado_en)
+     VALUES (ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
+       $1, 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte sembrado para el resumen ejecutivo',
+       'rodilla', 'ocasional', $2::severidad, 5, 2, $3::severidad, $4, $5::estado_reporte, $6::timestamptz)
+     RETURNING id::text`,
+    [
+      o.distrito,
+      o.severidad,
+      o.manual ?? null,
+      o.manual ? 'Reclasificado en prueba' : null,
+      o.estado,
+      o.creado,
+    ],
+  );
+  return r!.id;
+}
+
+const CREADO_NUEVO = hace(DIA);
+
+beforeAll(async () => {
+  base = await levantarBaseEfimera();
+  pool = new pg.Pool({ connectionString: base.url, max: 3 });
+  ex = ejecutorPg(pool);
+  await cargarCapasDePrueba(ex);
+  await crearUsuarios(ex);
+  const cuadrado = JSON.stringify({
+    type: 'Polygon',
+    coordinates: [
+      [
+        [-63.1, -17.7],
+        [-63.09, -17.7],
+        [-63.09, -17.69],
+        [-63.1, -17.69],
+        [-63.1, -17.7],
+      ],
+    ],
+  });
+  // Distrito 02 en la capa vigente y sin reportes: tiene que salir con ceros.
+  await ex.consultar(
+    `INSERT INTO geo.distrito_municipal (id, codigo, nombre, geom, version_capa)
+     VALUES ('distrito_municipal:02', '02', 'Distrito Dos (test)', ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 'test')`,
+    [cuadrado],
+  );
+  // Distrito 99 solo en una versión de capa que ya no es vigente, con un reporte resuelto con ella.
+  await ex.consultar(
+    `INSERT INTO geo.distrito_municipal (id, codigo, nombre, geom, version_capa)
+     VALUES ('distrito_municipal:99', '99', 'Distrito Viejo (test)', ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 'vieja')`,
+    [cuadrado],
+  );
+
+  const d1 = 'distrito_municipal:01';
+  idCualquiera = await sembrar({
+    distrito: d1,
+    estado: 'nuevo',
+    severidad: 'baja',
+    creado: CREADO_NUEVO,
+  });
+  await sembrar({ distrito: d1, estado: 'validado', severidad: 'media', creado: hace(2 * DIA) });
+  // Severidad efectiva = la manual.
+  await sembrar({
+    distrito: d1,
+    estado: 'validado',
+    severidad: 'media',
+    manual: 'critica',
+    creado: hace(3 * DIA),
+  });
+  await sembrar({ distrito: d1, estado: 'resuelto', severidad: 'alta', creado: hace(40 * DIA) });
+  // Rechazados y duplicados no cuentan, ni siquiera para el último reporte.
+  await sembrar({ distrito: d1, estado: 'rechazado', severidad: 'alta', creado: hace(HORA) });
+  await sembrar({ distrito: d1, estado: 'duplicado', severidad: 'baja', creado: hace(HORA) });
+  await sembrar({
+    distrito: 'distrito_municipal:99',
+    estado: 'validado',
+    severidad: 'alta',
+    creado: hace(10 * DIA),
+  });
+
+  app = await crearApp({
+    pool,
+    cfg: {
+      ...leerConfig({ DATABASE_URL: base.url }),
+      rutaOpenApi: '/no-existe.yaml',
+      rateLimitMax: 1000,
+    },
+    resolver: resolverDePrueba,
+    almacen: new AlmacenMemoria(),
+  });
+  cookieEjecutivo = await iniciarSesion(app, CUENTAS.ejecutivo);
+  cookieTecnico = await iniciarSesion(app, CUENTAS.tecnico);
+  cookieVecina = await iniciarSesion(app, CUENTAS.vecina);
+}, 120_000);
+
+afterAll(async () => {
+  await app?.close();
+  await pool?.end();
+  await base?.cerrar();
+});
+
+const resumen = (cookie?: string, ventana?: string) =>
+  app.inject({
+    method: 'GET',
+    url: `/api/v1/ejecutivo/resumen${ventana ? `?ventana=${ventana}` : ''}`,
+    cookies: cookie ? sesion(cookie) : {},
+  });
+
+describe('GET /api/v1/ejecutivo/resumen: autorización', () => {
+  it('sin sesión → 401 SIN_SESION', async () => {
+    const r = await resumen();
+    expect(r.statusCode).toBe(401);
+    expect(r.json().codigo).toBe('SIN_SESION');
+  });
+
+  it('ciudadano → 403 SIN_PERMISO', async () => {
+    const r = await resumen(cookieVecina);
+    expect(r.statusCode).toBe(403);
+    expect(r.json().codigo).toBe('SIN_PERMISO');
+  });
+
+  it('ejecutivo → 200, privado y conforme al contrato', async () => {
+    const r = await resumen(cookieEjecutivo);
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
+    expect(r.headers['cache-control']).toBe('private, no-store');
+    expect(() => ResumenEjecutivoSchema.parse(r.json())).not.toThrow();
+  });
+
+  it('técnico → 200 conforme al contrato', async () => {
+    const r = await resumen(cookieTecnico);
+    expect(r.statusCode).toBe(200);
+    expect(() => ResumenEjecutivoSchema.parse(r.json())).not.toThrow();
+  });
+
+  it('ventana inválida → 400', async () => {
+    const r = await resumen(cookieEjecutivo, '90d');
+    expect(r.statusCode).toBe(400);
+  });
+});
+
+describe('GET /api/v1/ejecutivo/resumen: conteos', () => {
+  it('ventana=todo: totales por severidad efectiva, estado y distrito', async () => {
+    const r = await resumen(cookieEjecutivo, 'todo');
+    const c = ResumenEjecutivoSchema.parse(r.json());
+    expect(c.ventana).toEqual({ desde: null, hasta: null });
+    expect(c.total).toBe(5);
+    expect(c.por_severidad).toEqual({ critica: 1, alta: 2, media: 1, baja: 1 });
+    expect(c.por_estado).toEqual({ nuevo: 1, validado: 3, resuelto: 1 });
+    expect(c.ultimo_reporte_en).toBe(CREADO_NUEVO);
+
+    expect(c.por_distrito.map((d) => d.codigo)).toEqual(['01', '02', '99']);
+    const [d1, d2, d99] = c.por_distrito;
+    expect(d1).toMatchObject({
+      distrito_id: 'distrito_municipal:01',
+      nombre: 'Distrito Uno (test)',
+      total: 4,
+      por_severidad: { critica: 1, alta: 1, media: 1, baja: 1 },
+      por_estado: { nuevo: 1, validado: 2, resuelto: 1 },
+      ultimo_reporte_en: CREADO_NUEVO,
+    });
+    expect(d2).toMatchObject({
+      distrito_id: 'distrito_municipal:02',
+      nombre: 'Distrito Dos (test)',
+      total: 0,
+      por_severidad: { critica: 0, alta: 0, media: 0, baja: 0 },
+      por_estado: { nuevo: 0, validado: 0, resuelto: 0 },
+      ultimo_reporte_en: null,
+    });
+    expect(d99).toMatchObject({ nombre: 'Distrito Viejo (test)', total: 1 });
+    // Las filas por distrito suman el total global.
+    expect(c.por_distrito.reduce((s, d) => s + d.total, 0)).toBe(c.total);
+  });
+
+  it('ventana=7d excluye los reportes viejos', async () => {
+    const r = await resumen(cookieEjecutivo, '7d');
+    const c = ResumenEjecutivoSchema.parse(r.json());
+    expect(c.ventana.desde).not.toBeNull();
+    expect(c.ventana.hasta).not.toBeNull();
+    expect(c.total).toBe(3);
+    expect(c.por_severidad).toEqual({ critica: 1, alta: 0, media: 1, baja: 1 });
+    expect(c.por_estado).toEqual({ nuevo: 1, validado: 2, resuelto: 0 });
+    const d2 = c.por_distrito.find((d) => d.codigo === '02');
+    expect(d2?.total).toBe(0);
+  });
+
+  it('ventana=30d deja fuera el resuelto de hace 40 días pero no el de hace 10', async () => {
+    const r = await resumen(cookieTecnico, '30d');
+    const c = ResumenEjecutivoSchema.parse(r.json());
+    expect(c.total).toBe(4);
+    expect(c.por_estado.resuelto).toBe(0);
+  });
+});
+
+describe('el ejecutivo no modera, no exporta, no ve la vista técnica', () => {
+  const casos: [string, string, Record<string, unknown>?][] = [
+    ['GET', '/api/v1/tecnico/reportes'],
+    ['GET', '/api/v1/exportar?formato=csv'],
+    ['GET', '/api/v1/indicadores'],
+    ['GET', '/api/v1/admin/capas'],
+  ];
+  for (const [metodo, url] of casos)
+    it(`${metodo} ${url} → 403`, async () => {
+      const r = await app.inject({
+        method: metodo as 'GET',
+        url,
+        cookies: sesion(cookieEjecutivo),
+      });
+      expect(r.statusCode).toBe(403);
+      expect(r.json().codigo).toBe('SIN_PERMISO');
+    });
+
+  it('PATCH estado, PATCH severidad y POST fusionar → 403', async () => {
+    const pedidos = [
+      {
+        method: 'PATCH' as const,
+        url: `/api/v1/reportes/${idCualquiera}/estado`,
+        payload: { estado: 'validado' },
+      },
+      {
+        method: 'PATCH' as const,
+        url: `/api/v1/reportes/${idCualquiera}/severidad`,
+        payload: { severidad_manual: 'alta', severidad_motivo: 'Intento del ejecutivo' },
+      },
+      {
+        method: 'POST' as const,
+        url: `/api/v1/reportes/${idCualquiera}/fusionar`,
+        payload: { canonico_id: idCualquiera },
+      },
+    ];
+    for (const p of pedidos) {
+      const r = await app.inject({ ...p, cookies: sesion(cookieEjecutivo) });
+      expect(r.statusCode, `${p.method} ${p.url}`).toBe(403);
+    }
+  });
+
+  it('puede crear un reporte como cualquier sesión', async () => {
+    await liberarCuota(ex, CUENTAS.ejecutivo);
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reportes',
+      payload: reporteValido,
+      cookies: sesion(cookieEjecutivo),
+    });
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(201);
+    expect(r.json().properties.estado).toBe('nuevo');
+  });
+});

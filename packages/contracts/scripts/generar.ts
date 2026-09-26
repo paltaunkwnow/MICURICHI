@@ -23,8 +23,10 @@ writeFileSync(
 const dominio = {
   generado_por: 'packages/contracts',
   enums: {
-    tirante: enums.TIRANTES,
+    profundidad: enums.PROFUNDIDADES,
     frecuencia: enums.FRECUENCIAS,
+    sumidero_cercano: enums.SUMIDERO_CERCANO,
+    sumidero_estado: enums.SUMIDERO_ESTADOS,
     causa_presunta: enums.CAUSAS_PRESUNTAS,
     severidad: enums.SEVERIDADES,
     estado: enums.ESTADOS_REPORTE,

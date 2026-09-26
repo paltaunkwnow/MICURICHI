@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { CREDENCIALES_TECNICO, esperarPila, PANEL } from './ayudas';
+import { CREDENCIALES_EJECUTIVO, CREDENCIALES_TECNICO, esperarPila, PANEL } from './ayudas';
 
 /**
  * Comprobaciones de accesibilidad sin dependencias extra (WCAG 2.2 AA, CLAUDE.md §14.1).
@@ -74,6 +74,21 @@ test.describe('accesibilidad básica', () => {
 
     for (const ruta of ['/reportes', '/indicadores', '/capas', '/plano']) {
       await revisar(page, `${PANEL}${ruta}`);
+    }
+  });
+
+  test('panel ejecutivo, ya con sesión', async ({ page }) => {
+    await page.goto(`${PANEL}/login`);
+    await page.locator('#email').fill(CREDENCIALES_EJECUTIVO.email);
+    await page.locator('#password').fill(CREDENCIALES_EJECUTIVO.password);
+    await page.getByTestId('boton-login').click();
+    await expect(page).toHaveURL(/\/ejecutivo$/, { timeout: 60_000 });
+    await revisar(page, `${PANEL}/ejecutivo`);
+    // `revisar` mira lo que haya al cargar; el resumen llega después. Se repasan los botones
+    // (pestañas y ventana) ya con los datos en pantalla, que es donde suele faltar el nombre.
+    await expect(page.getByTestId('ejecutivo-total')).toHaveText(/\d/, { timeout: 60_000 });
+    for (const pestana of ['critica', 'media', 'baja', 'todas']) {
+      await expect(page.getByTestId(`ejecutivo-pestana-${pestana}`)).toHaveAccessibleName(/\S/);
     }
   });
 

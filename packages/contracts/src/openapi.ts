@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from './dominio/config.js';
+import { SEVERIDAD_VERSION } from './dominio/severidad.js';
 import { CapaVersionSchema, ExportarQuerySchema, IndicadoresSchema } from './esquemas/admin.js';
 import { LoginSchema, RegistroSchema, SesionActualSchema, UsuarioSchema } from './esquemas/auth.js';
 import { ErrorApiSchema } from './esquemas/comunes.js';
+import { ResumenEjecutivoQuerySchema, ResumenEjecutivoSchema } from './esquemas/ejecutivo.js';
 import {
   AgregadoUvSchema,
   CapaInfoSchema,
@@ -42,6 +44,7 @@ export const COMPONENTES = {
   CapaVersion: CapaVersionSchema,
   ExportarQuery: ExportarQuerySchema,
   Indicadores: IndicadoresSchema,
+  ResumenEjecutivo: ResumenEjecutivoSchema,
   ResolverEntrada: ResolverEntradaSchema,
   ResolverRespuesta: ResolverRespuestaSchema,
   CapasVigentes: CapasVigentesSchema,
@@ -88,7 +91,7 @@ export function construirOpenApi(): Record<string, unknown> {
       version: '1.0.0',
       description:
         'Reporte ciudadano georreferenciado de puntos de inundación. Contrato generado desde packages/contracts (Zod). ' +
-        `Severidad versión ${CONFIG_DOMINIO.RECURRENCIA_RADIO_M ? 1 : 1}; radio de recurrencia ${CONFIG_DOMINIO.RECURRENCIA_RADIO_M} m.`,
+        `Severidad versión ${SEVERIDAD_VERSION}; radio de recurrencia ${CONFIG_DOMINIO.RECURRENCIA_RADIO_M} m.`,
     },
     servers: [
       { url: 'http://localhost:3001', description: 'api-core local' },
@@ -99,6 +102,7 @@ export function construirOpenApi(): Record<string, unknown> {
       { name: 'fotos', description: 'api-core (Parte 3)' },
       { name: 'auth', description: 'api-core (Parte 3)' },
       { name: 'admin', description: 'api-core (Parte 3)' },
+      { name: 'ejecutivo', description: 'api-core (Parte 3)' },
       { name: 'geo', description: 'geo-service (Parte 4)' },
     ],
     components: {
@@ -271,6 +275,21 @@ export function construirOpenApi(): Record<string, unknown> {
           responses: { '200': { description: 'Indicadores', content: json(ref('Indicadores')) } },
         }),
       },
+      '/api/v1/ejecutivo/resumen': {
+        get: op(
+          'Resumen del panel ejecutivo: totales por severidad efectiva, por estado y por distrito. Exige rol ejecutivo, tecnico o admin. Cuenta solo reportes en estado nuevo, validado o resuelto.',
+          'ejecutivo',
+          {
+            security: seguridadSesion,
+            parameters: parametrosDesde(ResumenEjecutivoQuerySchema),
+            responses: {
+              '200': { description: 'Resumen ejecutivo', content: json(ref('ResumenEjecutivo')) },
+              '401': error('SIN_SESION'),
+              '403': error('SIN_PERMISO: el rol no permite el panel ejecutivo'),
+            },
+          },
+        ),
+      },
       '/api/v1/auth/registro': {
         post: op(
           'Crear una cuenta ciudadana. La respuesta es la MISMA exista o no ese correo: no revela quién tiene cuenta. No inicia sesión (devolver cookie solo en el caso nuevo delataría lo anterior). El rol siempre es «ciudadano» y no se puede pedir otro.',
@@ -290,7 +309,7 @@ export function construirOpenApi(): Record<string, unknown> {
         ),
       },
       '/api/v1/auth/login': {
-        post: op('Iniciar sesión (ciudadano, técnico o admin)', 'auth', {
+        post: op('Iniciar sesión (ciudadano, técnico, admin o ejecutivo)', 'auth', {
           requestBody: { required: true, content: json(ref('Login')) },
           responses: {
             '200': { description: 'Sesión creada (cookie)', content: json(ref('Usuario')) },

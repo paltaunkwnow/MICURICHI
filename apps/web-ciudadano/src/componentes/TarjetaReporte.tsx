@@ -2,7 +2,12 @@
 
 import { Image as IconoImagen } from 'lucide-react';
 import type { ReporteFeature } from '@/lib/api';
-import { etiquetaTirante, subtituloReporte, tituloReporte, urlFotoRelativa } from '@/lib/formato';
+import {
+  etiquetaProfundidad,
+  subtituloReporte,
+  tituloReporte,
+  urlFotoRelativa,
+} from '@/lib/formato';
 import { ChipSeveridad } from './ChipSeveridad';
 
 interface Props {
@@ -50,7 +55,9 @@ export function TarjetaReporte({ reporte, distanciaM, seleccionado, onSelecciona
           {subtituloReporte(p, distanciaM)}
         </span>
         <span className="mt-2 flex flex-wrap gap-1.5">
-          <span className="mini">{etiquetaTirante(p.tirante_estimado).split(' · ')[0]}</span>
+          <span className="mini">
+            {etiquetaProfundidad(p.profundidad_estimada).split(' · ')[0]}
+          </span>
           <span className="mini">
             {p.n_reportes_punto && p.n_reportes_punto > 1
               ? `${p.n_reportes_punto} reportes`

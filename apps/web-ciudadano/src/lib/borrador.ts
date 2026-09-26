@@ -28,7 +28,7 @@ export const PASOS_REPORTE = 4;
 
 /**
  * Formato del borrador. Hasta la corrida 2026-09-25-quitar-campos-del-reporte el asistente tenía
- * cinco pasos (tirante y duración en el 2, frecuencia y afectación en el 3); ahora tirante y
+ * cinco pasos (profundidad y duración en el 2, frecuencia y afectación en el 3); ahora profundidad y
  * frecuencia van juntos en el 2 y todo lo que seguía se corre uno. Un borrador sin `formato` es
  * del asistente viejo: sin traducir su paso, quien iba por las fotos caería en la revisión.
  */
@@ -40,6 +40,43 @@ const PASO_VIEJO_A_NUEVO: Record<number, number> = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 
  * viajarían en el envío y el formulario cargaría con valores que no se ven en ninguna pantalla.
  */
 const CAMPOS_QUITADOS = ['duracion_estimada', 'afectacion'] as const;
+
+/**
+ * Traducción de respuestas guardadas con nombres o valores de contracts < 0.5.0. Se traducen en
+ * vez de descartarse: el vecino ya las contestó, y perderlas por un renombre sería castigarlo por
+ * algo que no hizo.
+ * - `tirante_estimado` pasó a llamarse `profundidad_estimada` (mismos valores).
+ * - El sumidero perdió «No sé»: «no contestó» es `null`. Su estado quedó en tapado / no tapado.
+ *   Si no se tradujeran, el envío fallaría la validación por un valor que ninguna pantalla
+ *   muestra ni deja corregir.
+ */
+const SUMIDERO_ESTADO_VIEJO_A_NUEVO: Record<string, 'tapado' | 'no_tapado'> = {
+  tapado: 'tapado',
+  no_tapado: 'no_tapado',
+  libre: 'no_tapado',
+  obstruido: 'tapado',
+  danado: 'tapado',
+};
+
+export function traducirValoresViejos(entrada: Record<string, unknown>): Record<string, unknown> {
+  const valores: Record<string, unknown> = { ...entrada };
+  for (const c of CAMPOS_QUITADOS) delete valores[c];
+  if ('tirante_estimado' in valores) {
+    if (valores.profundidad_estimada === undefined) {
+      valores.profundidad_estimada = valores.tirante_estimado;
+    }
+    delete valores.tirante_estimado;
+  }
+  if ('sumidero_cercano' in valores) {
+    const v = valores.sumidero_cercano;
+    valores.sumidero_cercano = v === 'si' || v === 'no' ? v : null;
+  }
+  if ('sumidero_estado' in valores) {
+    const v = valores.sumidero_estado;
+    valores.sumidero_estado = (typeof v === 'string' && SUMIDERO_ESTADO_VIEJO_A_NUEVO[v]) || null;
+  }
+  return valores;
+}
 
 export interface Borrador {
   /** Momento del último guardado, en milisegundos desde época. */
@@ -96,9 +133,9 @@ export function leerBorrador(): Borrador | null {
       olvidarBorrador();
       return null;
     }
-    const valores: Record<string, unknown> =
-      typeof d.valores === 'object' && d.valores !== null ? { ...d.valores } : {};
-    for (const c of CAMPOS_QUITADOS) delete valores[c];
+    const valores = traducirValoresViejos(
+      typeof d.valores === 'object' && d.valores !== null ? { ...d.valores } : {},
+    );
     return {
       guardado_en: d.guardado_en,
       paso: pasoRestaurado(d.paso, (b as { formato?: unknown }).formato === FORMATO),

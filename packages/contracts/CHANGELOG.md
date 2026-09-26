@@ -1,5 +1,84 @@
 # Changelog — contracts
 
+## 0.5.0 — 2026-09-25
+
+**Cambio con ruptura.** «Tirante estimado» pasa a llamarse «Profundidad estimada» en todo el
+contrato (API y base), las respuestas del sumidero se reducen a dos valores, aparece el rol
+`ejecutivo` y el esquema del panel ejecutivo. La fórmula de severidad **no cambia** (sigue
+`SEVERIDAD_VERSION = 2`): solo cambian los nombres.
+
+### Renombres (viejo → nuevo)
+
+| Viejo | Nuevo |
+|---|---|
+| campo `tirante_estimado` (en `ReporteCrearSchema`, `ReportePublicoSchema`, `ReporteTecnicoSchema`, `ReporteFeatureSchema`, `ReporteFeatureCollectionSchema` y, por lo tanto, en exportación CSV/GeoJSON) | `profundidad_estimada` |
+| `TIRANTES` | `PROFUNDIDADES` (mismos valores: `tobillo`, `rodilla`, `muslo`, `mas_70`) |
+| `type Tirante` | `type Profundidad` |
+| `EntradaSeveridad = { tirante_estimado, frecuencia }` | `{ profundidad_estimada, frecuencia }` |
+| `PUNTOS.tirante` | `PUNTOS.profundidad` (mismos puntos 1–4) |
+| `PESOS = { tirante: 2, frecuencia: 1 }` | `PESOS = { profundidad: 2, frecuencia: 1 }` |
+| `ETIQUETAS.tirante` | `ETIQUETAS.profundidad` (mismas etiquetas por valor) |
+| `dist/dominio.json` → `enums.tirante` | `enums.profundidad` |
+
+`puntaje = 2·P + F` (P = puntos de profundidad), mismas bandas, E1 (P = 4 → `critica`) y E3
+(F = 4 → mínimo `media`). `NOTA_METODOLOGICA` dice ahora «la profundidad se estima por referencia
+corporal».
+
+### Sumidero (valores que desaparecen)
+
+- `SUMIDERO_CERCANO`: `['si', 'no', 'no_sabe']` → **`['si', 'no']`**. El campo sigue opcional y
+  nullable: «no contestó» es `null`.
+- `SUMIDERO_ESTADOS`: `['libre', 'obstruido', 'danado', 'no_sabe']` → **`['tapado', 'no_tapado']`**.
+- Migración de datos existentes:
+  - `sumidero_cercano`: `no_sabe` → `null`.
+  - `sumidero_estado`: `libre` → `no_tapado`; `obstruido` → `tapado`; `danado` → `tapado`;
+    `no_sabe` → `null`.
+- `agua_brota_sumidero` no cambia.
+- `ETIQUETAS.sumidero_cercano = { si: 'Sí', no: 'No' }`;
+  `ETIQUETAS.sumidero_estado = { tapado: 'Tapado', no_tapado: 'No tapado' }`.
+- `dist/dominio.json` exporta ahora también `enums.sumidero_cercano` y `enums.sumidero_estado`.
+
+### Etiquetas nuevas
+
+- `ETIQUETAS.campos`: `profundidad_estimada: 'Profundidad estimada'`, `profundidad: 'Profundidad'`
+  (forma corta), `sumidero_cercano: '¿Hay sumidero cercano?'`, `sumidero_estado: '¿Está tapado?'`.
+- `ETIQUETAS.rol`: `ciudadano: 'Ciudadano'`, `tecnico: 'Técnico'`, `admin: 'Administrador'`,
+  `ejecutivo: 'Ejecutivo'`.
+
+### Rol `ejecutivo`
+
+- `ROLES = ['ciudadano', 'tecnico', 'admin', 'ejecutivo']`; `UsuarioSchema` y `SesionActualSchema`
+  lo aceptan. **El alta pública sigue creando solo `ciudadano`**: `RegistroSchema` no gana campo de
+  rol. El rol ejecutivo se asigna fuera de `/auth/registro`.
+- `TRANSICIONES` no cambia: el ejecutivo **no** modera.
+
+### Panel ejecutivo (nuevo, `src/esquemas/ejecutivo.ts`)
+
+- `GET /api/v1/ejecutivo/resumen`, roles `ejecutivo`, `tecnico`, `admin` (401 `SIN_SESION`, 403
+  `SIN_PERMISO`). Publicado en OpenAPI con el componente `ResumenEjecutivo`.
+- `ResumenEjecutivoQuerySchema = { ventana: '7d' | '30d' | 'todo' }`, por defecto `todo`
+  (`VENTANAS_RESUMEN`, `type VentanaResumen`).
+- `ResumenEjecutivoSchema` (`type ResumenEjecutivo`):
+  `{ generado_en, ventana: { desde, hasta } (null = histórico completo), total,
+  por_severidad: { critica, alta, media, baja }, por_estado: { nuevo, validado, resuelto },
+  por_distrito: ResumenDistrito[], ultimo_reporte_en }`. `total` cuenta solo reportes en `nuevo`,
+  `validado` o `resuelto`; `por_severidad` usa la severidad efectiva. Conteos enteros ≥ 0; fechas
+  ISO 8601 con zona.
+- `ResumenDistritoSchema`: `{ distrito_id, codigo, nombre, total, por_severidad, por_estado,
+  ultimo_reporte_en }`. Auxiliares exportados: `ConteoPorSeveridadSchema`,
+  `ConteoPorEstadoResumenSchema`.
+
+### Qué tienen que hacer los consumidores
+
+- `packages/db`: migración que renombra la columna `tirante_estimado` → `profundidad_estimada` (y
+  su tipo enum si lo hay), reduce los enums del sumidero con el mapeo de arriba y añade `ejecutivo`
+  al enum de rol. `severidad_*` no se recalcula (los números no cambian).
+- `api-core`: usar `profundidad_estimada` en lectura, escritura, exportación y `calcularSeveridad`;
+  implementar `GET /api/v1/ejecutivo/resumen`; autorizar `ejecutivo` solo ahí (no en moderación
+  ni en exportación).
+- `web-ciudadano`, `panel-admin`, `e2e`: nombres y etiquetas nuevas; el sumidero con Sí/No y
+  Tapado/No tapado, sin opción «No sé».
+
 ## 0.4.0 — 2026-09-25
 
 **Cambio con ruptura.** El reporte deja de tener `manzana_id`, `direccion_aprox`,

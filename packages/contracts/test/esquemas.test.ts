@@ -21,7 +21,7 @@ const valido = {
   ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte.',
-  tirante_estimado: 'rodilla',
+  profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
 };
 
@@ -43,7 +43,7 @@ const tecnicoValido = {
   unidad_vecinal: { id: 'unidad_vecinal:123', codigo: '123', nombre: 'Los Lotes' },
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte.',
   fotos: [],
-  tirante_estimado: 'rodilla',
+  profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
   causa_presunta: 'desconocida',
   severidad: 'media',

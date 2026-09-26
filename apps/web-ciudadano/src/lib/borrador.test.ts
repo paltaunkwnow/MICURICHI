@@ -5,6 +5,7 @@ import {
   guardarBorrador,
   leerBorrador,
   olvidarBorrador,
+  traducirValoresViejos,
   VALIDEZ_MS,
 } from './borrador';
 
@@ -33,7 +34,7 @@ const BASE: Omit<Borrador, 'guardado_en'> = {
   ubicacion: { lat: -17.78, lon: -63.18, metodo: 'manual', precisionM: null },
   resuelto: { dentro_cobertura: true },
   fotos: [{ objeto_key: 'a.jpg', url: '/api/v1/fotos/a.jpg' }],
-  valores: { descripcion: 'Se junta el agua en la esquina', tirante_estimado: 'rodilla' },
+  valores: { descripcion: 'Se junta el agua en la esquina', profundidad_estimada: 'rodilla' },
   clave: '11111111-1111-4111-8111-111111111111',
 };
 
@@ -135,15 +136,62 @@ describe('borrador del formulario de reporte', () => {
     }).not.toThrow();
     const restaurado = b as Borrador | null;
     expect(restaurado).not.toBeNull();
-    // El paso 3 del asistente viejo (tirante y duración) equivale al 2 del nuevo (tirante y
+    // El paso 3 del asistente viejo (profundidad y duración) equivale al 2 del nuevo (profundidad y
     // frecuencia juntos): PASO_VIEJO_A_NUEVO[3] = 2.
     expect(restaurado?.paso).toBe(2);
     expect(Object.keys(restaurado?.valores ?? {})).not.toContain('duracion_estimada');
     expect(Object.keys(restaurado?.valores ?? {})).not.toContain('afectacion');
     // Lo que sigue existiendo se conserva: el vecino no pierde lo que ya contestó.
-    expect(restaurado?.valores.tirante_estimado).toBe('rodilla');
+    // Y el tirante de entonces llega con su nombre de ahora (contracts 0.5.0).
+    expect(restaurado?.valores.profundidad_estimada).toBe('rodilla');
     expect(restaurado?.valores.frecuencia).toBe('cada_lluvia_fuerte');
     expect(restaurado?.valores.descripcion).toBe('Se junta el agua en la esquina');
+  });
+
+  it('traduce un borrador con tirante_estimado a profundidad_estimada', () => {
+    const almacen = almacenFalso();
+    instalar(almacen);
+    almacen.setItem(
+      CLAVE,
+      JSON.stringify({
+        ...BASE,
+        formato: 2,
+        valores: {
+          descripcion: 'Se junta el agua',
+          tirante_estimado: 'muslo',
+          frecuencia: 'ocasional',
+        },
+        guardado_en: Date.now(),
+      }),
+    );
+    const b = leerBorrador();
+    expect(b?.valores.profundidad_estimada).toBe('muslo');
+    expect(Object.keys(b?.valores ?? {})).not.toContain('tirante_estimado');
+    expect(b?.valores.frecuencia).toBe('ocasional');
+    expect(b?.paso).toBe(3);
+  });
+
+  it('si el borrador ya trae profundidad, el tirante viejo no la pisa', () => {
+    expect(
+      traducirValoresViejos({ tirante_estimado: 'tobillo', profundidad_estimada: 'rodilla' }),
+    ).toEqual({ profundidad_estimada: 'rodilla' });
+  });
+
+  it('traduce las respuestas viejas del sumidero: sin «No sé», tapado o no tapado', () => {
+    expect(traducirValoresViejos({ sumidero_cercano: 'no_sabe' }).sumidero_cercano).toBeNull();
+    expect(traducirValoresViejos({ sumidero_cercano: '' }).sumidero_cercano).toBeNull();
+    expect(traducirValoresViejos({ sumidero_cercano: 'si' }).sumidero_cercano).toBe('si');
+    expect(traducirValoresViejos({ sumidero_cercano: 'no' }).sumidero_cercano).toBe('no');
+    expect(traducirValoresViejos({ sumidero_estado: 'libre' }).sumidero_estado).toBe('no_tapado');
+    expect(traducirValoresViejos({ sumidero_estado: 'obstruido' }).sumidero_estado).toBe('tapado');
+    expect(traducirValoresViejos({ sumidero_estado: 'danado' }).sumidero_estado).toBe('tapado');
+    expect(traducirValoresViejos({ sumidero_estado: 'no_sabe' }).sumidero_estado).toBeNull();
+    expect(traducirValoresViejos({ sumidero_estado: 'tapado' }).sumidero_estado).toBe('tapado');
+    expect(traducirValoresViejos({ sumidero_estado: 'no_tapado' }).sumidero_estado).toBe(
+      'no_tapado',
+    );
+    // Lo que no vino, no aparece: el formulario distingue «no tocado» de «contestado vacío».
+    expect(traducirValoresViejos({ descripcion: 'x' })).toEqual({ descripcion: 'x' });
   });
 
   it('un borrador recién abierto no cuenta como algo que retomar', () => {

@@ -25,7 +25,7 @@ function reporte(sufijo, desplazamiento = 0) {
     ubicacion_metodo: 'manual',
     ubicacion_tipo: 'via_publica',
     descripcion: `[concurrencia] prueba automática ${sufijo} con descripción suficientemente larga`,
-    tirante_estimado: 'rodilla',
+    profundidad_estimada: 'rodilla',
     frecuencia: 'ocasional',
     causa_presunta: 'desconocida',
     fotos: [],

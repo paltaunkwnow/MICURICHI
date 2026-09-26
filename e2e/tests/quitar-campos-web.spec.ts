@@ -5,7 +5,7 @@ import { API, crearCuentaYEntrarPorUi, esperarPila, GEO, PUNTO_CENTRO } from './
  * Corrida SDD `2026-09-25-quitar-campos-del-reporte`, criterios CA-W1…CA-W8 de la app pública.
  *
  * El reporte deja de tener `manzana_id`, `direccion_aprox`, `duracion_estimada` y `afectacion`,
- * y la severidad pasa a la fórmula v2 (`puntaje = 2 × tirante + frecuencia`, rango 3–12).
+ * y la severidad pasa a la fórmula v2 (`puntaje = 2 × profundidad + frecuencia`, rango 3–12).
  *
  * El número de pasos del formulario todavía puede ser 4 o 5 (pregunta P-4 de la spec), así que
  * el recorrido no los enumera: en cada paso contesta lo que haya y sigue. Así la prueba describe
@@ -19,7 +19,7 @@ interface PasoVisto {
   m: number;
   controles: number;
   camposViejos: string[];
-  preguntaTirante: boolean;
+  preguntaProfundidad: boolean;
   preguntaFrecuencia: boolean;
 }
 
@@ -80,7 +80,7 @@ async function contestarPaso(page: Page, n: number) {
     return;
   }
   const preferidos: Record<string, string> = {
-    tirante_estimado: 'rodilla',
+    profundidad_estimada: 'rodilla',
     frecuencia: 'cada_lluvia_fuerte',
     ubicacion_tipo: 'via_publica',
   };
@@ -90,6 +90,9 @@ async function contestarPaso(page: Page, n: number) {
   for (const nombre of nombres) {
     const grupo = page.locator(`input[type="radio"][name="${nombre}"]`);
     if ((await page.locator(`input[type="radio"][name="${nombre}"]:checked`).count()) > 0) continue;
+    // Las preguntas opcionales (p. ej. el sumidero) van plegadas en un `<details>`: no hace
+    // falta contestarlas para seguir, y plegadas no se pueden marcar.
+    if (!(await grupo.first().isVisible())) continue;
     const valor = preferidos[nombre];
     if (valor) await page.locator(`input[name="${nombre}"][value="${valor}"]`).check();
     else await grupo.first().check();
@@ -120,7 +123,7 @@ async function recorrerFormulario(page: Page): Promise<PasoVisto[]> {
       m,
       controles: await contarControles(page),
       camposViejos: await camposViejosEnPantalla(page),
-      preguntaTirante: (await page.locator('input[name="tirante_estimado"]').count()) > 0,
+      preguntaProfundidad: (await page.locator('input[name="profundidad_estimada"]').count()) > 0,
       preguntaFrecuencia: (await page.locator('input[name="frecuencia"]').count()) > 0,
     });
     await contestarPaso(page, n);
@@ -149,10 +152,10 @@ test.describe('quitar campos del reporte · app pública', () => {
       );
     expect(await page.locator('input[name="duracion_estimada"]').count()).toBe(0);
     expect(await page.locator('input[name="afectacion"]').count()).toBe(0);
-    // Tirante y frecuencia se siguen preguntando: son las dos entradas de la severidad v2.
+    // Profundidad y frecuencia se siguen preguntando: son las dos entradas de la severidad v2.
     expect(
-      vistos.some((p) => p.preguntaTirante),
-      'algún paso pregunta el tirante',
+      vistos.some((p) => p.preguntaProfundidad),
+      'algún paso pregunta la profundidad',
     ).toBe(true);
     expect(
       vistos.some((p) => p.preguntaFrecuencia),
@@ -163,7 +166,7 @@ test.describe('quitar campos del reporte · app pública', () => {
     const filas = (await page.locator('#contenido form dl dt').allTextContents()).map((t) =>
       t.trim(),
     );
-    expect(filas).toContain('Tirante');
+    expect(filas).toContain('Profundidad');
     expect(filas).toContain('Frecuencia');
     expect(filas).not.toContain('Duración');
     expect(filas).not.toContain('Afectación');
@@ -192,12 +195,12 @@ test.describe('quitar campos del reporte · app pública', () => {
 
     for (const c of CAMPOS_QUITADOS) expect(Object.keys(cuerpo), c).not.toContain(c);
     // Lo que sí tiene que viajar.
-    expect(cuerpo.tirante_estimado).toBeTruthy();
+    expect(cuerpo.profundidad_estimada).toBeTruthy();
     expect(cuerpo.frecuencia).toBeTruthy();
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
   });
 
-  test('CA-W6: la hoja de detalle muestra tirante y frecuencia, y no duración ni afectación', async ({
+  test('CA-W6: la hoja de detalle muestra profundidad y frecuencia, y no duración ni afectación', async ({
     page,
     request,
   }) => {
@@ -212,7 +215,7 @@ test.describe('quitar campos del reporte · app pública', () => {
     const hoja = page.getByTestId('hoja-detalle');
     await expect(hoja).toBeVisible();
     const etiquetas = (await hoja.locator('dt').allTextContents()).map((t) => t.trim());
-    expect(etiquetas).toContain('Tirante');
+    expect(etiquetas).toContain('Profundidad');
     expect(etiquetas).toContain('Frecuencia');
     expect(etiquetas).not.toContain('Duración');
     expect(etiquetas).not.toContain('Afectación');
@@ -278,7 +281,7 @@ test.describe('quitar campos del reporte · app pública', () => {
 
     const panel = page.locator('#panel-colores');
     await expect(
-      panel.getByText('puntaje = 2 × tirante + frecuencia', { exact: true }),
+      panel.getByText('puntaje = 2 × profundidad + frecuencia', { exact: true }),
     ).toBeVisible();
 
     // La spec fija los rangos, no cómo se escriben («3–4», «3 a 4»…): se comparan los números.

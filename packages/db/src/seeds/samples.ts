@@ -84,7 +84,7 @@ function rng(semilla: number) {
   };
 }
 
-const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
+const PROFUNDIDADES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
 const CAUSAS = [
   'sumidero_tapado',
@@ -118,6 +118,7 @@ export async function sembrarSamples(
     passwordAdmin?: string;
     passwordTecnico?: string;
     passwordVecina?: string;
+    passwordEjecutivo?: string;
     permitirEnProduccion?: boolean;
   } = {},
 ): Promise<ResumenSeed> {
@@ -155,18 +156,23 @@ export async function sembrarSamples(
   // que sin una cuenta así no se puede probar el recorrido del vecino recién clonado el repo.
   const passwordVecina =
     opciones.passwordVecina ?? process.env.SEED_VECINA_PASSWORD ?? 'curichi-vecina-local';
+  // Cuenta ejecutiva de desarrollo (contrato 0.5.0): ve el resumen ejecutivo y no modera.
+  const passwordEjecutivo =
+    opciones.passwordEjecutivo ?? process.env.SEED_EJECUTIVO_PASSWORD ?? 'curichi-ejecutivo-local';
   await ex.consultar(
-    `DELETE FROM usuario WHERE email IN ('admin@curichi.local', 'tecnico@curichi.local', 'vecina@curichi.local')`,
+    `DELETE FROM usuario WHERE email IN ('admin@curichi.local', 'tecnico@curichi.local', 'vecina@curichi.local', 'ejecutivo@curichi.local')`,
   );
   await ex.consultar(
     `INSERT INTO usuario (email, nombre, rol, password_hash) VALUES
        ('admin@curichi.local', 'Admin local (sintético)', 'admin', $1),
        ('tecnico@curichi.local', 'Técnico local (sintético)', 'tecnico', $2),
-       ('vecina@curichi.local', 'Vecina local (sintética)', 'ciudadano', $3)`,
+       ('vecina@curichi.local', 'Vecina local (sintética)', 'ciudadano', $3),
+       ('ejecutivo@curichi.local', 'Ejecutivo local', 'ejecutivo', $4)`,
     await Promise.all([
       hashPassword(passwordAdmin),
       hashPassword(passwordTecnico),
       hashPassword(passwordVecina),
+      hashPassword(passwordEjecutivo),
     ]),
   );
   const [tecnico] = await ex.consultar<{ id: string }>(
@@ -208,7 +214,7 @@ export async function sembrarSamples(
   let insertados = 0;
   for (const [i, p] of puntos.entries()) {
     const entrada = {
-      tirante_estimado: elegir(TIRANTES),
+      profundidad_estimada: elegir(PROFUNDIDADES),
       frecuencia: elegir(FRECUENCIAS),
     };
     const sev = calcularSeveridad(entrada);
@@ -218,7 +224,7 @@ export async function sembrarSamples(
     const desc = `${elegir(DESCRIPCIONES)} [muestra sintética]`;
     await ex.consultar(
       `INSERT INTO reporte_inundacion (geom, creado_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
-         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, tirante_estimado, frecuencia, causa_presunta,
+         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
          sumidero_cercano, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, validado_por, validado_en)
        SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval, now() - ($3 || ' days')::interval - interval '3 hours',
          COALESCE((SELECT distrito_id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_distrito'),
@@ -228,7 +234,7 @@ export async function sembrarSamples(
          -- hay que guardar, o el dato de trazabilidad miente.
          COALESCE((SELECT version_capa FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), $4),
          '{"seed": true}'::jsonb,
-         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::tirante_estimado, $10::frecuencia, $11::causa_presunta,
+         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::profundidad_estimada, $10::frecuencia, $11::causa_presunta,
          $12::sumidero_cercano, $13::severidad, $14, $15, $16::estado_reporte, $17,
          CASE WHEN $16 IN ('validado', 'resuelto') THEN $18::uuid END,
          CASE WHEN $16 IN ('validado', 'resuelto') THEN now() - ($3 || ' days')::interval + interval '1 day' END`,
@@ -241,10 +247,10 @@ export async function sembrarSamples(
         al() < 0.6 ? Math.round(5 + al() * 30) : null,
         al() < 0.8 ? 'via_publica' : 'vivienda_o_predio',
         desc,
-        entrada.tirante_estimado,
+        entrada.profundidad_estimada,
         entrada.frecuencia,
         elegir(CAUSAS),
-        elegir(['si', 'no', 'no_sabe'] as const),
+        elegir(['si', 'no', null] as const),
         sev.banda,
         sev.puntaje,
         sev.version,
@@ -273,5 +279,5 @@ export async function sembrarSamples(
     process.env.JITTER_SAL || 'jitter-local-cambiar-en-produccion',
   );
   const pc = await recalcularPuntosCriticos(ex);
-  return { capas, usuarios: 3, reportes: Number(n?.n ?? insertados), puntosCriticos: pc.puntos };
+  return { capas, usuarios: 4, reportes: Number(n?.n ?? insertados), puntosCriticos: pc.puntos };
 }

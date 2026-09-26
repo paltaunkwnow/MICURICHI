@@ -33,12 +33,16 @@ export const resolverDePrueba: ResolverGeo = {
 
 export const PASSWORD_PRUEBA = 'contrasena-test-123';
 
-/** Cuentas de prueba. `vecina` y `vecino` son ciudadanas: reportar exige sesión desde la 0009. */
+/**
+ * Cuentas de prueba. `vecina` y `vecino` son ciudadanas: reportar exige sesión desde la 0009.
+ * `ejecutivo` (rol de la 0011) solo ve el resumen del panel ejecutivo; no modera ni exporta.
+ */
 export const CUENTAS = {
   tecnico: 'tecnico@test.local',
   admin: 'admin@test.local',
   vecina: 'vecina@test.local',
   vecino: 'vecino@test.local',
+  ejecutivo: 'ejecutivo@test.local',
 } as const;
 
 export async function crearUsuarios(ex: Ejecutor) {
@@ -47,7 +51,8 @@ export async function crearUsuarios(ex: Ejecutor) {
        ('tecnico@test.local', 'Técnico', 'tecnico', $1),
        ('admin@test.local', 'Admin', 'admin', $1),
        ('vecina@test.local', 'Vecina', 'ciudadano', $1),
-       ('vecino@test.local', 'Vecino', 'ciudadano', $1)`,
+       ('vecino@test.local', 'Vecino', 'ciudadano', $1),
+       ('ejecutivo@test.local', 'Ejecutiva', 'ejecutivo', $1)`,
     [await hashPassword(PASSWORD_PRUEBA)],
   );
 }
@@ -89,7 +94,7 @@ export const reporteValido = {
   ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte y tarda horas en irse.',
-  tirante_estimado: 'rodilla',
+  profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
   causa_presunta: 'sumidero_tapado',
 };

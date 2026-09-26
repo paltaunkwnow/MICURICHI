@@ -5,7 +5,7 @@ import {
   contadorDescripcion,
   distanciaDesde,
   etiquetaDistrito,
-  etiquetaTirante,
+  etiquetaProfundidad,
   etiquetaUnidadVecinal,
   subtituloReporte,
   textoCapaOficial,
@@ -18,7 +18,7 @@ const props = {
   id: '00000000-0000-0000-0000-000000000001',
   distrito: { id: 'distrito_municipal:7', codigo: '7', nombre: 'Distrito 7' },
   unidad_vecinal: { id: 'unidad_vecinal:123', codigo: '123', nombre: 'Unidad Vecinal 123' },
-  tirante_estimado: 'rodilla',
+  profundidad_estimada: 'rodilla',
 } as unknown as ReporteFeature['properties'];
 
 const reporte = {
@@ -67,8 +67,8 @@ describe('formato', () => {
     expect(tituloPuntos(9)).toBe('9 puntos cerca de vos');
   });
 
-  it('describe el tirante con su rango en centímetros', () => {
-    expect(etiquetaTirante('rodilla')).toBe('A la rodilla · 10–40 cm');
+  it('describe la profundidad con su rango en centímetros', () => {
+    expect(etiquetaProfundidad('rodilla')).toBe('A la rodilla · 10–40 cm');
   });
 
   it('calcula la distancia solo si hay ubicación del vecino', () => {

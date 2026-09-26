@@ -70,7 +70,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       'creado_en',
       'evento_en',
       'validado_en',
-      'tirante_estimado',
+      'profundidad_estimada',
       'frecuencia',
       'causa_presunta',
       'sumidero_cercano',

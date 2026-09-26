@@ -20,6 +20,7 @@ import { opcionFastify } from './proxy.js';
 import { GeoNoDisponible, type ResolverGeo } from './resolver.js';
 import { rutasAdmin } from './rutas/admin.js';
 import { rutasAuth } from './rutas/auth.js';
+import { rutasEjecutivo } from './rutas/ejecutivo.js';
 import { rutasFotos } from './rutas/fotos.js';
 import { rutasModeracion } from './rutas/moderacion.js';
 import { rutasReportes } from './rutas/reportes.js';
@@ -248,6 +249,7 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
   await rutasModeracion(app, dep);
   await rutasFotos(app, dep);
   await rutasAdmin(app, dep);
+  await rutasEjecutivo(app, dep);
   return app;
 }
 

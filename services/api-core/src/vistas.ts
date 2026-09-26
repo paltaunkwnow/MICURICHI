@@ -29,7 +29,7 @@ export interface FilaReporte {
   precision_gps_m: string | null;
   ubicacion_tipo: 'via_publica' | 'vivienda_o_predio' | 'otro';
   descripcion: string;
-  tirante_estimado: ReportePublico['tirante_estimado'];
+  profundidad_estimada: ReportePublico['profundidad_estimada'];
   frecuencia: ReportePublico['frecuencia'];
   causa_presunta: ReportePublico['causa_presunta'];
   sumidero_cercano: ReporteTecnico['sumidero_cercano'];
@@ -56,7 +56,7 @@ export const SELECT_REPORTE = `
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
          r.ubicacion_metodo, r.precision_gps_m, r.ubicacion_tipo, r.descripcion,
-         r.tirante_estimado, r.frecuencia, r.causa_presunta,
+         r.profundidad_estimada, r.frecuencia, r.causa_presunta,
          r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,
          r.estado, r.estado_motivo, r.fusionado_en_id, r.punto_critico_id, pc.n_reportes AS n_reportes_punto,
@@ -132,7 +132,7 @@ export function vistaPublica(
         : null,
       descripcion: f.descripcion,
       fotos: (f.fotos ?? []).map((k) => urlFoto(urlBase, k)),
-      tirante_estimado: f.tirante_estimado,
+      profundidad_estimada: f.profundidad_estimada,
       frecuencia: f.frecuencia,
       causa_presunta: f.causa_presunta,
       severidad: f.severidad_manual ?? f.severidad_calculada,

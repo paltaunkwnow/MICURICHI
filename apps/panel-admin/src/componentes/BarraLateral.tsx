@@ -1,19 +1,29 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChartColumn, Map as IconoMapa, Layers, ListChecks, LogOut } from 'lucide-react';
+import {
+  ChartColumn,
+  Map as IconoMapa,
+  Landmark,
+  Layers,
+  ListChecks,
+  LogOut,
+  type LucideIcon,
+} from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cerrarSesion } from '@/lib/api';
 import { etiquetaRol } from '@/lib/formato';
+import { enlacesPara } from '@/lib/roles';
 import { useUsuarioActual } from '@/lib/sesion';
 
-const ENLACES = [
-  { href: '/reportes', texto: 'Reportes', Icono: ListChecks },
-  { href: '/indicadores', texto: 'Indicadores', Icono: ChartColumn },
-  { href: '/capas', texto: 'Capas', Icono: Layers },
-  { href: '/plano', texto: 'Plano oficial', Icono: IconoMapa },
-] as const;
+const ICONOS: Record<string, LucideIcon> = {
+  '/ejecutivo': Landmark,
+  '/reportes': ListChecks,
+  '/indicadores': ChartColumn,
+  '/capas': Layers,
+  '/plano': IconoMapa,
+};
 
 export function BarraLateral() {
   const usuario = useUsuarioActual();
@@ -35,12 +45,15 @@ export function BarraLateral() {
         <img src="/logo.png" alt="" width={44} height={44} className="rounded-xl object-cover" />
         <div>
           <p className="titular text-lg leading-tight">Mi Curichi</p>
-          <p className="text-sm text-white/75">Panel técnico</p>
+          <p className="text-sm text-white/75">
+            {usuario.rol === 'ejecutivo' ? 'Panel ejecutivo' : 'Panel técnico'}
+          </p>
         </div>
       </div>
 
       <nav className="nav-lateral flex flex-col gap-1" aria-label="Secciones del panel">
-        {ENLACES.map(({ href, texto, Icono }) => {
+        {enlacesPara(usuario.rol).map(({ href, texto }) => {
+          const Icono = ICONOS[href] ?? ListChecks;
           const activo = ruta === href || ruta.startsWith(`${href}/`);
           return (
             <Link

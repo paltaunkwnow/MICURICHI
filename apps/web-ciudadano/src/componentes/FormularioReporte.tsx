@@ -7,15 +7,19 @@ import {
   CONFIG_DOMINIO,
   calcularSeveridad,
   ETIQUETAS,
+  PROFUNDIDADES,
   type ReporteCrearEntrada,
   ReporteCrearSchema,
   type ResolverRespuesta,
+  SUMIDERO_CERCANO,
+  SUMIDERO_ESTADOS,
 } from 'contracts';
-import { Check, ChevronLeft, Copy, Navigation, Plus, ShieldCheck, X } from 'lucide-react';
+import { Camera, Check, ChevronLeft, Copy, Navigation, Plus, ShieldCheck, X } from 'lucide-react';
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useForm } from 'react-hook-form';
 import {
   crearReporte,
@@ -61,7 +65,6 @@ interface FotoLista {
   url: string;
 }
 
-const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
 const CAUSAS = [
   'desconocida',
@@ -82,12 +85,10 @@ const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
  */
 const ESPERA_RESOLVER_MS = 600;
 
-/**
- * Un <select> sin elegir devuelve la cadena vacía, y los campos opcionales del sumidero son
- * enums anulables: '' no es ni un valor válido ni null, así que la validación del formulario
- * fallaba SIEMPRE que el vecino no tocaba esos desplegables (es decir, casi siempre).
- */
-const vacioANulo = (v: unknown) => (v === '' || v === undefined ? null : v);
+/** Espacio de foto abierto con «¿Querés añadir otro detalle?»; se consume al subir su foto. */
+interface EspacioCamara {
+  id: number;
+}
 
 /** Opción en tarjeta con radio real escondido: el aspecto es del prototipo, el control es nativo. */
 function Opcion({
@@ -174,8 +175,10 @@ export function FormularioReporte() {
   const [creado, setCreado] = useState<{ id: string } | null>(null);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [retomado, setRetomado] = useState(false);
+  const [espaciosCamara, setEspaciosCamara] = useState<EspacioCamara[]>([]);
   const mapa = useRef<MapaGl | null>(null);
   const archivo = useRef<HTMLInputElement>(null);
+  const siguienteEspacio = useRef(1);
 
   /**
    * «Me pasa a mí»: el detalle de un punto abre este flujo ya ubicado ahí. Si el reporte nuevo
@@ -354,6 +357,41 @@ export function FormularioReporte() {
     onError: (e) => setErrorFoto(mensajeDeError(e)),
   });
 
+  /**
+   * Único camino de subida, sea el «Agregar» de la galería o un espacio de «Foto de referencia»
+   * con la cámara. Se comprueba ANTES de subir: el servidor lo rechaza igual (413 / 415), pero
+   * llegar hasta ahí significa haber mandado hasta 8 MB por datos móviles para que le digan que
+   * no, y quien peor conexión tiene es quien más lo paga.
+   */
+  function alElegirFoto(e: ChangeEvent<HTMLInputElement>, alSubir?: () => void) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    const error = motivoDeRechazoDeFoto(f);
+    if (error) {
+      setErrorFoto(error);
+      return;
+    }
+    subir.mutate(f, alSubir ? { onSuccess: alSubir } : undefined);
+  }
+
+  const quitarEspacio = (id: number) => setEspaciosCamara((p) => p.filter((x) => x.id !== id));
+
+  // El tope cuenta también los espacios abiertos y sin foto: si no, se podrían abrir más
+  // espacios que fotos admite el reporte y el último fallaría al subir.
+  const lugaresOcupados = fotos.length + espaciosCamara.length;
+  const fotosCompletas = lugaresOcupados >= CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE;
+
+  function abrirOtroDetalle() {
+    if (fotosCompletas) return;
+    const id = siguienteEspacio.current++;
+    // flushSync pinta el espacio ya, dentro del mismo toque: el `<input>` tiene que existir para
+    // abrir la cámara, y los navegadores solo la abren en respuesta directa a un gesto. Si aun así
+    // no se abre, el espacio queda a la vista con su propio botón y basta con tocarlo.
+    flushSync(() => setEspaciosCamara((p) => [...p, { id }]));
+    document.getElementById(`foto-referencia-${id}`)?.click();
+  }
+
   const enviar = useMutation({
     mutationFn: (payload: ReporteCrearEntrada) =>
       crearReporte(payload, claveEnvio.current as string),
@@ -418,15 +456,15 @@ export function FormularioReporte() {
   // ---------------------------------------------------------------- pasos
 
   const severidad =
-    valores.tirante_estimado && valores.frecuencia
+    valores.profundidad_estimada && valores.frecuencia
       ? calcularSeveridad({
-          tirante_estimado: valores.tirante_estimado,
+          profundidad_estimada: valores.profundidad_estimada,
           frecuencia: valores.frecuencia,
         })
       : null;
 
   const puedePaso2 = !!ubicacion && !!resuelto?.dentro_cobertura;
-  const puedePaso3 = !!valores.tirante_estimado && !!valores.frecuencia;
+  const puedePaso3 = !!valores.profundidad_estimada && !!valores.frecuencia;
   const puedePaso4 = (valores.descripcion ?? '').trim().length >= CONFIG_DOMINIO.DESCRIPCION_MIN;
 
   const irAdelante = () => setPaso((p) => Math.min(PASOS, p + 1));
@@ -459,7 +497,7 @@ export function FormularioReporte() {
         return;
       }
       const pasoDelError =
-        errores.tirante_estimado || errores.frecuencia ? 2 : errores.descripcion ? 3 : 4;
+        errores.profundidad_estimada || errores.frecuencia ? 2 : errores.descripcion ? 3 : 4;
       setPaso(pasoDelError);
       setErrorEnvio('Revisá los campos marcados y volvé a intentar.');
     },
@@ -708,17 +746,20 @@ export function FormularioReporte() {
             </div>
 
             <fieldset className="mt-5">
-              <legend className="lbl">¿Hasta dónde llegaba el agua?</legend>
+              <legend className="lbl">{ETIQUETAS.campos.profundidad_estimada}</legend>
+              <p className="ayuda mb-2.5">
+                ¿Hasta dónde llegaba el agua? Tomá tu cuerpo como referencia.
+              </p>
               <div className="grid gap-2.5">
-                {TIRANTES.map((t) => (
+                {PROFUNDIDADES.map((p) => (
                   <Opcion
-                    key={t}
-                    nombre="tirante_estimado"
-                    valor={t}
-                    texto={ETIQUETAS.tirante[t].corta}
-                    detalle={ETIQUETAS.tirante[t].rango}
-                    marcado={valores.tirante_estimado === t}
-                    onCambio={() => form.setValue('tirante_estimado', t)}
+                    key={p}
+                    nombre="profundidad_estimada"
+                    valor={p}
+                    texto={ETIQUETAS.profundidad[p].corta}
+                    detalle={ETIQUETAS.profundidad[p].rango}
+                    marcado={valores.profundidad_estimada === p}
+                    onCambio={() => form.setValue('profundidad_estimada', p)}
                   />
                 ))}
               </div>
@@ -795,7 +836,39 @@ export function FormularioReporte() {
                   </button>
                 </li>
               ))}
-              {fotos.length < CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE ? (
+              {espaciosCamara.map((esp) => (
+                <li key={esp.id} className="relative aspect-square">
+                  <label
+                    htmlFor={`foto-referencia-${esp.id}`}
+                    className="grid h-full w-full cursor-pointer place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-verde-700"
+                  >
+                    <Camera size={20} aria-hidden="true" />
+                    {subir.isPending ? 'Subiendo…' : 'Foto de referencia'}
+                  </label>
+                  {/* `capture` pide la cámara trasera en el teléfono; en escritorio se comporta
+                      como un selector de archivos más. El tipo real lo decide el servidor por
+                      los bytes, y antes `motivoDeRechazoDeFoto` descarta lo que no se admite. */}
+                  <input
+                    id={`foto-referencia-${esp.id}`}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="sr-only"
+                    aria-label="Foto de referencia"
+                    disabled={subir.isPending}
+                    onChange={(e) => alElegirFoto(e, () => quitarEspacio(esp.id))}
+                  />
+                  <button
+                    type="button"
+                    className="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/95 text-[13px] font-bold"
+                    aria-label="Quitar este espacio de foto"
+                    onClick={() => quitarEspacio(esp.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+              {lugaresOcupados < CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE ? (
                 <li className="aspect-square">
                   <button
                     type="button"
@@ -816,21 +889,24 @@ export function FormularioReporte() {
               accept={CONFIG_DOMINIO.FOTO_MIME_PERMITIDOS.join(',')}
               className="sr-only"
               aria-label="Elegir una foto del punto"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = '';
-                if (!f) return;
-                // Se comprueba ANTES de subir. El servidor lo rechaza igual (413 / 415), pero
-                // llegar hasta ahí significa haber mandado hasta 8 MB por datos móviles para que
-                // le digan que no: quien peor conexión tiene es quien más lo paga.
-                const error = motivoDeRechazoDeFoto(f);
-                if (error) {
-                  setErrorFoto(error);
-                  return;
-                }
-                subir.mutate(f);
-              }}
+              onChange={(e) => alElegirFoto(e)}
             />
+            <button
+              type="button"
+              data-testid="boton-otro-detalle"
+              className="btn btn-fantasma btn-bloque mt-2.5"
+              onClick={abrirOtroDetalle}
+              disabled={fotosCompletas || subir.isPending}
+              aria-describedby="ayuda-otro-detalle"
+            >
+              <Camera size={18} aria-hidden="true" />
+              ¿Querés añadir otro detalle?
+            </button>
+            <p id="ayuda-otro-detalle" className="ayuda mt-1.5" aria-live="polite">
+              {fotosCompletas
+                ? `Ya llegaste al máximo de ${CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos. Quitá una si querés cambiarla.`
+                : 'Abre la cámara para sacar una foto de referencia de otro detalle del lugar.'}
+            </p>
             <div className="mt-1.5 flex justify-between text-[13.5px] text-tinta-600">
               <span>Hasta {CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos</span>
               <span>
@@ -891,40 +967,60 @@ export function FormularioReporte() {
                     ))}
                   </select>
                 </div>
-                <div>
-                  <label htmlFor="sumidero_cercano" className="lbl">
-                    ¿Hay un sumidero cerca?
-                  </label>
-                  <select
-                    id="sumidero_cercano"
-                    className="campo"
-                    {...form.register('sumidero_cercano', { setValueAs: vacioANulo })}
-                  >
-                    <option value="">No sé / prefiero no responder</option>
-                    {(['si', 'no', 'no_sabe'] as const).map((v) => (
-                      <option key={v} value={v}>
-                        {ETIQUETAS.sumidero_cercano[v]}
-                      </option>
+                {/* Radios y no <select>: «no contestó» tiene que ser `null`, nunca `''`. Con
+                    los desplegables anteriores, uno sin elegir mandaba la cadena vacía y la
+                    validación fallaba SIEMPRE que el vecino no los tocaba (TRASPASO §3.8). Aquí
+                    `setValue` solo escribe un valor del enum o `null`; si algún día vuelve a ser
+                    un control registrado, necesita `setValueAs` que convierta '' en null. */}
+                <fieldset>
+                  <legend className="lbl">{ETIQUETAS.campos.sumidero_cercano}</legend>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {SUMIDERO_CERCANO.map((v) => (
+                      <Opcion
+                        key={v}
+                        nombre="sumidero_cercano"
+                        valor={v}
+                        texto={ETIQUETAS.sumidero_cercano[v]}
+                        marcado={valores.sumidero_cercano === v}
+                        onCambio={() => {
+                          form.setValue('sumidero_cercano', v);
+                          // Sin sumidero no hay nada que esté tapado: la respuesta anterior no
+                          // puede viajar escondida en el envío.
+                          if (v === 'no') form.setValue('sumidero_estado', null);
+                        }}
+                      />
                     ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="sumidero_estado" className="lbl">
-                    ¿Cómo está ese sumidero?
-                  </label>
-                  <select
-                    id="sumidero_estado"
-                    className="campo"
-                    {...form.register('sumidero_estado', { setValueAs: vacioANulo })}
-                  >
-                    <option value="">No sé / prefiero no responder</option>
-                    {(['libre', 'obstruido', 'danado', 'no_sabe'] as const).map((v) => (
-                      <option key={v} value={v}>
-                        {ETIQUETAS.sumidero_estado[v]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  </div>
+                  {valores.sumidero_cercano ? (
+                    <button
+                      type="button"
+                      className="mt-1.5 inline-flex min-h-12 items-center px-0.5 text-[14px] font-bold text-agua-700"
+                      onClick={() => {
+                        form.setValue('sumidero_cercano', null);
+                        form.setValue('sumidero_estado', null);
+                      }}
+                    >
+                      Dejar sin responder
+                    </button>
+                  ) : null}
+                </fieldset>
+                {valores.sumidero_cercano === 'si' ? (
+                  <fieldset>
+                    <legend className="lbl">{ETIQUETAS.campos.sumidero_estado}</legend>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      {SUMIDERO_ESTADOS.map((v) => (
+                        <Opcion
+                          key={v}
+                          nombre="sumidero_estado"
+                          valor={v}
+                          texto={ETIQUETAS.sumidero_estado[v]}
+                          marcado={valores.sumidero_estado === v}
+                          onCambio={() => form.setValue('sumidero_estado', v)}
+                        />
+                      ))}
+                    </div>
+                  </fieldset>
+                ) : null}
                 <label className="opc">
                   <input type="checkbox" {...form.register('agua_brota_sumidero')} />
                   <span>El agua brota del sumidero cuando llueve</span>
@@ -993,10 +1089,10 @@ export function FormularioReporte() {
                 alEditar={() => setPaso(1)}
               />
               <FilaRevision
-                etiqueta="Tirante"
+                etiqueta={ETIQUETAS.campos.profundidad}
                 valor={
-                  valores.tirante_estimado
-                    ? `${ETIQUETAS.tirante[valores.tirante_estimado].corta} · ${ETIQUETAS.tirante[valores.tirante_estimado].rango}`
+                  valores.profundidad_estimada
+                    ? `${ETIQUETAS.profundidad[valores.profundidad_estimada].corta} · ${ETIQUETAS.profundidad[valores.profundidad_estimada].rango}`
                     : '—'
                 }
                 alEditar={() => setPaso(2)}

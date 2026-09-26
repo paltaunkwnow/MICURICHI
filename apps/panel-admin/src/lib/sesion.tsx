@@ -2,9 +2,10 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Usuario } from 'contracts';
-import { useRouter } from 'next/navigation';
-import { createContext, type ReactNode, useContext, useEffect } from 'react';
+import { usePathname, useRouter } from 'next/navigation';
+import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
 import { ErrorApi, EVENTO_SESION_CADUCADA, obtenerYo } from '@/lib/api';
+import { puedeEntrarAlPanel, puedeVerRuta, RUTA_EJECUTIVO } from '@/lib/roles';
 
 export const CLAVE_YO = ['yo'] as const;
 
@@ -19,6 +20,17 @@ export function useUsuario() {
 }
 
 const ContextoUsuario = createContext<Usuario | null>(null);
+
+const ContextoAvisoAcceso = createContext<string | null>(null);
+
+/** Aviso que deja <Protegido> cuando saca a alguien de una sección que su rol no ve. */
+export function useAvisoAcceso(): string | null {
+  return useContext(ContextoAvisoAcceso);
+}
+
+export const AVISO_SOLO_EJECUTIVO =
+  'Tu cuenta es de perfil ejecutivo: la moderación, la exportación y la administración son del ' +
+  'equipo técnico. Te trajimos al panel ejecutivo.';
 
 /** Usuario actual dentro de <Protegido>. */
 export function useUsuarioActual(): Usuario {
@@ -36,7 +48,24 @@ export function Protegido({ children }: { children: ReactNode }) {
   // El login de api-core acepta cualquier usuario activo, también uno con rol `ciudadano`.
   // La API le devolvería 403 en cada acción, pero sin esto entraba igual al panel y solo veía
   // errores. El permiso real lo sigue aplicando el servidor (`requerirRol`); esto es la puerta.
-  const sinPermiso = !!data && data.rol !== 'tecnico' && data.rol !== 'admin';
+  const sinPermiso = !!data && !puedeEntrarAlPanel(data.rol);
+  const ruta = usePathname() ?? '';
+  // El ejecutivo solo ve su panel. Si pisa otra sección (enlace guardado, URL escrita a mano) se
+  // lo lleva a /ejecutivo con un aviso; la API igual le contestaría 403 a cada llamada.
+  const fueraDeSuRol = !!data && !sinPermiso && !puedeVerRuta(data.rol, ruta);
+  const [avisoAcceso, setAvisoAcceso] = useState<{ mensaje: string; ruta: string } | null>(null);
+
+  useEffect(() => {
+    if (fueraDeSuRol) {
+      setAvisoAcceso({ mensaje: AVISO_SOLO_EJECUTIVO, ruta: RUTA_EJECUTIVO });
+      router.replace(RUTA_EJECUTIVO);
+    }
+  }, [fueraDeSuRol, router]);
+
+  // El aviso se ve en la pantalla a la que se lo llevó; al navegar a otra, desaparece.
+  useEffect(() => {
+    if (avisoAcceso && ruta !== avisoAcceso.ruta && !fueraDeSuRol) setAvisoAcceso(null);
+  }, [ruta, avisoAcceso, fueraDeSuRol]);
 
   useEffect(() => {
     if (sinSesion) {
@@ -73,11 +102,20 @@ export function Protegido({ children }: { children: ReactNode }) {
       </p>
     );
   }
+  if (fueraDeSuRol) {
+    return (
+      <p className="p-8 text-tinta-600" role="status">
+        Llevándote al panel ejecutivo…
+      </p>
+    );
+  }
   if (sinPermiso) {
     return (
       <div className="p-8" role="alert">
         <p className="error">Tu cuenta no tiene acceso al panel técnico.</p>
-        <p className="ayuda">Pedí a un administrador que te asigne el rol de técnico.</p>
+        <p className="ayuda">
+          Pedí a un administrador que te asigne el rol de técnico o de ejecutivo.
+        </p>
       </div>
     );
   }
@@ -91,5 +129,11 @@ export function Protegido({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  return <ContextoUsuario.Provider value={data}>{children}</ContextoUsuario.Provider>;
+  return (
+    <ContextoUsuario.Provider value={data}>
+      <ContextoAvisoAcceso.Provider value={avisoAcceso?.mensaje ?? null}>
+        {children}
+      </ContextoAvisoAcceso.Provider>
+    </ContextoUsuario.Provider>
+  );
 }

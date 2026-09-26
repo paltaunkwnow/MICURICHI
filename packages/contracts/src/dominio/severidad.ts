@@ -1,21 +1,22 @@
-import type { Frecuencia, Severidad, Tirante } from './enums.js';
+import type { Frecuencia, Profundidad, Severidad } from './enums.js';
 
 /**
  * Matriz de severidad v2 (CLAUDE.md §9.1). Función pura y reproducible.
- * puntaje = 2·T + F (rango 3..12) → banda base → reglas de escalamiento (solo suben).
+ * puntaje = 2·P + F (P = profundidad) (rango 3..12) → banda base → reglas de escalamiento (solo suben).
  * La v1 (2·T + D + F + A, con la regla E2) desapareció al quitar duración y afectación del reporte.
+ * El «tirante» (T) de v1 y v2 se llama profundidad desde contracts 0.5.0; los números no cambian.
  */
 export const SEVERIDAD_VERSION = 2;
 
 export const PUNTOS = {
-  tirante: { tobillo: 1, rodilla: 2, muslo: 3, mas_70: 4 },
+  profundidad: { tobillo: 1, rodilla: 2, muslo: 3, mas_70: 4 },
   frecuencia: { primera_vez: 1, ocasional: 2, cada_lluvia_fuerte: 3, permanente: 4 },
 } as const satisfies {
-  tirante: Record<Tirante, number>;
+  profundidad: Record<Profundidad, number>;
   frecuencia: Record<Frecuencia, number>;
 };
 
-export const PESOS = { tirante: 2, frecuencia: 1 } as const;
+export const PESOS = { profundidad: 2, frecuencia: 1 } as const;
 
 /** Bandas base por puntaje: [min, max] inclusivos. */
 export const BANDAS: ReadonlyArray<{ banda: Severidad; min: number; max: number }> = [
@@ -28,7 +29,7 @@ export const BANDAS: ReadonlyArray<{ banda: Severidad; min: number; max: number 
 const ORDEN: Record<Severidad, number> = { baja: 0, media: 1, alta: 2, critica: 3 };
 
 export interface EntradaSeveridad {
-  tirante_estimado: Tirante;
+  profundidad_estimada: Profundidad;
   frecuencia: Frecuencia;
 }
 
@@ -50,17 +51,17 @@ export function severidadMaxima(a: Severidad, b: Severidad): Severidad {
 }
 
 export function calcularSeveridad(e: EntradaSeveridad): ResultadoSeveridad {
-  const t = PUNTOS.tirante[e.tirante_estimado];
+  const p = PUNTOS.profundidad[e.profundidad_estimada];
   const f = PUNTOS.frecuencia[e.frecuencia];
-  const puntaje = PESOS.tirante * t + PESOS.frecuencia * f;
+  const puntaje = PESOS.profundidad * p + PESOS.frecuencia * f;
 
   const base = BANDAS.find((b) => puntaje >= b.min && puntaje <= b.max);
   if (!base) throw new Error(`Puntaje fuera de rango: ${puntaje}`);
 
   let banda: Severidad = base.banda;
   const reglas: string[] = [];
-  // E1: tirante > 70 cm → crítica.
-  if (t === 4) {
+  // E1: profundidad > 70 cm → crítica.
+  if (p === 4) {
     banda = 'critica';
     reglas.push('E1');
   }

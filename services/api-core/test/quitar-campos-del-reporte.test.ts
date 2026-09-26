@@ -46,7 +46,7 @@ const PAYLOAD_NUEVO = {
   ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte y tarda horas en irse.',
-  tirante_estimado: 'rodilla',
+  profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
   causa_presunta: 'sumidero_tapado',
 } as const;
@@ -143,17 +143,17 @@ afterAll(async () => {
 describe('CA-A1: camino crítico con el payload nuevo', () => {
   // T y F elegidos para que v1 y v2 den resultados distintos (y uno de ellos dispare E1).
   const casos = [
-    { tirante: 'rodilla', frecuencia: 'cada_lluvia_fuerte', puntaje: 7, banda: 'media' },
-    { tirante: 'tobillo', frecuencia: 'ocasional', puntaje: 4, banda: 'baja' },
-    { tirante: 'muslo', frecuencia: 'permanente', puntaje: 10, banda: 'alta' },
-    { tirante: 'mas_70', frecuencia: 'primera_vez', puntaje: 9, banda: 'critica' },
+    { profundidad: 'rodilla', frecuencia: 'cada_lluvia_fuerte', puntaje: 7, banda: 'media' },
+    { profundidad: 'tobillo', frecuencia: 'ocasional', puntaje: 4, banda: 'baja' },
+    { profundidad: 'muslo', frecuencia: 'permanente', puntaje: 10, banda: 'alta' },
+    { profundidad: 'mas_70', frecuencia: 'primera_vez', puntaje: 9, banda: 'critica' },
   ] as const;
 
   for (const c of casos) {
-    it(`CA-A1: ${c.tirante} + ${c.frecuencia} sin duración ni afectación → 201, nuevo, UV resuelta, severidad v2 ${c.puntaje}/${c.banda}`, async () => {
+    it(`CA-A1: ${c.profundidad} + ${c.frecuencia} sin duración ni afectación → 201, nuevo, UV resuelta, severidad v2 ${c.puntaje}/${c.banda}`, async () => {
       const r = await crear({
         ...PAYLOAD_NUEVO,
-        tirante_estimado: c.tirante,
+        profundidad_estimada: c.profundidad,
         frecuencia: c.frecuencia,
       });
       expect(r.statusCode, r.body.slice(0, 400)).toBe(201);
@@ -316,7 +316,7 @@ describe('CA-A5: exportación sin las columnas', () => {
     const columnas = encabezado!.split(',');
     for (const campo of CUATRO_CAMPOS) expect(columnas, campo).not.toContain(campo);
     // Siguen las que no se quitan.
-    for (const campo of ['tirante_estimado', 'frecuencia', 'severidad', 'unidad_vecinal'])
+    for (const campo of ['profundidad_estimada', 'frecuencia', 'severidad', 'unidad_vecinal'])
       expect(columnas, campo).toContain(campo);
   });
 

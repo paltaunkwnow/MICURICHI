@@ -3,8 +3,8 @@
  * base de datos, API, frontends y ETL (exportados a dist/dominio.json).
  */
 
-export const TIRANTES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
-export type Tirante = (typeof TIRANTES)[number];
+export const PROFUNDIDADES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
+export type Profundidad = (typeof PROFUNDIDADES)[number];
 
 export const FRECUENCIAS = [
   'primera_vez',
@@ -37,7 +37,7 @@ export const ESTADOS_PUBLICOS = [
   'resuelto',
 ] as const satisfies readonly EstadoReporte[];
 
-export const ROLES = ['ciudadano', 'tecnico', 'admin'] as const;
+export const ROLES = ['ciudadano', 'tecnico', 'admin', 'ejecutivo'] as const;
 export type Rol = (typeof ROLES)[number];
 
 export const UBICACION_METODOS = ['gps', 'manual'] as const;
@@ -46,10 +46,11 @@ export type UbicacionMetodo = (typeof UBICACION_METODOS)[number];
 export const UBICACION_TIPOS = ['via_publica', 'vivienda_o_predio', 'otro'] as const;
 export type UbicacionTipo = (typeof UBICACION_TIPOS)[number];
 
-export const SUMIDERO_CERCANO = ['si', 'no', 'no_sabe'] as const;
+/** «No contestó» es null: no hay valor «no sé» (contracts 0.5.0). */
+export const SUMIDERO_CERCANO = ['si', 'no'] as const;
 export type SumideroCercano = (typeof SUMIDERO_CERCANO)[number];
 
-export const SUMIDERO_ESTADOS = ['libre', 'obstruido', 'danado', 'no_sabe'] as const;
+export const SUMIDERO_ESTADOS = ['tapado', 'no_tapado'] as const;
 export type SumideroEstado = (typeof SUMIDERO_ESTADOS)[number];
 
 export const TIPOS_CAPA = ['distrito_municipal', 'unidad_vecinal', 'manzana'] as const;
@@ -57,7 +58,14 @@ export type TipoCapa = (typeof TIPOS_CAPA)[number];
 
 /** Etiquetas en español para la interfaz. La severidad nunca se muestra solo con color. */
 export const ETIQUETAS = {
-  tirante: {
+  /** Rótulos de campo. `profundidad` es la forma corta (encabezado de columna, ficha). */
+  campos: {
+    profundidad_estimada: 'Profundidad estimada',
+    profundidad: 'Profundidad',
+    sumidero_cercano: '¿Hay sumidero cercano?',
+    sumidero_estado: '¿Está tapado?',
+  },
+  profundidad: {
     tobillo: { corta: 'Al tobillo', rango: '<10 cm' },
     rodilla: { corta: 'A la rodilla', rango: '10–40 cm' },
     muslo: { corta: 'Al muslo', rango: '40–70 cm' },
@@ -96,12 +104,18 @@ export const ETIQUETAS = {
     vivienda_o_predio: 'Vivienda o predio',
     otro: 'Otro',
   },
-  sumidero_cercano: { si: 'Sí', no: 'No', no_sabe: 'No sé' },
-  sumidero_estado: { libre: 'Libre', obstruido: 'Obstruido', danado: 'Dañado', no_sabe: 'No sé' },
+  sumidero_cercano: { si: 'Sí', no: 'No' },
+  sumidero_estado: { tapado: 'Tapado', no_tapado: 'No tapado' },
   tipo_capa: {
     distrito_municipal: 'Distrito municipal',
     unidad_vecinal: 'Unidad vecinal',
     manzana: 'Manzana',
+  },
+  rol: {
+    ciudadano: 'Ciudadano',
+    tecnico: 'Técnico',
+    admin: 'Administrador',
+    ejecutivo: 'Ejecutivo',
   },
 } as const;
 

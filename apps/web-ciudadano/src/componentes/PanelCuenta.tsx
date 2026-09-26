@@ -4,7 +4,7 @@ import { CONFIG_DOMINIO } from 'contracts';
 import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { destinoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
+import { destinoDelPanel, textoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
 import { useCerrarSesion, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
 
@@ -77,11 +77,12 @@ export function PanelCuenta() {
         <div className="mb-5">
           <a href={panel} className="btn btn-tinta btn-bloque no-underline">
             <LayoutDashboard size={18} aria-hidden="true" className="mr-2" />
-            Ir al panel técnico
+            Ir al {textoDelPanel(usuario.rol).toLowerCase()}
           </a>
           <p className="ayuda mt-2">
-            Tu cuenta es de {usuario.rol === 'admin' ? 'administrador' : 'técnico'}. Moderar,
-            exportar y ver los indicadores se hace desde el panel.
+            {usuario.rol === 'ejecutivo'
+              ? 'Tu cuenta es de ejecutivo. El resumen de reportes por distrito y severidad está en el panel.'
+              : `Tu cuenta es de ${usuario.rol === 'admin' ? 'administrador' : 'técnico'}. Moderar, exportar y ver los indicadores se hace desde el panel.`}
           </p>
         </div>
       )}

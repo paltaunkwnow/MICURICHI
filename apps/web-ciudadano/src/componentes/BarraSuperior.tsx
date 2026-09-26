@@ -3,7 +3,7 @@
 import { LayoutDashboard, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { destinoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
+import { destinoDelPanel, textoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
 import { useSesion } from '@/lib/sesion';
 
 /**
@@ -47,13 +47,17 @@ export function BarraSuperior() {
         ))}
       </nav>
       <div className="ml-auto flex items-center gap-2">
-        {/* Solo técnico y admin. Es `<a>` y no `Link`: el panel es otra aplicación, en otro origen.
-            Por debajo de 1280 px queda solo el ícono: con el texto, a 1024 px la barra partía en dos
-            líneas todos sus enlaces. El texto sigue ahí para el lector de pantalla. */}
+        {/* Solo técnico, admin y ejecutivo. Es `<a>` y no `Link`: el panel es otra aplicación, en
+            otro origen. Por debajo de 1280 px queda solo el ícono: con el texto, a 1024 px la barra
+            partía en dos líneas todos sus enlaces. El texto sigue ahí para el lector de pantalla. */}
         {panel && (
-          <a href={panel} className="btn btn-tinta btn-sm no-underline" title="Panel técnico">
+          <a
+            href={panel}
+            className="btn btn-tinta btn-sm no-underline"
+            title={textoDelPanel(usuario?.rol)}
+          >
             <LayoutDashboard size={17} aria-hidden="true" className="xl:mr-2" />
-            <span className="max-xl:sr-only">Panel técnico</span>
+            <span className="max-xl:sr-only">{textoDelPanel(usuario?.rol)}</span>
           </a>
         )}
         {/* Mientras no se sabe si hay sesión no se enseña ninguna de las dos opciones: un

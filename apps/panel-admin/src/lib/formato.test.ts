@@ -6,9 +6,9 @@ import {
   etiquetaDistrito,
   etiquetaEstado,
   etiquetaMetodo,
+  etiquetaProfundidad,
   etiquetaSeveridad,
   etiquetaSiNo,
-  etiquetaTirante,
   etiquetaUnidadVecinal,
   fechaCorta,
   fechaHora,
@@ -24,9 +24,9 @@ describe('etiquetas del dominio', () => {
     expect(etiquetaEstado('nuevo')).toBe('Nuevo');
   });
 
-  it('compone el tirante con referencia corporal y rango', () => {
-    expect(etiquetaTirante('rodilla')).toBe('A la rodilla · 10–40 cm');
-    expect(etiquetaTirante('mas_70')).toContain('>70 cm');
+  it('compone la profundidad con referencia corporal y rango', () => {
+    expect(etiquetaProfundidad('rodilla')).toBe('A la rodilla · 10–40 cm');
+    expect(etiquetaProfundidad('mas_70')).toContain('>70 cm');
   });
 
   it('describe el método de ubicación y los booleanos nulos', () => {

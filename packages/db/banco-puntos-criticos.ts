@@ -28,7 +28,7 @@ async function sembrar(pool: pg.Pool, n: number, desde: number) {
   }
   await pool.query(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-      tirante_estimado, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
+      profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
      VALUES ${filas.join(',')}`,
     params,
   );

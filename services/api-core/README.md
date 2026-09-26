@@ -12,9 +12,15 @@ Fastify + PostGIS. Único punto de escritura de reportes. Contratos en `packages
 | `POST /api/v1/fotos`, `GET /api/v1/fotos/:key` | público | Magic bytes, reprocesado con sharp **sin metadatos EXIF**, ancho máx. 1600 px, JPEG |
 | `GET /api/v1/exportar?formato=csv\|geojson` | técnico, admin | Con nota metodológica |
 | `GET /api/v1/indicadores` | técnico, admin | Conteos por estado, severidad, distrito, UV; puntos críticos recurrentes |
+| `GET /api/v1/ejecutivo/resumen?ventana=7d\|30d\|todo` | ejecutivo, técnico, admin | Resumen del panel ejecutivo (`ResumenEjecutivoSchema`): totales, por severidad efectiva, por estado (`nuevo`/`validado`/`resuelto`; duplicados y rechazados no cuentan) y por distrito vigente (incluidos los que tienen 0). Ventana sobre `creado_en`. Caché en memoria de 30 s por ventana; `Cache-Control: private, no-store` |
 | `GET /api/v1/admin/capas`, `POST /api/v1/admin/capas/:id/activar` | técnico / admin | Versiones de capas; activar una (invalida la caché de geo-service) |
 | `POST /api/v1/auth/login`, `logout`, `GET /api/v1/auth/yo` | | Sesión por cookie `curichi_sesion` (httpOnly, SameSite=Lax); contraseñas con scrypt |
 | `GET /health`, `GET /ready`, `GET /docs` | | |
+
+**Roles.** `ciudadano` (alta pública), `tecnico`, `admin` y `ejecutivo` (contracts 0.5.0; se asigna
+fuera de `/auth/registro`). El ejecutivo inicia sesión, puede reportar y subir fotos como cualquier
+sesión y ve `/api/v1/ejecutivo/resumen`; recibe 403 `SIN_PERMISO` en `/api/v1/tecnico/*`,
+`/api/v1/exportar`, `/api/v1/indicadores`, `/api/v1/admin/*` y en toda la moderación.
 
 ```bash
 pnpm --filter api-core dev    # http://127.0.0.1:3001

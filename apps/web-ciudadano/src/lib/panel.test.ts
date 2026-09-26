@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { destinoDelPanel, normalizarUrlDelPanel } from './panel';
+import { destinoDelPanel, normalizarUrlDelPanel, textoDelPanel } from './panel';
 
 const PANEL = 'http://localhost:3100/';
 
@@ -7,6 +7,16 @@ describe('destinoDelPanel', () => {
   it('técnico y administrador ven el botón', () => {
     expect(destinoDelPanel('tecnico', PANEL)).toBe(PANEL);
     expect(destinoDelPanel('admin', PANEL)).toBe(PANEL);
+  });
+
+  it('el ejecutivo lo ve y va directo a su resumen', () => {
+    expect(destinoDelPanel('ejecutivo', PANEL)).toBe('http://localhost:3100/ejecutivo');
+    expect(destinoDelPanel('ejecutivo', 'https://panel.ejemplo.bo/admin/')).toBe(
+      'https://panel.ejemplo.bo/admin/ejecutivo',
+    );
+    expect(destinoDelPanel('ejecutivo', null)).toBeNull();
+    expect(textoDelPanel('ejecutivo')).toBe('Panel ejecutivo');
+    expect(textoDelPanel('tecnico')).toBe('Panel técnico');
   });
 
   it('un ciudadano no lo ve, y sin sesión tampoco', () => {

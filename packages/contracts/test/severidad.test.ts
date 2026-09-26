@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   FRECUENCIAS,
   type Frecuencia,
+  PROFUNDIDADES,
+  type Profundidad,
   type Severidad,
-  TIRANTES,
-  type Tirante,
 } from '../src/dominio/enums.js';
 import {
   BANDAS,
@@ -21,7 +21,7 @@ import {
  * E1 (T = 4 → critica) y E3 (F = 4 → mínimo media); E2 desaparece.
  */
 interface Caso {
-  t: Tirante;
+  t: Profundidad;
   f: Frecuencia;
   puntaje: number;
   base: Severidad;
@@ -60,13 +60,13 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
   it('CA-C5: la tabla de la spec cubre las 16 combinaciones T × F', () => {
     expect(TABLA_V2).toHaveLength(16);
     const claves = new Set(TABLA_V2.map((c) => `${c.t}/${c.f}`));
-    for (const t of TIRANTES)
+    for (const t of PROFUNDIDADES)
       for (const f of FRECUENCIAS) expect(claves.has(`${t}/${f}`)).toBe(true);
   });
 
   for (const c of TABLA_V2) {
     it(`CA-C5: ${c.t}/${c.f} → ${c.puntaje} ${c.base} ${c.reglas.join('+') || '—'} → ${c.banda} (v2)`, () => {
-      const r = calcularSeveridad({ tirante_estimado: c.t, frecuencia: c.f });
+      const r = calcularSeveridad({ profundidad_estimada: c.t, frecuencia: c.f });
       expect(r).toStrictEqual({
         puntaje: c.puntaje,
         banda_base: c.base,
@@ -81,10 +81,10 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
     expect(SEVERIDAD_VERSION).toBe(2);
   });
 
-  it('CA-C6: PESOS es { tirante: 2, frecuencia: 1 } y PUNTOS solo tiene tirante y frecuencia', () => {
-    expect(PESOS).toStrictEqual({ tirante: 2, frecuencia: 1 });
-    expect(Object.keys(PUNTOS)).toStrictEqual(['tirante', 'frecuencia']);
-    expect(PUNTOS.tirante).toStrictEqual({ tobillo: 1, rodilla: 2, muslo: 3, mas_70: 4 });
+  it('CA-C6: PESOS es { profundidad: 2, frecuencia: 1 } y PUNTOS solo tiene profundidad y frecuencia', () => {
+    expect(PESOS).toStrictEqual({ profundidad: 2, frecuencia: 1 });
+    expect(Object.keys(PUNTOS)).toStrictEqual(['profundidad', 'frecuencia']);
+    expect(PUNTOS.profundidad).toStrictEqual({ tobillo: 1, rodilla: 2, muslo: 3, mas_70: 4 });
     expect(PUNTOS.frecuencia).toStrictEqual({
       primera_vez: 1,
       ocasional: 2,
@@ -112,9 +112,9 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
 
   it('CA-C7: ninguna combinación aplica E2 ni E3; critica ⇔ T = 4; banda nunca baja de banda_base', () => {
     let n = 0;
-    for (const t of TIRANTES)
+    for (const t of PROFUNDIDADES)
       for (const f of FRECUENCIAS) {
-        const r = calcularSeveridad({ tirante_estimado: t, frecuencia: f });
+        const r = calcularSeveridad({ profundidad_estimada: t, frecuencia: f });
         expect(r.reglas).not.toContain('E2');
         expect(r.reglas).not.toContain('E3');
         expect(r.banda === 'critica').toBe(t === 'mas_70');
@@ -127,15 +127,19 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
     expect(n).toBe(16);
   });
 
-  it('CA-C7: es monótona: subir tirante o frecuencia nunca baja la banda', () => {
-    for (let it = 0; it < TIRANTES.length; it++)
+  it('CA-C7: es monótona: subir profundidad o frecuencia nunca baja la banda', () => {
+    for (let it = 0; it < PROFUNDIDADES.length; it++)
       for (let iff = 0; iff < FRECUENCIAS.length; iff++) {
-        const t = TIRANTES[it] as Tirante;
+        const t = PROFUNDIDADES[it] as Profundidad;
         const f = FRECUENCIAS[iff] as Frecuencia;
-        const base = calcularSeveridad({ tirante_estimado: t, frecuencia: f }).banda;
+        const base = calcularSeveridad({ profundidad_estimada: t, frecuencia: f }).banda;
         const vecinos = [
-          it < 3 ? { tirante_estimado: TIRANTES[it + 1] as Tirante, frecuencia: f } : null,
-          iff < 3 ? { tirante_estimado: t, frecuencia: FRECUENCIAS[iff + 1] as Frecuencia } : null,
+          it < 3
+            ? { profundidad_estimada: PROFUNDIDADES[it + 1] as Profundidad, frecuencia: f }
+            : null,
+          iff < 3
+            ? { profundidad_estimada: t, frecuencia: FRECUENCIAS[iff + 1] as Frecuencia }
+            : null,
         ];
         for (const v of vecinos) {
           if (!v) continue;
@@ -146,7 +150,7 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
 
   it('CA-C8: es función pura: con entrada congelada no muta y da resultados idénticos', () => {
     const entrada = Object.freeze({
-      tirante_estimado: 'muslo' as const,
+      profundidad_estimada: 'muslo' as const,
       frecuencia: 'permanente' as const,
     });
     const copia = { ...entrada };

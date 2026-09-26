@@ -139,7 +139,7 @@ async function generar(cuantos) {
         INSERT INTO reporte_inundacion (
           geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
           ubicacion_metodo, ubicacion_tipo, descripcion,
-          tirante_estimado, frecuencia, causa_presunta,
+          profundidad_estimada, frecuencia, causa_presunta,
           severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en)
         SELECT
           ST_SetSRID(pt, 4326),
@@ -152,7 +152,7 @@ async function generar(cuantos) {
           (ARRAY['gps','manual'])[1 + (i % 2)]::ubicacion_metodo,
           CASE WHEN i % 5 = 0 THEN 'vivienda_o_predio' ELSE 'via_publica' END::ubicacion_tipo,
           $2 || ' anegamiento de prueba nº ' || i,
-          (ARRAY['tobillo','rodilla','muslo','mas_70'])[1 + (i % 4)]::tirante_estimado,
+          (ARRAY['tobillo','rodilla','muslo','mas_70'])[1 + (i % 4)]::profundidad_estimada,
           (ARRAY['primera_vez','ocasional','cada_lluvia_fuerte','permanente'])[1 + (i % 4)]::frecuencia,
           'desconocida'::causa_presunta,
           -- Severidad v2 (CLAUDE.md §9.1): T = F = 1 + (i % 4), así que puntaje = 2·T + F = 3·T

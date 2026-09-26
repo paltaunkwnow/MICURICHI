@@ -17,7 +17,7 @@ vivienda.
 > *Curichi*: en el habla cruceña, un bajío donde el agua se estanca.
 
 **Lo que este sistema NO es**: ni un modelo hidráulico, ni un estudio de drenaje, ni un
-diagnóstico de pavimento. Los datos son de **percepción**, no medidos: el tirante se estima por
+diagnóstico de pavimento. Los datos son de **percepción**, no medidos: la profundidad se estima por
 referencia corporal, la ubicación tiene el error del GPS de un celular.
 Sirve para saber **dónde** y **cuánto se repite**. Cualquier decisión de obra necesita un estudio
 técnico formal. Esa advertencia va en la interfaz y en cada exportación, no solo aquí.
@@ -38,6 +38,7 @@ pública como vecino y el panel técnico como administrador.
 | **Usuario normal** (reportar un punto) | App pública · <http://localhost:3000/ingresar> | `vecina@curichi.local` | `curichi-vecina-local` | ciudadano |
 | **Administrador** (moderar, exportar, activar capas) | Panel técnico · <http://localhost:3100> | `admin@curichi.local` | `curichi-admin-local` | admin |
 | Técnico (moderar y exportar, sin administración) | Panel técnico · <http://localhost:3100> | `tecnico@curichi.local` | `curichi-tecnico-local` | técnico |
+| Ejecutivo (solo el resumen, sin moderar ni exportar) | Panel ejecutivo · <http://localhost:3100/ejecutivo> | `ejecutivo@curichi.local` | `curichi-ejecutivo-local` | ejecutivo |
 
 - **El mapa se ve sin entrar.** La cuenta solo hace falta para **enviar** un reporte.
 - Desde la app pública también se puede **crear una cuenta nueva** en «Crear cuenta»; siempre
@@ -56,8 +57,8 @@ pública como vecino y el panel técnico como administrador.
 
 > **Solo para desarrollo.** Estas contraseñas están escritas aquí a propósito para que el equipo
 > pueda probar. No deben existir en ninguna instalación real: el seed se niega a ejecutarse con
-> `NODE_ENV=production`. Se pueden cambiar con `SEED_VECINA_PASSWORD`, `SEED_ADMIN_PASSWORD` y
-> `SEED_TECNICO_PASSWORD` en `.env` antes de correr el seed.
+> `NODE_ENV=production`. Se pueden cambiar con `SEED_VECINA_PASSWORD`, `SEED_ADMIN_PASSWORD`,
+> `SEED_TECNICO_PASSWORD` y `SEED_EJECUTIVO_PASSWORD` en `.env` antes de correr el seed.
 
 ---
 
@@ -74,6 +75,7 @@ desplegada en ningún sitio.**
 | **Reporte ciudadano** | Formulario de 5 pasos con GPS o selección manual, foto, previsualización de la unidad vecinal antes de enviar, borrador que sobrevive a una recarga |
 | **Cuentas de ciudadano** | Alta, ingreso, cierre de sesión. **Reportar exige cuenta; ver el mapa no** |
 | **Panel técnico** | Login, tabla y mapa sincronizados, filtros, validar/rechazar/fusionar/reclasificar, exportación CSV y GeoJSON, indicadores, coropletas, gestión de capas |
+| **Panel ejecutivo** | `localhost:3100/ejecutivo`. Dónde y cuánto se inunda, sin moderar ni exportar: pestañas por severidad (crítica, media, baja), gráficas por distrito y actualización cada 60 s |
 | **Geoespacial** | PIP con índice GIST, bordes, huecos y fuera de cobertura; capas como GeoJSON o teselas vectoriales al vuelo; puntos críticos por DBSCAN |
 | **ETL** | Shapefile → GeoJSON → PostGIS, reproducible con un comando, con reporte de calidad |
 | **Seguridad** | Roles de PostgreSQL con privilegios mínimos, separación estricta de vista pública y técnica, cuota antiabuso por cuenta, EXIF eliminado, contenedores endurecidos. Ver [SECURITY.md](SECURITY.md) |

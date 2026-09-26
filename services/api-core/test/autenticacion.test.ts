@@ -71,7 +71,7 @@ describe('freno de fuerza bruta por cuenta', () => {
     const conBuena = await login(a, 'tecnico@test.local', PASSWORD);
     expect(conBuena.statusCode).toBe(429);
     await a.close();
-  });
+  }, 30_000); // tres verificaciones Argon2id seguidas superan los 5 s por defecto en máquinas lentas o cargadas
 
   it('el freno de una cuenta no afecta a otra', async () => {
     const a = await app({ limitesLogin: { maxPorEmail: 2, maxPorIp: 100, ventanaMinutos: 15 } });

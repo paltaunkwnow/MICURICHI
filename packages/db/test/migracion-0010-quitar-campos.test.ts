@@ -118,11 +118,16 @@ function sha256Lf(archivo: string): string {
   return createHash('sha256').update(texto).digest('hex');
 }
 
-/** Directorio temporal con copias de 0001–0009: el estado de una base de antes de la corrida. */
-function directorioHasta0009(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'curichi-0010-'));
+/**
+ * Directorio temporal con copias de las migraciones anteriores a `limite`. Con '0010' es el estado
+ * de una base de antes de la corrida; con '0011', el de justo después de 0010. Desde la 0011
+ * (profundidad en lugar de tirante) la base «vieja» se migra solo hasta 0010: estas pruebas leen
+ * `tirante_estimado`, que la 0011 renombra y prueba por su cuenta (migracion-0011).
+ */
+function directorioHasta(limite: string): string {
+  const dir = mkdtempSync(join(tmpdir(), `curichi-${limite}-`));
   for (const f of listarMigraciones()) {
-    if (f < '0010') copyFileSync(join(DIRECTORIO_MIGRACIONES, f), join(dir, f));
+    if (f < limite) copyFileSync(join(DIRECTORIO_MIGRACIONES, f), join(dir, f));
   }
   return dir;
 }
@@ -159,6 +164,7 @@ const SQL_INSTANTANEA = `SELECT id::text, ST_AsEWKT(geom) AS geom, ST_AsEWKT(geo
 let dbVieja: Awaited<ReturnType<typeof crearPglite>>;
 let exVieja: Ejecutor;
 let dirViejo: string;
+let dirHasta0010: string;
 const filasAntes: FilaAntes[] = [];
 let instantaneaAntes: Instantanea[] = [];
 let resultado0010: ResultadoMigracion;
@@ -170,7 +176,7 @@ let exNueva: Ejecutor;
 beforeAll(async () => {
   dbVieja = await crearPglite();
   exVieja = ejecutorPglite(dbVieja);
-  dirViejo = directorioHasta0009();
+  dirViejo = directorioHasta('0010');
   await aplicarMigraciones(exVieja, dirViejo);
   await cargarCapasDePrueba(exVieja);
 
@@ -232,7 +238,8 @@ beforeAll(async () => {
   }
   instantaneaAntes = await exVieja.consultar<Instantanea>(SQL_INSTANTANEA);
 
-  resultado0010 = await aplicarMigraciones(exVieja);
+  dirHasta0010 = directorioHasta('0011');
+  resultado0010 = await aplicarMigraciones(exVieja, dirHasta0010);
 
   dbNueva = await crearPglite();
   exNueva = ejecutorPglite(dbNueva);
@@ -243,6 +250,7 @@ afterAll(async () => {
   await dbVieja?.close();
   await dbNueva?.close();
   if (dirViejo) rmSync(dirViejo, { recursive: true, force: true });
+  if (dirHasta0010) rmSync(dirHasta0010, { recursive: true, force: true });
 });
 
 /** La base vieja tiene que haber recibido exactamente una migración nueva, y es la 0010. */
@@ -266,7 +274,8 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
       )
     ).map((c) => c.column_name);
     for (const campo of CUATRO_CAMPOS) expect(columnas, `columna ${campo}`).not.toContain(campo);
-    for (const campo of ['tirante_estimado', 'frecuencia', 'severidad_version'])
+    // Con todas las migraciones, la 0011 ya renombró tirante_estimado → profundidad_estimada.
+    for (const campo of ['profundidad_estimada', 'frecuencia', 'severidad_version'])
       expect(columnas, `columna ${campo}`).toContain(campo);
 
     const tipos = await exNueva.consultar<{ typname: string }>(
@@ -278,10 +287,12 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
 
   it('CA-D2: 0001–0009 intactas, 0010 es el único archivo nuevo y volver a migrar no aplica nada', async () => {
     const archivos = listarMigraciones();
-    expect(archivos).toEqual([
+    // Después de 0010 pueden venir migraciones posteriores (0011 en adelante), nunca anteriores.
+    expect(archivos.slice(0, 10)).toEqual([
       ...Object.keys(HASH_MIGRACIONES_ANTERIORES),
       expect.stringMatching(ES_0010),
     ]);
+    for (const f of archivos.slice(10)) expect(f >= '0011').toBe(true);
     for (const [archivo, hash] of Object.entries(HASH_MIGRACIONES_ANTERIORES))
       expect(sha256Lf(join(DIRECTORIO_MIGRACIONES, archivo)), `${archivo} cambió`).toBe(hash);
 
@@ -351,7 +362,7 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
   it('CA-D5: el esquema Drizzle de reporteInundacion no declara los cuatro campos ni sus enums; manzana sigue exportada', () => {
     const nombres = Object.values(getTableColumns(esquema.reporteInundacion)).map((c) => c.name);
     for (const campo of CUATRO_CAMPOS) expect(nombres, `columna ${campo}`).not.toContain(campo);
-    for (const campo of ['tirante_estimado', 'frecuencia', 'severidad_version'])
+    for (const campo of ['profundidad_estimada', 'frecuencia', 'severidad_version'])
       expect(nombres).toContain(campo);
 
     const enums = Object.values(esquema)
@@ -383,21 +394,22 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
       passwordAdmin: 'x-admin-test',
       passwordTecnico: 'x-tecnico-test',
       passwordVecina: 'x-vecina-test',
+      passwordEjecutivo: 'x-ejecutivo-test',
     });
     expect(r.reportes).toBeGreaterThan(0);
     const filas = await exNueva.consultar<{
-      tirante_estimado: Tirante;
+      profundidad_estimada: Tirante;
       frecuencia: Frecuencia;
       severidad_calculada: Banda;
       severidad_puntaje: number;
       severidad_version: number;
     }>(
-      `SELECT tirante_estimado::text, frecuencia::text, severidad_calculada::text, severidad_puntaje,
+      `SELECT profundidad_estimada::text, frecuencia::text, severidad_calculada::text, severidad_puntaje,
          severidad_version FROM reporte_inundacion`,
     );
     expect(filas.length).toBe(r.reportes);
     for (const f of filas) {
-      const clave = `${f.tirante_estimado}|${f.frecuencia}`;
+      const clave = `${f.profundidad_estimada}|${f.frecuencia}`;
       const esperado = SEVERIDAD_V2[clave]!;
       expect(
         {

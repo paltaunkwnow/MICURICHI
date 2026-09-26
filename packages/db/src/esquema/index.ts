@@ -27,7 +27,12 @@ export const geometry = customType<{ data: string; driverData: string }>({
   },
 });
 
-export const tiranteEnum = pgEnum('tirante_estimado', ['tobillo', 'rodilla', 'muslo', 'mas_70']);
+export const profundidadEnum = pgEnum('profundidad_estimada', [
+  'tobillo',
+  'rodilla',
+  'muslo',
+  'mas_70',
+]);
 export const frecuenciaEnum = pgEnum('frecuencia', [
   'primera_vez',
   'ocasional',
@@ -51,20 +56,15 @@ export const estadoEnum = pgEnum('estado_reporte', [
   'rechazado',
   'resuelto',
 ]);
-export const rolEnum = pgEnum('rol', ['ciudadano', 'tecnico', 'admin']);
+export const rolEnum = pgEnum('rol', ['ciudadano', 'tecnico', 'ejecutivo', 'admin']);
 export const ubicacionMetodoEnum = pgEnum('ubicacion_metodo', ['gps', 'manual']);
 export const ubicacionTipoEnum = pgEnum('ubicacion_tipo', [
   'via_publica',
   'vivienda_o_predio',
   'otro',
 ]);
-export const sumideroCercanoEnum = pgEnum('sumidero_cercano', ['si', 'no', 'no_sabe']);
-export const sumideroEstadoEnum = pgEnum('sumidero_estado', [
-  'libre',
-  'obstruido',
-  'danado',
-  'no_sabe',
-]);
+export const sumideroCercanoEnum = pgEnum('sumidero_cercano', ['si', 'no']);
+export const sumideroEstadoEnum = pgEnum('sumidero_estado', ['tapado', 'no_tapado']);
 
 export const geo = pgSchema('geo');
 
@@ -170,7 +170,7 @@ export const reporteInundacion = pgTable(
     precisionGpsM: numeric('precision_gps_m'),
     ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
     descripcion: text('descripcion').notNull(),
-    tiranteEstimado: tiranteEnum('tirante_estimado').notNull(),
+    profundidadEstimada: profundidadEnum('profundidad_estimada').notNull(),
     frecuencia: frecuenciaEnum('frecuencia').notNull(),
     causaPresunta: causaEnum('causa_presunta').notNull().default('desconocida'),
     sumideroCercano: sumideroCercanoEnum('sumidero_cercano'),

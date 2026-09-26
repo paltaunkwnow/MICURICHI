@@ -1,12 +1,13 @@
 'use client';
 
+import { ETIQUETAS } from 'contracts';
 import Link from 'next/link';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import type { ReporteTecnicoFeature } from '@/lib/api';
 import {
   etiquetaDistrito,
   etiquetaFrecuencia,
-  etiquetaTirante,
+  etiquetaProfundidad,
   etiquetaUnidadVecinal,
   fechaCorta,
   numero,
@@ -36,7 +37,7 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
             <th scope="col">Distrito</th>
             <th scope="col">Severidad</th>
             <th scope="col">Estado</th>
-            <th scope="col">Tirante</th>
+            <th scope="col">{ETIQUETAS.campos.profundidad}</th>
             <th scope="col">Frecuencia</th>
             <th scope="col" className="numero">
               N en el punto
@@ -74,7 +75,7 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                 <td>
                   <ChipEstado estado={p.estado} />
                 </td>
-                <td>{etiquetaTirante(p.tirante_estimado)}</td>
+                <td>{etiquetaProfundidad(p.profundidad_estimada)}</td>
                 <td>{etiquetaFrecuencia(p.frecuencia)}</td>
                 <td className="numero">
                   {p.n_reportes_punto === null ? '—' : numero(p.n_reportes_punto)}

@@ -73,6 +73,19 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
   ],
 };
 
+/**
+ * Coropleta: pinta los polígonos de una capa según su `codigo`. La usa el panel ejecutivo para
+ * colorear los distritos por cantidad de reportes; el mapa técnico no la pasa y queda igual.
+ */
+export interface RellenoCapa {
+  capa: 'distrito_municipal' | 'unidad_vecinal';
+  /** `codigo` del polígono → color. Los que no están van con `colorPorDefecto`. */
+  colores: Record<string, string>;
+  colorPorDefecto: string;
+  /** `codigo` → texto del tooltip al pasar o tocar el polígono. */
+  descripciones?: Record<string, string>;
+}
+
 export interface PropsMapa {
   reportes?: ReporteTecnicoFeature[];
   capas?: CapaInfo[];
@@ -85,6 +98,7 @@ export interface PropsMapa {
   zoom?: number;
   className?: string;
   ariaLabel?: string;
+  relleno?: RellenoCapa;
 }
 
 function coloresPorSeveridad(): maplibregl.ExpressionSpecification {
@@ -110,6 +124,7 @@ export function Mapa({
   zoom = 12,
   className = '',
   ariaLabel = 'Mapa de reportes de inundación',
+  relleno,
 }: PropsMapa) {
   const contenedor = useRef<HTMLDivElement>(null);
   const mapa = useRef<MapaGl | null>(null);
@@ -122,11 +137,14 @@ export function Mapa({
   const seleccionarRef = useRef(onSeleccionar);
   const ajustarRef = useRef(ajustarAPuntos);
   const seleccionRef = useRef(seleccionado);
+  const rellenoRef = useRef(relleno);
+  const tooltip = useRef<maplibregl.Popup | null>(null);
   reportesRef.current = reportes;
   capasRef.current = capas;
   seleccionarRef.current = onSeleccionar;
   ajustarRef.current = ajustarAPuntos;
   seleccionRef.current = seleccionado;
+  rellenoRef.current = relleno;
 
   /**
    * Marcadores en pastilla, iguales a los del mapa público: punto de color y nombre de la
@@ -149,6 +167,12 @@ export function Mapa({
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     // Los botones de MapLibre vienen en inglés y alguno sin nombre accesible (WCAG 4.1.2).
     etiquetarControlesDelMapa(m);
+    tooltip.current = new maplibregl.Popup({
+      closeButton: false,
+      closeOnClick: false,
+      className: 'tooltip-mapa',
+      offset: 12,
+    });
 
     const vivos = new Map<string, maplibregl.Marker>();
     pines.current = vivos;
@@ -253,11 +277,14 @@ export function Mapa({
       });
       listo.current = true;
       aplicarCapas(m, capasRef.current);
+      aplicarRelleno(m, rellenoRef, tooltip.current);
       aplicarReportes(m, reportesRef.current, ajustarRef.current);
       sincronizarPines.current();
     });
     mapa.current = m;
     return () => {
+      tooltip.current?.remove();
+      tooltip.current = null;
       for (const marca of vivos.values()) marca.remove();
       vivos.clear();
       m.remove();
@@ -281,8 +308,17 @@ export function Mapa({
   }, [seleccionado]);
 
   useEffect(() => {
-    if (mapa.current && listo.current) aplicarCapas(mapa.current, capas);
+    if (mapa.current && listo.current) {
+      aplicarCapas(mapa.current, capas);
+      aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
+    }
   }, [capas]);
+
+  // `relleno` se lee por ref dentro de `aplicarRelleno` (el tooltip necesita el texto vigente).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se lee por ref, ver arriba
+  useEffect(() => {
+    if (mapa.current && listo.current) aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
+  }, [relleno]);
 
   return <section ref={contenedor} className={className} aria-label={ariaLabel} />;
 }
@@ -366,4 +402,70 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
       'puntos-halo',
     );
   }
+}
+
+function expresionRelleno(r: RellenoCapa): maplibregl.ExpressionSpecification | string {
+  const pares = Object.entries(r.colores).flat();
+  if (!pares.length) return r.colorPorDefecto;
+  // `to-string`: según la capa, el código puede llegar como número en las teselas.
+  return [
+    'match',
+    ['to-string', ['get', 'codigo']],
+    ...pares,
+    r.colorPorDefecto,
+  ] as unknown as maplibregl.ExpressionSpecification;
+}
+
+/**
+ * Crea o actualiza la capa de relleno. Si la capa de polígonos todavía no está cargada no hace
+ * nada: `aplicarCapas` la agrega después y el efecto de `capas` vuelve a llamar acá.
+ */
+function aplicarRelleno(
+  m: MapaGl,
+  rellenoRef: { current: RellenoCapa | undefined },
+  tooltip: maplibregl.Popup | null,
+) {
+  const r = rellenoRef.current;
+  if (!r) return;
+  const origen = `capa-${r.capa}`;
+  const fuente = m.getSource(origen);
+  if (!fuente) return;
+  const idRelleno = `${origen}-relleno`;
+  if (m.getLayer(idRelleno)) {
+    m.setPaintProperty(idRelleno, 'fill-color', expresionRelleno(r));
+    return;
+  }
+  const base =
+    fuente.type === 'vector' ? { source: origen, 'source-layer': r.capa } : { source: origen };
+  m.addLayer(
+    {
+      id: idRelleno,
+      type: 'fill',
+      ...base,
+      paint: { 'fill-color': expresionRelleno(r), 'fill-opacity': 0.82 },
+    } as maplibregl.LayerSpecification,
+    m.getLayer(`${origen}-linea`) ? `${origen}-linea` : 'puntos-halo',
+  );
+  if (!tooltip) return;
+  const mostrar = (e: maplibregl.MapLayerMouseEvent) => {
+    const f = e.features?.[0];
+    const codigo = f?.properties?.codigo;
+    if (codigo === undefined || codigo === null) return;
+    const texto = rellenoRef.current?.descripciones?.[String(codigo)];
+    if (!texto) {
+      tooltip.remove();
+      return;
+    }
+    tooltip.setLngLat(e.lngLat).setText(texto).addTo(m);
+  };
+  m.on('mousemove', idRelleno, (e) => {
+    m.getCanvas().style.cursor = 'pointer';
+    mostrar(e);
+  });
+  // En pantallas táctiles no hay «pasar por encima»: el toque muestra el mismo tooltip.
+  m.on('click', idRelleno, mostrar);
+  m.on('mouseleave', idRelleno, () => {
+    m.getCanvas().style.cursor = '';
+    tooltip.remove();
+  });
 }

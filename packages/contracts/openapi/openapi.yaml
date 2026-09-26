@@ -4,7 +4,7 @@ info:
   title: Mi Curichi — API
   version: 1.0.0
   description: Reporte ciudadano georreferenciado de puntos de inundación.
-    Contrato generado desde packages/contracts (Zod). Severidad versión 1; radio
+    Contrato generado desde packages/contracts (Zod). Severidad versión 2; radio
     de recurrencia 25 m.
 servers:
   - url: http://localhost:3001
@@ -19,6 +19,8 @@ tags:
   - name: auth
     description: api-core (Parte 3)
   - name: admin
+    description: api-core (Parte 3)
+  - name: ejecutivo
     description: api-core (Parte 3)
   - name: geo
     description: geo-service (Parte 4)
@@ -70,7 +72,7 @@ components:
           type: string
           minLength: 10
           maxLength: 1000
-        tirante_estimado:
+        profundidad_estimada:
           type: string
           enum:
             - tobillo
@@ -101,16 +103,13 @@ components:
               enum:
                 - si
                 - no
-                - no_sabe
             - type: "null"
         sumidero_estado:
           anyOf:
             - type: string
               enum:
-                - libre
-                - obstruido
-                - danado
-                - no_sabe
+                - tapado
+                - no_tapado
             - type: "null"
         agua_brota_sumidero:
           type:
@@ -139,7 +138,7 @@ components:
         - ubicacion_metodo
         - ubicacion_tipo
         - descripcion
-        - tirante_estimado
+        - profundidad_estimada
         - frecuencia
     ReporteFiltros:
       type: object
@@ -297,7 +296,7 @@ components:
               items:
                 type: string
               description: URLs servidas por api-core, ya sin EXIF
-            tirante_estimado:
+            profundidad_estimada:
               type: string
               enum:
                 - tobillo
@@ -367,7 +366,7 @@ components:
             - unidad_vecinal
             - descripcion
             - fotos
-            - tirante_estimado
+            - profundidad_estimada
             - frecuencia
             - causa_presunta
             - severidad
@@ -476,7 +475,7 @@ components:
                     items:
                       type: string
                     description: URLs servidas por api-core, ya sin EXIF
-                  tirante_estimado:
+                  profundidad_estimada:
                     type: string
                     enum:
                       - tobillo
@@ -546,7 +545,7 @@ components:
                   - unidad_vecinal
                   - descripcion
                   - fotos
-                  - tirante_estimado
+                  - profundidad_estimada
                   - frecuencia
                   - causa_presunta
                   - severidad
@@ -634,7 +633,7 @@ components:
           items:
             type: string
           description: URLs servidas por api-core, ya sin EXIF
-        tirante_estimado:
+        profundidad_estimada:
           type: string
           enum:
             - tobillo
@@ -717,16 +716,13 @@ components:
               enum:
                 - si
                 - no
-                - no_sabe
             - type: "null"
         sumidero_estado:
           anyOf:
             - type: string
               enum:
-                - libre
-                - obstruido
-                - danado
-                - no_sabe
+                - tapado
+                - no_tapado
             - type: "null"
         agua_brota_sumidero:
           type:
@@ -798,7 +794,7 @@ components:
         - unidad_vecinal
         - descripcion
         - fotos
-        - tirante_estimado
+        - profundidad_estimada
         - frecuencia
         - causa_presunta
         - severidad
@@ -957,6 +953,7 @@ components:
             - ciudadano
             - tecnico
             - admin
+            - ejecutivo
       required:
         - id
         - email
@@ -981,6 +978,7 @@ components:
             - ciudadano
             - tecnico
             - admin
+            - ejecutivo
         puede_reportar_desde:
           anyOf:
             - type: string
@@ -1228,6 +1226,168 @@ components:
         - por_unidad_vecinal
         - puntos_criticos_recurrentes
         - capas_vigentes
+    ResumenEjecutivo:
+      type: object
+      properties:
+        generado_en:
+          type: string
+          format: date-time
+          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+        ventana:
+          type: object
+          properties:
+            desde:
+              anyOf:
+                - type: string
+                  format: date-time
+                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                - type: "null"
+            hasta:
+              anyOf:
+                - type: string
+                  format: date-time
+                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                - type: "null"
+          required:
+            - desde
+            - hasta
+          description: null en desde y hasta = histórico completo (ventana=todo)
+        total:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Reportes en estado nuevo, validado o resuelto
+        por_severidad:
+          type: object
+          properties:
+            critica:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            alta:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            media:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            baja:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+          required:
+            - critica
+            - alta
+            - media
+            - baja
+          description: Por severidad efectiva
+        por_estado:
+          type: object
+          properties:
+            nuevo:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            validado:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+            resuelto:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+          required:
+            - nuevo
+            - validado
+            - resuelto
+        por_distrito:
+          type: array
+          items:
+            type: object
+            properties:
+              distrito_id:
+                type: string
+                minLength: 1
+              codigo:
+                type: string
+              nombre:
+                type: string
+              total:
+                type: integer
+                minimum: 0
+                maximum: 9007199254740991
+              por_severidad:
+                type: object
+                properties:
+                  critica:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  alta:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  media:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  baja:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                required:
+                  - critica
+                  - alta
+                  - media
+                  - baja
+              por_estado:
+                type: object
+                properties:
+                  nuevo:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  validado:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  resuelto:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                required:
+                  - nuevo
+                  - validado
+                  - resuelto
+              ultimo_reporte_en:
+                anyOf:
+                  - type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                  - type: "null"
+            required:
+              - distrito_id
+              - codigo
+              - nombre
+              - total
+              - por_severidad
+              - por_estado
+              - ultimo_reporte_en
+        ultimo_reporte_en:
+          anyOf:
+            - type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            - type: "null"
+      required:
+        - generado_en
+        - ventana
+        - total
+        - por_severidad
+        - por_estado
+        - por_distrito
+        - ultimo_reporte_en
     ResolverEntrada:
       type: object
       properties:
@@ -2098,6 +2258,44 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Indicadores"
+  /api/v1/ejecutivo/resumen:
+    get:
+      summary: "Resumen del panel ejecutivo: totales por severidad efectiva, por
+        estado y por distrito. Exige rol ejecutivo, tecnico o admin. Cuenta solo
+        reportes en estado nuevo, validado o resuelto."
+      tags:
+        - ejecutivo
+      security: *a1
+      parameters:
+        - name: ventana
+          in: query
+          required: false
+          schema:
+            default: todo
+            type: string
+            enum:
+              - 7d
+              - 30d
+              - todo
+      responses:
+        "200":
+          description: Resumen ejecutivo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResumenEjecutivo"
+        "401":
+          description: SIN_SESION
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "403":
+          description: "SIN_PERMISO: el rol no permite el panel ejecutivo"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /api/v1/auth/registro:
     post:
       summary: "Crear una cuenta ciudadana. La respuesta es la MISMA exista o no ese
@@ -2134,7 +2332,7 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/auth/login:
     post:
-      summary: Iniciar sesión (ciudadano, técnico o admin)
+      summary: Iniciar sesión (ciudadano, técnico, admin o ejecutivo)
       tags:
         - auth
       requestBody:

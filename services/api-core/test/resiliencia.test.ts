@@ -187,7 +187,7 @@ describe('geo-service caído: crear un reporte es 503, no 500', () => {
     ubicacion_metodo: 'manual',
     ubicacion_tipo: 'via_publica',
     descripcion: 'Se junta agua en la esquina cada vez que llueve fuerte.',
-    tirante_estimado: 'rodilla',
+    profundidad_estimada: 'rodilla',
     frecuencia: 'ocasional',
     causa_presunta: 'desconocida',
     sitio_web: '',

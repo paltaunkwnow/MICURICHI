@@ -13,7 +13,7 @@ import { FactoresSeveridad } from './FactoresSeveridad';
 /** Solo los campos que lee `FactoresSeveridad`; el resto del reporte no interviene. */
 function reporteConFactores(): ReporteTecnico {
   const parcial = {
-    tirante_estimado: 'muslo',
+    profundidad_estimada: 'muslo',
     frecuencia: 'permanente',
     severidad_calculada: 'alta',
     severidad_puntaje: 10,
@@ -42,10 +42,10 @@ describe('FactoresSeveridad (severidad v2)', () => {
     createElement(FactoresSeveridad, { reporte: reporteConFactores() }),
   );
 
-  it('CA-P2: con T = muslo y F = permanente hay exactamente dos filas, Tirante ×2 y Frecuencia', () => {
+  it('CA-P2: con T = muslo y F = permanente hay exactamente dos filas, Profundidad ×2 y Frecuencia', () => {
     const nombres = filas(html);
     expect(nombres).toHaveLength(2);
-    expect(nombres[0]).toMatch(/^Tirante\s*×2$/);
+    expect(nombres[0]).toMatch(/^Profundidad\s*×2$/);
     expect(nombres[1]).toBe('Frecuencia');
     // Puntos de cada variable sobre 4: muslo = 3, permanente = 4.
     const valores = [...html.matchAll(/(\d+)(?:<!--.*?-->)?\/(?:<!--.*?-->)?4/g)].map((m) => m[1]);
@@ -56,9 +56,9 @@ describe('FactoresSeveridad (severidad v2)', () => {
     expect(texto(html)).toContain('Cómo se llegó a 10 de 12 puntos');
   });
 
-  it('CA-P2: la fórmula es «puntaje = 2 × tirante + frecuencia» y no nombra duración ni afectación', () => {
+  it('CA-P2: la fórmula es «puntaje = 2 × profundidad + frecuencia» y no nombra duración ni afectación', () => {
     const t = texto(html);
-    expect(t).toContain('puntaje = 2 × tirante + frecuencia');
+    expect(t).toContain('puntaje = 2 × profundidad + frecuencia');
     expect(t.toLowerCase()).not.toContain('duración');
     expect(t.toLowerCase()).not.toContain('afectación');
   });

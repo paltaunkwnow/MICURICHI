@@ -64,6 +64,8 @@ pnpm privilegios   # matriz real de privilegios contra la documentada (PostgreSQ
       campo de autor, de rol o de estado.
 - [ ] Un rol `ciudadano` sigue recibiendo 403 en `/api/v1/tecnico/*`, `/api/v1/exportar`,
       `/api/v1/indicadores` y `/api/v1/admin/*`.
+- [ ] Un rol `ejecutivo` recibe 403 en `/api/v1/tecnico/*`, `/api/v1/exportar`,
+      `/api/v1/indicadores` y `/api/v1/admin/*`, y 200 solo en `/api/v1/ejecutivo/resumen`.
 - [ ] Probado a mano o en test: enviar `rol`, `autor_id`, `estado` o `creado_en` en el cuerpo no
       cambia nada.
 

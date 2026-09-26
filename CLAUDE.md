@@ -2,7 +2,7 @@
 
 > **Manual operativo permanente del repositorio.** Cualquier agente o persona que trabaje aquí debe leer este archivo completo antes de tocar nada.
 > Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada el 2026-09-13. Las cinco partes están escritas y corren con los datos reales del municipio; queda la tarea 9 (E2E, seguridad, cierre). El estado exacto, los defectos abiertos y cómo retomar están en **`docs/TRASPASO.md`**.
-> Última actualización: 2026-09-25 (severidad v2; se quitan direccion_aprox, duracion_estimada, afectacion y manzana_id del reporte).
+> Última actualización: 2026-09-25 (severidad v2; se quitan direccion_aprox, duracion_estimada, afectacion y manzana_id del reporte; tirante_estimado pasa a profundidad_estimada; sumidero con respuestas cerradas; rol ejecutivo y panel ejecutivo).
 > Versiones de software verificadas el 2026-09-13 (ver §8). Distribución del trabajo en **5 partes** fijada por el usuario (§4).
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)
@@ -24,7 +24,7 @@
 
 **Nombre:** Mi Curichi. En el habla de Santa Cruz (Bolivia), *curichi* es un bajío o zona pantanosa donde el agua se estanca; el nombre alude a los charcos recurrentes que cada vecino conoce en su barrio.
 
-**Problema.** En la ciudad existen puntos recurrentes de inundación y estancamiento de agua (anegamientos) que hoy no están sistematizados. La municipalidad no dispone de un inventario georreferenciado, alimentado por la ciudadanía, que permita saber **dónde**, **con qué frecuencia** y **con qué tirante** se anega la ciudad.
+**Problema.** En la ciudad existen puntos recurrentes de inundación y estancamiento de agua (anegamientos) que hoy no están sistematizados. La municipalidad no dispone de un inventario georreferenciado, alimentado por la ciudadanía, que permita saber **dónde**, **con qué frecuencia** y **con qué profundidad** se anega la ciudad.
 
 **Solución.** Plataforma web de **reporte ciudadano georreferenciado de puntos de inundación**. El vecino marca dónde se estanca el agua, adjunta foto y datos del evento; el sistema acumula, valida, clasifica por severidad y visualiza los puntos sobre un mapa, cruzándolos automáticamente con la división administrativa oficial (**distrito municipal** y **unidad vecinal**).
 
@@ -35,6 +35,7 @@
 | Ciudadano / vecino | Reporta un punto (GPS o clic en el mapa), adjunta foto, consulta el mapa público | Parte 1 (`apps/web-ciudadano`) |
 | Técnico municipal / analista | Valida, rechaza, fusiona duplicados, reclasifica, filtra, exporta, analiza | Parte 2 (`apps/panel-admin`) |
 | Administrador | Gestiona capas base, usuarios, moderación y configuración | Parte 2 (`apps/panel-admin`) |
+| Ejecutivo (secretarios, concejales, alcalde) | Ve dónde y cuánto se está inundando y cómo va el trabajo: totales, pestañas por severidad, coropleta y gráficas por distrito, actualización cada 60 s (`/ejecutivo`) | Parte 2 (`apps/panel-admin`) |
 
 **Contexto territorial.** Ciudad: **Santa Cruz de la Sierra, Bolivia** `<a confirmar>` (inferido por el nombre "curichi" y por la división distrito municipal / unidad vecinal, propia de esa ciudad). Capas administrativas provistas por el municipio en **shapefile**, en una carpeta llamada **`DM_UV_MZ_2025`** con tres capas: distritos municipales (DM), unidades vecinales (UV) y **manzanas** (MZ). Fuente oficial y fecha de vigencia `<a confirmar>`. Las manzanas se usan para el **render del mapa interactivo**; el point-in-polygon del MVP resuelve distrito y UV.
 
@@ -47,8 +48,8 @@
 | Término | Definición operativa en este proyecto |
 |---|---|
 | **Anegamiento** | Acumulación de agua sobre la superficie (calle, acera, predio) que no drena en un tiempo razonable tras la lluvia. Es el fenómeno que se reporta. |
-| **Inundación** | Anegamiento con tirante y extensión suficientes para afectar personas, vehículos o viviendas. En el sistema no se distingue formalmente de anegamiento; la severidad (§9.1) hace la gradación. |
-| **Tirante** | Altura de la lámina de agua sobre el suelo. Se estima por referencia corporal: tobillo (<10 cm), rodilla (10–40 cm), muslo (40–70 cm), >70 cm. |
+| **Inundación** | Anegamiento con profundidad y extensión suficientes para afectar personas, vehículos o viviendas. En el sistema no se distingue formalmente de anegamiento; la severidad (§9.1) hace la gradación. |
+| **Profundidad estimada** (antes «tirante») | Altura de la lámina de agua sobre el suelo. Se estima por referencia corporal: tobillo (<10 cm), rodilla (10–40 cm), muslo (40–70 cm), >70 cm. |
 | **Recurrencia / frecuencia** | Cuántas veces se anega el mismo punto: primera vez, ocasional, cada lluvia fuerte, permanente. |
 | **Escorrentía** | Fracción de la lluvia que no infiltra y corre por la superficie hacia el sistema de drenaje. |
 | **Sumidero (boca de tormenta, rejilla)** | Estructura de captación que toma el agua de la calle y la lleva al colector. Tiene una capacidad de captación limitada; si está tapado o es insuficiente, el agua se acumula. |
@@ -484,11 +485,11 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 | `precision_gps_m` | `numeric` null | de `Geolocation.coords.accuracy` |
 | `ubicacion_tipo` | enum `via_publica` \| `vivienda_o_predio` \| `otro` | activa jitter público (§13) |
 | `descripcion` | `text` | 10–1000 caracteres `<límites a confirmar>` |
-| `tirante_estimado` | enum `tobillo` \| `rodilla` \| `muslo` \| `mas_70` | <10 / 10–40 / 40–70 / >70 cm |
+| `profundidad_estimada` | enum `tobillo` \| `rodilla` \| `muslo` \| `mas_70` | <10 / 10–40 / 40–70 / >70 cm |
 | `frecuencia` | enum `primera_vez` \| `ocasional` \| `cada_lluvia_fuerte` \| `permanente` | |
 | `causa_presunta` | enum `sumidero_tapado` \| `falta_sumidero` \| `hundimiento_pavimento` \| `contrapendiente` \| `colector_saturado` \| `desborde_cauce` \| `desconocida` | |
-| `sumidero_cercano` | enum `si` \| `no` \| `no_sabe` null | observación opcional (§9.3) |
-| `sumidero_estado` | enum `libre` \| `obstruido` \| `danado` \| `no_sabe` null | opcional |
+| `sumidero_cercano` | enum `si` \| `no` null | observación opcional (§9.3) |
+| `sumidero_estado` | enum `tapado` \| `no_tapado` null | opcional |
 | `agua_brota_sumidero` | `boolean` null | opcional; síntoma de colector sobrecargado |
 | `severidad_calculada` | enum `baja` \| `media` \| `alta` \| `critica` | función pura §9.1; **nunca** editable a mano |
 | `severidad_manual` | enum ídem, null | reclasificación del técnico |
@@ -512,7 +513,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 
 **`punto_critico`**: `id uuid`, `geom geometry(Point, 4326)` (centroide), `n_reportes int`, `primer_reporte_en`, `ultimo_reporte_en`, `severidad_max`, `distrito_id`, `unidad_vecinal_id`, `radio_m numeric`, `calculado_en`. Ver §9.2.
 
-**`usuario`**: `id`, `email` (único), `nombre`, `rol` enum `ciudadano` \| `tecnico` \| `admin`, `activo`, `creado_en`. Contraseñas: hash con Argon2id `<a confirmar proveedor de auth, ver §16>`.
+**`usuario`**: `id`, `email` (único), `nombre`, `rol` enum `ciudadano` \| `tecnico` \| `ejecutivo` \| `admin`, `activo`, `creado_en`. Contraseñas: hash con Argon2id `<a confirmar proveedor de auth, ver §16>`.
 
 **`auditoria`**: `id`, `entidad`, `entidad_id`, `accion`, `actor_id null`, `antes jsonb`, `despues jsonb`, `creado_en`. Se escribe en cada transición de estado, reclasificación, fusión y activación de capa.
 
@@ -581,7 +582,8 @@ Respuesta:
 | `POST /reportes/:id/fusionar` | técnico, admin | Atajo: marca `:id` como `duplicado` de `{ canonico_id }`. |
 | `GET /exportar` | técnico, admin | `formato=csv|geojson` + mismos filtros de `GET /reportes`. |
 | `GET /indicadores` | técnico, admin | Conteos por UV, distrito, estado, severidad; puntos críticos con `n_reportes ≥ 2`. |
-| `POST /auth/login`, `POST /auth/logout`, `GET /auth/yo` | — / autenticado | Sesión para técnico/admin. |
+| `GET /ejecutivo/resumen` | ejecutivo, tecnico, admin | Totales, por severidad, por estado y por distrito (query `ventana=7d\|30d\|todo`) para el panel ejecutivo |
+| `POST /auth/login`, `POST /auth/logout`, `GET /auth/yo` | — / autenticado | Sesión para técnico, admin y ejecutivo. |
 | `GET /admin/capas`, `POST /admin/capas/:id/activar` | admin | Lista versiones cargadas; activa una. |
 | `GET /health`, `GET /ready` | público | Liveness / readiness (DB, MinIO, geo-service). |
 | `GET /docs` | público en local | OpenAPI UI. |
@@ -673,11 +675,11 @@ Fuentes: registro npm (`npm view <pkg> version`), `nodejs.org/dist/index.json`, 
 
 ### 9.1 Matriz de severidad (explícita y reproducible)
 
-La severidad es una **función pura** `severidad(tirante, frecuencia) → { puntaje, banda }` que vive en `packages/contracts/src/dominio/severidad.ts` y se ejecuta en `api-core` (Parte 3). El frontend solo la muestra (puede pre-visualizarla con la misma función, pero el valor guardado es el del servidor). Versión vigente: **`severidad_version = 2`** (2026-09-25). La v1 (cuatro variables, rango 5–20) queda en el historial de `packages/contracts/CHANGELOG.md`.
+La severidad es una **función pura** `severidad(profundidad, frecuencia) → { puntaje, banda }` que vive en `packages/contracts/src/dominio/severidad.ts` y se ejecuta en `api-core` (Parte 3). El frontend solo la muestra (puede pre-visualizarla con la misma función, pero el valor guardado es el del servidor). Versión vigente: **`severidad_version = 2`** (2026-09-25). La v1 (cuatro variables, rango 5–20) queda en el historial de `packages/contracts/CHANGELOG.md`.
 
 **Paso 1 — puntos por variable (1 a 4):**
 
-| Puntos | Tirante (T) | Frecuencia (F) |
+| Puntos | Profundidad (P) | Frecuencia (F) |
 |---|---|---|
 | 1 | tobillo (<10 cm) | primera vez |
 | 2 | rodilla (10–40 cm) | ocasional |
@@ -687,10 +689,10 @@ La severidad es una **función pura** `severidad(tirante, frecuencia) → { punt
 **Paso 2 — puntaje ponderado:**
 
 ```
-puntaje = 2·T + 1·F        → rango 3 … 12
+puntaje = 2·P + 1·F        → rango 3 … 12
 ```
 
-El tirante pesa doble porque es la variable más ligada al riesgo directo para personas y vehículos (pérdida de estabilidad al caminar, ingreso de agua a motores) y a la probabilidad de daño en viviendas.
+La profundidad pesa doble porque es la variable más ligada al riesgo directo para personas y vehículos (pérdida de estabilidad al caminar, ingreso de agua a motores) y a la probabilidad de daño en viviendas.
 
 **Paso 3 — banda base:**
 
@@ -705,14 +707,14 @@ El tirante pesa doble porque es la variable más ligada al riesgo directo para p
 
 | Regla | Condición | Efecto | Razón |
 |---|---|---|---|
-| E1 | T = 4 (>70 cm) | banda = `critica` | Tirante por encima del muslo es riesgo de arrastre y de daño mayor, sin importar el resto. |
-| E3 | F = 4 (permanente) | banda mínima `media` | Agua permanente indica falla de drenaje (contrapendiente o colector) aunque el tirante sea bajo. |
+| E1 | P = 4 (>70 cm) | banda = `critica` | Profundidad por encima del muslo es riesgo de arrastre y de daño mayor, sin importar el resto. |
+| E3 | F = 4 (permanente) | banda mínima `media` | Agua permanente indica falla de drenaje (contrapendiente o colector) aunque la profundidad sea baja. |
 
-E1 se anota siempre que T = 4, aunque la banda base ya sea `critica`. Con estas bandas E3 no llega a dispararse (F = 4 da puntaje ≥ 6, ya `media`); se conserva como guarda.
+E1 se anota siempre que P = 4, aunque la banda base ya sea `critica`. Con estas bandas E3 no llega a dispararse (F = 4 da puntaje ≥ 6, ya `media`); se conserva como guarda.
 
 **Ejemplos de verificación (deben estar en el test):**
 
-| T | F | Puntaje | Base | Escalamiento | Final |
+| P | F | Puntaje | Base | Escalamiento | Final |
 |---|---|---|---|---|---|
 | 1 | 1 | 3 | baja | — | `baja` |
 | 1 | 4 | 6 | media | — | `media` |
@@ -741,7 +743,7 @@ Un charco recurrente es un **síntoma**; la causa suele ser una de estas cuatro,
 | Causa presunta | Mecanismo | Síntomas que el vecino puede observar | Campos que la sugieren |
 |---|---|---|---|
 | **Contrapendiente / punto bajo** | El punto está más bajo que su salida; el agua no tiene adónde ir por gravedad. Solo se va por infiltración o evaporación. | El agua queda **mucho después** de la lluvia; no hay sumidero cerca o el sumidero está más alto que el charco. | `frecuencia = permanente`, `sumidero_cercano = no` |
-| **Sumidero insuficiente o tapado** | El caudal que llega supera la capacidad de captación de la rejilla (o está obstruida por basura/sedimento). | Se acumula **durante** la lluvia y drena rápido al terminar; rejilla visible con basura. | `sumidero_cercano = si`, `sumidero_estado = obstruido` |
+| **Sumidero insuficiente o tapado** | El caudal que llega supera la capacidad de captación de la rejilla (o está obstruida por basura/sedimento). | Se acumula **durante** la lluvia y drena rápido al terminar; rejilla visible con basura. | `sumidero_cercano = si`, `sumidero_estado = tapado` |
 | **Colector saturado (sobrecarga)** | La red aguas abajo está llena; el agua no entra e incluso **sube** por los sumideros (efecto de remanso). | Agua que **brota** de la rejilla o levanta tapas; el charco crece aunque el sumidero esté limpio. | `agua_brota_sumidero = true` |
 | **Desborde de cauce o canal** | Un canal o arroyo cercano supera su capacidad. | Extensión grande, agua con sedimento, coincide con crecidas. | `causa_presunta = desborde_cauce` |
 
@@ -754,13 +756,13 @@ Referencias conceptuales que **no** se implementan en Misión 1: método raciona
 | **Hundimiento** | Asentamiento de la subrasante (suelo débil, compactación deficiente) o lavado de finos por fuga de tubería. Crea una depresión cerrada. | `causa_presunta = hundimiento_pavimento`; suele coincidir con `frecuencia = permanente`. |
 | **Ahuellamiento** | Las huellas de neumáticos se deforman y forman canales longitudinales que retienen agua (riesgo de hidroplaneo). | Charcos alargados en la huella. |
 | **Pérdida de bombeo transversal** | Si la calzada pierde su pendiente hacia los bordes (deformación o recapados sucesivos sin corregir sección), el agua queda en el carril en vez de ir a la cuneta. | Charcos en el centro del carril con cuneta seca. |
-| **Baches** | El bache retiene agua y el agua acelera el deterioro del bache (bombeo de finos, pérdida de adherencia). Ciclo vicioso agua ↔ pavimento. | Muchos reportes pequeños de `tirante = tobillo` recurrentes. |
+| **Baches** | El bache retiene agua y el agua acelera el deterioro del bache (bombeo de finos, pérdida de adherencia). Ciclo vicioso agua ↔ pavimento. | Muchos reportes pequeños de `profundidad = tobillo` recurrentes. |
 
 Indicadores usuales como referencia, **sin valores normativos afirmados aquí**: **PCI** (ASTM D6433, 0–100, evaluación visual de fallas) e **IRI** (m/km, regularidad longitudinal). Los umbrales de intervención y la pendiente transversal mínima de diseño dependen de la normativa local `<a confirmar>`. Un punto crítico con muchos reportes es un buen candidato para levantar PCI/IRI en campo, no un sustituto de ese levantamiento.
 
 ### 9.5 Limitaciones explícitas (deben mostrarse en la UI pública y en toda exportación)
 
-- Mi Curichi es un **inventario de reportes ciudadanos**. Los datos son de **percepción**, no medidos: el tirante es estimado por referencia corporal, la ubicación tiene el error del GPS del celular o de la mano del usuario.
+- Mi Curichi es un **inventario de reportes ciudadanos**. Los datos son de **percepción**, no medidos: la profundidad es estimada por referencia corporal, la ubicación tiene el error del GPS del celular o de la mano del usuario.
 - **No es** un modelo hidráulico ni hidrológico, ni un estudio de drenaje, ni un diagnóstico de pavimento.
 - Cualquier decisión de inversión, obra o priorización **requiere estudio técnico formal** (topografía, inventario de red, modelación, evaluación de pavimento).
 - La ausencia de reportes en una zona **no significa** ausencia de anegamiento (sesgo de participación).
@@ -886,7 +888,7 @@ Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13
 | **Secretos** | Nunca en el repo. `.env.example` con nombres y descripción, sin valores. `.env` en `.gitignore`. En CI, GitHub Secrets. Escaneo de secretos en pre-commit `<herramienta a confirmar>`. |
 | **Validación en servidor** | Todos los payloads pasan por los esquemas Zod de `contracts` en `api-core`. La validación del cliente es solo UX. |
 | **Archivos** | Tipos permitidos por *magic bytes*, no por extensión; tamaño máximo; redimensionado a un ancho máximo `<propuesto 1600 px, a confirmar>`; nombres de objeto generados por el servidor (uuid), nunca el nombre original. |
-| **Autorización** | Por rol en cada handler; los endpoints de moderación y export exigen `tecnico` o `admin`. `geo-service` no expone escritura. |
+| **Autorización** | Por rol en cada handler; los endpoints de moderación y export exigen `tecnico` o `admin`; el rol `ejecutivo` solo accede a `/ejecutivo/resumen` (y a crear reportes); recibe 403 en moderación, exportación, indicadores y admin. `geo-service` no expone escritura. |
 | **Auditoría** | Toda transición de estado, reclasificación, fusión y activación de capa queda en `auditoria` con actor y antes/después. |
 | **Cabeceras** | CSP, HSTS (Fase 2), `X-Content-Type-Options`, CORS restringido a los orígenes de las Partes 1 y 2. |
 | **Datos personales** | Se recoge lo mínimo: para anónimos, nada identificable salvo `ip_hash` temporal. Para técnicos, email y nombre. Política de retención `<a confirmar con el municipio>`. |
@@ -926,7 +928,7 @@ Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13
 - **Paleta, tomada del logotipo (capibara sobre círculo verde y azul):** verde marca `#28934D` (acción, marca, severidad baja; botones rellenos con el paso 700 `#1B6B38` para contraste 6:1), azul agua `#0D6189` (enlaces, datos de agua, estado resuelto), azul profundo o *tinta* `#0F2D43` (todo el texto, mapa oscuro, tarjetas invertidas; contraste 12,8:1). Cada rol con rampa 100/300/500/700/900. Fondo de página verde-gris muy claro, superficies blancas.
 - **Severidad = color + etiqueta + forma** (contador de barras), nunca solo color: baja relleno `#28934D` texto `#1B6B38`; media relleno `#C98A0E` texto `#8A5A00`; alta relleno `#E4601B` texto `#B84A0E`; crítica relleno `#B3200A`, texto blanco sobre tinta.
 - **Tipografía:** Sora 600 para titulares y cifras (52/54 titular de pantalla, 32/36 título de sección, 20/24 título de tarjeta); Source Sans 3 400/600 para interfaz (18/28 cuerpo del flujo de reporte, 16/24 interfaz, 13,5/20 metadatos). Mínimo 16 px en interfaz y 18 px en el cuerpo del flujo de reporte.
-- **UI kit:** radios de 12 a 30 px, controles en pastilla completa, objetivos táctiles de 48 px, foco visible en verde. Botón primario relleno verde 700; secundario blanco con filete; acciones del mapa en tinta; deshabilitado verde apagado. Chips de filtro con punto de color y nombre (activo en tinta). Botones circulares (filtros, +, ubicación) y buscador en pastilla. Campo de texto con contador «Mínimo 10 caracteres · 0/1000» y error en rojo. Tirante elegido en tarjetas radio por referencia corporal.
+- **UI kit:** radios de 12 a 30 px, controles en pastilla completa, objetivos táctiles de 48 px, foco visible en verde. Botón primario relleno verde 700; secundario blanco con filete; acciones del mapa en tinta; deshabilitado verde apagado. Chips de filtro con punto de color y nombre (activo en tinta). Botones circulares (filtros, +, ubicación) y buscador en pastilla. Campo de texto con contador «Mínimo 10 caracteres · 0/1000» y error en rojo. Profundidad elegida en tarjetas radio por referencia corporal.
 - **Layouts:** móvil = mapa a toda altura, «Reportar un punto» fijo al alcance del pulgar, hoja de detalle redondeada que sube sobre el punto; estado vacío «Todavía nadie reportó en esta zona» con «Reportar el primero acá». Escritorio = panel izquierdo con «N puntos cerca de vos», chips de severidad y tarjetas de reporte; mapa oscuro a la derecha con buscador, chip «Distrito 07 · UV-123 · capa oficial vigente», marcadores en pastilla «● Crítica» y KPIs abajo. Tono cercano con voseo («cerca de vos», «contanos qué ves»).
 - **Logo:** el usuario lo envió como imagen; el archivo definitivo va en `apps/web-ciudadano/public/logo.png` `<pendiente de recibir el archivo>`.
 

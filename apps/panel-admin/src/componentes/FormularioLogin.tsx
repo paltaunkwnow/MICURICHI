@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Aviso } from '@/componentes/Aviso';
 import { ErrorApi, iniciarSesion } from '@/lib/api';
+import { rutaInicial } from '@/lib/roles';
 import { CLAVE_YO, useUsuario } from '@/lib/sesion';
 
 // Mismas reglas que LoginSchema de contracts, con mensajes en español para la interfaz.
@@ -29,7 +30,7 @@ export function FormularioLogin() {
 
   // Con sesión vigente no tiene sentido mostrar el formulario.
   useEffect(() => {
-    if (sesion.data) router.replace('/reportes');
+    if (sesion.data) router.replace(rutaInicial(sesion.data.rol));
   }, [sesion.data, router]);
 
   const {
@@ -43,7 +44,7 @@ export function FormularioLogin() {
     onMutate: () => setMensajeError(null),
     onSuccess: (usuario) => {
       cliente.setQueryData(CLAVE_YO, usuario);
-      router.replace('/reportes');
+      router.replace(rutaInicial(usuario.rol));
     },
     onError: (e) => {
       if (e instanceof ErrorApi && e.estado === 401)
@@ -146,7 +147,7 @@ export function FormularioLogin() {
         ) : null}
 
         <p className="ayuda mt-6">
-          Acceso solo para técnicos y administradores municipales. Entorno local: ver{' '}
+          Acceso solo para técnicos, administradores y autoridades municipales. Entorno local: ver{' '}
           <code>packages/db/README.md</code>.
         </p>
       </div>
