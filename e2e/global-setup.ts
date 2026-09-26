@@ -46,8 +46,12 @@ export default async function preparar(): Promise<void> {
       `${PUBLICA}/`,
       `${PUBLICA}/reportar`,
       `${PUBLICA}/como-funciona`,
+      `${PUBLICA}/mis-reportes`,
+      `${PUBLICA}/cuenta`,
       `${PANEL}/login`,
       `${PANEL}/ejecutivo`,
+      `${PANEL}/reportes`,
+      `${PANEL}/indicadores`,
     ]) {
       try {
         await esperar(contexto, url, 300_000);

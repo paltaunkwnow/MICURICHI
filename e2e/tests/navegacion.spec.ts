@@ -1,5 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { CREDENCIALES_TECNICO, esperarPila, PANEL } from './ayudas';
+import { CREDENCIALES_TECNICO, esperarPila, leerCiudad, PANEL } from './ayudas';
+
+/**
+ * El plano de zonificación que trae el panel es contenido de la instalación de Santa Cruz de la
+ * Sierra, no del producto: el panel solo lo muestra si la ciudad configurada es esa
+ * (`hayPlanoDeReferencia` en `apps/panel-admin/src/lib/plano.ts`).
+ */
+const CIUDAD_DEL_PLANO = { nombre: 'santa cruz de la sierra', pais: 'BO' };
 
 /**
  * Recorrido de la interfaz nueva (la del prototipo): que cada destino exista, cargue y responda.
@@ -66,11 +73,47 @@ test.describe('navegación de la app pública', () => {
     // Sin cuentas de ciudadano, la lista sale de lo que guardó este navegador: en uno limpio está
     // vacía, y eso es lo que tiene que decir en vez de fingir que no hay reportes en el sistema.
     await page.goto('/mis-reportes');
+    await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Todavía no enviaste ninguno' })).toBeVisible();
     // La acción del estado vacío, no la de la barra superior (que también lleva a reportar).
     await expect(
       page.locator('#contenido').getByRole('link', { name: 'Reportar un punto' }),
     ).toBeVisible();
+  });
+
+  test('«Borrar esta lista del dispositivo» la vacía en pantalla y en el navegador', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    // Un reporte recordado por este dispositivo, como lo deja el formulario tras enviar. El id no
+    // existe: la API responde 404 y la tarjeta queda «esperando revisión».
+    await page.evaluate(() => {
+      localStorage.setItem(
+        'curichi.mis-reportes.v1',
+        JSON.stringify([
+          {
+            id: '00000000-0000-4000-8000-0000000000cc',
+            enviado_en: new Date().toISOString(),
+            titulo: 'Punto para borrar',
+            unidad_vecinal: 'UV-105',
+            distrito: 'D02',
+            severidad: 'media',
+            tiene_foto: false,
+          },
+        ]),
+      );
+    });
+    await page.goto('/mis-reportes');
+    await expect(page.getByText('Punto para borrar')).toBeVisible();
+
+    await page.getByTestId('boton-borrar-lista').click();
+    // Antes se borraba solo el almacenamiento y la lista seguía a la vista.
+    await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
+    await expect(page.getByText('Punto para borrar')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('curichi.mis-reportes.v1'))).toBeNull();
+
+    await page.reload();
+    await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
   });
 
   test('el mapa deja cambiar la capa administrativa', async ({ page, isMobile }) => {
@@ -93,18 +136,40 @@ test.describe('panel técnico', () => {
     await esperarPila(request);
   });
 
-  test('el plano oficial se sirve con su advertencia', async ({ page, isMobile }) => {
+  test('el plano oficial se sirve con su advertencia (solo en la instalación que lo tiene)', async ({
+    page,
+    request,
+    isMobile,
+  }) => {
     test.skip(isMobile, 'el panel técnico es de escritorio');
+    const ciudad = await leerCiudad(request);
+    const hayPlano =
+      ciudad.pais === CIUDAD_DEL_PLANO.pais &&
+      ciudad.nombre.localeCompare(CIUDAD_DEL_PLANO.nombre, 'es', { sensitivity: 'base' }) === 0;
+
     await page.goto(`${PANEL}/login`);
     await page.locator('#email').fill(CREDENCIALES_TECNICO.email);
     await page.locator('#password').fill(CREDENCIALES_TECNICO.password);
     await page.getByTestId('boton-login').click();
     await expect(page).toHaveURL(/\/reportes/);
 
+    // La barra lateral ofrece el plano solo donde existe.
+    await expect(
+      page.getByRole('navigation', { name: 'Secciones del panel' }).getByRole('link', {
+        name: 'Plano oficial',
+      }),
+    ).toHaveCount(hayPlano ? 1 : 0);
+
     await page.goto(`${PANEL}/plano`);
     await expect(
       page.getByRole('heading', { name: 'Plano oficial de zonificación' }),
     ).toBeVisible();
+    if (!hayPlano) {
+      // En otra ciudad ese plano sería el de otro municipio: se dice que no hay y se remite a Capas.
+      await expect(page.getByTestId('plano-no-disponible')).toContainText(ciudad.nombre);
+      await expect(page.getByRole('img', { name: /Plano de zonificación/ })).toHaveCount(0);
+      return;
+    }
     const imagen = page.getByRole('img', { name: /Plano de zonificación/ });
     await expect(imagen).toBeVisible();
     // La advertencia es lo que impide que alguien tome los límites de esta imagen por los que

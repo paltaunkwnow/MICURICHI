@@ -1,5 +1,15 @@
-import { expect, type Page, type Request, test } from '@playwright/test';
-import { API, crearCuentaYEntrarPorUi, esperarPila, GEO, PUNTO_CENTRO } from './ayudas';
+import { expect, type Page, test } from '@playwright/test';
+import {
+  API,
+  crearCuentaYEntrarPorUi,
+  esperarPila,
+  esperarRedQuieta,
+  GEO,
+  numeroDePaso,
+  PUNTO_CENTRO,
+  pasoActual,
+  vigilarRed,
+} from './ayudas';
 
 /**
  * Corrida SDD `2026-09-25-quitar-campos-del-reporte`, criterios CA-W1…CA-W8 de la app pública.
@@ -21,30 +31,6 @@ interface PasoVisto {
   camposViejos: string[];
   preguntaProfundidad: boolean;
   preguntaFrecuencia: boolean;
-}
-
-/** Número del paso en pantalla, sin afirmar nada: para esperar a que cambie. */
-async function numeroDePaso(page: Page): Promise<number | null> {
-  const t = await page
-    .getByText(/^\s*Paso \d+ de \d+\s*$/)
-    .first()
-    .textContent()
-    .catch(() => null);
-  const r = t ? /Paso (\d+) de/.exec(t) : null;
-  return r ? Number(r[1]) : null;
-}
-
-/** «Paso N de M» del paso que está en pantalla. Lo dicen el rótulo visible y la región viva. */
-async function pasoActual(page: Page): Promise<{ n: number; m: number }> {
-  const textos = await page.getByText(/^\s*Paso \d+ de \d+\s*$/).allTextContents();
-  expect(textos.length, 'cada paso tiene que anunciar «Paso N de M»').toBeGreaterThan(0);
-  const leidos = textos.map((t) => {
-    const r = /Paso (\d+) de (\d+)/.exec(t);
-    return { n: Number(r?.[1]), m: Number(r?.[2]) };
-  });
-  // El rótulo del paso y el anuncio para lectores de pantalla no pueden decir cosas distintas.
-  for (const l of leidos) expect(l, `«${textos.join('» / «')}»`).toEqual(leidos[0]);
-  return leidos[0] as { n: number; m: number };
 }
 
 /** Controles con los que el vecino contesta algo en este paso (sin el honeypot ni ocultos). */
@@ -239,8 +225,7 @@ test.describe('quitar campos del reporte · app pública', () => {
 
       // No hay acceso a la instancia de MapLibre desde la página, así que la capa se observa por
       // lo que el mapa pide: dibujar una capa implica pedir su GeoJSON o sus teselas.
-      const pedidas: string[] = [];
-      page.on('request', (r: Request) => pedidas.push(r.url()));
+      const red = vigilarRed(page);
       const esCapa = (capa: string) => (u: string) => {
         const ruta = new URL(u).pathname;
         return ruta.startsWith(`/geo/v1/teselas/${capa}/`) || ruta === `/geo/v1/capas/${capa}`;
@@ -255,16 +240,17 @@ test.describe('quitar campos del reporte · app pública', () => {
       const centrar = page.getByRole('button', { name: 'Centrar el mapa en mi ubicación' });
       await expect(async () => {
         await centrar.click();
-        await expect.poll(() => pedidas.some(baseAZoom15), { timeout: 5_000 }).toBe(true);
+        await expect.poll(() => red.pedidas.some(baseAZoom15), { timeout: 5_000 }).toBe(true);
       }).toPass({ timeout: 30_000 });
 
-      await expect.poll(() => pedidas.some(esCapa('distrito_municipal'))).toBe(true);
-      await expect.poll(() => pedidas.some(esCapa('unidad_vecinal'))).toBe(true);
-      // Las teselas de manzanas saldrían en la misma tanda que las de UV a este zoom. Se deja
-      // un margen para que, si el mapa las pidiera, la petición llegue a registrarse.
-      await page.waitForTimeout(3_000);
+      await expect.poll(() => red.pedidas.some(esCapa('distrito_municipal'))).toBe(true);
+      await expect.poll(() => red.pedidas.some(esCapa('unidad_vecinal'))).toBe(true);
+      // Las teselas de manzanas saldrían en la misma tanda que las de UV a este zoom. En vez de
+      // un margen fijo (que pasaba igual con el mapa todavía cargando), se espera a que la red de
+      // geo-service se quede quieta: todo lo pedido volvió y no sale nada nuevo.
+      await esperarRedQuieta(red, (u) => new URL(u).pathname.startsWith('/geo/v1/'));
 
-      const manzanas = pedidas.filter(esCapa('manzana'));
+      const manzanas = red.pedidas.filter(esCapa('manzana'));
       expect(manzanas, 'el mapa público no dibuja manzanas').toEqual([]);
     });
   });

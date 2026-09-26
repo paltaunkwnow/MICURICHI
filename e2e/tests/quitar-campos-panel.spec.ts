@@ -4,9 +4,11 @@ import {
   CREDENCIALES_TECNICO,
   cuentaNuevaConSesion,
   esperarPila,
+  esperarRedQuieta,
   GEO,
   PANEL,
   reporteValido,
+  vigilarRed,
 } from './ayudas';
 
 /**
@@ -111,8 +113,8 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     const distrito = prefijo('distrito_municipal');
     const uv = prefijo('unidad_vecinal');
 
-    const pedidas: string[] = [];
-    page.on('request', (r) => pedidas.push(new URL(r.url()).pathname));
+    const red = vigilarRed(page);
+    const pedidas = () => red.pedidas.map((u) => new URL(u).pathname);
 
     await entrarAlPanel(page);
     // El detalle abre el mapa en zoom 16 sobre el reporte: por encima del umbral de 15.
@@ -122,22 +124,23 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     ).toBeVisible({ timeout: 60_000 });
 
     await expect
-      .poll(() => pedidas.some((p) => p.startsWith(distrito)), {
+      .poll(() => pedidas().some((p) => p.startsWith(distrito)), {
         message: 'el mapa debe seguir dibujando los distritos',
         timeout: 30_000,
       })
       .toBe(true);
     await expect
-      .poll(() => pedidas.some((p) => p.startsWith(uv)), {
+      .poll(() => pedidas().some((p) => p.startsWith(uv)), {
         message: 'el mapa debe seguir dibujando las unidades vecinales',
         timeout: 30_000,
       })
       .toBe(true);
-    // Las fuentes se añaden en la misma pasada; un margen corto cubre la petición de manzanas si
-    // la hubiera, que saldría en el mismo cuadro que las de UV.
-    await page.waitForTimeout(1500);
+    // Las fuentes se añaden en la misma pasada: la de manzanas, si la hubiera, saldría en la
+    // misma tanda que las de UV. En vez de un margen fijo, se espera a que la red de geo-service
+    // se quede quieta (todo lo pedido volvió y no sale nada nuevo).
+    await esperarRedQuieta(red, (u) => new URL(u).pathname.startsWith('/geo/v1/'));
 
-    const deManzana = pedidas.filter(
+    const deManzana = pedidas().filter(
       (p) => p.startsWith(manzana) || p.includes('/geo/v1/teselas/manzana/'),
     );
     expect(deManzana, 'el panel no debe pedir teselas ni GeoJSON de manzanas').toEqual([]);

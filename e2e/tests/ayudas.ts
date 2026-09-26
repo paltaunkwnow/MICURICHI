@@ -1,10 +1,14 @@
-import { type APIRequestContext, expect, type Page } from '@playwright/test';
+import { type APIRequestContext, expect, type Page, type Request } from '@playwright/test';
 
 export const API = 'http://127.0.0.1:3001';
 export const GEO = 'http://127.0.0.1:3002';
 export const PANEL = process.env.PANEL_ADMIN_URL ?? 'http://localhost:3100';
 
-/** Punto dentro de la cobertura municipal (plaza 24 de Septiembre, Santa Cruz de la Sierra). */
+/**
+ * Punto dentro de la cobertura de las capas cargadas (la plaza principal de la entrega
+ * `DM_UV_MZ_2025`). Es un dato de las capas, no de la ciudad configurada: la ciudad llega por
+ * `GET /api/v1/configuracion` y se lee con `leerCiudad`.
+ */
 export const PUNTO_CENTRO = { lat: -17.7833, lon: -63.1821 };
 /** Punto claramente fuera del municipio. */
 export const PUNTO_FUERA = { lat: -17.5, lon: -63.0 };
@@ -176,4 +180,258 @@ export async function crearCuentaYEntrarPorUi(page: Page, volver = '/reportar') 
   await page.locator('#password').fill(datos.password);
   await principal.getByRole('button', { name: 'Entrar' }).click();
   return datos;
+}
+
+/**
+ * Crea una cuenta ciudadana y deja su sesión en el NAVEGADOR de la prueba sin recorrer las
+ * pantallas de alta y de ingreso, que ya recorren `cuenta-ciudadana.spec.ts` y
+ * `recorrido-completo.spec.ts`. Para las pruebas del formulario es tiempo que no prueba nada.
+ *
+ * Va por `page.request`, que comparte las cookies con el contexto del navegador, y contra el
+ * origen de la app pública: la cookie queda para `localhost` igual que si la hubiera puesto el
+ * formulario de ingreso. Necesita `COOKIE_SEGURA=0` (ver README): con la cookie `Secure` sobre
+ * http el cliente de Playwright no la guarda.
+ */
+export async function cuentaNuevaEnElNavegador(page: Page, marca = '') {
+  const datos = {
+    email: `e2e-nav-${marca}${Date.now()}-${Math.random().toString(36).slice(2, 8)}@curichi.test`,
+    nombre: 'Vecina de prueba',
+    password: 'contrasena-de-prueba-e2e',
+  };
+  const alta = await page.request.post(`${PUBLICA}/api/v1/auth/registro`, { data: datos });
+  expect(alta.status(), 'el alta de cuenta debe responder 201').toBe(201);
+  const login = await page.request.post(`${PUBLICA}/api/v1/auth/login`, {
+    data: { email: datos.email, password: datos.password },
+  });
+  expect(login.status(), 'la cuenta recién creada debe poder iniciar sesión').toBe(200);
+  return datos;
+}
+
+/**
+ * Sesión del panel en el navegador, sin pasar por el formulario de ingreso: para las pruebas en
+ * las que entrar no es lo que se comprueba. El panel reenvía `/api/*` a api-core en su propio
+ * origen, así que la cookie queda para el host del panel.
+ */
+export async function sesionDelPanelEnElNavegador(
+  page: Page,
+  credenciales: { email: string; password: string },
+) {
+  const r = await page.request.post(`${PANEL}/api/v1/auth/login`, { data: credenciales });
+  expect(r.status(), `${credenciales.email} debe poder iniciar sesión en el panel`).toBe(200);
+  return r.json();
+}
+
+/** Ciudad del despliegue, tal como la sirve api-core (contracts 0.7.0). */
+export interface CiudadConfigurada {
+  nombre: string;
+  pais: string;
+  zona_horaria: string;
+  locale: string;
+  centro: { lon: number; lat: number };
+  zoom_inicial: number;
+}
+
+/**
+ * La ciudad llega por `GET /api/v1/configuracion` y las apps la leen al atender cada página. Las
+ * pruebas que necesitan su nombre, su centro o su formato de números la leen de ahí en vez de
+ * escribir «Santa Cruz»: la misma suite tiene que valer en cualquier instalación.
+ */
+export async function leerCiudad(request: APIRequestContext): Promise<CiudadConfigurada> {
+  const r = await request.get(`${API}/api/v1/configuracion`);
+  expect(r.status(), 'GET /api/v1/configuracion').toBe(200);
+  return (await r.json()).ciudad as CiudadConfigurada;
+}
+
+// ------------------------------------------------------------------ formulario de reporte
+
+const RE_PASO = /^\s*Paso \d+ de \d+\s*$/;
+
+/**
+ * Número del paso en pantalla, sin afirmar nada: para esperar a que cambie con `expect.poll`. Lo
+ * lee de «Paso N de M», que el formulario escribe dos veces (el rótulo visible y la región viva
+ * para lectores de pantalla); no depende de la clase con que se dibuje.
+ */
+export async function numeroDePaso(page: Page): Promise<number | null> {
+  const t = await page
+    .getByText(RE_PASO)
+    .first()
+    .textContent({ timeout: 5_000 })
+    .catch(() => null);
+  const r = t ? /Paso (\d+) de/.exec(t) : null;
+  return r ? Number(r[1]) : null;
+}
+
+/** «Paso N de M» del paso que está en pantalla. El rótulo y la región viva tienen que coincidir. */
+export async function pasoActual(page: Page): Promise<{ n: number; m: number }> {
+  const textos = await page.getByText(RE_PASO).allTextContents();
+  expect(textos.length, 'cada paso tiene que anunciar «Paso N de M»').toBeGreaterThan(0);
+  const leidos = textos.map((t) => {
+    const r = /Paso (\d+) de (\d+)/.exec(t);
+    return { n: Number(r?.[1]), m: Number(r?.[2]) };
+  });
+  for (const l of leidos) expect(l, `«${textos.join('» / «')}»`).toEqual(leidos[0]);
+  return leidos[0] as { n: number; m: number };
+}
+
+/**
+ * Abre `/reportar` (o el enlace dado) con la sesión ya puesta y espera a que el formulario haya
+ * decidido si retoma un borrador: el mapa del paso 1 no se monta hasta después de leerlo, así que
+ * verlo es la señal de que «borrador-retomado» ya está o ya no va a estar.
+ */
+export async function abrirFormulario(page: Page, url = '/reportar') {
+  await page.goto(url);
+  await expect(page.getByRole('heading', { name: 'Reportar un punto' })).toBeVisible();
+  if ((await numeroDePaso(page)) === 1) await esperarMapaDelPaso1(page);
+}
+
+/**
+ * El mapa del paso 1 cargado: montado y con su primer `idle` (se va «Cargando el mapa…»). Antes
+ * del arreglo, el `load` del mapa pisaba el punto con el centro: afirmar algo sobre el punto antes
+ * de esto no probaría nada.
+ */
+export async function esperarMapaDelPaso1(page: Page) {
+  const mapa = page.getByRole('region', { name: 'Mapa para elegir la ubicación del reporte' });
+  await expect(mapa).toBeVisible({ timeout: 30_000 });
+  await expect(mapa.getByText('Cargando el mapa…')).toHaveCount(0, { timeout: 30_000 });
+  return mapa;
+}
+
+/** Paso 1 por la alternativa accesible al mapa: escribir las coordenadas. */
+export async function elegirPuntoPorCoordenadas(page: Page, punto = PUNTO_CENTRO) {
+  // El botón abre y cierra el bloque: al volver al paso 1 puede seguir abierto.
+  if (!(await page.locator('#lat').isVisible()))
+    await page.getByTestId('opcion-coordenadas').click();
+  await page.locator('#lat').fill(String(punto.lat));
+  await page.locator('#lon').fill(String(punto.lon));
+  await page.getByTestId('boton-confirmar-ubicacion').click();
+  await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+}
+
+/** «Continuar» y espera al paso siguiente. */
+export async function continuar(page: Page) {
+  const n = await numeroDePaso(page);
+  const boton = page.getByTestId('boton-siguiente');
+  await expect(boton, `el paso ${n} tiene que poder continuarse`).toBeEnabled();
+  await boton.click();
+  await expect.poll(() => numeroDePaso(page)).toBe((n ?? 0) + 1);
+}
+
+/** Paso 2: profundidad y frecuencia (las dos entradas de la severidad v2). */
+export async function responderPaso2(
+  page: Page,
+  { profundidad = 'rodilla', frecuencia = 'cada_lluvia_fuerte' } = {},
+) {
+  await page.locator(`input[name="profundidad_estimada"][value="${profundidad}"]`).check();
+  await page.locator(`input[name="frecuencia"][value="${frecuencia}"]`).check();
+}
+
+/** Del paso 1, con el punto ya elegido, hasta el paso 3 (fotos y descripción). */
+export async function llegarAFotos(page: Page) {
+  await continuar(page);
+  await responderPaso2(page);
+  await continuar(page);
+}
+
+/** Del paso 1, con el punto ya elegido, hasta la revisión, sin tocar lo opcional. */
+export async function llegarARevision(page: Page, marca: string) {
+  await llegarAFotos(page);
+  await page
+    .locator('textarea[name="descripcion"]')
+    .fill(`Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`);
+  await continuar(page);
+}
+
+/** Pulsa «Enviar reporte» y devuelve el cuerpo que salió hacia `POST /api/v1/reportes`. */
+export async function enviarYLeerCuerpo(page: Page): Promise<Record<string, unknown>> {
+  const peticion = page.waitForRequest(
+    (r) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/v1/reportes',
+  );
+  await page.getByTestId('boton-enviar').click();
+  return (await peticion).postDataJSON() as Record<string, unknown>;
+}
+
+// ------------------------------------------------------------------ red
+
+/**
+ * Retiene las peticiones que casan con `patron` hasta `liberar()`, para poder mirar el estado
+ * intermedio (una foto que sube, una unidad vecinal que se está buscando) sin depender de que el
+ * servidor tarde. `llegada` se cumple con la primera retenida.
+ */
+export async function retenerPeticiones(page: Page, patron: string | RegExp) {
+  let liberar: () => void = () => {};
+  const liberadas = new Promise<void>((r) => {
+    liberar = r;
+  });
+  let avisarLlegada: () => void = () => {};
+  const llegada = new Promise<void>((r) => {
+    avisarLlegada = r;
+  });
+  // Si la prueba falla antes de liberar, la página se cierra: la espera no puede quedar colgada.
+  const cerrada = new Promise<void>((r) => {
+    page.once('close', () => r());
+  });
+  await page.route(patron, async (ruta) => {
+    avisarLlegada();
+    await Promise.race([liberadas, cerrada]);
+    // La página pudo cancelarla mientras esperaba (el punto cambió otra vez): no es un fallo.
+    await ruta.continue().catch(() => {});
+  });
+  return { llegada, liberar: () => liberar() };
+}
+
+/** Lo que pidió la página desde que se empezó a mirar, y lo que sigue en vuelo. */
+export interface RedVigilada {
+  pedidas: string[];
+  enVuelo: Set<Request>;
+}
+
+/** Registrar ANTES de navegar: lo que salga antes no se ve. */
+export function vigilarRed(page: Page): RedVigilada {
+  const red: RedVigilada = { pedidas: [], enVuelo: new Set() };
+  page.on('request', (r) => {
+    red.pedidas.push(r.url());
+    red.enVuelo.add(r);
+  });
+  const terminar = (r: Request) => {
+    red.enVuelo.delete(r);
+  };
+  page.on('requestfinished', terminar);
+  page.on('requestfailed', terminar);
+  return red;
+}
+
+/**
+ * Espera a que la red de lo que cumple `filtro` se quede quieta: nada en vuelo y ninguna petición
+ * nueva durante `quietudMs`. Es la señal para poder afirmar una AUSENCIA («el mapa no pidió
+ * manzanas»): MapLibre pide las teselas de todas las fuentes visibles en la misma tanda, así que
+ * cuando las de UV y distritos ya volvieron y no sale nada más, una de manzanas ya habría salido.
+ * Reemplaza a un `waitForTimeout` fijo, que pasaba igual con el mapa todavía cargando.
+ */
+export async function esperarRedQuieta(
+  red: RedVigilada,
+  filtro: (url: string) => boolean,
+  { quietudMs = 1_500, plazoMs = 30_000 } = {},
+) {
+  let conteo = -1;
+  let quietaDesde = Date.now();
+  await expect
+    .poll(
+      () => {
+        const ahora = Date.now();
+        const n = red.pedidas.filter(filtro).length;
+        const pendientes = [...red.enVuelo].some((r) => filtro(r.url()));
+        if (pendientes || n !== conteo) {
+          conteo = n;
+          quietaDesde = ahora;
+          return false;
+        }
+        return ahora - quietaDesde >= quietudMs;
+      },
+      {
+        message: `la red no se quedó quieta ${quietudMs} ms (peticiones en vuelo o nuevas)`,
+        timeout: plazoMs,
+        intervals: [250],
+      },
+    )
+    .toBe(true);
 }

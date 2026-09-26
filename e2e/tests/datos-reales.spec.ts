@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { API, esperarPila, GEO } from './ayudas';
+import { type APIRequestContext, expect, test } from '@playwright/test';
+import { API, esperarPila, GEO, leerCiudad } from './ayudas';
 
 /**
  * El mapa con los datos que de verdad rigen.
@@ -11,10 +11,35 @@ import { API, esperarPila, GEO } from './ayudas';
  * con CUALQUIER capa: que hay capa, que cubre la ciudad, que sus nombres no son identificadores,
  * que la búsqueda encuentra una de sus unidades y que un punto tomado de la propia capa se
  * resuelve a esa misma unidad.
+ *
+ * Tampoco se fija la ciudad: llega por `GET /api/v1/configuracion` (contracts 0.7.0). Lo que sí se
+ * exige es que esa ciudad y las capas cargadas sean la misma: un despliegue configurado para una
+ * ciudad con las capas de otra es justo el error que esto tiene que detectar.
  */
 
-/** Recuadro generoso alrededor de Santa Cruz de la Sierra. Sirve para detectar un CRS mal leído. */
-const SANTA_CRUZ = { oeste: -64.0, sur: -18.5, este: -62.0, norte: -17.0 };
+/**
+ * Un grado (unos 100 km) alrededor del centro configurado: una ciudad entra entera; una capa
+ * reproyectada mal o leída con el CRS equivocado aterriza a cientos de kilómetros y no.
+ */
+const MARGEN_GRADOS = 1;
+
+interface Recuadro {
+  oeste: number;
+  sur: number;
+  este: number;
+  norte: number;
+}
+
+/** Recuadro generoso alrededor del centro de la ciudad configurada. */
+async function recuadroDeLaCiudad(request: APIRequestContext): Promise<Recuadro> {
+  const { centro } = await leerCiudad(request);
+  return {
+    oeste: centro.lon - MARGEN_GRADOS,
+    sur: centro.lat - MARGEN_GRADOS,
+    este: centro.lon + MARGEN_GRADOS,
+    norte: centro.lat + MARGEN_GRADOS,
+  };
+}
 
 interface CapaInfo {
   capa: string;
@@ -65,20 +90,48 @@ test.describe('capas administrativas vigentes', () => {
     }
   });
 
-  test('la extensión de las capas cae sobre Santa Cruz de la Sierra', async ({ request }) => {
+  test('la extensión de las capas cae sobre la ciudad configurada', async ({ request }) => {
     // Un shapefile reproyectado mal (o leído con el CRS equivocado) aterriza en el golfo de
     // Guinea o en medio del Atlántico. El bbox lo delata sin mirar un solo polígono.
+    const ciudad = await recuadroDeLaCiudad(request);
     for (const c of await capas(request)) {
       const b = c.bbox;
       expect(b, `la capa ${c.capa} no publica bbox`).toBeTruthy();
       const [oeste, sur, este, norte] = b!;
-      expect(oeste, `${c.capa}: borde oeste fuera de la ciudad`).toBeGreaterThan(SANTA_CRUZ.oeste);
-      expect(este, `${c.capa}: borde este fuera de la ciudad`).toBeLessThan(SANTA_CRUZ.este);
-      expect(sur, `${c.capa}: borde sur fuera de la ciudad`).toBeGreaterThan(SANTA_CRUZ.sur);
-      expect(norte, `${c.capa}: borde norte fuera de la ciudad`).toBeLessThan(SANTA_CRUZ.norte);
+      expect(oeste, `${c.capa}: borde oeste fuera de la ciudad`).toBeGreaterThan(ciudad.oeste);
+      expect(este, `${c.capa}: borde este fuera de la ciudad`).toBeLessThan(ciudad.este);
+      expect(sur, `${c.capa}: borde sur fuera de la ciudad`).toBeGreaterThan(ciudad.sur);
+      expect(norte, `${c.capa}: borde norte fuera de la ciudad`).toBeLessThan(ciudad.norte);
       // Una capa administrativa de una ciudad ocupa grados, no un punto.
       expect(este - oeste, `${c.capa}: extensión sospechosamente pequeña`).toBeGreaterThan(0.05);
     }
+  });
+
+  test('el centro de la ciudad configurada cae dentro de los distritos cargados', async ({
+    request,
+  }) => {
+    // El mapa abre en ese centro: si quedara fuera de las capas, la primera vista del vecino
+    // sería un mapa sin ningún distrito.
+    const { centro } = await leerCiudad(request);
+    const distritos = (await capas(request)).find((c) => c.capa === 'distrito_municipal');
+    const [oeste, sur, este, norte] = distritos!.bbox!;
+    expect(centro.lon).toBeGreaterThan(oeste);
+    expect(centro.lon).toBeLessThan(este);
+    expect(centro.lat).toBeGreaterThan(sur);
+    expect(centro.lat).toBeLessThan(norte);
+  });
+
+  test('el mapa público nombra la ciudad que llega por configuración', async ({
+    page,
+    request,
+  }) => {
+    const { nombre } = await leerCiudad(request);
+    await page.goto('/');
+    // Título de la pantalla del mapa (lo leen los lectores de pantalla), armado con la ciudad
+    // del despliegue y no con una escrita en el código.
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText(
+      `Mapa de puntos de inundación de ${nombre}`,
+    );
   });
 
   test('los nombres son nombres, no identificadores internos ni marcas de muestra', async ({
@@ -200,6 +253,7 @@ test.describe('el mapa público no queda vacío con la capa vigente', () => {
   test('hay puntos publicados y cada uno trae su distrito y su unidad vecinal con nombre', async ({
     request,
   }) => {
+    const ciudad = await recuadroDeLaCiudad(request);
     const r = await request.get(`${API}/api/v1/reportes?limite=50`);
     expect(r.status()).toBe(200);
     const fc = await r.json();
@@ -210,10 +264,10 @@ test.describe('el mapa público no queda vacío con la capa vigente', () => {
       expect(p.distrito?.nombre ?? '').not.toContain('distrito_municipal:');
       // Coordenada pública: cinco decimales como máximo (§13) y dentro de la ciudad.
       const [lon, lat] = f.geometry.coordinates as [number, number];
-      expect(lon).toBeGreaterThan(SANTA_CRUZ.oeste);
-      expect(lon).toBeLessThan(SANTA_CRUZ.este);
-      expect(lat).toBeGreaterThan(SANTA_CRUZ.sur);
-      expect(lat).toBeLessThan(SANTA_CRUZ.norte);
+      expect(lon).toBeGreaterThan(ciudad.oeste);
+      expect(lon).toBeLessThan(ciudad.este);
+      expect(lat).toBeGreaterThan(ciudad.sur);
+      expect(lat).toBeLessThan(ciudad.norte);
       expect(String(lon).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(5);
       expect(String(lat).split('.')[1]?.length ?? 0).toBeLessThanOrEqual(5);
     }

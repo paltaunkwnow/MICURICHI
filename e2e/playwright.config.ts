@@ -52,6 +52,17 @@ export default defineConfig({
       // El listado público pasó a tener límite en la Fase 3 (240/min). La suite lo consulta
       // muchas veces por test; sin subirlo, los últimos casos recibirían 429.
       RATE_LIMIT_LECTURAS_POR_MINUTO: '100000',
+      // Lo mismo en geo-service: detrás de las apps de Next todas las teselas y resoluciones
+      // llegan desde la misma IP, y la suite abre decenas de mapas por minuto.
+      GEO_RATE_LIMIT_POR_MINUTO: '100000',
+      GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO: '100000',
+      /**
+       * Dirección del panel que api-core manda en `panel_url` de `/auth/yo` (contracts 0.7.0): de
+       * ahí sale el botón «Panel técnico/ejecutivo» de la app pública. Tiene que ser la misma en
+       * la que la suite busca el panel (`PANEL` en tests/ayudas.ts); sin ella, api-core manda
+       * null y el botón no aparece.
+       */
+      PANEL_ADMIN_URL: process.env.PANEL_ADMIN_URL ?? 'http://localhost:3100',
       // Igual con el login: la suite entra varias veces desde la misma IP. Hay DOS frenos y
       // hay que subir los dos: el tope bruto de peticiones por ventana y el contador de fallos
       // por cuenta y por IP, que vive en la base y sobrevive a un reinicio del servicio.

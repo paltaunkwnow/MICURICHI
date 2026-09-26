@@ -1,5 +1,41 @@
-import { expect, test } from '@playwright/test';
-import { CREDENCIALES_TECNICO, crearCuentaYEntrarPorUi, esperarPila, PANEL } from './ayudas';
+import { expect, type Page, test } from '@playwright/test';
+import {
+  abrirFormulario,
+  CREDENCIALES_TECNICO,
+  crearCuentaYEntrarPorUi,
+  cuentaNuevaEnElNavegador,
+  elegirPuntoPorCoordenadas,
+  esperarMapaDelPaso1,
+  esperarPila,
+  llegarAFotos,
+  numeroDePaso,
+  PANEL,
+  PNG_1X1,
+  pasoActual,
+} from './ayudas';
+
+/** Una foto cualquiera para el input de la galería. */
+const FOTO = { name: 'charco.png', mimeType: 'image/png', buffer: PNG_1X1 };
+
+/** Respuesta de error de api-core, con la forma `{ codigo, mensaje }` de todas sus rutas. */
+function errorApi(status: number, codigo: string, mensaje: string, extra: object = {}) {
+  return {
+    status,
+    contentType: 'application/json',
+    body: JSON.stringify({ codigo, mensaje, ...extra }),
+  };
+}
+
+/** Hasta el paso de fotos con una descripción escrita, que es lo que no se puede perder. */
+async function formularioEnFotos(page: Page, marca: string) {
+  await cuentaNuevaEnElNavegador(page, marca);
+  await abrirFormulario(page);
+  await elegirPuntoPorCoordenadas(page);
+  await llegarAFotos(page);
+  const texto = `Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}${Date.now()}`;
+  await page.locator('textarea[name="descripcion"]').fill(texto);
+  return texto;
+}
 
 /**
  * Qué ve una persona cuando algo falla.
@@ -100,35 +136,126 @@ test.describe('el formulario no pierde lo escrito', () => {
     await crearCuentaYEntrarPorUi(page, '/reportar');
     await page.waitForURL('**/reportar');
 
-    // Paso 1: el punto es el centro del mapa; se espera a que la unidad vecinal resuelva.
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible({ timeout: 30_000 });
+    // Paso 1: el centro del mapa ya NO es la ubicación al cargar; el punto lo elige la persona.
+    await esperarMapaDelPaso1(page);
+    await expect(page.getByTestId('boton-siguiente')).toBeDisabled();
+    await elegirPuntoPorCoordenadas(page);
     await page.getByTestId('boton-siguiente').click();
+    await expect.poll(() => numeroDePaso(page)).toBe(2);
 
-    // Paso 2: la profundidad (y la frecuencia, si P-4 las junta en el mismo paso), suficiente para
-    // que haya algo que perder. Duración y afectación ya no existen (severidad v2).
+    // Paso 2: profundidad y frecuencia, suficiente para que haya algo que perder. Duración y
+    // afectación ya no existen (severidad v2).
     await page.locator('input[name="profundidad_estimada"][value="rodilla"]').check();
-    const frecuenciaEnPaso2 = (await page.locator('input[name="frecuencia"]').count()) > 0;
-    if (frecuenciaEnPaso2)
-      await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
+    await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
+    const { m: total } = await pasoActual(page);
 
     await page.reload();
 
     await expect(page.getByTestId('borrador-retomado')).toBeVisible();
-    // `.pno` es el rótulo del paso; hay otro igual solo para lectores de pantalla. El total de
-    // pasos (4 o 5) lo fija P-4; lo que no puede cambiar es que sea el mismo en todo el recorrido.
-    const rotulo = page.locator('p.pno');
-    await expect(rotulo).toHaveText(/^Paso 2 de [45]$/);
-    const total = ((await rotulo.textContent()) ?? '').replace(/^Paso 2 de /, '');
+    // El total de pasos no puede cambiar a mitad del recorrido.
+    expect(await pasoActual(page)).toEqual({ n: 2, m: total });
     await expect(page.locator('input[name="profundidad_estimada"][value="rodilla"]')).toBeChecked();
-    if (frecuenciaEnPaso2)
-      await expect(
-        page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]'),
-      ).toBeChecked();
+    await expect(
+      page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]'),
+    ).toBeChecked();
 
-    // Y se puede descartar a propósito, que es la otra mitad del trato.
+    // Y se puede descartar a propósito, que es la otra mitad del trato: vuelve al paso 1 sin
+    // punto elegido.
     await page.getByRole('button', { name: 'Empezar de nuevo' }).click();
     await expect(page.getByTestId('borrador-retomado')).toHaveCount(0);
-    await expect(rotulo).toHaveText(`Paso 1 de ${total}`);
+    await expect.poll(() => numeroDePaso(page)).toBe(1);
+    expect((await pasoActual(page)).m).toBe(total);
+    await expect(page.getByTestId('ubicacion-pendiente')).toBeVisible();
+  });
+
+  test('si la sesión vence al subir una foto, dice «Se cerró tu sesión» y lo escrito sigue', async ({
+    page,
+  }) => {
+    const texto = await formularioEnFotos(page, 'foto-401-');
+    // api-core responde 401 a la subida: la sesión venció mientras se elegía la foto.
+    await page.route('**/api/v1/fotos', (ruta) =>
+      ruta.fulfill(errorApi(401, 'SIN_SESION', 'Iniciá sesión para subir una foto.')),
+    );
+    await page.locator('#fotos').setInputFiles(FOTO);
+
+    await expect(page.getByRole('heading', { name: 'Se cerró tu sesión' })).toBeVisible();
+    await expect(
+      page.getByText('Lo que hayas completado se guarda en este dispositivo'),
+    ).toBeVisible();
+
+    // La sesión de verdad sigue viva (el 401 era simulado): al volver, el formulario retoma el
+    // paso de fotos con lo escrito.
+    await page.unroute('**/api/v1/fotos');
+    await page.reload();
+    await expect(page.getByTestId('borrador-retomado')).toBeVisible();
+    await expect.poll(() => numeroDePaso(page)).toBe(3);
+    await expect(page.locator('textarea[name="descripcion"]')).toHaveValue(texto);
+  });
+
+  test('si se acabó el cupo de fotos, muestra el mensaje del servidor y no pierde nada', async ({
+    page,
+  }) => {
+    const texto = await formularioEnFotos(page, 'foto-429-');
+    const miniaturas = page.getByRole('img', { name: 'Foto que subiste' });
+    await page.locator('#fotos').setInputFiles(FOTO);
+    await expect(miniaturas).toHaveCount(1);
+
+    // El texto es inventado a propósito: tiene que verse el del servidor, no uno genérico.
+    const mensaje =
+      'Llegaste al máximo de fotos por hora (prueba E2E). Vas a poder subir otra en 37 minutos.';
+    await page.route('**/api/v1/fotos', (ruta) =>
+      ruta.fulfill(
+        errorApi(429, 'CUOTA_DE_FOTOS', mensaje, {
+          detalles: { disponible_en: new Date(Date.now() + 37 * 60_000).toISOString() },
+        }),
+      ),
+    );
+    await page.locator('#fotos').setInputFiles({ ...FOTO, name: 'otra.png' });
+
+    await expect(page.getByTestId('error-foto')).toContainText(mensaje);
+    // Nada de lo ya cargado se pierde, y se puede seguir sin esa foto.
+    await expect(miniaturas).toHaveCount(1);
+    await expect(page.locator('textarea[name="descripcion"]')).toHaveValue(texto);
+    expect(await numeroDePaso(page)).toBe(3);
+    await expect(page.getByRole('heading', { name: 'Se cerró tu sesión' })).toHaveCount(0);
+    await expect(page.getByTestId('boton-siguiente')).toBeEnabled();
+  });
+});
+
+test.describe('no saber si hay sesión no es «no tenés cuenta»', () => {
+  test('con /auth/yo caído, el formulario y la cuenta lo dicen y se recuperan al reintentar', async ({
+    page,
+  }) => {
+    await page.route('**/api/v1/auth/yo', (ruta) =>
+      ruta.fulfill(
+        errorApi(
+          503,
+          'NO_DISPONIBLE',
+          'El servicio está saturado. Probá de nuevo en unos segundos.',
+        ),
+      ),
+    );
+
+    await page.goto('/reportar');
+    const aviso = page.getByTestId('error-sesion');
+    await expect(aviso).toBeVisible();
+    await expect(aviso).toContainText('No pudimos cargar tu sesión');
+    // Lo que NO puede pasar: mandar a crear una cuenta a quien quizá ya la tiene.
+    await expect(page.getByRole('heading', { name: 'Necesitás una cuenta' })).toHaveCount(0);
+    // La barra de arriba tampoco afirma nada: ni «Iniciar sesión» ni un nombre.
+    await expect(
+      page.locator('header.topnav').getByRole('link', { name: 'Iniciar sesión' }),
+    ).toHaveCount(0);
+
+    await page.goto('/cuenta');
+    await expect(page.getByTestId('error-sesion')).toBeVisible();
+    await expect(page.getByText('Todavía no iniciaste sesión')).toHaveCount(0);
+
+    // Vuelve el servicio: «Reintentar» resuelve sin recargar. Sin cookie, ahora sí es «sin sesión».
+    await page.unroute('**/api/v1/auth/yo');
+    await page.getByTestId('error-sesion').getByRole('button', { name: 'Reintentar' }).click();
+    await expect(page.getByTestId('error-sesion')).toHaveCount(0);
+    await expect(page.getByText('Todavía no iniciaste sesión')).toBeVisible();
   });
 });
 
