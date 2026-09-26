@@ -1,4 +1,10 @@
-import { LoginSchema, RegistroSchema, type Rol } from 'contracts';
+import {
+  LoginSchema,
+  RegistroSchema,
+  ROLES_DEL_PANEL,
+  type Rol,
+  SesionActualSchema,
+} from 'contracts';
 import {
   anotarRegistro,
   ejecutorPg,
@@ -242,6 +248,12 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
    *
    * No sustituye a la comprobación del servidor: la autoridad sigue siendo el UPDATE atómico de
    * `cuota.ts`. Esto es cortesía, no control.
+   *
+   * `panel_url` (contracts 0.7.0) solo se agrega para `ROLES_DEL_PANEL` (`tecnico`, `admin`,
+   * `ejecutivo`): antes viajaba fija en el JavaScript público de la app ciudadana, a la vista de
+   * cualquiera. Al ciudadano no se le manda ni siquiera en `null`. La respuesta se valida contra
+   * `SesionActualSchema` —que rechaza justamente una sesión de ciudadano con `panel_url`— antes de
+   * mandarla: un descuido aquí tiene que romper con un 500 y no publicar el campo de más.
    */
   app.get('/api/v1/auth/yo', async (req, res) => {
     if (!req.usuario) return res.status(401).send({ codigo: 'SIN_SESION', mensaje: 'Sin sesión.' });
@@ -250,6 +262,11 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
       req.usuario.id,
       dep.cfg.minutosEntreReportes,
     );
-    return { ...req.usuario, puede_reportar_desde: desde ? desde.toISOString() : null };
+    const esRolDelPanel = (ROLES_DEL_PANEL as readonly Rol[]).includes(req.usuario.rol);
+    return SesionActualSchema.parse({
+      ...req.usuario,
+      puede_reportar_desde: desde ? desde.toISOString() : null,
+      ...(esRolDelPanel ? { panel_url: dep.cfg.panelAdminUrl } : {}),
+    });
   });
 }

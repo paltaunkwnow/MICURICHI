@@ -1,6 +1,6 @@
 /** Regresiones de seguridad y privacidad (CLAUDE.md §13). Todas son funciones puras. */
 import Fastify from 'fastify';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { leerConfig, verificarProduccion } from '../src/config.js';
 import { igualEnTiempoConstante } from '../src/observabilidad.js';
 import { leerConfianzaProxy, opcionFastify } from '../src/proxy.js';
@@ -16,6 +16,9 @@ const ENTORNO_MINIMO = {
   COOKIE_SEGURA: '1',
   CORS_ORIGENES: 'https://curichi.gob.bo',
   METRICAS_TOKEN: 'token-de-metricas',
+  GEO_TOKEN_INTERNO: 'token-interno-de-produccion-con-largo-suficiente',
+  // Obligatoria y https en producción desde contracts 0.7.0 (config.ts: verificarProduccion).
+  PANEL_ADMIN_URL: 'https://panel.curichi.gob.bo',
   NODE_ENV: 'production',
 } satisfies NodeJS.ProcessEnv;
 
@@ -52,6 +55,49 @@ describe('configuración de producción', () => {
     const cfg = leerConfig({});
     expect(() => verificarProduccion(cfg)).toThrow(/IP_HASH_SAL[\s\S]*JITTER_SAL/);
   });
+
+  /**
+   * Sin token, geo-service no reconoce a api-core: cada `POST /reportes` gasta el cupo por IP del
+   * resolver (todas salen del mismo origen, así que una tormenta lo agota y crear reportes da
+   * 503) y la invalidación de capas recibe 403. Mismo criterio de longitud que las sales.
+   */
+  it('no arranca sin GEO_TOKEN_INTERNO ni con uno corto', () => {
+    expect(() => leerConfig({ ...ENTORNO_MINIMO, GEO_TOKEN_INTERNO: '' })).toThrow(
+      /GEO_TOKEN_INTERNO/,
+    );
+    expect(() => leerConfig({ ...ENTORNO_MINIMO, GEO_TOKEN_INTERNO: 'corto' })).toThrow(
+      /GEO_TOKEN_INTERNO[^\n]*32/,
+    );
+    expect(() =>
+      leerConfig({ ...ENTORNO_MINIMO, GEO_TOKEN_INTERNO: 'x'.repeat(32) }),
+    ).not.toThrow();
+  });
+});
+
+/**
+ * Con qué rol se conecta api-core. El `.env` raíz trae `DATABASE_URL` con el rol DUEÑO del esquema
+ * (lo usan las migraciones, los seeds y el ETL); api-core tiene su propio rol con privilegios
+ * mínimos (`curichi_api`, migración 0008) en `API_DATABASE_URL`, que manda cuando está.
+ */
+describe('URL de la base de api-core', () => {
+  const DUENO = 'postgresql://curichi:x@127.0.0.1:5432/curichi';
+  const API = 'postgresql://curichi_api:y@127.0.0.1:5432/curichi';
+
+  it('API_DATABASE_URL tiene prioridad sobre DATABASE_URL', () => {
+    expect(leerConfig({ API_DATABASE_URL: API, DATABASE_URL: DUENO }).databaseUrl).toBe(API);
+  });
+
+  it('vacía cuenta como ausente: el .env.example la declara sin valor', () => {
+    // Con `??` una cadena vacía ganaba y el servicio arrancaba sin URL.
+    expect(leerConfig({ API_DATABASE_URL: '', DATABASE_URL: DUENO }).databaseUrl).toBe(DUENO);
+    expect(leerConfig({ API_DATABASE_URL: '', DATABASE_URL: '' }).databaseUrl).toBe(
+      leerConfig({}).databaseUrl,
+    );
+  });
+
+  it('sin ninguna de las dos cae en la base local sin Docker (ADR 0002)', () => {
+    expect(leerConfig({}).databaseUrl).toBe('postgresql://curichi:curichi@127.0.0.1:5433/curichi');
+  });
 });
 
 describe('CSV: inyección de fórmulas', () => {
@@ -77,6 +123,20 @@ describe('CSV: inyección de fórmulas', () => {
   it('sigue escapando comillas y comas como antes', () => {
     expect(csvCelda('dice "hola", y algo')).toBe('"dice ""hola"", y algo"');
     expect(csvCelda(null)).toBe('');
+  });
+
+  it('entrecomilla el \\r suelto: sin comillas parte el registro y la fila nueva empieza con =', () => {
+    // Excel y LibreOffice cortan el registro en un CR aunque no venga seguido de LF.
+    expect(csvCelda("agua en la esquina\r=cmd|' /C calc'!A0")).toBe(
+      `"agua en la esquina\r=cmd|' /C calc'!A0"`,
+    );
+    expect(csvCelda('primera línea\r\nsegunda')).toBe('"primera línea\r\nsegunda"');
+    expect(csvCelda('uno;dos')).toBe('"uno;dos"');
+  });
+
+  it('una celda que empieza por salto de línea también se neutraliza', () => {
+    expect(csvCelda('\n=1+1')).toBe(`"'\n=1+1"`);
+    expect(csvCelda('\r@SUM(A1)')).toBe(`"'\r@SUM(A1)"`);
   });
 });
 
@@ -220,9 +280,23 @@ describe('comparación de tokens en tiempo constante', () => {
  *
  * Aquí se comprueba el comportamiento, no el parseo: se monta Fastify con la misma opción que usa
  * `crearApp` y se mira qué `req.ip` resulta. Contar saltos DESDE el servicio es lo que hace que
- * añadir entradas por delante no sirva de nada.
+ * añadir entradas por delante no sirva de nada… siempre que el número de saltos sea el de los
+ * proxies que de verdad ESCRIBEN en la cabecera.
+ *
+ * TOPOLOGÍA REAL (navegador → proxy TLS → Next → api-core), comprobada ejecutando:
+ *   - el proxy TLS AÑADE la IP del cliente al final de lo que mandó el navegador;
+ *   - el rewrite de Next reenvía la cabecera TAL CUAL y no añade entrada propia;
+ *   - api-core ve como socket la IP de Next.
+ * Solo hay UN salto que escribe, así que el valor correcto es `TRUST_PROXY=1`. La prueba anterior
+ * suponía una entrada de Next que no existe y daba por buena `TRUST_PROXY=2`, que en esta
+ * topología le entrega al cliente la elección de su IP.
  */
 describe('la IP del cliente no se puede elegir desde el navegador', () => {
+  /** IP de Next: la que abre el socket contra api-core. */
+  const NEXT = '10.9.9.9';
+  /** IP pública real del vecino, la que ve el proxy TLS. */
+  const CLIENTE = '198.51.100.7';
+
   async function ipVista(confianza: string | undefined, cabeceras: Record<string, string>) {
     const app = Fastify({ trustProxy: opcionFastify(leerConfianzaProxy(confianza)) });
     app.get('/', async (req) => ({ ip: req.ip }));
@@ -230,43 +304,60 @@ describe('la IP del cliente no se puede elegir desde el navegador', () => {
       method: 'GET',
       url: '/',
       headers: cabeceras,
-      remoteAddress: '10.9.9.9', // el proxy real que abre el socket
+      remoteAddress: NEXT,
     });
     await app.close();
     return r.json().ip as string;
   }
 
+  /**
+   * `X-Forwarded-For` tal como llega a api-core: lo que mandó el navegador (si mandó algo) más la
+   * IP real que añade el proxy TLS. Next no añade nada.
+   */
+  function cabeceraQueLlega(xffDelNavegador?: string) {
+    return { 'x-forwarded-for': xffDelNavegador ? `${xffDelNavegador}, ${CLIENTE}` : CLIENTE };
+  }
+
+  // La primera instancia de Fastify del proceso cuesta segundos cuando la suite corre en paralelo
+  // con las que levantan PGlite, y ese coste se lo comía entero el primer `it` (se vio pasar de
+  // los 5 s). Pagarlo aquí no cambia lo que se prueba; mismo criterio que resiliencia.test.ts.
+  beforeAll(async () => {
+    await ipVista('0', {});
+  }, 60_000);
+
   it('sin proxy declarado, la cabecera se ignora por completo', async () => {
-    expect(await ipVista('0', { 'x-forwarded-for': '203.0.113.1' })).toBe('10.9.9.9');
-    expect(await ipVista(undefined, { 'x-forwarded-for': '203.0.113.1' })).toBe('10.9.9.9');
+    expect(await ipVista('0', { 'x-forwarded-for': '203.0.113.1' })).toBe(NEXT);
+    expect(await ipVista(undefined, { 'x-forwarded-for': '203.0.113.1' })).toBe(NEXT);
   });
 
-  it('con dos saltos declarados, el cliente no puede colarse añadiendo entradas', async () => {
-    // Topología documentada: navegador → proxy TLS → Next → servicio. Lo que escribe el cliente
-    // va al principio de la lista; lo que escriben los proxies de confianza, al final.
-    // Cliente miente «1.1.1.1», luego el proxy TLS anota la IP real y Next anota la del proxy.
-    const ip = await ipVista('2', { 'x-forwarded-for': '1.1.1.1, 198.51.100.7, 172.20.0.5' });
-    // La IP que queda es la que escribió un proxy de confianza, no la inventada por el cliente.
-    expect(ip).not.toBe('1.1.1.1');
-    expect(ip).toBe('198.51.100.7');
+  it('con TRUST_PROXY=1 la IP es la real, la que anotó el proxy TLS', async () => {
+    expect(await ipVista('1', cabeceraQueLlega())).toBe(CLIENTE);
   });
 
-  it('añadir muchas entradas por delante tampoco desplaza el resultado', async () => {
-    const ip = await ipVista('2', {
-      'x-forwarded-for': '1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4, 198.51.100.7, 172.20.0.5',
-    });
-    expect(['1.1.1.1', '2.2.2.2', '3.3.3.3', '4.4.4.4']).not.toContain(ip);
-    expect(ip).toBe('198.51.100.7');
+  it('con TRUST_PROXY=1 el navegador no puede colarse mandando su propia cabecera', async () => {
+    expect(await ipVista('1', cabeceraQueLlega('1.1.1.1'))).toBe(CLIENTE);
+  });
+
+  it('con TRUST_PROXY=1 añadir muchas entradas por delante tampoco desplaza el resultado', async () => {
+    const ip = await ipVista('1', cabeceraQueLlega('1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4'));
+    expect(ip).toBe(CLIENTE);
+  });
+
+  it('con TRUST_PROXY=2 en esta topología el cliente SÍ elige su IP: por eso el valor es 1', async () => {
+    // El segundo salto «de confianza» ya no es un proxy nuestro: es lo que escribió el navegador.
+    expect(await ipVista('2', cabeceraQueLlega('1.1.1.1'))).toBe('1.1.1.1');
+    // Y cambiándola en cada petición, estrena cubo de rate limit y de freno de login cada vez.
+    expect(await ipVista('2', cabeceraQueLlega('5.5.5.5'))).toBe('5.5.5.5');
   });
 
   it('«true» y «*» ya no se aceptan: eran exactamente la configuración vulnerable', async () => {
-    expect(await ipVista('true', { 'x-forwarded-for': '1.1.1.1' })).toBe('10.9.9.9');
-    expect(await ipVista('*', { 'x-forwarded-for': '1.1.1.1' })).toBe('10.9.9.9');
+    expect(await ipVista('true', { 'x-forwarded-for': '1.1.1.1' })).toBe(NEXT);
+    expect(await ipVista('*', { 'x-forwarded-for': '1.1.1.1' })).toBe(NEXT);
   });
 
   it('otras cabeceras de proxy no se miran nunca', async () => {
     for (const cab of ['x-real-ip', 'cf-connecting-ip', 'true-client-ip'])
-      expect(await ipVista('2', { [cab]: '203.0.113.9' }), cab).toBe('10.9.9.9');
+      expect(await ipVista('1', { [cab]: '203.0.113.9' }), cab).toBe(NEXT);
   });
 });
 

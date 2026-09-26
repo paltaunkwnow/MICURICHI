@@ -14,7 +14,12 @@
  *                    el proxy de confianza, no la que eligió el cliente.
  *   - lista de IP/CIDR → se confía solo en esas direcciones.
  *
- * Con la topología documentada (navegador → proxy TLS → Next → servicio) el valor correcto es 2.
+ * Con la topología documentada (navegador → proxy TLS → Next → servicio) el valor correcto es 1,
+ * no 2. N cuenta los saltos que ESCRIBEN en la cabecera, y aquí solo escribe el proxy TLS: añade
+ * la IP real del cliente al final de lo que mandó el navegador, y el rewrite de Next la reenvía
+ * tal cual sin añadir entrada propia (el socket que ve el servicio es el de Next). Con 2, el
+ * segundo «salto de confianza» es la última entrada que escribió el propio navegador, y cualquiera
+ * vuelve a elegirse la IP. Comprobado en `test/seguridad.test.ts`.
  */
 export type ConfianzaProxy = false | number | string[];
 

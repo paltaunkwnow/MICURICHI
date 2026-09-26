@@ -225,6 +225,37 @@ export function instrumentarPool(pool: PoolObservable, metricas: Metricas): void
   metricas.medidor('curichi_db_pool_max', () => pool.options?.max ?? 0);
 }
 
+/** Por qué se cae (o no) cada intento de `POST /api/v1/fotos`, para `curichi_fotos_subidas_total`. */
+export type ResultadoSubidaFoto =
+  | 'aceptada'
+  | 'rechazada_tipo'
+  | 'rechazada_tamano'
+  | 'rechazada_cuota'
+  | 'error';
+
+/**
+ * Cuenta un intento de subida de foto por resultado.
+ *
+ * Por qué hace falta. La revisión de producción encontró que un almacén de fotos sin permisos de
+ * escritura (volumen montado root:root, usuario `node` sin acceso) fallaba en silencio: `/ready`
+ * ya lo marca `fotos: error` (ver `AlmacenDisco.comprobar`), pero eso solo dice que la réplica está
+ * degradada AHORA, no cuántas subidas reales se están perdiendo ni por qué. Un pico de
+ * `rechazada_tipo` o `rechazada_tamano` es el formulario o un cliente viejo; un pico de `error` es
+ * el almacén o la base.
+ */
+export function registrarSubidaDeFoto(metricas: Metricas, resultado: ResultadoSubidaFoto): void {
+  metricas.contar('curichi_fotos_subidas_total', { resultado });
+}
+
+/**
+ * Duración del reprocesado con sharp (`sanitizarImagen`), no de la petición entera: la petición ya
+ * la mide `curichi_http_duracion_segundos` y esa incluye el multipart, la cuota y la base. Aquí
+ * interesa aislar la parte que de verdad puede saturar la CPU (§13, `HILOS_LIBVIPS`).
+ */
+export function registrarProcesadoDeFoto(metricas: Metricas, segundos: number): void {
+  metricas.observar('curichi_fotos_procesado_segundos', {}, segundos);
+}
+
 function serializar(etiquetas: Record<string, string>): string {
   return Object.entries(etiquetas)
     .sort(([a], [b]) => a.localeCompare(b))

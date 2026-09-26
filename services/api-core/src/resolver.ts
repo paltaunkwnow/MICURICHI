@@ -1,5 +1,7 @@
 /** Cliente de geo-service (Parte 4). Interfaz inyectable para tests. */
 import { type ResolverRespuesta, ResolverRespuestaSchema } from 'contracts';
+import type { FastifyBaseLogger } from 'fastify';
+import type { Metricas } from './observabilidad.js';
 
 /**
  * geo-service no responde ahora mismo: está parado, reiniciándose, saturado o tardó demasiado.
@@ -20,17 +22,47 @@ export class GeoNoDisponible extends Error {
   }
 }
 
+/** Dónde avisa el cliente de lo que no puede devolver como error (ver `invalidarCapas`). */
+export interface ObservabilidadResolver {
+  log: Pick<FastifyBaseLogger, 'warn'>;
+  metricas: Pick<Metricas, 'contar'>;
+}
+
 export interface ResolverGeo {
   /** `requestId` se propaga a geo-service para poder seguir la misma petición en ambos logs. */
   resolver(lat: number, lon: number, requestId?: string): Promise<ResolverRespuesta>;
   invalidarCapas(): Promise<void>;
+  /**
+   * `crearApp` le pasa su logger y su registro de métricas, que no existen todavía cuando se
+   * construye el cliente (servidor.ts lo crea antes que la app). Opcional: los falsos de las
+   * pruebas no lo necesitan.
+   */
+  observar?(o: ObservabilidadResolver): void;
 }
 
 export class ResolverHttp implements ResolverGeo {
+  private obs: ObservabilidadResolver | null = null;
+
   constructor(
     private baseUrl: string,
     private tokenInterno = '',
   ) {}
+
+  observar(o: ObservabilidadResolver): void {
+    this.obs = o;
+  }
+
+  /**
+   * El token va en TODAS las llamadas, no solo en la de invalidar. geo-service exime de su cupo
+   * por IP al resolver cuando la petición trae el token válido: api-core llama una vez por cada
+   * `POST /reportes`, siempre desde el mismo origen, y sin token todas las creaciones de la
+   * ciudad compartían un solo cupo por IP (120/min por defecto) que una tormenta agota:
+   * geo-service responde 429 y el vecino recibe 503 al enviar su reporte.
+   */
+  private cabecerasInternas(): Record<string, string> {
+    return this.tokenInterno ? { 'x-token-interno': this.tokenInterno } : {};
+  }
+
   async resolver(lat: number, lon: number, requestId?: string): Promise<ResolverRespuesta> {
     let r: Response;
     try {
@@ -38,6 +70,7 @@ export class ResolverHttp implements ResolverGeo {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
+          ...this.cabecerasInternas(),
           ...(requestId ? { 'x-request-id': requestId } : {}),
         },
         body: JSON.stringify({ lat, lon }),
@@ -53,15 +86,23 @@ export class ResolverHttp implements ResolverGeo {
     if (!r.ok) throw new Error(`geo-service respondió ${r.status}`);
     return ResolverRespuestaSchema.parse(await r.json());
   }
+  /**
+   * Mejor esfuerzo: la activación de la capa ya está confirmada en la base y geo-service relee
+   * por su cuenta las versiones vigentes al poco tiempo, así que un fallo aquí no se devuelve a
+   * quien activó. Pero tampoco se calla: antes se tragaba todo, incluido el 403 de un token mal
+   * configurado —que `fetch` ni siquiera trata como error—, y cada activación fallaba sin rastro.
+   */
   async invalidarCapas() {
     try {
-      await fetch(`${this.baseUrl}/geo/v1/capas/invalidar`, {
+      const r = await fetch(`${this.baseUrl}/geo/v1/capas/invalidar`, {
         method: 'POST',
-        headers: this.tokenInterno ? { 'x-token-interno': this.tokenInterno } : {},
+        headers: this.cabecerasInternas(),
         signal: AbortSignal.timeout(3000),
       });
-    } catch {
-      /* mejor esfuerzo */
+      if (!r.ok) throw new Error(`geo-service respondió ${r.status}`);
+    } catch (e) {
+      this.obs?.log.warn({ err: e }, 'no se pudo invalidar la caché de capas de geo-service');
+      this.obs?.metricas.contar('curichi_geo_invalidacion_fallida_total');
     }
   }
 }

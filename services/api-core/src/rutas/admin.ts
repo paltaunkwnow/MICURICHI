@@ -1,17 +1,44 @@
 import { ExportarQuerySchema, type Indicadores, NOTA_METODOLOGICA, SEVERIDADES } from 'contracts';
 import type { FastifyInstance } from 'fastify';
+import type pg from 'pg';
 import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
-import { listarReportes } from '../consultas.js';
+import { seleccionarParaExportar } from '../consultas.js';
 import { aFeature, vistaTecnica } from '../vistas.js';
+import { invalidarResumenEjecutivo } from './ejecutivo.js';
+
+/** Invalidador de la caché de indicadores, uno por instancia de la app (los tests montan varias). */
+const invalidadoresIndicadores = new WeakMap<FastifyInstance, () => void>();
 
 /**
- * Caracteres con los que Excel, LibreOffice y Sheets interpretan la celda como fórmula.
- * La descripción la escribe cualquier vecino: sin neutralizarlos, un reporte que empiece por
- * `=HYPERLINK(...)` o `@SUM(...)` se ejecuta al abrir la exportación en el municipio.
+ * Olvida los agregados cacheados en ESTE proceso (indicadores y resumen ejecutivo): la próxima
+ * petición los recalcula. Lo llaman cada transición de estado y cada reclasificación
+ * (moderacion.ts) y la activación de una versión de capa; sin esto el técnico que acaba de
+ * validar veía la cifra de antes hasta 30 s.
+ *
+ * Solo alcanza a este proceso. Con varias réplicas, las demás siguen sirviendo su copia hasta que
+ * venza el TTL de 30 s (TTL_INDICADORES_MS, TTL_RESUMEN_MS); avisarles pediría un canal entre
+ * procesos, por ejemplo LISTEN/NOTIFY de PostgreSQL.
  */
-const INICIO_FORMULA = /^[=+\-@\t\r]/;
+export function invalidarCachesDeAgregados(app: FastifyInstance): void {
+  invalidadoresIndicadores.get(app)?.();
+  invalidarResumenEjecutivo(app);
+}
+
+/**
+ * Caracteres con los que Excel, LibreOffice y Sheets interpretan la celda como fórmula, más los
+ * saltos de línea. La descripción la escribe cualquier vecino: sin neutralizarlos, un reporte que
+ * empiece por `=HYPERLINK(...)` o `@SUM(...)` se ejecuta al abrir la exportación en el municipio.
+ */
+const INICIO_FORMULA = /^[=+\-@\t\r\n]/;
+
+/**
+ * Celdas que van entre comillas. El CR suelto también: las hojas de cálculo cortan el registro en
+ * él aunque no lo siga un LF, y sin comillas un `…\r=cmd|…` en la descripción abría una fila
+ * nueva que empezaba por la fórmula, saltándose la neutralización de arriba.
+ */
+const NECESITA_COMILLAS = /[",;\r\n]/;
 
 export function csvCelda(v: unknown): string {
   if (v === null || v === undefined) return '';
@@ -20,7 +47,115 @@ export function csvCelda(v: unknown): string {
   // seguir siendo numéricas en la hoja.
   const esNumero = typeof v === 'number' || (s !== '' && Number.isFinite(Number(s)));
   const seguro = !esNumero && INICIO_FORMULA.test(s) ? `'${s}` : s;
-  return /[",\n;]/.test(seguro) ? `"${seguro.replace(/"/g, '""')}"` : seguro;
+  return NECESITA_COMILLAS.test(seguro) ? `"${seguro.replace(/"/g, '""')}"` : seguro;
+}
+
+/** Los indicadores se miran, no se operan: 30 s de desfase no cambian ninguna decisión. */
+const TTL_INDICADORES_MS = 30_000;
+
+/**
+ * Estados que son un anegamiento. Rechazados y duplicados solo cuentan en `por_estado`: contarlos
+ * en el resto dejaba que el spam subiera un distrito en el ranking.
+ */
+const ESTADOS_QUE_CUENTAN: readonly string[] = ['nuevo', 'validado', 'resuelto'];
+
+/**
+ * Datos de la capa para un id, sea de la versión que sea: los de la vigente si el id sigue en
+ * ella y si no los de la última versión cargada que lo tenga. Agrupar por id y nombre repetía el
+ * distrito cuando una entrega nueva le cambiaba el nombre, y mirar solo la vigente dejaba sin
+ * nombre a los reportes resueltos con una capa anterior (ver el comentario de SELECT_REPORTE).
+ */
+const datosDeCapa = (
+  capa: 'distrito_municipal' | 'unidad_vecinal',
+  id: string,
+  columnas: string,
+) => `
+  LEFT JOIN LATERAL (
+    SELECT ${columnas} FROM geo.${capa} x
+    LEFT JOIN geo.capa_version cv ON cv.capa = '${capa}' AND cv.version = x.version_capa
+    WHERE x.id = ${id}
+    ORDER BY cv.vigente DESC NULLS LAST, cv.cargado_en DESC NULLS LAST, x.version_capa DESC
+    LIMIT 1
+  ) c ON true`;
+
+/**
+ * Dos tandas en paralelo, cada una en serie: como mucho dos conexiones del pool. Antes eran siete
+ * consultas a la vez, siete de las ocho conexiones, y un par de paneles abiertos dejaban sin
+ * conexiones al resto de la API.
+ */
+async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
+  const [conteos, geografia] = await Promise.all([
+    (async () => {
+      // Una sola pasada por la tabla: estado × severidad efectiva, a lo sumo 20 filas.
+      const porEstadoYSeveridad = await pool.query<{
+        estado: string;
+        severidad: string;
+        n: number;
+      }>(
+        `SELECT estado::text AS estado, COALESCE(severidad_manual, severidad_calculada)::text AS severidad,
+                count(*)::int AS n
+           FROM reporte_inundacion GROUP BY 1, 2`,
+      );
+      const recurrentes = await pool.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM punto_critico WHERE n_reportes >= 2',
+      );
+      const capas = await pool.query<{ capa: string; version: string }>(
+        'SELECT capa, version FROM geo.capa_version WHERE vigente',
+      );
+      return { porEstadoYSeveridad, recurrentes, capas };
+    })(),
+    (async () => {
+      const porDistrito = await pool.query<{
+        distrito_id: string;
+        nombre: string | null;
+        n: number;
+      }>(
+        `SELECT a.distrito_id, c.nombre, a.n
+           FROM (SELECT distrito_id, count(*)::int AS n FROM reporte_inundacion
+                  WHERE estado = ANY($1::estado_reporte[]) GROUP BY distrito_id) a
+           ${datosDeCapa('distrito_municipal', 'a.distrito_id', 'x.nombre')}
+          ORDER BY a.n DESC, a.distrito_id`,
+        [ESTADOS_QUE_CUENTAN],
+      );
+      const porUv = await pool.query<{
+        unidad_vecinal_id: string;
+        nombre: string | null;
+        distrito_id: string | null;
+        n: number;
+      }>(
+        `SELECT a.unidad_vecinal_id, c.nombre, c.distrito_id, a.n
+           FROM (SELECT unidad_vecinal_id, count(*)::int AS n FROM reporte_inundacion
+                  WHERE estado = ANY($1::estado_reporte[]) GROUP BY unidad_vecinal_id
+                  ORDER BY count(*) DESC, unidad_vecinal_id LIMIT 50) a
+           ${datosDeCapa('unidad_vecinal', 'a.unidad_vecinal_id', 'x.nombre, x.distrito_id')}
+          ORDER BY a.n DESC, a.unidad_vecinal_id`,
+        [ESTADOS_QUE_CUENTAN],
+      );
+      return { porDistrito, porUv };
+    })(),
+  ]);
+
+  const porEstado: Record<string, number> = {};
+  const porSeveridad = Object.fromEntries(SEVERIDADES.map((s) => [s, 0])) as Record<
+    (typeof SEVERIDADES)[number],
+    number
+  >;
+  let total = 0;
+  for (const f of conteos.porEstadoYSeveridad.rows) {
+    porEstado[f.estado] = (porEstado[f.estado] ?? 0) + f.n;
+    if (!ESTADOS_QUE_CUENTAN.includes(f.estado)) continue;
+    total += f.n;
+    porSeveridad[f.severidad as keyof typeof porSeveridad] += f.n;
+  }
+  return {
+    total,
+    por_estado: porEstado,
+    por_severidad: porSeveridad,
+    por_distrito: geografia.porDistrito.rows,
+    por_unidad_vecinal: geografia.porUv.rows,
+    puntos_criticos_recurrentes: conteos.recurrentes.rows[0]?.n ?? 0,
+    capas_vigentes: Object.fromEntries(conteos.capas.rows.map((f) => [f.capa, f.version])),
+  };
 }
 
 export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
@@ -31,23 +166,33 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
         codigo: 'FILTROS_INVALIDOS',
         mensaje: q.error.issues.map((i) => i.message).join('; '),
       });
-    const { filas, total } = await listarReportes(dep.pool, {
+    const { filas, total } = await seleccionarParaExportar(dep.pool, {
       filtros: q.data,
       soloPublicos: false,
+      zonaHoraria: dep.cfg.zonaHoraria,
     });
     const vistas = filas.map((f) => vistaTecnica(f, dep.cfg.urlPublica));
-    const fecha = new Date().toISOString().slice(0, 10);
+    // Nunca un recorte en silencio: el archivo dice cuántos trae de cuántos, y la cabecera lo
+    // avisa a quien descarga por programa sin abrirlo.
+    const exportados = vistas.length;
+    const truncado = total > exportados;
+    if (truncado) res.header('X-Curichi-Truncado', '1');
+    const generadoEn = new Date().toISOString();
+    const fecha = generadoEn.slice(0, 10);
     if (q.data.formato === 'geojson') {
       res.header('Content-Type', 'application/geo+json; charset=utf-8');
       res.header(
         'Content-Disposition',
         `attachment; filename="mi-curichi-reportes-${fecha}.geojson"`,
       );
+      // Forma de ExportacionGeoJsonSchema.
       return {
         type: 'FeatureCollection',
         nota_metodologica: NOTA_METODOLOGICA,
-        generado_en: new Date().toISOString(),
+        generado_en: generadoEn,
         total,
+        exportados,
+        truncado,
         features: vistas.map(aFeature),
       };
     }
@@ -85,9 +230,13 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
     ];
     const lineas = [
       `# ${NOTA_METODOLOGICA}`,
-      `# Generado ${new Date().toISOString()} · ${total} reportes · CRS EPSG:4326`,
-      columnas.join(','),
+      `# Generado ${generadoEn} · ${exportados} de ${total} reportes · CRS EPSG:4326`,
     ];
+    if (truncado)
+      lineas.push(
+        `# INCOMPLETO: este archivo no trae ${total - exportados} de los reportes seleccionados. Acotá los filtros para exportar el resto.`,
+      );
+    lineas.push(columnas.join(','));
     for (const v of vistas) {
       const p = v.props;
       const fila: Record<string, unknown> = {
@@ -107,62 +256,45 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
     return `﻿${lineas.join('\n')}\n`;
   });
 
+  let indicadoresGuardados: { valor: Indicadores; en: number } | null = null;
+  // Una sola consulta en vuelo: sin esto, al caducar la caché cada panel abierto lanzaría a la
+  // vez su propio cálculo completo.
+  let indicadoresEnVuelo: Promise<Indicadores> | null = null;
+  // Sube con cada invalidación. Un cálculo que leyó la base antes de moderar y termina después
+  // no puede volver a guardar su cifra, y la petición siguiente tampoco se sube a él.
+  let generacion = 0;
+  invalidadoresIndicadores.set(app, () => {
+    generacion++;
+    indicadoresGuardados = null;
+    indicadoresEnVuelo = null;
+  });
+
+  function calcularYGuardar(): Promise<Indicadores> {
+    const deEstaGeneracion = generacion;
+    const calculo: Promise<Indicadores> = calcularIndicadores(dep.pool)
+      .then((valor) => {
+        if (deEstaGeneracion === generacion) indicadoresGuardados = { valor, en: Date.now() };
+        return valor;
+      })
+      .finally(() => {
+        if (indicadoresEnVuelo === calculo) indicadoresEnVuelo = null;
+      });
+    indicadoresEnVuelo = calculo;
+    return calculo;
+  }
+
   app.get(
     '/api/v1/indicadores',
     { preHandler: requerirRol('tecnico', 'admin') },
-    async (): Promise<Indicadores> => {
-      // Los nombres de distrito y unidad vecinal salen de la versión de capa con la que se
-      // resolvió CADA reporte, no de la vigente: si no, al activar una entrega nueva los
-      // reportes anteriores aparecen sin nombre en el panel (ver el comentario de SELECT_REPORTE).
-      const [total, porEstado, porSev, porDistrito, porUv, pc, capas] = await Promise.all([
-        dep.pool.query<{ n: string }>('SELECT count(*)::text AS n FROM reporte_inundacion'),
-        dep.pool.query<{ estado: string; n: string }>(
-          'SELECT estado::text, count(*)::text AS n FROM reporte_inundacion GROUP BY estado',
-        ),
-        dep.pool.query<{ severidad: string; n: string }>(
-          'SELECT COALESCE(severidad_manual, severidad_calculada)::text AS severidad, count(*)::text AS n FROM reporte_inundacion GROUP BY 1',
-        ),
-        dep.pool.query<{ distrito_id: string; nombre: string | null; n: string }>(
-          `SELECT r.distrito_id, d.nombre, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.distrito_municipal d ON d.id = r.distrito_id AND d.version_capa = r.version_capa GROUP BY r.distrito_id, d.nombre ORDER BY count(*) DESC`,
-        ),
-        dep.pool.query<{
-          unidad_vecinal_id: string;
-          nombre: string | null;
-          distrito_id: string | null;
-          n: string;
-        }>(
-          `SELECT r.unidad_vecinal_id, u.nombre, u.distrito_id, count(*)::text AS n FROM reporte_inundacion r LEFT JOIN geo.unidad_vecinal u ON u.id = r.unidad_vecinal_id AND u.version_capa = r.version_capa GROUP BY r.unidad_vecinal_id, u.nombre, u.distrito_id ORDER BY count(*) DESC LIMIT 50`,
-        ),
-        dep.pool.query<{ n: string }>(
-          'SELECT count(*)::text AS n FROM punto_critico WHERE n_reportes >= 2',
-        ),
-        dep.pool.query<{ capa: string; version: string }>(
-          'SELECT capa, version FROM geo.capa_version WHERE vigente',
-        ),
-      ]);
-      const sev = Object.fromEntries(SEVERIDADES.map((s) => [s, 0])) as Record<
-        (typeof SEVERIDADES)[number],
-        number
-      >;
-      for (const f of porSev.rows) sev[f.severidad as keyof typeof sev] = Number(f.n);
-      return {
-        total: Number(total.rows[0]?.n ?? 0),
-        por_estado: Object.fromEntries(porEstado.rows.map((f) => [f.estado, Number(f.n)])),
-        por_severidad: sev,
-        por_distrito: porDistrito.rows.map((f) => ({
-          distrito_id: f.distrito_id,
-          nombre: f.nombre,
-          n: Number(f.n),
-        })),
-        por_unidad_vecinal: porUv.rows.map((f) => ({
-          unidad_vecinal_id: f.unidad_vecinal_id,
-          nombre: f.nombre,
-          distrito_id: f.distrito_id,
-          n: Number(f.n),
-        })),
-        puntos_criticos_recurrentes: Number(pc.rows[0]?.n ?? 0),
-        capas_vigentes: Object.fromEntries(capas.rows.map((f) => [f.capa, f.version])),
-      };
+    async (_req, res): Promise<Indicadores> => {
+      if (indicadoresGuardados && Date.now() - indicadoresGuardados.en < TTL_INDICADORES_MS) {
+        res.header('X-Cache', 'hit');
+        app.metricas.contar('curichi_indicadores_cache_total', { resultado: 'hit' });
+        return indicadoresGuardados.valor;
+      }
+      res.header('X-Cache', 'miss');
+      app.metricas.contar('curichi_indicadores_cache_total', { resultado: 'miss' });
+      return indicadoresEnVuelo ?? calcularYGuardar();
     },
   );
 
@@ -216,6 +348,9 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
         cliente.release();
       }
       await dep.resolver.invalidarCapas();
+      // Cambian los nombres y `capas_vigentes`: el panel de capas refresca los indicadores tras
+      // activar y tiene que verlos ya.
+      invalidarCachesDeAgregados(app);
       const r = await dep.pool.query(
         'SELECT id, capa, version, fuente, fecha_vigencia::text, crs_origen, n_features, cargado_en, vigente, activado_por, activado_en FROM geo.capa_version WHERE id = $1',
         [p.data.id],

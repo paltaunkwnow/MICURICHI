@@ -12,6 +12,14 @@ export const COOKIE_SESION = 'curichi_sesion';
  */
 const REFRESCO_USO_MS = 60_000;
 
+/**
+ * Cabecera con la que un cliente marca una petición automática, no hecha por la persona: el panel
+ * ejecutivo consulta el resumen cada 60 s. La sesión se valida igual (sin sesión viva es 401),
+ * pero la petición no cuenta como uso: si contara, un panel abierto en una pantalla renovaba
+ * `ultimo_uso_en` cada minuto y la caducidad por inactividad no llegaba nunca.
+ */
+export const CABECERA_SONDEO = 'x-curichi-sondeo';
+
 export async function crearSesion(
   pool: pg.Pool,
   usuarioId: string,
@@ -32,11 +40,14 @@ export async function crearSesion(
  *  - `expira_en`: tope absoluto desde el inicio de sesión;
  *  - `ultimo_uso_en`: inactividad. Una cookie robada de un equipo compartido servía hasta 7 días;
  *    con el corte por inactividad deja de valer al poco de dejar de usarse.
+ *
+ * `renovarUso = false` valida sin marcar actividad (ver `CABECERA_SONDEO`).
  */
 export async function usuarioDeSesion(
   pool: pg.Pool,
   sesionId: string | undefined,
   idleHoras: number,
+  renovarUso = true,
 ): Promise<Usuario | null> {
   if (!sesionId || !/^[a-f0-9]{64}$/.test(sesionId)) return null;
   const r = await pool.query<Usuario & { refrescar: boolean }>(
@@ -51,7 +62,7 @@ export async function usuarioDeSesion(
   );
   const fila = r.rows[0];
   if (!fila) return null;
-  if (fila.refrescar) {
+  if (renovarUso && fila.refrescar) {
     // Sin await: refrescar la marca no debe añadir latencia a la petición del usuario.
     void pool
       .query('UPDATE sesion SET ultimo_uso_en = now() WHERE id = $1', [sesionId])
@@ -70,7 +81,8 @@ export interface OpcionesAuth {
 export function instalarAuth(app: FastifyInstance, o: OpcionesAuth) {
   app.decorateRequest('usuario', null);
   app.addHook('onRequest', async (req) => {
-    req.usuario = await usuarioDeSesion(o.pool, req.cookies[COOKIE_SESION], o.idleHoras);
+    const sondeo = req.headers[CABECERA_SONDEO] === '1';
+    req.usuario = await usuarioDeSesion(o.pool, req.cookies[COOKIE_SESION], o.idleHoras, !sondeo);
   });
 }
 

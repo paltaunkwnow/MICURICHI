@@ -124,13 +124,24 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(pub.json().features[0].properties.punto_critico_id).toBeTruthy();
   });
   it('respeta la máquina de estados (validado → nuevo no existe; rechazado requiere motivo; reabrir es de admin)', async () => {
+    // Con motivo, para que lo que se compruebe sea la transición: desde contracts 0.6.0 pasar a
+    // `nuevo` sin motivo es 400 antes de mirar el estado.
     const mal = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/reportes/${id}/estado`,
+      payload: { estado: 'nuevo', estado_motivo: 'Intento de reabrir un validado' },
+      cookies: { curichi_sesion: cookieTecnico },
+    });
+    expect(mal.statusCode).toBe(409);
+    expect(mal.json().codigo).toBe('TRANSICION_NO_PERMITIDA');
+    const malSinMotivo = await app.inject({
       method: 'PATCH',
       url: `/api/v1/reportes/${id}/estado`,
       payload: { estado: 'nuevo' },
       cookies: { curichi_sesion: cookieTecnico },
     });
-    expect(mal.statusCode).toBe(409);
+    expect(malSinMotivo.statusCode).toBe(400);
+    expect(malSinMotivo.json().codigo).toBe('PAYLOAD_INVALIDO');
     const otro = (await crear()).json().id as string;
     const sinMotivo = await app.inject({
       method: 'PATCH',
@@ -160,6 +171,50 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
       cookies: { curichi_sesion: cookieAdmin },
     });
     expect(reabrirAdmin.statusCode).toBe(200);
+  });
+  it('reabrir exige motivo: el nuevo queda en estado_motivo y el del rechazo en la auditoría', async () => {
+    const r = (await crear()).json().id as string;
+    const rechazo = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/reportes/${r}/estado`,
+      payload: { estado: 'rechazado', estado_motivo: 'Fuera del municipio' },
+      cookies: { curichi_sesion: cookieTecnico },
+    });
+    expect(rechazo.statusCode).toBe(200);
+    const sinMotivo = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/reportes/${r}/estado`,
+      payload: { estado: 'nuevo' },
+      cookies: { curichi_sesion: cookieAdmin },
+    });
+    expect(sinMotivo.statusCode).toBe(400);
+    expect(sinMotivo.json().codigo).toBe('PAYLOAD_INVALIDO');
+    const reabrir = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/reportes/${r}/estado`,
+      payload: { estado: 'nuevo', estado_motivo: 'El punto sí está dentro del municipio' },
+      cookies: { curichi_sesion: cookieAdmin },
+    });
+    expect(reabrir.statusCode).toBe(200);
+    expect(reabrir.json().properties.estado).toBe('nuevo');
+    expect(reabrir.json().properties.estado_motivo).toBe('El punto sí está dentro del municipio');
+    const audit = await pool.query<{
+      antes: Record<string, unknown>;
+      despues: Record<string, unknown>;
+    }>(
+      `SELECT antes, despues FROM auditoria WHERE entidad_id = $1 AND accion = 'estado:rechazado->nuevo'`,
+      [r],
+    );
+    expect(audit.rows).toHaveLength(1);
+    // Sin esto el porqué del rechazo se perdía: la fila solo guarda el motivo vigente.
+    expect(audit.rows[0]!.antes).toMatchObject({
+      estado: 'rechazado',
+      motivo: 'Fuera del municipio',
+    });
+    expect(audit.rows[0]!.despues).toMatchObject({
+      estado: 'nuevo',
+      motivo: 'El punto sí está dentro del municipio',
+    });
   });
   it('fusiona duplicados y reclasifica severidad con motivo', async () => {
     const dup = (await crear()).json().id as string;

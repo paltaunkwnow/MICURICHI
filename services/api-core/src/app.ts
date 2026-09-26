@@ -20,10 +20,31 @@ import { opcionFastify } from './proxy.js';
 import { GeoNoDisponible, type ResolverGeo } from './resolver.js';
 import { rutasAdmin } from './rutas/admin.js';
 import { rutasAuth } from './rutas/auth.js';
+import { rutasConfiguracion } from './rutas/configuracion.js';
 import { rutasEjecutivo } from './rutas/ejecutivo.js';
 import { rutasFotos } from './rutas/fotos.js';
 import { rutasModeracion } from './rutas/moderacion.js';
 import { rutasReportes } from './rutas/reportes.js';
+
+/**
+ * Código y mensaje propios para un 4xx que produce Fastify, o uno de sus plugins, antes de que la
+ * ruta vea la petición (cuerpo mal formado o demasiado grande, tipo de contenido sin parser…).
+ */
+export function errorDeFramework(estado: number): { codigo: string; mensaje: string } {
+  if (estado === 400)
+    return { codigo: 'PAYLOAD_INVALIDO', mensaje: 'La petición no tiene un formato válido.' };
+  if (estado === 413)
+    return {
+      codigo: 'PAYLOAD_DEMASIADO_GRANDE',
+      mensaje: 'La petición supera el tamaño permitido.',
+    };
+  if (estado === 415)
+    return {
+      codigo: 'TIPO_DE_CONTENIDO_NO_ADMITIDO',
+      mensaje: 'Esta ruta no admite ese tipo de contenido.',
+    };
+  return { codigo: 'PETICION_INVALIDA', mensaje: 'No se pudo procesar la petición.' };
+}
 
 export interface Dependencias {
   pool: pg.Pool;
@@ -84,6 +105,9 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
     exponerEn: dep.cfg.rutaMetricas,
     token: dep.cfg.tokenMetricas,
   });
+  // El cliente de geo-service tiene fallos que no devuelve a nadie (la invalidación de capas es
+  // de mejor esfuerzo): sin este logger y estas métricas, esos fallos no dejaban rastro.
+  dep.resolver.observar?.({ log: app.log, metricas });
   instalarAuth(app, { pool: dep.pool, idleHoras: dep.cfg.sesionIdleHoras });
 
   app.addHook('onSend', async (req, res) => {
@@ -157,8 +181,16 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
         codigo: 'RATE_LIMIT',
         mensaje: 'Demasiadas solicitudes. Esperá un momento y volvé a intentar.',
       });
-    if (e.statusCode && e.statusCode < 500)
+    if (e.statusCode && e.statusCode < 500) {
+      // Los 4xx del propio Fastify y de sus plugins (`FST_*`) salían tal cual: un JSON mal
+      // formado respondía `FST_ERR_CTP_INVALID_JSON_BODY` con el mensaje interno en inglés. Al
+      // cliente, un código del dominio con el mismo estado; el detalle, al log.
+      if (e.code?.startsWith('FST_')) {
+        req.log.info({ err: e }, 'petición rechazada antes de llegar a la ruta');
+        return res.status(e.statusCode).send(errorDeFramework(e.statusCode));
+      }
       return res.status(e.statusCode).send({ codigo: e.code ?? 'ERROR', mensaje: e.message });
+    }
     if (esBaseNoDisponible(e)) {
       req.log.warn({ err: e }, 'base de datos saturada o no disponible');
       metricas.contar('curichi_db_no_disponible_total', { ruta: req.routeOptions?.url ?? 'otra' });
@@ -245,6 +277,7 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
   }
 
   await rutasAuth(app, dep);
+  await rutasConfiguracion(app, dep);
   await rutasReportes(app, dep);
   await rutasModeracion(app, dep);
   await rutasFotos(app, dep);

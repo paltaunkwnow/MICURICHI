@@ -19,6 +19,14 @@ let pool: pg.Pool;
 
 const PASSWORD = 'contrasena-test-123';
 
+/**
+ * Plazo de las pruebas que verifican VARIAS contraseñas. Cada login hace una verificación
+ * Argon2id, y tres a seis seguidas superan los 5 s por defecto de vitest cuando la máquina va
+ * cargada (la suite completa corre en paralelo con los demás paquetes): fallaban por tiempo, no
+ * por lo que prueban.
+ */
+const TIMEOUT_ARGON2 = 30_000;
+
 async function app(extra: Partial<ConfigApi> = {}): Promise<FastifyInstance> {
   return crearApp({
     pool,
@@ -55,7 +63,7 @@ beforeEach(async () => {
   await pool.query('DELETE FROM sesion');
 });
 
-describe('freno de fuerza bruta por cuenta', () => {
+describe('freno de fuerza bruta por cuenta', { timeout: TIMEOUT_ARGON2 }, () => {
   it('corta tras N fallos contra el mismo email y responde 429 con Retry-After', async () => {
     const a = await app({ limitesLogin: { maxPorEmail: 3, maxPorIp: 100, ventanaMinutos: 15 } });
     for (let i = 0; i < 3; i++) {
@@ -71,7 +79,7 @@ describe('freno de fuerza bruta por cuenta', () => {
     const conBuena = await login(a, 'tecnico@test.local', PASSWORD);
     expect(conBuena.statusCode).toBe(429);
     await a.close();
-  }, 30_000); // tres verificaciones Argon2id seguidas superan los 5 s por defecto en máquinas lentas o cargadas
+  });
 
   it('el freno de una cuenta no afecta a otra', async () => {
     const a = await app({ limitesLogin: { maxPorEmail: 2, maxPorIp: 100, ventanaMinutos: 15 } });
@@ -115,7 +123,7 @@ describe('freno de fuerza bruta por cuenta', () => {
   });
 });
 
-describe('migración de hashes scrypt a Argon2id', () => {
+describe('migración de hashes scrypt a Argon2id', { timeout: TIMEOUT_ARGON2 }, () => {
   it('un usuario con hash viejo entra igual y su hash queda migrado', async () => {
     const { randomBytes, scryptSync } = await import('node:crypto');
     const sal = randomBytes(16).toString('hex');
@@ -191,6 +199,48 @@ describe('caducidad de sesión', () => {
       [cookie],
     );
     expect(s.rows[0]?.viejo).toBe(false);
+    await a.close();
+  });
+
+  /**
+   * El panel ejecutivo consulta el resumen cada 60 s. Si cada consulta renovara `ultimo_uso_en`,
+   * un panel abierto en una pantalla mantendría la sesión viva para siempre y la caducidad por
+   * inactividad no llegaría nunca: una consulta automática no es actividad de la persona.
+   */
+  it('una consulta marcada como sondeo valida la sesión pero no la renueva', async () => {
+    const a = await app({ sesionIdleHoras: 12 });
+    const r = await login(a, 'tecnico@test.local', PASSWORD);
+    const cookie = r.cookies.find((c) => c.name === 'curichi_sesion')!.value;
+    await pool.query(
+      `UPDATE sesion SET ultimo_uso_en = now() - interval '11 hours' WHERE id = $1`,
+      [cookie],
+    );
+    const sondeo = await a.inject({
+      method: 'GET',
+      url: '/api/v1/auth/yo',
+      headers: { 'x-curichi-sondeo': '1' },
+      cookies: { curichi_sesion: cookie },
+    });
+    expect(sondeo.statusCode, 'la sesión sigue valiendo').toBe(200);
+    await new Promise((r2) => setTimeout(r2, 250)); // el refresco, si lo hubiera, va sin await
+    const s = await pool.query<{ viejo: boolean }>(
+      `SELECT (ultimo_uso_en < now() - interval '10 hours') AS viejo FROM sesion WHERE id = $1`,
+      [cookie],
+    );
+    expect(s.rows[0]?.viejo, 'el sondeo no cuenta como uso').toBe(true);
+
+    // Y pasado el plazo de inactividad, el sondeo tampoco la revive: recibe 401 como cualquiera.
+    await pool.query(
+      `UPDATE sesion SET ultimo_uso_en = now() - interval '13 hours' WHERE id = $1`,
+      [cookie],
+    );
+    const caducada = await a.inject({
+      method: 'GET',
+      url: '/api/v1/auth/yo',
+      headers: { 'x-curichi-sondeo': '1' },
+      cookies: { curichi_sesion: cookie },
+    });
+    expect(caducada.statusCode).toBe(401);
     await a.close();
   });
 

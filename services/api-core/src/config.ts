@@ -1,6 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { CONFIG_DOMINIO } from 'contracts';
+import { type Ciudad, CiudadSchema, CONFIG_DOMINIO } from 'contracts';
 import {
   LIMITES_LOGIN_POR_DEFECTO,
   type LimitesLogin,
@@ -19,11 +19,19 @@ const SAL_JITTER_POR_DEFECTO = 'jitter-local-cambiar-en-produccion';
 export interface ConfigApi {
   puerto: number;
   host: string;
+  /**
+   * `API_DATABASE_URL` si está, y si no `DATABASE_URL`. En el `.env` raíz, `DATABASE_URL` es la
+   * del rol DUEÑO del esquema (migraciones, seeds, ETL); api-core se conecta con su rol de
+   * privilegios mínimos (`curichi_api`), que va en `API_DATABASE_URL`.
+   */
   databaseUrl: string;
   /** Conexiones máximas del pool de este proceso. El techo real es réplicas × poolMax. */
   poolMax: number;
   geoServiceUrl: string;
-  /** Token compartido con geo-service para sus rutas internas (invalidar capas). */
+  /**
+   * Token compartido con geo-service (`x-token-interno`): lo exige para invalidar capas y, con
+   * él, las llamadas al resolver quedan fuera de su cupo por IP. Obligatorio en producción.
+   */
   geoTokenInterno: string;
   corsOrigenes: string[];
   dirAlmacen: string;
@@ -70,7 +78,9 @@ export interface ConfigApi {
   salJitter: string;
   /**
    * Confianza acotada en X-Forwarded-For: false, número de saltos, o lista de IP/CIDR.
-   * Ver proxy.ts; con la topología documentada (proxy TLS → Next → servicio) el valor es 2.
+   * Con la topología documentada (proxy TLS → Next → servicio) el valor es 1: el rewrite de Next
+   * reenvía la cabecera sin añadir entrada, así que el único salto que escribe es el proxy TLS, y
+   * con 2 el segundo «salto» es lo que escribió el navegador (test/seguridad.test.ts).
    */
   confiarEnProxy: ConfianzaProxy;
   rutaOpenApi: string;
@@ -82,14 +92,40 @@ export interface ConfigApi {
   rutaMetricas: string;
   /** Token para /metrics cuando el endpoint es alcanzable desde fuera. */
   tokenMetricas: string;
+  /**
+   * Zona horaria de la ciudad (nombre IANA), `ZONA_HORARIA` o la del contrato. Los filtros
+   * `desde`/`hasta` son días de su calendario: comparados en la zona de la sesión de PostgreSQL
+   * (UTC en Docker), un reporte de las 21:00 del 20 en La Paz caía en el día 21.
+   */
+  zonaHoraria: string;
+  /**
+   * Ciudad del despliegue (contracts 0.7.0, `GET /api/v1/configuracion`). Se arma con las
+   * variables `CIUDAD_*` sobre `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO` y comparte `zona_horaria` con
+   * `zonaHoraria`: antes el centro del mapa, el locale y el nombre estaban fijados en el
+   * JavaScript de cada frontend, así que una instalación en otra ciudad exigía recompilarlos.
+   */
+  ciudad: Ciudad;
+  /**
+   * URL base del panel (`apps/panel-admin`), normalizada (sin usuario ni contraseña) para viajar
+   * en `panel_url` de `/auth/yo` (contracts 0.7.0). `null` = este despliegue no configuró panel.
+   * Antes viajaba fija en el JavaScript público de la app ciudadana (`PANEL_ADMIN_URL` al
+   * compilar); obligatoria y `https` en producción (`verificarProduccion`).
+   */
+  panelAdminUrl: string | null;
 }
 
 export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
   const produccion = env.NODE_ENV === 'production';
+  const zonaHoraria = leerZonaHoraria(env.ZONA_HORARIA);
   const cfg: ConfigApi = {
     puerto: Number(env.API_CORE_PORT ?? 3001),
     host: env.API_CORE_HOST ?? '127.0.0.1',
-    databaseUrl: env.DATABASE_URL ?? 'postgresql://curichi:curichi@127.0.0.1:5433/curichi',
+    // `||` y no `??`: el `.env.example` declara API_DATABASE_URL vacía (el Compose la arma), y
+    // con `??` la cadena vacía ganaba y el servicio arrancaba sin URL.
+    databaseUrl:
+      env.API_DATABASE_URL ||
+      env.DATABASE_URL ||
+      'postgresql://curichi:curichi@127.0.0.1:5433/curichi',
     poolMax: Number(env.DB_POOL_MAX ?? POOL_MAX_POR_DEFECTO),
     geoServiceUrl: env.GEO_SERVICE_URL ?? 'http://127.0.0.1:3002',
     geoTokenInterno: env.GEO_TOKEN_INTERNO ?? '',
@@ -125,9 +161,103 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
     retencionIpHashDias: Number(env.IP_HASH_RETENCION_DIAS ?? 30),
     rutaMetricas: env.METRICAS_RUTA ?? '/metrics',
     tokenMetricas: env.METRICAS_TOKEN ?? '',
+    zonaHoraria,
+    ciudad: leerCiudad(env, zonaHoraria),
+    panelAdminUrl: leerPanelAdminUrl(env.PANEL_ADMIN_URL),
   };
   if (produccion) verificarProduccion(cfg);
   return cfg;
+}
+
+/** `undefined`, vacía o solo espacios cuentan como ausente: cae al valor de la ciudad por defecto. */
+function textoOPorDefecto(valor: string | undefined, porDefecto: string): string {
+  const v = valor?.trim();
+  return v ? v : porDefecto;
+}
+
+/** Igual que `textoOPorDefecto`, pero numérico: un valor no vacío que no parsea da NaN a propósito, para que `CiudadSchema` lo rechace con un mensaje y no se pierda en silencio. */
+function numeroOPorDefecto(valor: string | undefined, porDefecto: number): number {
+  const v = valor?.trim();
+  return v ? Number(v) : porDefecto;
+}
+
+/**
+ * Ciudad del despliegue: `CIUDAD_*` sobre `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO`, con la MISMA zona
+ * horaria que ya validó `leerZonaHoraria` (no una copia aparte que pudiera desincronizarse).
+ *
+ * Se valida al arrancar contra `CiudadSchema`, el mismo esquema que valida `GET
+ * /api/v1/configuracion`: una ciudad mal configurada (un locale como `es_BO`, una latitud fuera
+ * de rango) tiene que impedir que el servicio arranque, no llegar rota al navegador y romper ahí
+ * con un `Intl` `RangeError`.
+ */
+function leerCiudad(env: NodeJS.ProcessEnv, zonaHoraria: string): Ciudad {
+  const porDefecto = CONFIG_DOMINIO.CIUDAD_POR_DEFECTO;
+  const candidata = {
+    nombre: textoOPorDefecto(env.CIUDAD_NOMBRE, porDefecto.nombre),
+    pais: textoOPorDefecto(env.CIUDAD_PAIS, porDefecto.pais),
+    zona_horaria: zonaHoraria,
+    locale: textoOPorDefecto(env.CIUDAD_LOCALE, porDefecto.locale),
+    centro: {
+      lon: numeroOPorDefecto(env.CIUDAD_CENTRO_LON, porDefecto.centro.lon),
+      lat: numeroOPorDefecto(env.CIUDAD_CENTRO_LAT, porDefecto.centro.lat),
+    },
+    zoom_inicial: numeroOPorDefecto(env.CIUDAD_ZOOM_INICIAL, porDefecto.zoom_inicial),
+  };
+  const r = CiudadSchema.safeParse(candidata);
+  if (!r.success) {
+    const detalle = r.error.issues
+      .map((i) => `${i.path.join('.') || 'ciudad'}: ${i.message}`)
+      .join('\n - ');
+    throw new Error(
+      `Configuración de ciudad inválida (variables CIUDAD_* y ZONA_HORARIA):\n - ${detalle}`,
+    );
+  }
+  return r.data;
+}
+
+/**
+ * URL base del panel administrativo, normalizada: mismo criterio que exige `SesionActualSchema`
+ * para `panel_url` (http/https absoluta, sin usuario ni contraseña) y que ya aplicaba
+ * `normalizarUrlDelPanel` en `web-ciudadano` cuando la URL viajaba fija en su JavaScript.
+ *
+ * Ausente o vacía: `null` (este despliegue no configuró panel; obligatoria en producción, ver
+ * `verificarProduccion`). Presente pero mal formada: se detiene el arranque con el motivo, en vez
+ * de servir `panel_url` roto a todo el que inicia sesión como técnico.
+ */
+function leerPanelAdminUrl(valor: string | undefined): string | null {
+  const v = valor?.trim();
+  if (!v) return null;
+  let url: URL;
+  try {
+    url = new URL(v);
+  } catch {
+    throw new Error(
+      `PANEL_ADMIN_URL inválida: «${v}». Tiene que ser una URL absoluta http o https.`,
+    );
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:')
+    throw new Error(`PANEL_ADMIN_URL inválida: «${v}». Solo se admite http o https.`);
+  if (url.username || url.password)
+    throw new Error(`PANEL_ADMIN_URL inválida: «${v}». No puede llevar usuario ni contraseña.`);
+  return url.href;
+}
+
+/**
+ * Se valida al arrancar y en cualquier entorno: con un nombre inválido cada filtro por fecha
+ * fallaría en la base. Solo nombres IANA: un desfase como «-04:00» PostgreSQL lo lee con el signo
+ * POSIX, al revés que ISO 8601, y filtraría con el desfase invertido sin dar ningún error.
+ */
+function leerZonaHoraria(valor: string | undefined): string {
+  const zona = valor?.trim() || CONFIG_DOMINIO.ZONA_HORARIA_POR_DEFECTO;
+  let valida = /^[A-Za-z][A-Za-z0-9_+-]*(\/[A-Za-z0-9_+-]+)*$/.test(zona);
+  try {
+    if (valida) new Intl.DateTimeFormat('es', { timeZone: zona });
+  } catch {
+    valida = false;
+  }
+  if (!valida)
+    throw new Error(`ZONA_HORARIA inválida: «${zona}». Usá un nombre IANA, p. ej. America/La_Paz.`);
+  return zona;
 }
 
 /**
@@ -138,6 +268,9 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
  */
 export const SAL_MIN_LONGITUD = 32;
 
+/** Longitud mínima de `GEO_TOKEN_INTERNO`: el mismo criterio que las sales. */
+export const TOKEN_INTERNO_MIN_LONGITUD = 32;
+
 /** En producción no se arranca con secretos de ejemplo ni con CORS abierto: se falla temprano. */
 export function verificarProduccion(cfg: ConfigApi): void {
   const fallos: string[] = [];
@@ -147,7 +280,20 @@ export function verificarProduccion(cfg: ConfigApi): void {
   if (cfg.salJitter === SAL_JITTER_POR_DEFECTO) fallos.push('JITTER_SAL usa el valor de ejemplo');
   else if (cfg.salJitter.length < SAL_MIN_LONGITUD)
     fallos.push(`JITTER_SAL debe tener al menos ${SAL_MIN_LONGITUD} caracteres`);
+  // Sin token, geo-service no distingue a api-core de cualquier otro cliente: cada POST /reportes
+  // gasta el cupo por IP del resolver —todas salen del mismo origen, así que en una tormenta se
+  // agota y crear reportes da 503— y la invalidación de capas recibe 403. geo-service ya se niega
+  // a arrancar sin él; aquí se comprueba el otro extremo.
+  if (!cfg.geoTokenInterno)
+    fallos.push('GEO_TOKEN_INTERNO es obligatorio (el mismo valor que en geo-service)');
+  else if (cfg.geoTokenInterno.length < TOKEN_INTERNO_MIN_LONGITUD)
+    fallos.push(`GEO_TOKEN_INTERNO debe tener al menos ${TOKEN_INTERNO_MIN_LONGITUD} caracteres`);
   if (!cfg.cookieSegura) fallos.push('COOKIE_SEGURA debe ser 1 (cookie de sesión solo por HTTPS)');
+  // Sin ella, /auth/yo manda panel_url = null a técnico, admin y ejecutivo, y el botón al panel
+  // desaparece en producción sin que nada lo avise en el arranque.
+  if (!cfg.panelAdminUrl) fallos.push('PANEL_ADMIN_URL es obligatoria en producción');
+  else if (!cfg.panelAdminUrl.startsWith('https://'))
+    fallos.push('PANEL_ADMIN_URL debe ser https en producción');
   if (cfg.corsOrigenes.includes('*'))
     fallos.push('CORS_ORIGENES no puede ser * con cookies de sesión');
   if (!cfg.corsOrigenes.length) fallos.push('CORS_ORIGENES está vacío');

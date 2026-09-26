@@ -16,11 +16,13 @@ import {
   resolverDePrueba,
   sesion,
 } from './ayudas.js';
+import { espiarPool } from './espia-pool.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
 let app: FastifyInstance;
 let ex: ReturnType<typeof ejecutorPg>;
+let espia: ReturnType<typeof espiarPool>;
 let cookieEjecutivo: string;
 let cookieTecnico: string;
 let cookieVecina: string;
@@ -29,7 +31,11 @@ let idCualquiera: string;
 const HORA = 3_600_000;
 const DIA = 24 * HORA;
 const ahora = Date.now();
-const hace = (ms: number) => new Date(ahora - ms).toISOString();
+// Siempre con segundos y milisegundos (…:12.345): el resumen tiene que devolverlo truncado.
+const hace = (ms: number) =>
+  new Date(Math.floor((ahora - ms) / 60_000) * 60_000 + 12_345).toISOString();
+const alMinuto = (iso: string) =>
+  new Date(Math.floor(Date.parse(iso) / 60_000) * 60_000).toISOString();
 
 /** Reporte sembrado directamente en la base, con fecha de creación controlada. */
 async function sembrar(o: {
@@ -64,6 +70,7 @@ const CREADO_NUEVO = hace(DIA);
 beforeAll(async () => {
   base = await levantarBaseEfimera();
   pool = new pg.Pool({ connectionString: base.url, max: 3 });
+  espia = espiarPool(pool);
   ex = ejecutorPg(pool);
   await cargarCapasDePrueba(ex);
   await crearUsuarios(ex);
@@ -180,36 +187,67 @@ describe('GET /api/v1/ejecutivo/resumen: autorización', () => {
 });
 
 describe('GET /api/v1/ejecutivo/resumen: conteos', () => {
-  it('ventana=todo: totales por severidad efectiva, estado y distrito', async () => {
+  it('ventana=todo: activas (nuevo + validado) por severidad efectiva; resueltas aparte', async () => {
     const r = await resumen(cookieEjecutivo, 'todo');
+    expect(r.statusCode, r.body.slice(0, 400)).toBe(200);
     const c = ResumenEjecutivoSchema.parse(r.json());
     expect(c.ventana).toEqual({ desde: null, hasta: null });
-    expect(c.total).toBe(5);
-    expect(c.por_severidad).toEqual({ critica: 1, alta: 2, media: 1, baja: 1 });
+    // El resuelto de hace 40 días ya no suma a la inundación activa: es trabajo hecho.
+    expect(c.activas).toEqual({
+      total: 4,
+      verificadas: 3,
+      en_revision: 1,
+      por_severidad: { critica: 1, alta: 1, media: 1, baja: 1 },
+    });
+    expect(c.resueltas).toBe(1);
     expect(c.por_estado).toEqual({ nuevo: 1, validado: 3, resuelto: 1 });
-    expect(c.ultimo_reporte_en).toBe(CREADO_NUEVO);
+    expect(c.ultimo_reporte_en).toBe(alMinuto(CREADO_NUEVO));
 
     expect(c.por_distrito.map((d) => d.codigo)).toEqual(['01', '02', '99']);
     const [d1, d2, d99] = c.por_distrito;
-    expect(d1).toMatchObject({
+    expect(d1).toEqual({
       distrito_id: 'distrito_municipal:01',
+      codigo: '01',
       nombre: 'Distrito Uno (test)',
-      total: 4,
-      por_severidad: { critica: 1, alta: 1, media: 1, baja: 1 },
+      en_capa_vigente: true,
+      activas: {
+        total: 3,
+        verificadas: 2,
+        en_revision: 1,
+        por_severidad: { critica: 1, alta: 0, media: 1, baja: 1 },
+      },
       por_estado: { nuevo: 1, validado: 2, resuelto: 1 },
-      ultimo_reporte_en: CREADO_NUEVO,
+      ultimo_reporte_en: alMinuto(CREADO_NUEVO),
     });
-    expect(d2).toMatchObject({
+    expect(d2).toEqual({
       distrito_id: 'distrito_municipal:02',
+      codigo: '02',
       nombre: 'Distrito Dos (test)',
-      total: 0,
-      por_severidad: { critica: 0, alta: 0, media: 0, baja: 0 },
+      en_capa_vigente: true,
+      activas: {
+        total: 0,
+        verificadas: 0,
+        en_revision: 0,
+        por_severidad: { critica: 0, alta: 0, media: 0, baja: 0 },
+      },
       por_estado: { nuevo: 0, validado: 0, resuelto: 0 },
       ultimo_reporte_en: null,
     });
-    expect(d99).toMatchObject({ nombre: 'Distrito Viejo (test)', total: 1 });
-    // Las filas por distrito suman el total global.
-    expect(c.por_distrito.reduce((s, d) => s + d.total, 0)).toBe(c.total);
+    // Solo existe en una versión de capa anterior: sale, con su nombre, marcado fuera de la vigente.
+    expect(d99).toMatchObject({
+      nombre: 'Distrito Viejo (test)',
+      en_capa_vigente: false,
+      activas: { total: 1, verificadas: 1, en_revision: 0 },
+    });
+    expect(c.por_distrito.reduce((s, d) => s + d.activas.total, 0)).toBe(c.activas.total);
+  });
+
+  it('ultimo_reporte_en va truncado al minuto, en la raíz y en cada distrito', async () => {
+    const c = ResumenEjecutivoSchema.parse((await resumen(cookieEjecutivo, 'todo')).json());
+    // CREADO_NUEVO lleva segundos y milisegundos; lo que sale no.
+    expect(CREADO_NUEVO).not.toBe(alMinuto(CREADO_NUEVO));
+    for (const v of [c.ultimo_reporte_en, ...c.por_distrito.map((d) => d.ultimo_reporte_en)])
+      if (v) expect(Date.parse(v) % 60_000, v).toBe(0);
   });
 
   it('ventana=7d excluye los reportes viejos', async () => {
@@ -217,18 +255,84 @@ describe('GET /api/v1/ejecutivo/resumen: conteos', () => {
     const c = ResumenEjecutivoSchema.parse(r.json());
     expect(c.ventana.desde).not.toBeNull();
     expect(c.ventana.hasta).not.toBeNull();
-    expect(c.total).toBe(3);
-    expect(c.por_severidad).toEqual({ critica: 1, alta: 0, media: 1, baja: 1 });
+    expect(c.activas).toEqual({
+      total: 3,
+      verificadas: 2,
+      en_revision: 1,
+      por_severidad: { critica: 1, alta: 0, media: 1, baja: 1 },
+    });
+    expect(c.resueltas).toBe(0);
     expect(c.por_estado).toEqual({ nuevo: 1, validado: 2, resuelto: 0 });
     const d2 = c.por_distrito.find((d) => d.codigo === '02');
-    expect(d2?.total).toBe(0);
+    expect(d2?.activas.total).toBe(0);
   });
 
   it('ventana=30d deja fuera el resuelto de hace 40 días pero no el de hace 10', async () => {
     const r = await resumen(cookieTecnico, '30d');
     const c = ResumenEjecutivoSchema.parse(r.json());
-    expect(c.total).toBe(4);
+    expect(c.activas.total).toBe(4);
+    expect(c.resueltas).toBe(0);
     expect(c.por_estado.resuelto).toBe(0);
+  });
+});
+
+describe('GET /api/v1/ejecutivo/resumen: caché', () => {
+  /** La pasada sobre la tabla de reportes que hace el resumen. */
+  const pasadas = (espia: ReturnType<typeof espiarPool>) => espia.contar(/FULL JOIN agg/);
+
+  async function appNueva() {
+    return crearApp({
+      pool,
+      cfg: {
+        ...leerConfig({ DATABASE_URL: base.url }),
+        rutaOpenApi: '/no-existe.yaml',
+        rateLimitMax: 1000,
+      },
+      resolver: resolverDePrueba,
+      almacen: new AlmacenMemoria(),
+    });
+  }
+
+  it('la segunda petición es un acierto de caché y no vuelve a la base', async () => {
+    const otra = await appNueva();
+    try {
+      espia.reiniciar();
+      const primera = await otra.inject({
+        method: 'GET',
+        url: '/api/v1/ejecutivo/resumen?ventana=7d',
+        cookies: sesion(cookieEjecutivo),
+      });
+      expect(primera.headers['x-cache']).toBe('miss');
+      const segunda = await otra.inject({
+        method: 'GET',
+        url: '/api/v1/ejecutivo/resumen?ventana=7d',
+        cookies: sesion(cookieEjecutivo),
+      });
+      expect(segunda.headers['x-cache']).toBe('hit');
+      expect(segunda.json()).toEqual(primera.json());
+      expect(pasadas(espia)).toBe(1);
+    } finally {
+      await otra.close();
+    }
+  });
+
+  it('dos peticiones a la vez hacen una sola consulta', async () => {
+    const otra = await appNueva();
+    try {
+      espia.reiniciar();
+      const pedir = () =>
+        otra.inject({
+          method: 'GET',
+          url: '/api/v1/ejecutivo/resumen?ventana=30d',
+          cookies: sesion(cookieEjecutivo),
+        });
+      const [a, b] = await Promise.all([pedir(), pedir()]);
+      expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+      expect(a.json()).toEqual(b.json());
+      expect(pasadas(espia)).toBe(1);
+    } finally {
+      await otra.close();
+    }
   });
 });
 

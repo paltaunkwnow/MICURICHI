@@ -16,9 +16,12 @@
  * Aquí no hace falta base de datos: basta un pool de mentira que lance los errores que lanza
  * `pg` de verdad. Los mensajes y códigos están copiados de lo que se vio en los logs.
  */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import { AlmacenMemoria } from '../src/almacen.js';
+import { AlmacenDisco, AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
 import { GeoNoDisponible } from '../src/resolver.js';
@@ -253,6 +256,44 @@ describe('almacén de fotos caído: degradado, no fuera de rotación', () => {
       almacen,
     });
     const r = await app.inject({ method: 'GET', url: '/ready' });
+    expect(r.statusCode).toBe(200);
+    const cuerpo = r.json();
+    expect(cuerpo.ok).toBe(true);
+    expect(cuerpo.fotos).toBe('error');
+    expect(cuerpo.degradado).toBe(true);
+  }, 20_000);
+
+  it('AlmacenDisco de verdad: directorio no escribible → /ready marca fotos=error', async () => {
+    // Simula el hallazgo de la revisión de producción: un volumen montado root:root deja al
+    // proceso (usuario node) sin permiso de escritura. Aquí se logra el mismo síntoma —el
+    // directorio deja de estar disponible para escribir— quitándolo después de construir el
+    // almacén, que es lo que hacía que antes de implementar comprobar() nadie se enterara:
+    // /ready respondía fotos: ok igual.
+    const dir = mkdtempSync(join(tmpdir(), 'curichi-almacen-ready-'));
+    const almacen = new AlmacenDisco(dir);
+    rmSync(dir, { recursive: true, force: true });
+    const cfg = leerConfig({
+      NODE_ENV: 'test',
+      GEO_SERVICE_URL: 'http://127.0.0.1:59999',
+      METRICAS_RUTA: '',
+    });
+    app = await crearApp({
+      pool: {
+        query: async () => ({ rows: [], rowCount: 0 }),
+        connect: async () => ({ query: async () => ({ rows: [] }), release() {} }),
+        totalCount: 1,
+        idleCount: 1,
+        waitingCount: 0,
+        options: { max: 8 },
+        // biome-ignore lint/suspicious/noExplicitAny: pool de mentira, solo la forma mínima
+      } as any,
+      cfg,
+      resolver: resolverDePrueba,
+      almacen,
+    });
+    const r = await app.inject({ method: 'GET', url: '/ready' });
+    // 200, no 503: el almacén de fotos es compartido entre réplicas, así que su caída no saca a
+    // esta réplica de rotación (mismo motivo que geo-service, más arriba).
     expect(r.statusCode).toBe(200);
     const cuerpo = r.json();
     expect(cuerpo.ok).toBe(true);

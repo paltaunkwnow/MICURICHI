@@ -225,13 +225,17 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         const id = ins.rows[0]!.id;
         const claves = [...new Set(d.fotos)];
         if (claves.length) {
-          // Solo se reclaman fotos sin dueño y recién subidas: la clave es un vale temporal
-          // (CLAUDE.md §7.5), no un identificador permanente que sirva para siempre.
+          // Solo se reclaman fotos sin reporte, recién subidas y SUBIDAS POR QUIEN REPORTA: la
+          // clave es un vale temporal (CLAUDE.md §7.5), no un identificador que valga para
+          // cualquiera. Sin `subido_por`, con la clave recién subida por otra cuenta se le podía
+          // quitar la foto y pegarla a un reporte propio. Las anteriores a la 0012 no tienen autor
+          // conocido y no se aceptan.
           const asociadas = await cliente.query(
             `UPDATE reporte_foto SET reporte_id = $1
              WHERE objeto_key = ANY($2::text[]) AND reporte_id IS NULL AND exif_sanitizado
+               AND subido_por = $4
                AND creado_en > now() - ($3 || ' hours')::interval`,
-            [id, claves, String(HORAS_VALIDEZ_FOTO)],
+            [id, claves, String(HORAS_VALIDEZ_FOTO), autor.id],
           );
           // Sin esta comprobación el reporte se guardaba sin las fotos y nadie se enteraba.
           if (asociadas.rowCount !== claves.length) {
@@ -350,6 +354,9 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     const { filas, total, totalExacto } = await listarReportes(dep.pool, {
       filtros: f.datos,
       soloPublicos: true,
+      // `desde`/`hasta` son días de la ciudad de esta instalación. Sin pasarla, consultas.ts cae
+      // en la del contrato (La Paz) y el listado contaba otros días que la exportación.
+      zonaHoraria: dep.cfg.zonaHoraria,
     });
     cacheDeListadoPublico(res);
     return {
@@ -398,6 +405,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     const { filas, total, totalExacto } = await listarReportes(dep.pool, {
       filtros: f.datos,
       soloPublicos: false,
+      zonaHoraria: dep.cfg.zonaHoraria,
     });
     return {
       type: 'FeatureCollection',

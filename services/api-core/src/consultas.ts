@@ -1,11 +1,16 @@
 /** Construcción de la consulta de listado con filtros (§7.5). */
-import type { ReporteFiltros } from 'contracts';
+import { CONFIG_DOMINIO, type ReporteFiltros } from 'contracts';
 import type pg from 'pg';
 import { type FilaReporte, SELECT_REPORTE } from './vistas.js';
 
 export interface OpcionesListado {
   filtros: ReporteFiltros;
   soloPublicos: boolean;
+  /**
+   * Zona en la que `desde` y `hasta` son días del calendario: la de la instalación
+   * (`cfg.zonaHoraria`). Sin ella se usa la del contrato.
+   */
+  zonaHoraria?: string;
 }
 
 export function armarWhere(o: OpcionesListado): { where: string; params: unknown[] } {
@@ -29,8 +34,14 @@ export function armarWhere(o: OpcionesListado): { where: string; params: unknown
   if (f.distrito_id) cond.push(`r.distrito_id = ${p(f.distrito_id)}`);
   if (f.unidad_vecinal_id) cond.push(`r.unidad_vecinal_id = ${p(f.unidad_vecinal_id)}`);
   if (f.punto_critico_id) cond.push(`r.punto_critico_id = ${p(f.punto_critico_id)}`);
-  if (f.desde) cond.push(`r.creado_en >= ${p(f.desde)}::date`);
-  if (f.hasta) cond.push(`r.creado_en < (${p(f.hasta)}::date + interval '1 day')`);
+  // `desde` y `hasta` son días de la ciudad. Con `::date` a secas se medían en la zona de la
+  // sesión de PostgreSQL (UTC en Docker) y un reporte de las 21:00 del 20 en La Paz caía en el 21.
+  // Se compara contra el instante de la medianoche local, y no `(creado_en AT TIME ZONE …)::date`,
+  // para que la condición siga pudiendo usar el índice sobre creado_en.
+  const zona = o.zonaHoraria ?? CONFIG_DOMINIO.ZONA_HORARIA_POR_DEFECTO;
+  if (f.desde) cond.push(`r.creado_en >= (${p(f.desde)}::date::timestamp AT TIME ZONE ${p(zona)})`);
+  if (f.hasta)
+    cond.push(`r.creado_en < ((${p(f.hasta)}::date + 1)::timestamp AT TIME ZONE ${p(zona)})`);
   if (f.bbox) {
     // El público filtra por la geometría PUBLICADA, no por la exacta. Filtrar por la exacta y
     // devolver la desplazada convertía el bbox en un oráculo: encogiéndolo por bisección se
@@ -77,12 +88,54 @@ export async function listarReportes(pool: pg.Pool, o: OpcionesListado): Promise
   const bruto = Number(conteo.rows[0]?.n ?? 0);
   const totalExacto = bruto <= TOPE_CONTEO;
 
-  const filas = await pool.query<FilaReporte>(
+  const [sql, valores] = consultaDePagina(where, params, o.filtros, offset);
+  const filas = await pool.query<FilaReporte>(sql, valores);
+  return { filas: filas.rows, total: totalExacto ? bruto : TOPE_CONTEO, totalExacto };
+}
+
+function consultaDePagina(
+  where: string,
+  params: unknown[],
+  filtros: ReporteFiltros,
+  offset: number,
+): [string, unknown[]] {
+  return [
     `${SELECT_REPORTE} ${where} ORDER BY r.creado_en DESC, r.id DESC
      LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-    [...params, o.filtros.limite, offset],
-  );
-  return { filas: filas.rows, total: totalExacto ? bruto : TOPE_CONTEO, totalExacto };
+    [...params, filtros.limite, offset],
+  ];
+}
+
+/**
+ * Selección de la exportación: las filas hasta `limite` y el total SIN `TOPE_CONTEO`, porque la
+ * exportación declara cuántos reportes trae de cuántos (`exportados`, `total`); con el tope del
+ * listado una selección de 30 000 se anunciaba como de 10 000. Conteo y filas comparten una
+ * instantánea (REPEATABLE READ): si no, un reporte que entra entre las dos consultas da
+ * «10 001 de 10 000».
+ */
+export async function seleccionarParaExportar(
+  pool: pg.Pool,
+  o: OpcionesListado,
+): Promise<{ filas: FilaReporte[]; total: number }> {
+  const { where, params } = armarWhere(o);
+  const offset = (o.filtros.pagina - 1) * o.filtros.limite;
+  const cliente = await pool.connect();
+  try {
+    await cliente.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+    const conteo = await cliente.query<{ n: string }>(
+      `SELECT count(*)::text AS n FROM reporte_inundacion r ${where}`,
+      params,
+    );
+    const [sql, valores] = consultaDePagina(where, params, o.filtros, offset);
+    const filas = await cliente.query<FilaReporte>(sql, valores);
+    await cliente.query('COMMIT');
+    return { filas: filas.rows, total: Number(conteo.rows[0]?.n ?? 0) };
+  } catch (e) {
+    await cliente.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    cliente.release();
+  }
 }
 
 /**
