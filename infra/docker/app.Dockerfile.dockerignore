@@ -1,0 +1,39 @@
+# Contexto del build de las apps Next (contexto = raíz del repositorio). Lista BLANCA: solo entra lo
+# que las dos apps necesitan para compilarse. Con la lista negra de la raíz (.dockerignore) entraba
+# todo lo que no estuviera nombrado, incluido un `apps/<app>/.env.local` de desarrollo, que
+# `next build` LEE: sus valores podían acabar dentro de la imagen de producción.
+
+*
+
+# Workspace de pnpm.
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.base.json
+
+# Lo que se compila.
+!packages/contracts
+!apps/web-ciudadano
+!apps/panel-admin
+
+# Y de eso, fuera lo que se genera dentro de la imagen o no le hace falta.
+**/node_modules
+**/.next
+**/.turbo
+**/dist
+**/*.tsbuildinfo
+**/coverage
+**/test-results
+**/playwright-report
+# La copia del worker de MapLibre la hace el `prebuild` DENTRO del build, desde el paquete instalado.
+apps/*/public/maplibre
+# Pruebas: no forman parte de la imagen (y el typecheck de `next build` no las necesita).
+**/test
+**/*.test.ts
+**/*.test.tsx
+**/*.fixture.ts
+# Secretos y configuración local, estén donde estén.
+**/.env
+**/.env.*
+# Documentación.
+**/*.md

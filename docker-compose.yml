@@ -1,5 +1,19 @@
-# Entorno local de Mi Curichi con Docker (alternativa al modo sin Docker del ADR 0002). Parte 5.
-# Uso: cp .env.example .env && docker compose up -d
+# Entorno de Mi Curichi con Docker. Parte 5.
+#
+# Una instalación por ciudad (decisión del 2026-09-26): la MISMA imagen y este mismo archivo sirven
+# a cualquier ciudad; lo que cambia es el `.env` (bloque «Ciudad», credenciales) y las capas del ETL.
+#
+# Perfiles. Sin ninguno, `docker compose up -d` levanta solo PostgreSQL, que es lo que hace falta
+# para desarrollar con `pnpm dev` en la máquina (ver README, «Arranque local con Docker»).
+#
+#   servicios       migraciones (job) → api-core y geo-service → web-ciudadano y panel-admin → proxy
+#                   (Caddy: TLS y reparto; lo ÚNICO que publica puertos hacia fuera, 80 y 443)
+#   minio           MinIO + su inicialización: S3 LOCAL para las fotos. En producción va un S3
+#                   gestionado (docs/operaciones/produccion.md, «Fotos en producción»)
+#   respaldos       respaldo diario cifrado a un S3 externo (docs/operaciones/respaldo-y-restauracion.md)
+#   observabilidad  Prometheus, Alertmanager y blackbox (docs/operaciones/observabilidad.md)
+#
+#   docker compose --profile servicios --profile minio up -d --build      # la pila local entera
 #
 # VERIFICADO EN EJECUCIÓN (Fase 4, 2026-09-15): imágenes construidas, pila levantada, todos los
 # healthchecks en `healthy`, migraciones aplicadas contra PostgreSQL 18.6 + PostGIS 3.6.4, y
@@ -118,21 +132,28 @@ services:
           memory: 1536M
           pids: 512
 
+  # --- S3 local para las fotos (perfil `minio`) ---------------------------------------------------
+  #
+  # SOLO DESARROLLO. En producción las fotos van a un S3 gestionado (o a un servicio S3 que alguien
+  # mantenga con parches); el porqué está en docs/operaciones/produccion.md.
+  #
+  # POR QUÉ ESTA IMAGEN. MinIO archivó su edición comunitaria (abril de 2026) y dejó de publicar
+  # imágenes: `minio/minio` ya no está en Docker Hub y, desde el 24-09-2026, `quay.io/minio/minio`
+  # responde 401 a las descargas anónimas (comprobado el 26-09-2026). La que usábamos
+  # (RELEASE.2025-04-22) además no tenía el parche de CVE-2025-62506 (escalada de privilegios con
+  # políticas de sesión), que llegó en RELEASE.2025-10-15T17-29-55Z. Esta es esa versión compilada
+  # desde el código oficial por Coolify (etiqueta `org.opencontainers.image.revision` = commit
+  # da2e68be de minio/minio), fijada por digest: una reconstrucción trae siempre los mismos bytes.
+  # Trae `mc` dentro, así que `minio-init` usa la misma imagen.
   minio:
     <<: *comun
-    # quay.io y NO docker.io: `minio/minio` ya no se puede descargar de Docker Hub
-    # ("pull access denied ... repository does not exist"), comprobado en la Fase 4 al levantar
-    # la pila por primera vez. Y versión fijada en lugar de `latest`: con `latest` dos personas
-    # pueden estar corriendo binarios distintos sin saberlo y una actualización silenciosa rompe
-    # un entorno que ayer funcionaba.
-    #
-    # `api-core` sabe hablar con MinIO desde la Fase 5 (`src/almacen-s3.ts`, firma SigV4 sin SDK).
-    # No lo usa por defecto: hace falta poner `S3_ENDPOINT_DOCKER=http://minio:9000` en el .env.
-    # Con eso las fotos dejan de vivir en el disco de una réplica y varias pueden servirlas.
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["minio"]
+    image: ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
     container_name: curichi-minio
     command: server /data --console-address ":9001"
     environment:
+      # Las credenciales ROOT solo las usan este contenedor y `minio-init`. api-core usa un usuario
+      # propio limitado a su bucket (S3_ACCESS_KEY / S3_SECRET_KEY), que crea `minio-init`.
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
     ports:
@@ -155,8 +176,10 @@ services:
           pids: 256
 
   minio-init:
-    # Crea el bucket de fotos una vez y termina.
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    # Crea el bucket (privado) y el usuario de api-core con una política que solo alcanza a ese
+    # bucket, y termina. Se niega a seguir si api-core fuese a usar la credencial root.
+    profiles: ["minio"]
+    image: ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
     container_name: curichi-minio-init
     depends_on:
       minio:
@@ -165,92 +188,181 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-curichi}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Definir MINIO_ROOT_PASSWORD en .env}
       S3_BUCKET: ${S3_BUCKET:-fotos}
-    # Sigue reintentando aunque el healthcheck ya haya pasado: `mc ready` comprueba el servidor,
-    # no que la API acepte ya una operación de administración.
-    entrypoint:
-      - /bin/sh
-      - -c
-      - |
-        for i in $$(seq 1 30); do
-          if mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"; then
-            mc mb --ignore-existing "local/$$S3_BUCKET" && echo "bucket listo: $$S3_BUCKET" && exit 0
-          fi
-          echo "esperando a minio..." && sleep 2
-        done
-        echo "minio no respondio a tiempo" >&2 && exit 1
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+    entrypoint: ["/bin/sh", "/inicializar.sh"]
+    volumes:
+      - ./infra/minio/inicializar.sh:/inicializar.sh:ro
+    security_opt:
+      - no-new-privileges:true
     restart: "no"
 
-  # Los dos servicios Node van bajo el perfil `servicios`: `docker compose up -d` a secas levanta
-  # solo la base y MinIO, que es lo que hace falta para desarrollar con `pnpm dev`.
-  #   docker compose --profile servicios up -d --build
+  # --- Servicios (perfil `servicios`) -------------------------------------------------------------
+  #
+  # Las imágenes se construyen aquí en local; en producción se usan las que publica el CI en GHCR
+  # (tag = SHA del commit de `main`) poniendo IMAGEN_API_CORE, IMAGEN_GEO_SERVICE,
+  # IMAGEN_WEB_CIUDADANO, IMAGEN_PANEL_ADMIN e IMAGEN_PROXY en el .env.
+  #
+  # Topología (docs/operaciones/produccion.md, «Topología»):
+  #
+  #   navegador ─HTTPS─▶ proxy ─▶ web-ciudadano / panel-admin ─▶ api-core ─▶ geo-service
+  #                                      └──────────────────────▶ geo-service      │
+  #                                                              postgis ◀─────────┘
+  #
+  # Los valores que dependen de ESA topología no se leen de las variables de `pnpm dev`
+  # (TRUST_PROXY, PROXY_DE_CONFIANZA, COOKIE_SEGURA, CORS_ORIGENES, PANEL_ADMIN_URL, HSTS), que
+  # comparten el mismo .env en una máquina de desarrollo y ahí valen otra cosa: se fijan aquí o se
+  # derivan de DOMINIO_PUBLICO y DOMINIO_PANEL, con una variable `*_DOCKER` para casos especiales.
+  #
+  # Escalado: api-core y geo-service NO llevan `container_name` ni puerto fijo en la máquina, así
+  # que `--scale api-core=3` funciona. Cada réplica publica un puerto efímero en 127.0.0.1
+  # (`docker compose port api-core 3001` dice cuál) y, dentro de la red, el nombre del servicio
+  # reparte entre réplicas. OJO: el rate limit por IP es por proceso; con N réplicas el límite
+  # efectivo es N veces el configurado (docs/operaciones/produccion.md, «Varias réplicas»).
+
+  # Job de migraciones: corre con la imagen de api-core y el rol DUEÑO, aplica las pendientes y
+  # termina. api-core y geo-service no arrancan hasta que acabe BIEN (`service_completed_successfully`):
+  # si una migración falla, el despliegue se detiene con los contenedores viejos en marcha en vez de
+  # dejar servicios nuevos sobre un esquema viejo. Seguro con varias réplicas y en paralelo (advisory
+  # lock). Un fallo con SQLSTATE 55P03 es tráfico (lock_timeout), no un error del SQL: reintentar.
+  migraciones:
+    <<: [*comun, *servicio-node]
+    profiles: ["servicios"]
+    image: ${IMAGEN_API_CORE:-mi-curichi-api-core:local}
+    restart: "no"
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      # Rol DUEÑO del esquema: es el único que puede crear tablas. Ningún servicio lo usa.
+      # MIGRAR_BASE (solo desde la línea de órdenes) apunta el job a otra base del mismo servidor,
+      # p. ej. la de una restauración: `MIGRAR_BASE=curichi_restaurada docker compose … run …`.
+      - DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-curichi}:${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}@postgis:5432/${MIGRAR_BASE:-${POSTGRES_DB:-curichi}}}
+      - MIGRAR_LOCK_TIMEOUT_MS
+      - CRS_METRICO_EPSG
+    command: ["node", "node_modules/db/dist/cli/migrar.js"]
+    # El HEALTHCHECK de la imagen pregunta por /health, que un job no tiene.
+    healthcheck:
+      disable: true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 64
+
   api-core:
     <<: [*comun, *servicio-node]
     profiles: ["servicios"]
+    image: ${IMAGEN_API_CORE:-mi-curichi-api-core:local}
     build:
       context: .
       dockerfile: infra/docker/servicio.Dockerfile
       args:
         PAQUETE: api-core
         PUERTO: 3001
-    container_name: curichi-api-core
     depends_on:
+      migraciones:
+        condition: service_completed_successfully
       postgis:
         condition: service_healthy
       # `service_started` decía solo "el contenedor arrancó", que no es lo mismo que "responde":
       # api-core llama a geo-service en cada POST /reportes. Ahora espera a que esté sano.
       geo-service:
         condition: service_healthy
-      # Aunque las fotos vayan al disco, esperar a MinIO no cuesta nada y evita el caso feo:
-      # con S3 activado y MinIO todavía arrancando, api-core se niega a arrancar (comprueba el
-      # bucket antes de escuchar) y el contenedor entra en bucle de reinicio.
-      minio:
-        condition: service_healthy
+      # Solo si el perfil `minio` está activo (`required: false`). Con S3 en MinIO y MinIO todavía
+      # arrancando, api-core se negaría a arrancar (comprueba el bucket antes de escuchar).
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+    # Lista y no mapa a propósito: una entrada SIN valor (`- SESION_DIAS`) pasa la variable solo si
+    # está definida en el .env y, si no, el servicio usa su valor por defecto. Con `CLAVE: ${X:-}`
+    # llegaba una cadena vacía, y `Number("")` es 0: LOGIN_MAX_FALLOS_EMAIL vacío dejaba el freno
+    # de fuerza bruta en cero intentos.
     environment:
-      NODE_ENV: production
-      # Rol de aplicación, NO el dueño del esquema: api-core solo necesita DML sobre sus tablas
-      # (migración 0008). Arrancar con el rol dueño o con un superusuario está prohibido y el
-      # servicio lo comprueba al arrancar (`verificarPrivilegios`).
-      DATABASE_URL: ${API_DATABASE_URL:-postgresql://curichi_api:${API_DB_PASSWORD:?Definir API_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
-      GEO_SERVICE_URL: http://geo-service:3002
-      API_CORE_PORT: 3001
-      DB_POOL_MAX: ${DB_POOL_MAX:-8}
-      # Las sales y los tokens NO tienen valor por defecto a propósito: en producción el servicio
-      # se niega a arrancar con los de ejemplo (services/api-core/src/config.ts).
-      IP_HASH_SAL: ${IP_HASH_SAL:?Definir IP_HASH_SAL en .env}
-      JITTER_SAL: ${JITTER_SAL:?Definir JITTER_SAL en .env}
-      GEO_TOKEN_INTERNO: ${GEO_TOKEN_INTERNO:?Definir GEO_TOKEN_INTERNO en .env}
-      # Los dos van juntos: o se expone /metrics CON token, o se deja la ruta vacía y no se
-      # expone. Arrancar en producción con ruta y sin token es un error de configuración y el
-      # servicio se niega a hacerlo (services/api-core/src/config.ts).
-      METRICAS_RUTA: ${METRICAS_RUTA-/metrics}
-      METRICAS_TOKEN: ${METRICAS_TOKEN:-}
-      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:3000,http://localhost:3100}
-      COOKIE_SEGURA: ${COOKIE_SEGURA:-0}
-      TRUST_PROXY: ${TRUST_PROXY:-0}
-      # Límites ajustables sin reconstruir la imagen. Hacían falta para poder medir la capacidad
-      # real (subiéndolos) y para que el municipio pueda apretarlos o aflojarlos según lo que vea.
-      RATE_LIMIT_REPORTES_POR_HORA: ${RATE_LIMIT_REPORTES_POR_HORA:-10}
-      RATE_LIMIT_LECTURAS_POR_MINUTO: ${RATE_LIMIT_LECTURAS_POR_MINUTO:-240}
-      LOGIN_PETICIONES_POR_VENTANA: ${LOGIN_PETICIONES_POR_VENTANA:-20}
-      LOGIN_MAX_FALLOS_EMAIL: ${LOGIN_MAX_FALLOS_EMAIL:-}
-      LOGIN_MAX_FALLOS_IP: ${LOGIN_MAX_FALLOS_IP:-}
-      LOGIN_VENTANA_MINUTOS: ${LOGIN_VENTANA_MINUTOS:-}
-      PASSWORD_WORKERS: ${PASSWORD_WORKERS:-2}
-      STORAGE_DIR: /datos/fotos
-      # Almacén de fotos. Sin `S3_ENDPOINT_DOCKER` en el .env, api-core usa `STORAGE_DIR`, que es
-      # el volumen de ABAJO: correcto con una sola réplica y solo con una. Poniendo
-      # `S3_ENDPOINT_DOCKER=http://minio:9000` las fotos pasan a MinIO y varias réplicas ven las
-      # mismas. Es la variable "de dentro": desde el contenedor, localhost es el contenedor.
-      S3_ENDPOINT: ${S3_ENDPOINT_DOCKER:-}
-      S3_BUCKET: ${S3_BUCKET:-fotos}
-      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
-      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
-      S3_REGION: ${S3_REGION:-us-east-1}
-      S3_ESTILO_RUTA: ${S3_ESTILO_RUTA:-1}
+      - NODE_ENV=production
+      # Rol de aplicación, NO el dueño del esquema (migración 0008). Arrancar con el rol dueño o con
+      # un superusuario está prohibido y el servicio lo comprueba al arrancar. Es la variable «de
+      # dentro»: API_DATABASE_URL es la de `pnpm dev` y apunta a 127.0.0.1, que dentro del
+      # contenedor es el propio contenedor.
+      - DATABASE_URL=${API_DATABASE_URL_DOCKER:-postgresql://curichi_api:${API_DB_PASSWORD:?Definir API_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
+      - GEO_SERVICE_URL=http://geo-service:3002
+      - API_CORE_PORT=3001
+      # Ciudad de esta instalación (bloque «Ciudad» del .env). api-core la publica en
+      # GET /api/v1/configuracion; sin definir, vale Santa Cruz.
+      - CIUDAD_NOMBRE
+      - CIUDAD_PAIS
+      - CIUDAD_LOCALE
+      - CIUDAD_CENTRO_LON
+      - CIUDAD_CENTRO_LAT
+      - CIUDAD_ZOOM_INICIAL
+      - ZONA_HORARIA=${ZONA_HORARIA:-America/La_Paz}
+      - CRS_METRICO_EPSG
+      - DB_POOL_MAX=${DB_POOL_MAX:-8}
+      - DB_STATEMENT_TIMEOUT_MS
+      - DB_IDLE_TX_TIMEOUT_MS
+      - DB_ESPERA_CONEXION_MS
+      # Las sales y los tokens NO tienen valor por defecto a propósito: el servicio (que aquí corre
+      # con NODE_ENV=production) se niega a arrancar sin ellos, con el de ejemplo o con menos de 32
+      # caracteres, y dice cuál falta (config.ts). No llevan `:?`: un `:?` rompe TODO el Compose,
+      # también `docker compose up -d postgis` en un clon recién hecho, aunque no se use este perfil.
+      - IP_HASH_SAL
+      - JITTER_SAL
+      # Obligatorio en producción: api-core lo manda en cada POST /geo/v1/resolver y en la
+      # invalidación de capas; con él, geo-service saca esas llamadas del cupo por IP.
+      - GEO_TOKEN_INTERNO
+      # Los dos van juntos: o se expone /metrics CON token, o se deja la ruta vacía.
+      - METRICAS_RUTA=${METRICAS_RUTA-/metrics}
+      - METRICAS_TOKEN=${METRICAS_TOKEN:-}
+      # Los orígenes públicos de las dos apps. El navegador no llama a api-core de otro origen (va
+      # por /api en el suyo y la app reenvía), pero en producción no puede quedar vacío ni en `*`.
+      - CORS_ORIGENES=${CORS_ORIGENES_DOCKER:-https://${DOMINIO_PUBLICO:-localhost},https://${DOMINIO_PANEL:-localhost}}
+      # Fijo: con NODE_ENV=production api-core no arranca sin él, y detrás del proxy hay HTTPS.
+      - COOKIE_SEGURA=1
+      # Adónde lleva el botón «Panel técnico» (va en /auth/yo). Obligatoria y https en producción.
+      - PANEL_ADMIN_URL=${PANEL_ADMIN_URL_DOCKER:-https://${DOMINIO_PANEL:-}}
+      # 1 = un salto de confianza: el socket es la app Next y la última entrada de X-Forwarded-For
+      # la escribió el proxy con la IP real. Next no añade entrada propia. NO 2: la penúltima la
+      # elige el cliente. Cadena completa en produccion.md, «La IP del cliente».
+      - TRUST_PROXY=${TRUST_PROXY_DOCKER:-1}
+      - PUBLIC_BASE_URL
+      - EXPONER_DOCS
+      - SESION_DIAS
+      - SESION_IDLE_HORAS
+      - REPORTE_MINUTOS_ENTRE_ENVIOS
+      # Límites ajustables sin reconstruir la imagen.
+      - RATE_LIMIT_REPORTES_POR_HORA=${RATE_LIMIT_REPORTES_POR_HORA:-10}
+      - RATE_LIMIT_LECTURAS_POR_MINUTO=${RATE_LIMIT_LECTURAS_POR_MINUTO:-240}
+      - LOGIN_PETICIONES_POR_VENTANA=${LOGIN_PETICIONES_POR_VENTANA:-20}
+      - LOGIN_MAX_FALLOS_EMAIL
+      - LOGIN_MAX_FALLOS_IP
+      - LOGIN_VENTANA_MINUTOS
+      - REGISTRO_PETICIONES_POR_VENTANA
+      - REGISTRO_MAX_POR_IP
+      - REGISTRO_VENTANA_MINUTOS
+      - IP_HASH_RETENCION_DIAS
+      - PASSWORD_WORKERS=${PASSWORD_WORKERS:-2}
+      - PASSWORD_COLA_MAX
+      - CIERRE_PLAZO_MS
+      - MANTENIMIENTO_ESPERA_MS
+      # Almacén de fotos. Sin `S3_ENDPOINT_DOCKER`, api-core usa `STORAGE_DIR` (el volumen de
+      # abajo, que comparten las réplicas de ESTA máquina). Con `S3_ENDPOINT_DOCKER=http://minio:9000`
+      # (local) o la URL del S3 gestionado (producción), las fotos van a S3.
+      - STORAGE_DIR=/datos/fotos
+      - S3_ENDPOINT=${S3_ENDPOINT_DOCKER:-}
+      - S3_BUCKET=${S3_BUCKET:-fotos}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_REGION=${S3_REGION:-us-east-1}
+      - S3_ESTILO_RUTA=${S3_ESTILO_RUTA:-1}
+      - S3_PLAZO_MS
     volumes:
+      # La imagen crea /datos/fotos con dueño `node`, así que un volumen nuevo nace con ese dueño.
       - fotos-data:/datos/fotos
     ports:
-      - "127.0.0.1:${API_CORE_PORT:-3001}:3001"
+      # Puerto efímero en loopback: permite `--scale` y no choca con `pnpm dev` (3001).
+      - "127.0.0.1::3001"
     # Node cierra el servidor y el pool al recibir SIGTERM; 20 s le sobran y evitan el SIGKILL a
     # los 10 s por defecto, que corta peticiones en vuelo.
     stop_grace_period: 20s
@@ -264,39 +376,49 @@ services:
   geo-service:
     <<: [*comun, *servicio-node]
     profiles: ["servicios"]
+    image: ${IMAGEN_GEO_SERVICE:-mi-curichi-geo-service:local}
     build:
       context: .
       dockerfile: infra/docker/servicio.Dockerfile
       args:
         PAQUETE: geo-service
         PUERTO: 3002
-    container_name: curichi-geo-service
     depends_on:
+      migraciones:
+        condition: service_completed_successfully
       postgis:
         condition: service_healthy
     environment:
-      NODE_ENV: production
+      - NODE_ENV=production
       # Solo lectura (§4.6). El servicio comprueba al arrancar que este rol NO puede escribir en
       # reporte_inundacion y en producción se niega a servir si puede.
-      DATABASE_URL: ${GEO_DATABASE_URL:-postgresql://curichi_geo:${GEO_DB_PASSWORD:?Definir GEO_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
-      GEO_SERVICE_PORT: 3002
-      DB_POOL_MAX: ${DB_POOL_MAX:-8}
-      GEO_TOKEN_INTERNO: ${GEO_TOKEN_INTERNO:?Definir GEO_TOKEN_INTERNO en .env}
-      # geo-service también expone /metrics desde la Fase 4, y también se niega a arrancar en
-      # producción con la ruta puesta y sin token. Faltaban aquí: el contenedor moría en bucle.
-      METRICAS_RUTA: ${METRICAS_RUTA-/metrics}
-      METRICAS_TOKEN: ${METRICAS_TOKEN:-}
-      CORS_ORIGENES: ${CORS_ORIGENES:-http://localhost:3000,http://localhost:3100}
-      TRUST_PROXY: ${TRUST_PROXY:-0}
-      GEO_RATE_LIMIT_POR_MINUTO: ${GEO_RATE_LIMIT_POR_MINUTO:-600}
-      GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO: ${GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO:-120}
-      GEO_CACHE_AGREGADOS_MS: ${GEO_CACHE_AGREGADOS_MS:-30000}
+      - DATABASE_URL=${GEO_DATABASE_URL_DOCKER:-postgresql://curichi_geo:${GEO_DB_PASSWORD:?Definir GEO_DB_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
+      - GEO_SERVICE_PORT=3002
+      - DB_POOL_MAX=${DB_POOL_MAX:-8}
+      - GEO_DB_STATEMENT_TIMEOUT_MS
+      # Obligatorio en producción, el mismo valor que en api-core.
+      - GEO_TOKEN_INTERNO
+      # geo-service también registra `ipHash` en cada petición: sin la sal propia, el hash sería
+      # adivinable con el valor de ejemplo.
+      - IP_HASH_SAL
+      - METRICAS_RUTA=${METRICAS_RUTA-/metrics}
+      - METRICAS_TOKEN=${METRICAS_TOKEN:-}
+      - CORS_ORIGENES=${CORS_ORIGENES_DOCKER:-https://${DOMINIO_PUBLICO:-localhost},https://${DOMINIO_PANEL:-localhost}}
+      # Igual que api-core: le llega /geo/* desde las apps, con la IP real escrita por el proxy. Las
+      # llamadas de api-core no traen X-Forwarded-For y cuentan con la IP de api-core (y el token).
+      - TRUST_PROXY=${TRUST_PROXY_DOCKER:-1}
+      - GEO_RATE_LIMIT_POR_MINUTO=${GEO_RATE_LIMIT_POR_MINUTO:-600}
+      - GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO=${GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO:-120}
+      - GEO_CACHE_AGREGADOS_MS=${GEO_CACHE_AGREGADOS_MS:-30000}
+      - UMBRAL_TESELAS_BYTES
+      - TOLERANCIA_SIMPLIFICACION
+      - CIERRE_PLAZO_MS
       # Solo lectura: geo-service sirve las capas que genera el ETL, nunca las escribe (§4.6).
-      DIR_PROCESSED: /datos/processed
+      - DIR_PROCESSED=/datos/processed
     volumes:
       - ./data/processed:/datos/processed:ro
     ports:
-      - "127.0.0.1:${GEO_SERVICE_PORT:-3002}:3002"
+      - "127.0.0.1::3002"
     stop_grace_period: 20s
     # Más memoria que api-core: el índice de teselas de la capa de manzanas vive en el proceso.
     deploy:
@@ -306,7 +428,315 @@ services:
           memory: 1024M
           pids: 512
 
+  # --- Apps Next (perfil `servicios`) --------------------------------------------------------------
+  #
+  # Una imagen por app (infra/docker/app.Dockerfile) que sirve a cualquier ciudad: todo lo de esta
+  # instalación llega por entorno y la ciudad, de api-core. Sin `container_name` ni puertos: solo
+  # las alcanza el proxy, y `--scale web-ciudadano=3` funciona (el proxy reparte por DNS).
+  #
+  # PROXY_DE_CONFIANZA=1 FIJO, y es seguro justamente porque no publican puertos: la única forma de
+  # llegar a ellas es a través del proxy, que reescribe X-Forwarded-For con la IP real. Con 0,
+  # `src/proxy.ts` borraría esa cabecera y api-core vería a todos los vecinos con la IP de la app:
+  # el límite de 10 reportes por hora pasaría a ser de la ciudad entera.
+  # HSTS=0 FIJO: lo pone el proxy, que es quien sabe si hay certificados públicos (PROXY_TLS=acme).
+  web-ciudadano:
+    <<: [*comun, *servicio-node]
+    profiles: ["servicios"]
+    image: ${IMAGEN_WEB_CIUDADANO:-mi-curichi-web-ciudadano:local}
+    build:
+      context: .
+      dockerfile: infra/docker/app.Dockerfile
+      args:
+        APP: web-ciudadano
+        PUERTO: 3000
+    depends_on:
+      api-core:
+        condition: service_healthy
+      geo-service:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      # Por el nombre del servicio: con réplicas, el DNS de Docker reparte por conexión.
+      - API_CORE_URL=http://api-core:3001
+      - GEO_SERVICE_URL=http://geo-service:3002
+      - PROXY_DE_CONFIANZA=1
+      - HSTS=0
+    # Solo lectura como los servicios; `.next/cache` es lo único donde Next escribiría.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/apps/web-ciudadano/.next/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 256
+
+  panel-admin:
+    <<: [*comun, *servicio-node]
+    profiles: ["servicios"]
+    image: ${IMAGEN_PANEL_ADMIN:-mi-curichi-panel-admin:local}
+    build:
+      context: .
+      dockerfile: infra/docker/app.Dockerfile
+      args:
+        APP: panel-admin
+        PUERTO: 3100
+    depends_on:
+      api-core:
+        condition: service_healthy
+      geo-service:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=3100
+      - HOSTNAME=0.0.0.0
+      - API_CORE_URL=http://api-core:3001
+      - GEO_SERVICE_URL=http://geo-service:3002
+      - PROXY_DE_CONFIANZA=1
+      - HSTS=0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /app/apps/panel-admin/.next/cache:rw,noexec,nosuid,size=64m,uid=1000,gid=1000
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 256
+
+  # --- Proxy de entrada (perfil `servicios`) -------------------------------------------------------
+  #
+  # Caddy con la configuración horneada (infra/proxy/Caddyfile, infra/docker/proxy.Dockerfile).
+  # Termina TLS, reescribe X-Forwarded-For con la IP real, quita `x-middleware-rewrite`, pone HSTS
+  # con certificados públicos y reparte entre las réplicas de las apps por DNS.
+  #
+  #   DOMINIO_PUBLICO, DOMINIO_PANEL  nombres distintos, apuntando (DNS) a esta máquina
+  #   PROXY_TLS   acme (certificados públicos, por defecto) · interno (CA propia) · no (HTTP)
+  #   ACME_EMAIL  obligatorio con acme
+  #
+  # Sin `:?`: el propio contenedor valida y se niega a arrancar con la lista de lo que falta.
+  proxy:
+    <<: *comun
+    profiles: ["servicios"]
+    image: ${IMAGEN_PROXY:-mi-curichi-proxy:local}
+    build:
+      context: ./infra
+      dockerfile: docker/proxy.Dockerfile
+    depends_on:
+      web-ciudadano:
+        condition: service_healthy
+      panel-admin:
+        condition: service_healthy
+    environment:
+      - DOMINIO_PUBLICO
+      - DOMINIO_PANEL
+      - ACME_EMAIL
+      - PROXY_TLS=${PROXY_TLS:-acme}
+    ports:
+      # Caddy escucha en 8080/8443 sin root. Para probar en una máquina con 80/443 ocupados o sin
+      # exponerse a la red: PROXY_PUERTO_HTTP=127.0.0.1:8080, PROXY_PUERTO_HTTPS=127.0.0.1:8443.
+      - "${PROXY_PUERTO_HTTP:-80}:8080"
+      - "${PROXY_PUERTO_HTTPS:-443}:8443"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+      # Caddy no guarda configuración (persist_config off); /config existe pero queda vacía.
+      - /config:rw,noexec,nosuid,size=1m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    volumes:
+      # Certificados, cuenta ACME y CA interna. Tiene que sobrevivir a los reinicios: sin él, cada
+      # arranque pide certificados nuevos y Let's Encrypt limita cuántos se pueden pedir por semana.
+      - proxy-datos:/data
+    # Caddy cierra ordenadamente con `grace_period 20s`.
+    stop_grace_period: 25s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+          pids: 256
+
+  # --- Respaldos (perfil `respaldos`) -------------------------------------------------------------
+  #
+  # pg_dump diario → cifrado (gpg, AES-256) → S3 EXTERNO con retención 7 diarios / 4 semanales /
+  # 12 mensuales. Junto a cada respaldo sube un manifiesto con la última migración aplicada (el
+  # respaldo excluye `_migraciones`) y el número de filas de cada tabla. Al arrancar hace uno en el
+  # acto: así una credencial mal puesta se ve al desplegar y no a las 3 de la mañana.
+  # Procedimiento completo y restauración: docs/operaciones/respaldo-y-restauracion.md.
+  respaldo:
+    <<: *comun
+    profiles: ["respaldos"]
+    image: mi-curichi-respaldo:local
+    build:
+      context: ./infra
+      dockerfile: docker/respaldo.Dockerfile
+    # tini como PID 1: reenvía SIGTERM al script, que está durmiendo hasta el próximo respaldo.
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      - TZ=${ZONA_HORARIA:-America/La_Paz}
+      - INSTALACION_NOMBRE=${INSTALACION_NOMBRE:-mi-curichi}
+      # Rol dueño: el que puede leer todas las tablas. Misma variable que el job de migraciones.
+      - RESPALDO_DATABASE_URL=${DATABASE_URL_DOCKER:-postgresql://${POSTGRES_USER:-curichi}:${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}@postgis:5432/${POSTGRES_DB:-curichi}}
+      # Sin `:?` a propósito: una variable obligatoria de un perfil inactivo rompería
+      # `docker compose up` para todo el mundo. Las valida el propio script al arrancar.
+      - RESPALDO_CLAVE_CIFRADO
+      - RESPALDO_S3_ENDPOINT
+      - RESPALDO_S3_REGION
+      - RESPALDO_S3_BUCKET
+      - RESPALDO_S3_ACCESS_KEY
+      - RESPALDO_S3_SECRET_KEY
+      - RESPALDO_S3_PROVEEDOR
+      - RESPALDO_S3_ESTILO_RUTA
+      - RESPALDO_S3_PREFIJO
+      - RESPALDO_HORA
+      - RESPALDO_AL_ARRANCAR
+      - RESPALDO_RETENCION_DIARIA
+      - RESPALDO_RETENCION_SEMANAL
+      - RESPALDO_RETENCION_MENSUAL
+      - RESPALDO_URL_LATIDO
+      - RESPALDO_ALERTMANAGER_URL
+    volumes:
+      # Directorio de trabajo del dump antes de cifrarlo. En disco y no en tmpfs: la base crece.
+      - respaldo-trabajo:/trabajo
+    healthcheck:
+      # «unhealthy» si el último respaldo bueno tiene más de 26 h.
+      test: ["CMD", "curichi-respaldo", "salud"]
+      interval: 5m
+      timeout: 10s
+      retries: 1
+      start_period: 30m
+    stop_grace_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 128
+
+  # --- Monitoreo (perfil `observabilidad`) --------------------------------------------------------
+  #
+  # Prometheus lee /metrics de TODAS las réplicas (descubrimiento por DNS del nombre del servicio)
+  # con el token de METRICAS_TOKEN, el blackbox prueba /ready de cada réplica y Alertmanager manda
+  # las alertas al webhook de ALERTAS_WEBHOOK_URL. Reglas: infra/observabilidad/alertas.yml.
+  # Las dos interfaces web quedan en loopback: para verlas desde fuera, un túnel SSH.
+  prometheus:
+    <<: *comun
+    profiles: ["observabilidad"]
+    image: quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+    # Un envoltorio mínimo: escribe el token en un tmpfs (Prometheus no lee variables de entorno
+    # en su configuración) y pone el nombre de la instalación en las etiquetas externas.
+    entrypoint: ["/bin/sh", "/etc/prometheus/arrancar.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+    cap_drop:
+      - ALL
+    environment:
+      - METRICAS_TOKEN
+      - INSTALACION_NOMBRE=${INSTALACION_NOMBRE:-mi-curichi}
+      - PROMETHEUS_RETENCION=${PROMETHEUS_RETENCION:-30d}
+      - PROMETHEUS_RETENCION_TAMANO=${PROMETHEUS_RETENCION_TAMANO:-5GB}
+      # Los mismos que el proxy: el job `proxy` entra por él con el nombre de cada sitio y el
+      # módulo del blackbox que corresponde al modo TLS (infra/observabilidad/prometheus.yml).
+      - DOMINIO_PUBLICO
+      - DOMINIO_PANEL
+      - PROXY_TLS=${PROXY_TLS:-acme}
+    volumes:
+      - ./infra/observabilidad/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./infra/observabilidad/alertas.yml:/etc/prometheus/alertas.yml:ro
+      - ./infra/observabilidad/arrancar-prometheus.sh:/etc/prometheus/arrancar.sh:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+          pids: 256
+
+  alertmanager:
+    <<: *comun
+    profiles: ["observabilidad"]
+    image: quay.io/prometheus/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a
+    entrypoint: ["/bin/sh", "/etc/alertmanager/arrancar.sh"]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1m
+    cap_drop:
+      - ALL
+    environment:
+      # [SENSIBLE] La URL de un webhook suele llevar el secreto dentro. Vacía = las alertas se ven
+      # en la interfaz de Alertmanager pero no salen de la máquina (y el arranque lo avisa).
+      - ALERTAS_WEBHOOK_URL
+      - ALERTAS_URL_EXTERNA
+    volumes:
+      - ./infra/observabilidad/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./infra/observabilidad/alertmanager-sin-destino.yml:/etc/alertmanager/sin-destino.yml:ro
+      - ./infra/observabilidad/arrancar-alertmanager.sh:/etc/alertmanager/arrancar.sh:ro
+      - alertmanager-data:/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 128
+
+  blackbox:
+    <<: *comun
+    profiles: ["observabilidad"]
+    image: quay.io/prometheus/blackbox-exporter:v0.28.0@sha256:e753ff9f3fc458d02cca5eddab5a77e1c175eee484a8925ac7d524f04366c2fc
+    # La imagen corre como root; para sondas HTTP no hace falta (sí para ICMP, que no se usa).
+    user: "65534:65534"
+    read_only: true
+    cap_drop:
+      - ALL
+    command: ["--config.file=/etc/blackbox_exporter/config.yml"]
+    volumes:
+      - ./infra/observabilidad/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9115/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
+          pids: 64
+
 volumes:
   postgis-data:
   minio-data:
   fotos-data:
+  proxy-datos:
+  respaldo-trabajo:
+  prometheus-data:
+  alertmanager-data:

@@ -1,5 +1,9 @@
 # Qué NO se envía al demonio de Docker como contexto de build.
 #
+# Solo lo usa `infra/docker/servicio.Dockerfile`. Las demás imágenes tienen su propio archivo junto
+# al Dockerfile (`<Dockerfile>.dockerignore`, que BuildKit prefiere a este), y son listas BLANCAS:
+# app.Dockerfile.dockerignore, proxy.Dockerfile.dockerignore y respaldo.Dockerfile.dockerignore.
+#
 # Sin este archivo el contexto es el repositorio entero: los `node_modules` de nueve paquetes
 # (PGlite solo ya son ~100 MB de WebAssembly), el historial de git, las capas de `data/` y la
 # base local de `infra/.pglite`. Además del tiempo de subida, `.env` acabaría en el contexto:
@@ -20,10 +24,11 @@
 .vscode
 .idea
 
-# Secretos y configuración local.
-.env
-.env.*
-!.env.example
+# Secretos y configuración local, estén donde estén: antes solo se excluía el `.env` de la raíz, y
+# un `services/api-core/.env` de desarrollo habría entrado en la etapa de build (el Dockerfile copia
+# la carpeta entera del paquete) y de ahí, con `pnpm deploy`, a la imagen final.
+**/.env
+**/.env.*
 
 # Datos: `raw` es inmutable y pesado, `processed` se monta como volumen en Compose.
 data/raw

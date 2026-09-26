@@ -16,16 +16,21 @@
 # habilita *request smuggling*. Es justo el escenario de este despliegue, que lleva un proxy
 # delante. Una etiqueta flotante no avisa de nada: sigue diciendo «24» mientras sirve lo viejo.
 #
-# Con el digest, una reconstrucción trae SIEMPRE el mismo binario, haya caché o no. Para
-# actualizar: `docker pull node:<nueva>-slim`, copiar el digest que imprime y cambiar los dos ARG
-# de abajo. El procedimiento y la comprobación posterior están en `infra/docker/README.md`.
-ARG NODE_VERSION=24.21.0
-ARG NODE_DIGEST=sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6
+# Con el digest, una reconstrucción trae SIEMPRE el mismo binario, haya caché o no.
+#
+# Versión y digest van ESCRITOS en los dos FROM, no en ARG: Dependabot (.github/dependabot.yml)
+# solo sabe actualizar un FROM literal, y es él quien abre el PR cuando sale un parche de Node,
+# que es exactamente lo que faltó con 24.15.0. Los dos FROM tienen que decir lo mismo. Para
+# actualizar a mano: `docker pull node:<nueva>-slim`, copiar el digest que imprime y cambiar los
+# dos FROM (procedimiento en `infra/docker/README.md`).
+#
+# Solo Node LTS (CLAUDE.md §8.1): el build falla si la base trae otra versión mayor.
+ARG NODE_MAYOR=24
 
 # --- 1) Dependencias del workspace ------------------------------------------------------------
 # El contexto de build es la RAÍZ del repositorio: pnpm necesita ver el workspace entero para
 # resolver los enlaces `workspace:*` (contracts y db).
-FROM node:${NODE_VERSION}-slim@${NODE_DIGEST} AS deps
+FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS deps
 ENV PNPM_HOME=/pnpm CI=1
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -58,8 +63,8 @@ RUN pnpm --filter contracts build \
 RUN pnpm --filter "${PAQUETE}" --prod --legacy deploy /salida
 
 # --- 3) Imagen final --------------------------------------------------------------------------
-FROM node:${NODE_VERSION}-slim@${NODE_DIGEST} AS runtime
-ARG NODE_VERSION
+FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
+ARG NODE_MAYOR
 ARG PAQUETE
 ARG PUERTO=3001
 ENV NODE_ENV=production \
@@ -70,14 +75,22 @@ ENV NODE_ENV=production \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tini \
  && rm -rf /var/lib/apt/lists/*
-# El binario que se va a ejecutar tiene que ser el que dice el ARG. Es barato y cierra la puerta
-# a que una base cacheada o un `--build-arg` a medias dejen otra vez un runtime viejo en marcha
-# sin que nadie lo note: si no coincide, el build falla aquí y no hay imagen que desplegar.
-RUN test "v${NODE_VERSION}" = "$(node -v)" \
- || { echo "ERROR: la imagen base trae $(node -v) y se esperaba v${NODE_VERSION}" >&2; exit 1; }
+# El digest ya fija el binario exacto; esto cierra la otra puerta: que un PR de actualización
+# cuele una versión mayor que no es LTS (Node 26 es «Current»). Si no coincide, el build falla aquí
+# y no hay imagen que desplegar. `node -v` queda en el log del build para saber qué se construyó.
+RUN node -v \
+ && case "$(node -v)" in "v${NODE_MAYOR}".*) ;; \
+      *) echo "ERROR: la imagen base trae $(node -v) y aquí solo va Node ${NODE_MAYOR} LTS" >&2; exit 1 ;; \
+    esac
 # Usuario sin privilegios. La imagen de Node ya trae `node` (uid 1000); no se crea otro.
 WORKDIR /app
 COPY --from=build --chown=node:node /salida /app
+# Carpeta de fotos del almacén en disco (STORAGE_DIR del Compose), con dueño `node`. Sin ella, el
+# volumen `fotos-data` se creaba como root:root y api-core, que corre como `node`, no podía
+# escribir: la primera foto fallaba con EACCES. Docker copia dueño y permisos de la carpeta de la
+# imagen a un volumen con nombre NUEVO; uno que ya existía conserva los suyos (arreglo en
+# infra/docker/README.md). En geo-service la carpeta queda vacía y sin uso.
+RUN mkdir -p /datos/fotos && chown node:node /datos/fotos && chmod 0750 /datos/fotos
 USER node
 EXPOSE ${PUERTO}
 # 0.0.0.0 y no el 127.0.0.1 por defecto: dentro de un contenedor, escuchar solo en loopback deja

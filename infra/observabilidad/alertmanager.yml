@@ -1,0 +1,37 @@
+# Alertmanager de Mi Curichi (perfil `observabilidad`). Parte 5.
+#
+# El destino es un webhook genérico cuya URL llega por ALERTAS_WEBHOOK_URL: `arrancar-alertmanager.sh`
+# la deja en /tmp/webhook_url (Alertmanager no lee variables de entorno en su configuración). El
+# cuerpo es el JSON estándar de Alertmanager; para Slack, Teams, Telegram o correo hay receptores
+# nativos: ver docs/operaciones/observabilidad.md, «Adónde llegan las alertas».
+#
+# Si ALERTAS_WEBHOOK_URL está vacía se usa sin-destino.yml, que tiene las mismas rutas sin receptor.
+route:
+  receiver: principal
+  group_by: [alertname, instalacion, servicio]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h
+  routes:
+    - matchers: ['gravedad="critica"']
+      receiver: principal
+      repeat_interval: 1h
+    - matchers: ['gravedad="alta"']
+      receiver: principal
+      repeat_interval: 4h
+
+inhibit_rules:
+  # Con la réplica caída, que además esté lenta, dé 5xx o no esté lista es consecuencia.
+  - source_matchers: ['alertname=~"ServicioCaido|ServicioSinReplicas"']
+    target_matchers: ['alertname=~"NoListo|Degradado|TasaDeErrores5xx|LatenciaAlta|PoolDeConexionesSaturado|BaseNoDisponible"']
+    equal: [instalacion, servicio]
+  # Sin ninguna réplica de una app, que su sitio no responda por el proxy es consecuencia.
+  - source_matchers: ['alertname="AppSinReplicas"']
+    target_matchers: ['alertname="ProxyNoResponde"']
+    equal: [instalacion, app]
+
+receivers:
+  - name: principal
+    webhook_configs:
+      - url_file: /tmp/webhook_url
+        send_resolved: true

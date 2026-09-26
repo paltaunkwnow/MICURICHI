@@ -1,0 +1,20 @@
+# Alertmanager sin destino: la configuración que se usa cuando ALERTAS_WEBHOOK_URL está vacía.
+# Las alertas se agrupan y se ven en la interfaz (http://127.0.0.1:9093), pero no salen de la
+# máquina. El arranque lo avisa en el log. Mismas rutas que alertmanager.yml.
+route:
+  receiver: principal
+  group_by: [alertname, instalacion, servicio]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h
+
+inhibit_rules:
+  - source_matchers: ['alertname=~"ServicioCaido|ServicioSinReplicas"']
+    target_matchers: ['alertname=~"NoListo|Degradado|TasaDeErrores5xx|LatenciaAlta|PoolDeConexionesSaturado|BaseNoDisponible"']
+    equal: [instalacion, servicio]
+  - source_matchers: ['alertname="AppSinReplicas"']
+    target_matchers: ['alertname="ProxyNoResponde"']
+    equal: [instalacion, app]
+
+receivers:
+  - name: principal

@@ -1,0 +1,216 @@
+# Proxy de entrada de Mi Curichi (Parte 5): termina TLS y reparte entre las réplicas de las dos apps.
+#
+#   navegador ──HTTPS──▶ proxy (Caddy) ──HTTP──▶ web-ciudadano / panel-admin ──▶ api-core / geo-service
+#
+# Va HORNEADO en la imagen (infra/docker/proxy.Dockerfile), no montado: Docker Desktop no puede
+# montar carpetas de la unidad A: en contenedores nuevos, y una imagen con la configuración dentro
+# es más reproducible (lo que se probó es exactamente lo que se despliega). Cambiarlo exige
+# reconstruir la imagen del proxy.
+#
+# Variables (las valida `arrancar.sh` antes de ceder a Caddy):
+#   DOMINIO_PUBLICO  nombre de la app pública        p. ej. mapa.ciudad.gob.bo
+#   DOMINIO_PANEL    nombre del panel (OTRO nombre)  p. ej. panel.ciudad.gob.bo
+#   PROXY_TLS        acme    certificados públicos automáticos (Let's Encrypt, y ZeroSSL de reserva)
+#                    interno CA propia de Caddy (`tls internal`): pruebas locales o de preproducción
+#                    no      HTTP sin cifrar: solo pruebas en la máquina
+#   ACME_EMAIL       correo de la cuenta ACME (obligatorio con PROXY_TLS=acme)
+#
+# Qué se garantiza aquí y por qué, con detalle en docs/operaciones/produccion.md:
+#   - X-Forwarded-For lo ESCRIBE el proxy con la IP real; lo que mande el cliente se descarta.
+#   - La cabecera `x-middleware-rewrite` (URL interna de api-core o geo-service) no sale.
+#   - HSTS solo con certificados públicos (PROXY_TLS=acme).
+#   - Tope de cuerpo y tiempos de espera coherentes con las fotos (8 MiB) y la exportación (180 s).
+#   - El reparto entre réplicas sale del DNS de Docker, no de una IP fija.
+{
+	# Sin API de administración ni configuración guardada en disco: la configuración es la de la
+	# imagen y no se cambia en caliente.
+	admin off
+	persist_config off
+
+	# Caddy corre SIN root: escucha en 8080/8443 dentro del contenedor y el Compose publica 80 y 443.
+	# Caddy no añade estos puertos a sus redirecciones a HTTPS (están pensados justamente para ir
+	# detrás de un reenvío de puertos) y los desafíos ACME HTTP-01 y TLS-ALPN-01 los atiende en
+	# ellos, así que los certificados automáticos siguen funcionando.
+	http_port 8080
+	https_port 8443
+
+	# No intentar instalar la CA de `tls internal` en el almacén del sistema del contenedor: no es
+	# root y no serviría de nada. Quien quiera confiar en ella la exporta a mano (produccion.md).
+	skip_install_trust
+
+	# Al parar (SIGTERM), margen para las peticiones en vuelo. El Compose espera 25 s.
+	grace_period 20s
+
+	servers {
+		# Sin HTTP/3: iría por UDP y Caddy lo anunciaría (Alt-Svc) en el puerto INTERNO 8443, que
+		# desde fuera no existe. HTTP/2 sobre TLS es más que suficiente para esta aplicación.
+		protocols h1 h2
+
+		timeouts {
+			# Cabeceras lentas (slowloris): se cortan a los 15 s.
+			read_header 15s
+			# Petición entera, cuerpo incluido. Una foto de 8 MiB necesita ~28 KB/s para entrar en
+			# 5 min: holgado para un celular con mala señal en plena tormenta.
+			read_body 5m
+			# Respuesta entera, contada desde que llegan las cabeceras de la petición: cubre la
+			# subida anterior y la exportación del panel (hasta 180 s esperando a api-core) más
+			# la descarga.
+			write 10m
+			idle 2m
+		}
+	}
+}
+
+# --- Piezas comunes ------------------------------------------------------------------------------
+
+# Reenvío a una app Next.
+#   {args[0]} nombre del servicio en el Compose   {args[1]} puerto
+#   {args[2]} cuánto esperar las cabeceras de la respuesta de la app
+(reenvio) {
+	reverse_proxy {
+		# Réplicas por DNS de Docker: el nombre del servicio resuelve a TODAS sus réplicas y cada
+		# IP es un destino aparte, así que `--scale web-ciudadano=3` reparte sin tocar esto. Se
+		# vuelve a preguntar cada 5 s. Solo IPv4: la red del Compose no tiene IPv6.
+		dynamic a {
+			name {args[0]}
+			port {args[1]}
+			refresh 5s
+			versions ipv4
+		}
+		# Por turno: si una réplica no acepta la conexión (reiniciándose, recién escalada a la
+		# baja), el reintento va a la SIGUIENTE, durante 5 s como mucho. Solo se reintenta lo que
+		# no llegó a salir hacia la app, o un GET.
+		lb_policy round_robin
+		lb_try_duration 5s
+		# SIN chequeo pasivo (`fail_duration`), a propósito. Caddy cuenta como fallo de la réplica
+		# cualquier error del reenvío, también el de un cuerpo que supera `max_size`: comprobado el
+		# 2026-09-26, una subida de 11 MiB (413, correcto) dejó la única réplica fuera 10 s y la
+		# petición siguiente recibió «no upstreams available». Cualquiera podía tumbar la app así.
+		# Una réplica parada sale sola del DNS de Docker, y el `refresh` de arriba lo recoge.
+
+		# LA IP DEL CLIENTE. Caddy ya ignora por defecto el X-Forwarded-For que llega de un
+		# cliente que no es un proxy de confianza; se escribe explícito para que no dependa de un
+		# valor por defecto (antes de Caddy 2.5, AÑADÍA al valor del cliente). `{client_ip}` es la
+		# IP del socket mientras no se declaren `trusted_proxies`; si algún día hay un CDN delante
+		# y se declaran, pasa a ser la IP que ese CDN dice, y la cabecera sigue teniendo UNA sola
+		# entrada. De esto dependen el rate limit, el freno de fuerza bruta del login y el antispam
+		# de api-core (cadena completa en produccion.md, «La IP del cliente»).
+		header_up X-Forwarded-For {client_ip}
+		# Las otras cabeceras con las que un cliente puede declarar «su» IP no llegan a la app.
+		header_up -X-Real-IP
+		header_up -Forwarded
+		header_up -X-Client-IP
+		header_up -True-Client-IP
+
+		# El reenvío de Next publica en `x-middleware-rewrite` la URL de destino, es decir, la
+		# dirección interna de api-core o geo-service (comprobado: `http://api-core:3001/…`).
+		# `X-Powered-By` solo dice qué hay detrás.
+		header_down -X-Middleware-*
+		header_down -X-Powered-By
+
+		transport http {
+			dial_timeout 3s
+			response_header_timeout {args[2]}
+		}
+	}
+}
+
+# Lo que se hace en los dos sitios.
+(comun) {
+	# Ruta interna de geo-service (la llama api-core directamente, con token). Desde fuera no hay
+	# nada que hacer en ella: se corta aquí, antes incluso de llegar a la app.
+	@interno path /geo/v1/capas/invalidar /geo/v1/capas/invalidar/*
+	respond @interno 404
+
+	# El optimizador de imágenes de Next. Ninguna app usa `next/image` y las imágenes ya no llevan
+	# sharp (infra/docker/app.Dockerfile): sin él, Next devuelve la imagen tal cual y además intenta
+	# guardarla en su caché, así que solo serviría para que un tercero lo ponga a trabajar. Si una
+	# app empieza a usar `next/image`, quitar esto y el paso del Dockerfile a la vez.
+	@optimizador path /_next/image /_next/image/*
+	respond @optimizador 404
+
+	# Qué hay detrás no es asunto de nadie. `Via` lo añade el propio reenvío DESPUÉS de
+	# `header_down`, así que se quita aquí, al escribir la respuesta.
+	header {
+		-Server
+		-Via
+	}
+}
+
+# App pública.
+(publica) {
+	# Fotos de hasta 8 MiB (FOTO_MAX_BYTES de contracts) en multipart. 10 MiB es además el tope con
+	# que el reenvío de Next guarda el cuerpo en memoria: por encima Next lo TRUNCA y api-core
+	# recibiría una foto rota. Mejor un 413 aquí.
+	request_body {
+		max_size 10MiB
+	}
+	import comun
+	# La app corta su reenvío a los 30 s (valor por defecto de Next); aquí un poco más, para que
+	# el error lo dé la app, que sabe qué petición era.
+	import reenvio web-ciudadano 3000 35s
+}
+
+# Panel técnico.
+(panel) {
+	# El panel solo manda JSON pequeño (moderación, filtros).
+	request_body {
+		max_size 1MiB
+	}
+	import comun
+	# La exportación puede tardar hasta 180 s en empezar (proxyTimeout del panel y
+	# PLAZOS_MS.exportacion): aquí 185 s, para no cortarla antes que la propia app.
+	import reenvio panel-admin 3100 185s
+}
+
+(hsts) {
+	# Un año, subdominios incluidos. Solo con certificados públicos: anunciarlo con la CA interna o
+	# sobre HTTP dejaría al navegador sin poder volver atrás. Las apps tienen HSTS=0 en el Compose:
+	# quien sabe si hay HTTPS de verdad es el proxy.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+}
+
+# --- Modos (PROXY_TLS) ---------------------------------------------------------------------------
+
+(modo_acme) {
+	{$DOMINIO_PUBLICO} {
+		tls {$ACME_EMAIL}
+		import hsts
+		import publica
+	}
+	{$DOMINIO_PANEL} {
+		tls {$ACME_EMAIL}
+		import hsts
+		import panel
+	}
+}
+
+(modo_interno) {
+	{$DOMINIO_PUBLICO} {
+		tls internal
+		import publica
+	}
+	{$DOMINIO_PANEL} {
+		tls internal
+		import panel
+	}
+}
+
+(modo_no) {
+	http://{$DOMINIO_PUBLICO} {
+		import publica
+	}
+	http://{$DOMINIO_PANEL} {
+		import panel
+	}
+}
+
+# Salud del propio proxy para el HEALTHCHECK del contenedor: solo en loopback, nunca publicada.
+http://127.0.0.1:8099 {
+	bind 127.0.0.1
+	respond "ok" 200
+}
+
+# Un valor de PROXY_TLS que no sea acme, interno o no hace fallar el arranque («File to import not
+# found: modo_…»); `arrancar.sh` lo detiene antes con un mensaje más claro.
+import modo_{$PROXY_TLS:acme}

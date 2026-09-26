@@ -1,0 +1,5 @@
+# Contexto del build de la imagen de respaldos (contexto = infra/). Solo hace falta su script:
+# todo lo demás queda fuera, en particular infra/.pglite (la base local sin Docker, con datos) e
+# infra/.storage (fotos locales), que no tienen por qué salir hacia el demonio de Docker.
+*
+!respaldo/respaldo.sh

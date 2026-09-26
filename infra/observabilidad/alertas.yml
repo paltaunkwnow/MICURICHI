@@ -1,0 +1,267 @@
+# Reglas de alerta de Mi Curichi (perfil `observabilidad`). Parte 5.
+#
+# Son las de docs/operaciones/observabilidad.md §5 llevadas a PromQL, más las que hacían falta
+# para que las propias alertas no fallen en silencio. Qué hacer ante cada una: esa misma sección.
+#
+# Gravedad (etiqueta `gravedad`), que es lo que usa Alertmanager para repetir el aviso:
+#   critica  alguien tiene que mirarlo ya: el sistema no atiende o pierde datos
+#   alta     degradado: una parte no funciona o va lenta
+#   media    mirar en horario de trabajo
+#
+# Todas llevan `servicio` para poder inhibir: si una réplica está caída, su latencia y sus 5xx no
+# se avisan aparte.
+groups:
+  - name: mi-curichi-disponibilidad
+    rules:
+      - alert: ServicioCaido
+        expr: up{job=~"api-core|geo-service"} == 0
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "{{ $labels.job }} no responde ({{ $labels.instance }})"
+          descripcion: >-
+            Prometheus no puede leer /metrics de esta réplica desde hace 2 minutos: el proceso está
+            caído o reiniciándose, o el METRICAS_TOKEN de Prometheus no coincide con el del servicio.
+
+      - alert: ServicioSinReplicas
+        expr: absent(up{job="api-core"} == 1)
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: api-core
+        annotations:
+          resumen: "Ninguna réplica de api-core responde"
+          descripcion: "No hay ninguna réplica de api-core sana: no se pueden ver ni crear reportes."
+
+      - alert: ServicioSinReplicas
+        expr: absent(up{job="geo-service"} == 1)
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: geo-service
+        annotations:
+          resumen: "Ninguna réplica de geo-service responde"
+          descripcion: "Sin geo-service no se ubica ningún punto: crear reportes responde 503 y el mapa pierde las capas."
+
+      - alert: NoListo
+        expr: >-
+          (probe_success{job="listo"} == 0)
+          and on (instance) (probe_http_status_code{job="listo"} != 200)
+        for: 2m
+        labels:
+          gravedad: critica
+        annotations:
+          resumen: "{{ $labels.servicio }} no está listo ({{ $labels.instance }})"
+          descripcion: >-
+            /ready no responde 200 desde hace 2 minutos. En api-core, /ready solo da 503 cuando no
+            llega a la base de datos: es lo único que una réplica no puede suplir.
+
+      - alert: Degradado
+        expr: >-
+          (probe_success{job="listo"} == 0)
+          and on (instance) (probe_http_status_code{job="listo"} == 200)
+        for: 5m
+        labels:
+          gravedad: alta
+        annotations:
+          resumen: "api-core degradado ({{ $labels.instance }})"
+          descripcion: >-
+            /ready responde con "degradado": true: geo-service o el almacén de fotos no responden.
+            El mapa sigue, pero no se pueden crear reportes o no se pueden subir ni ver fotos.
+            `curl -s http://…/ready` dice cuál de los dos es (campos geo y fotos).
+
+  # La entrada: las apps réplica por réplica (job `apps`) y cada sitio entero a través del proxy,
+  # como un navegador (job `proxy`). Las apps no tienen ruta de salud propia: se mira `/`.
+  # `app` es la etiqueta común: con AppSinReplicas, Alertmanager inhibe el ProxyNoResponde de ese
+  # sitio, que es consecuencia.
+  - name: mi-curichi-entrada
+    rules:
+      - alert: AppCaida
+        expr: probe_success{job="apps"} == 0
+        for: 2m
+        labels:
+          gravedad: critica
+          app: "{{ $labels.servicio }}"
+        annotations:
+          resumen: "{{ $labels.servicio }} no responde en / ({{ $labels.instance }})"
+          descripcion: >-
+            Esta réplica no da 200 en / desde hace 2 minutos. `docker compose ps` y `docker compose
+            logs {{ $labels.servicio }}`. Si quedan otras réplicas sanas, el proxy ya reparte entre ellas.
+
+      - alert: AppSinReplicas
+        expr: absent(probe_success{job="apps", servicio="web-ciudadano"} == 1)
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: web-ciudadano
+          app: web-ciudadano
+        annotations:
+          resumen: "Ninguna réplica de la app pública responde"
+          descripcion: "Nadie puede ver el mapa ni reportar. `docker compose ps web-ciudadano` y sus logs."
+
+      - alert: AppSinReplicas
+        expr: absent(probe_success{job="apps", servicio="panel-admin"} == 1)
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: panel-admin
+          app: panel-admin
+        annotations:
+          resumen: "Ninguna réplica del panel responde"
+          descripcion: "Nadie puede moderar ni exportar; el mapa público sigue. `docker compose ps panel-admin` y sus logs."
+
+      - alert: ProxyNoResponde
+        expr: probe_success{job="proxy"} == 0
+        for: 2m
+        labels:
+          gravedad: critica
+          servicio: proxy
+        annotations:
+          resumen: "{{ $labels.instance }} no responde a través del proxy"
+          descripcion: >-
+            La sonda entra como un navegador (TLS con el nombre del sitio, proxy y app) y no obtiene
+            200 desde hace 2 minutos. Si la app de este sitio está caída, esta alerta se inhibe y
+            avisa AppSinReplicas. Si no: `docker compose ps proxy` y `docker compose logs proxy`.
+            Con PROXY_TLS=acme salta también si el certificado no valida o ya venció.
+
+      - alert: CertificadoPorVencer
+        expr: (probe_ssl_earliest_cert_expiry{job="proxy", tls="acme"} - time()) / 86400 < 10
+        for: 1h
+        labels:
+          gravedad: alta
+          servicio: proxy
+        annotations:
+          resumen: "El certificado de {{ $labels.instance }} vence en {{ $value | humanize }} días"
+          descripcion: >-
+            Caddy lo renueva solo cuando le queda un tercio de vida (unos 30 días en uno de 90): si
+            llega a 10, la renovación lleva días fallando. `docker compose logs proxy | grep -i acme`:
+            el DNS ya no apunta a esta máquina, el puerto 80 está cerrado o se alcanzó el límite de la
+            autoridad certificadora. Solo con PROXY_TLS=acme: la CA interna emite certificados de horas.
+
+  - name: mi-curichi-trafico
+    rules:
+      - alert: TasaDeErrores5xx
+        expr: >-
+          (
+            sum by (job) (rate({__name__=~"curichi_(geo_)?http_peticiones_total", codigo=~"5.."}[5m]))
+            / sum by (job) (rate({__name__=~"curichi_(geo_)?http_peticiones_total"}[5m]))
+          ) > 0.01
+          and sum by (job) (rate({__name__=~"curichi_(geo_)?http_peticiones_total"}[5m])) > 0.05
+        for: 5m
+        labels:
+          gravedad: critica
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "{{ $labels.job }}: {{ $value | humanizePercentage }} de respuestas 5xx"
+          descripcion: >-
+            Más del 1 % de las respuestas son 5xx durante 5 minutos (con un mínimo de tráfico para
+            que tres errores de madrugada no cuenten). Los 503 por base saturada también entran aquí.
+
+      - alert: LatenciaAlta
+        expr: >-
+          histogram_quantile(0.95,
+            sum by (job, le) (rate({__name__=~"curichi_(geo_)?http_duracion_segundos_bucket", ruta!~".*/exportar.*"}[5m]))
+          ) > 1
+          and sum by (job) (rate({__name__=~"curichi_(geo_)?http_duracion_segundos_count"}[5m])) > 0.05
+        for: 10m
+        labels:
+          gravedad: alta
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "{{ $labels.job }}: p95 de {{ $value | humanizeDuration }}"
+          descripcion: >-
+            El percentil 95 de las respuestas pasa de 1 s durante 10 minutos (sin la exportación,
+            que es lenta por diseño). Mirar primero el pool (curichi_db_pool_esperando).
+
+      - alert: PoolDeConexionesSaturado
+        expr: max by (job, instance) ({__name__=~"curichi_(geo_)?db_pool_esperando"}) > 0
+        for: 5m
+        labels:
+          gravedad: alta
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "{{ $labels.job }}: peticiones esperando conexión a la base ({{ $labels.instance }})"
+          descripcion: >-
+            Hay peticiones en cola por una conexión del pool en cada lectura de los últimos 5
+            minutos. Subir DB_POOL_MAX NO sirve si la base no tiene CPU (docs/operaciones/produccion.md).
+
+      - alert: BaseNoDisponible
+        expr: sum by (job) (increase(curichi_db_no_disponible_total[5m])) > 0
+        for: 2m
+        labels:
+          gravedad: alta
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "api-core responde 503 por base saturada o inalcanzable"
+          descripcion: "{{ $value | humanize }} respuestas 503 por la base en 5 minutos. Es capacidad, no un fallo de código."
+
+      - alert: RateLimitDisparado
+        expr: sum by (job, ruta) (increase({__name__=~"curichi_(geo_)?rate_limit_total"}[15m])) > 50
+        labels:
+          gravedad: media
+          servicio: "{{ $labels.job }}"
+        annotations:
+          resumen: "{{ $labels.job }}: {{ $value | humanize }} rechazos por límite en {{ $labels.ruta }}"
+          descripcion: >-
+            O hay abuso, o el límite molesta a gente real. Si TODAS las peticiones comparten ipHash
+            en los logs, TRUST_PROXY está mal y el límite es de la ciudad entera (produccion.md).
+
+  - name: mi-curichi-producto
+    rules:
+      - alert: CuotaDeFotosRechazando
+        expr: sum(increase(curichi_cuota_fotos_rechazos_total[1h])) > 20
+        labels:
+          gravedad: media
+          servicio: api-core
+        annotations:
+          resumen: "{{ $value | humanize }} subidas de fotos rechazadas por cuota en 1 h"
+          descripcion: "Alguien sube fotos en masa, o el tope de fotos por hora y cuenta se quedó corto."
+
+      - alert: ReportesSinCrecer
+        expr: >-
+          (sum(increase(curichi_reportes_creados_total[24h])) or vector(0)) == 0
+          and on () count(up{job="api-core"} == 1) > 0
+        for: 6h
+        labels:
+          gravedad: media
+          servicio: api-core
+        annotations:
+          resumen: "Ningún reporte nuevo en 24 h"
+          descripcion: >-
+            En temporada de lluvias es señal de que el formulario está roto aunque no haya errores
+            (ya pasó: una validación de cliente impedía enviar). Fuera de temporada, silenciarla en
+            Alertmanager.
+
+      - alert: PuntosCriticosFallando
+        expr: sum(increase(curichi_puntos_criticos_fallos_total[1h])) > 0
+        labels:
+          gravedad: media
+          servicio: api-core
+        annotations:
+          resumen: "El recálculo de puntos críticos falló en la última hora"
+          descripcion: "La moderación siguió adelante; el recálculo queda para el mantenimiento. Mirar los logs de api-core."
+
+  - name: mi-curichi-vigilancia
+    rules:
+      # Si esto falla, ninguna de las anteriores llega a nadie.
+      - alert: AlertasSinSalir
+        expr: sum(rate(alertmanager_notifications_failed_total[10m])) > 0
+        for: 15m
+        labels:
+          gravedad: alta
+          servicio: alertmanager
+        annotations:
+          resumen: "Alertmanager no consigue entregar los avisos"
+          descripcion: "Revisá ALERTAS_WEBHOOK_URL y `docker compose logs alertmanager`."
+
+      - alert: PrometheusSinAlertmanager
+        expr: prometheus_notifications_alertmanagers_discovered < 1
+        for: 5m
+        labels:
+          gravedad: alta
+          servicio: prometheus
+        annotations:
+          resumen: "Prometheus no encuentra a Alertmanager"
+          descripcion: "Las reglas se evalúan pero sus alertas no se envían a nadie."

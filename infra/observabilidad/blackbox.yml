@@ -1,0 +1,56 @@
+# Sondas del blackbox exporter (perfil `observabilidad`). Parte 5.
+#
+# /ready de api-core devuelve 200 también cuando está degradado (geo-service o el almacén de fotos
+# caídos): se sigue sirviendo el mapa, así que NO se saca de rotación. Esta sonda falla en ese caso
+# (cuerpo con "degradado":true) pero deja el código 200 en `probe_http_status_code`, y las reglas
+# separan «no lista» de «degradada» con ese dato. El /ready de geo-service no tiene ese campo.
+modules:
+  http_listo:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      fail_if_body_matches_regexp:
+        - '"degradado"\s*:\s*true'
+
+  # Las apps Next, réplica por réplica (job `apps`): `/` tiene que dar 200. No tienen ruta de salud
+  # propia; la pública renderiza la página entera, con la ciudad que sirve api-core, y la del panel
+  # es la que lleva a cada rol a su pantalla. También es el módulo de la entrada con PROXY_TLS=no.
+  http_app:
+    prober: http
+    timeout: 8s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+
+  # La entrada por el proxy como la ve un navegador (job `proxy`): TLS con el nombre del sitio,
+  # proxy y app. El parámetro `hostname` de la sonda pone la cabecera Host y, con ella, el SNI, así
+  # que se comprueba el certificado de ese nombre. Con certificados públicos (PROXY_TLS=acme) se
+  # verifica la cadena, y la fecha de vencimiento queda en probe_ssl_earliest_cert_expiry.
+  https_publico:
+    prober: http
+    timeout: 8s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      fail_if_not_ssl: true
+
+  # Lo mismo con la CA interna de Caddy (PROXY_TLS=interno), que el blackbox no conoce.
+  https_interno:
+    prober: http
+    timeout: 8s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      preferred_ip_protocol: ip4
+      no_follow_redirects: true
+      fail_if_not_ssl: true
+      tls_config:
+        insecure_skip_verify: true

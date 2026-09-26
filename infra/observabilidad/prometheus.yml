@@ -1,0 +1,147 @@
+# Prometheus de Mi Curichi (perfil `observabilidad` del Compose). Parte 5.
+#
+# `arrancar-prometheus.sh` copia este archivo a /tmp cambiando __INSTALACION__ por
+# INSTALACION_NOMBRE y los __…__ del job `proxy` por lo que dicen DOMINIO_PUBLICO, DOMINIO_PANEL y
+# PROXY_TLS, y deja el token de /metrics en /tmp/metricas_token. Prometheus no lee variables de
+# entorno en su configuración; por eso el envoltorio.
+#
+# Si cambiás METRICAS_RUTA en el .env, cambiá también `metrics_path` abajo.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  # Una instalación por ciudad: esta etiqueta viaja en cada alerta, así que un mismo canal de
+  # avisos puede recibir las de varias ciudades sin confundirlas.
+  external_labels:
+    instalacion: __INSTALACION__
+
+rule_files:
+  - /etc/prometheus/alertas.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Descubrimiento por DNS: dentro de la red de Compose, el nombre del servicio resuelve a TODAS
+  # sus réplicas, así que `--scale api-core=3` queda cubierto sin tocar nada. Cada réplica expone
+  # sus propias métricas y Prometheus las suma en las consultas.
+  - job_name: api-core
+    metrics_path: /metrics
+    http_headers:
+      X-Token-Metricas:
+        files: [/tmp/metricas_token]
+    dns_sd_configs:
+      - names: [api-core]
+        type: A
+        port: 3001
+        refresh_interval: 30s
+
+  - job_name: geo-service
+    metrics_path: /metrics
+    http_headers:
+      X-Token-Metricas:
+        files: [/tmp/metricas_token]
+    dns_sd_configs:
+      - names: [geo-service]
+        type: A
+        port: 3002
+        refresh_interval: 30s
+
+  # /ready de cada réplica a través del blackbox. Un solo módulo distingue tres estados:
+  #   probe_success = 1                                → lista y sin degradar
+  #   probe_success = 0 y probe_http_status_code = 200 → degradada (api-core: geo o fotos caídos)
+  #   probe_success = 0 y otro código (503, 0)         → no lista
+  - job_name: listo
+    metrics_path: /probe
+    params:
+      module: [http_listo]
+    dns_sd_configs:
+      - names: [api-core]
+        type: A
+        port: 3001
+        refresh_interval: 30s
+      - names: [geo-service]
+        type: A
+        port: 3002
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+        replacement: "http://$1/ready"
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [__meta_dns_name]
+        target_label: servicio
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # `/` de cada réplica de las apps, descubiertas por DNS como los servicios: `--scale` queda
+  # cubierto. Réplica por réplica y sin pasar por el proxy, para saber CUÁL falla.
+  - job_name: apps
+    metrics_path: /probe
+    params:
+      module: [http_app]
+    dns_sd_configs:
+      - names: [web-ciudadano]
+        type: A
+        port: 3000
+        refresh_interval: 30s
+      - names: [panel-admin]
+        type: A
+        port: 3100
+        refresh_interval: 30s
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+        replacement: "http://$1/"
+      - source_labels: [__param_target]
+        target_label: instance
+      - source_labels: [__meta_dns_name]
+        target_label: servicio
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  # La entrada tal como la ve un vecino: TLS con el nombre de cada sitio, proxy, app (y, en la
+  # pública, la ciudad que sirve api-core). Contra el contenedor del proxy, no contra el DNS
+  # público, que desde dentro de la red no siempre lleva a esta máquina: el DNS y el cortafuegos
+  # los cubre un vigilante EXTERNO (produccion.md). `hostname` pone la cabecera Host y el SNI.
+  # Módulo y URL según PROXY_TLS: acme → https_publico (cadena verificada, y de ahí la alerta de
+  # certificado por vencer), interno → https_interno, no → http_app contra el 8080.
+  - job_name: proxy
+    metrics_path: /probe
+    params:
+      module: [__MODULO_PROXY__]
+    static_configs:
+      - targets: ["__URL_PROXY__/"]
+        labels:
+          instance: __DOMINIO_PUBLICO__
+          sitio: publica
+          app: web-ciudadano
+          tls: __PROXY_TLS__
+          __param_hostname: __DOMINIO_PUBLICO__
+      - targets: ["__URL_PROXY__/"]
+        labels:
+          instance: __DOMINIO_PANEL__
+          sitio: panel
+          app: panel-admin
+          tls: __PROXY_TLS__
+          __param_hostname: __DOMINIO_PANEL__
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - target_label: __address__
+        replacement: blackbox:9115
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
+
+  - job_name: blackbox
+    static_configs:
+      - targets: ["blackbox:9115"]

@@ -1,0 +1,6 @@
+# Contexto del build de la imagen del proxy (contexto = infra/). Solo hacen falta su Caddyfile y su
+# script de arranque: todo lo demás queda fuera, en particular infra/.pglite (la base local sin
+# Docker, con datos) e infra/.storage (fotos locales), que no tienen por qué salir hacia Docker.
+*
+!proxy/Caddyfile
+!proxy/arrancar.sh

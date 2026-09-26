@@ -1,0 +1,92 @@
+# Pruebas de las alertas de la entrada (apps y proxy) con `promtool test rules`. Parte 5.
+#
+#   docker run --rm --network none -v "$PWD/infra/observabilidad:/etc/prometheus:ro" \
+#     --entrypoint /bin/promtool quay.io/prometheus/prometheus:v3.15.0@sha256:… \
+#     test rules /etc/prometheus/alertas.test.yml
+#
+# Se mira la serie ALERTS (qué alerta queda «firing» y con qué etiquetas) y no las anotaciones:
+# cambiar la redacción de una descripción no tiene por qué romper una prueba. El reloj de promtool
+# empieza en 0, así que `time()` vale los segundos transcurridos desde el inicio de la prueba.
+rule_files:
+  - alertas.yml
+
+evaluation_interval: 1m
+
+tests:
+  # Una réplica de la app pública cae y la otra sigue: AppCaida de esa réplica, sin AppSinReplicas.
+  # El panel tiene una sola réplica y cae: AppCaida y AppSinReplicas (que inhibe su ProxyNoResponde).
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="apps", servicio="web-ciudadano", instance="http://172.18.0.6:3000/"}'
+        values: '1 1 0 0 0 0 0'
+      - series: 'probe_success{job="apps", servicio="web-ciudadano", instance="http://172.18.0.8:3000/"}'
+        values: '1 1 1 1 1 1 1'
+      - series: 'probe_success{job="apps", servicio="panel-admin", instance="http://172.18.0.7:3100/"}'
+        values: '1 1 0 0 0 0 0'
+      - series: 'probe_success{job="proxy", instance="mapa.ejemplo.org", sitio="publica", app="web-ciudadano", tls="acme"}'
+        values: '1 1 1 1 1 1 1'
+      - series: 'probe_success{job="proxy", instance="panel.ejemplo.org", sitio="panel", app="panel-admin", tls="acme"}'
+        values: '1 1 0 0 0 0 0'
+    promql_expr_test:
+      # A los 3 minutos de fallar todavía no pasaron los 2 de `for` en la evaluación anterior: pendiente.
+      - expr: ALERTS{alertname="AppCaida"}
+        eval_time: 3m
+        exp_samples:
+          - labels: 'ALERTS{alertname="AppCaida", alertstate="pending", app="web-ciudadano", gravedad="critica", instance="http://172.18.0.6:3000/", job="apps", servicio="web-ciudadano"}'
+            value: 1
+          - labels: 'ALERTS{alertname="AppCaida", alertstate="pending", app="panel-admin", gravedad="critica", instance="http://172.18.0.7:3100/", job="apps", servicio="panel-admin"}'
+            value: 1
+      - expr: ALERTS{alertname="AppCaida", alertstate="firing"}
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="AppCaida", alertstate="firing", app="web-ciudadano", gravedad="critica", instance="http://172.18.0.6:3000/", job="apps", servicio="web-ciudadano"}'
+            value: 1
+          - labels: 'ALERTS{alertname="AppCaida", alertstate="firing", app="panel-admin", gravedad="critica", instance="http://172.18.0.7:3100/", job="apps", servicio="panel-admin"}'
+            value: 1
+      # La pública conserva una réplica sana: solo el panel se queda sin ninguna.
+      - expr: ALERTS{alertname="AppSinReplicas", alertstate="firing"}
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="AppSinReplicas", alertstate="firing", app="panel-admin", gravedad="critica", servicio="panel-admin"}'
+            value: 1
+      # La entrada del panel falla por el proxy; la pública, no. Misma `app` que AppSinReplicas.
+      - expr: ALERTS{alertname="ProxyNoResponde", alertstate="firing"}
+        eval_time: 5m
+        exp_samples:
+          - labels: 'ALERTS{alertname="ProxyNoResponde", alertstate="firing", app="panel-admin", gravedad="critica", instance="panel.ejemplo.org", job="proxy", servicio="proxy", sitio="panel", tls="acme"}'
+            value: 1
+
+  # Ninguna réplica de la app pública descubierta (DNS vacío): AppSinReplicas igual.
+  - interval: 1m
+    input_series:
+      - series: 'probe_success{job="apps", servicio="panel-admin", instance="http://172.18.0.7:3100/"}'
+        values: '1 1 1 1 1'
+    promql_expr_test:
+      - expr: ALERTS{alertname="AppSinReplicas", alertstate="firing"}
+        eval_time: 4m
+        exp_samples:
+          - labels: 'ALERTS{alertname="AppSinReplicas", alertstate="firing", app="web-ciudadano", gravedad="critica", servicio="web-ciudadano"}'
+            value: 1
+
+  # Certificados: 5 días con ACME avisa; 60 días con ACME, no; y con la CA interna (certificados de
+  # horas) no avisa nunca. Los valores son el vencimiento en segundos desde el inicio de la prueba.
+  # Una muestra por minuto: con huecos de más de 5 min la serie «desaparece» y el `for` se reinicia.
+  - interval: 1m
+    input_series:
+      - series: 'probe_ssl_earliest_cert_expiry{job="proxy", instance="mapa.ejemplo.org", sitio="publica", app="web-ciudadano", tls="acme"}'
+        values: '432000x150'
+      - series: 'probe_ssl_earliest_cert_expiry{job="proxy", instance="panel.ejemplo.org", sitio="panel", app="panel-admin", tls="acme"}'
+        values: '5184000x150'
+      - series: 'probe_ssl_earliest_cert_expiry{job="proxy", instance="mapa.local", sitio="publica", app="web-ciudadano", tls="interno"}'
+        values: '43200x150'
+    promql_expr_test:
+      - expr: ALERTS{alertname="CertificadoPorVencer"}
+        eval_time: 30m
+        exp_samples:
+          - labels: 'ALERTS{alertname="CertificadoPorVencer", alertstate="pending", app="web-ciudadano", gravedad="alta", instance="mapa.ejemplo.org", job="proxy", servicio="proxy", sitio="publica", tls="acme"}'
+            value: 1
+      - expr: ALERTS{alertname="CertificadoPorVencer"}
+        eval_time: 2h
+        exp_samples:
+          - labels: 'ALERTS{alertname="CertificadoPorVencer", alertstate="firing", app="web-ciudadano", gravedad="alta", instance="mapa.ejemplo.org", job="proxy", servicio="proxy", sitio="publica", tls="acme"}'
+            value: 1
