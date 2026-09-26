@@ -16,12 +16,19 @@
       "import": "./dist/test-utils.js"
     }
   },
+  "files": [
+    "dist",
+    "migraciones"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "local": "tsx src/local/servidor.ts",
     "migrate": "tsx src/cli/migrar.ts",
+    "migrate:prod": "node dist/cli/migrar.js",
+    "cuentas": "tsx src/cli/cuentas.ts",
+    "cuentas:prod": "node dist/cli/cuentas.js",
     "generate": "tsx src/cli/nueva-migracion.ts",
     "seed:samples": "tsx src/cli/seed-samples.ts",
     "puntos-criticos:recalcular": "tsx src/cli/recalcular-puntos-criticos.ts",

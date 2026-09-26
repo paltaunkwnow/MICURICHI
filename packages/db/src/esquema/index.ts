@@ -1,6 +1,11 @@
 /**
- * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0010) para consultas en api-core y geo-service.
+ * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0012) para consultas en api-core y geo-service.
  * La fuente de verdad del DDL son las migraciones SQL; este archivo no genera DDL.
+ *
+ * Una migración que añade o cambia columnas tiene que actualizar este archivo en el mismo cambio:
+ * `test/esquema-drizzle.test.ts` compara columnas, tipos, nulabilidad, DEFAULT y enums con una
+ * base migrada desde cero. Se había desalineado (faltaban `geom_publico` y `ultimo_uso_en`, y
+ * `severidad_version` seguía con DEFAULT 1) sin que nada lo notara.
  */
 import { sql } from 'drizzle-orm';
 import {
@@ -111,6 +116,8 @@ export const manzana = geo.table(
   'manzana',
   {
     ...columnasCapa,
+    /** La capa de manzanas no siempre trae nombre: DEFAULT '' desde la 0001. */
+    nombre: text('nombre').notNull().default(''),
     distritoId: text('distrito_id'),
     unidadVecinalId: text('unidad_vecinal_id'),
   },
@@ -136,11 +143,15 @@ export const sesion = pgTable('sesion', {
     .references(() => usuario.id, { onDelete: 'cascade' }),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
   expiraEn: timestamp('expira_en', { withTimezone: true }).notNull(),
+  /** Caducidad por inactividad (migración 0003): `expira_en` es el tope absoluto. */
+  ultimoUsoEn: timestamp('ultimo_uso_en', { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const puntoCritico = pgTable('punto_critico', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
   geom: geometry('geom').notNull(),
+  /** Centroide publicable (migración 0005): media de los puntos ya degradados; NULL no se publica. */
+  geomPublico: geometry('geom_publico'),
   nReportes: integer('n_reportes').notNull(),
   primerReporteEn: timestamp('primer_reporte_en', { withTimezone: true }).notNull(),
   ultimoReporteEn: timestamp('ultimo_reporte_en', { withTimezone: true }).notNull(),
@@ -158,6 +169,8 @@ export const reporteInundacion = pgTable(
   {
     id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
     geom: geometry('geom').notNull(),
+    /** Punto publicable (migración 0005): redondeado y, en vivienda o predio, con jitter (§13). */
+    geomPublico: geometry('geom_publico'),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
     eventoEn: timestamp('evento_en', { withTimezone: true }),
@@ -178,7 +191,7 @@ export const reporteInundacion = pgTable(
     aguaBrotaSumidero: boolean('agua_brota_sumidero'),
     severidadCalculada: severidadEnum('severidad_calculada').notNull(),
     severidadPuntaje: integer('severidad_puntaje').notNull(),
-    severidadVersion: integer('severidad_version').notNull().default(1),
+    severidadVersion: integer('severidad_version').notNull().default(2),
     severidadManual: severidadEnum('severidad_manual'),
     severidadMotivo: text('severidad_motivo'),
     estado: estadoEnum('estado').notNull().default('nuevo'),
@@ -204,6 +217,8 @@ export const reporteFoto = pgTable('reporte_foto', {
   alto: integer('alto').notNull(),
   exifSanitizado: boolean('exif_sanitizado').notNull().default(false),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  /** Cuenta que subió la foto (migración 0012). NULL en las anteriores o si la cuenta se borró. */
+  subidoPor: uuid('subido_por').references(() => usuario.id, { onDelete: 'set null' }),
 });
 
 export const auditoria = pgTable('auditoria', {

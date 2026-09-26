@@ -2,5 +2,11 @@
   "extends": "./tsconfig.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
   "include": ["src"],
+  "files": [
+    "src/cli/migrar.ts",
+    "src/cli/migrar-comando.ts",
+    "src/cli/cuentas.ts",
+    "src/cli/cuentas-comando.ts"
+  ],
   "exclude": ["**/*.test.ts", "src/local/**", "src/cli/**"]
 }

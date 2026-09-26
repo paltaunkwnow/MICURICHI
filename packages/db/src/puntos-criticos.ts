@@ -2,12 +2,20 @@
  * Recurrencia espacial (CLAUDE.md §9.2): agrupa reportes validados/resueltos en puntos críticos.
  * Intenta ST_ClusterDBSCAN en PostGIS; si la build no lo tiene (PGlite experimental), usa un
  * DBSCAN equivalente en Node (minpoints = 1 ⇒ componentes conexas por distancia ≤ radio).
+ *
+ * UNA sola métrica en los tres caminos (este completo, su equivalente en Node y el incremental de
+ * `puntos-criticos-entorno.ts`): distancia plana en metros sobre `ST_Transform(geom, <CRS
+ * métrico>)`, con el CRS de `CRS_METRICO_EPSG` (por defecto UTM 20S). Antes el completo usaba
+ * `eps` en grados (radio / 111 320) y el incremental geography: en Santa Cruz un grado de longitud
+ * mide ~106 km, así que el completo solo unía de este a oeste hasta ~23,8 m mientras el incremental
+ * unía hasta 25 m, y el mismo par de reportes daba uno o dos puntos críticos según qué camino
+ * hubiera corrido último. `test/puntos-criticos-metrica.test.ts` fija la equivalencia.
  */
 import { CONFIG_DOMINIO, distanciaAproximadaM } from 'contracts';
+import { crsMetricoEpsg } from './configuracion.js';
 import type { Ejecutor } from './ejecutor.js';
 
 const ORDEN_SEVERIDAD: Record<string, number> = { baja: 0, media: 1, alta: 2, critica: 3 };
-export const METROS_POR_GRADO = 111_320;
 
 /**
  * Advisory lock que serializa TODO recálculo de puntos críticos, completo o incremental, entre
@@ -47,14 +55,16 @@ export interface ResumenPuntosCriticos {
 async function agruparEnPostgis(
   ex: Ejecutor,
   radioM: number,
+  crsMetrico: number,
 ): Promise<Map<number, FilaReporte[]> | null> {
-  const epsGrados = radioM / METROS_POR_GRADO; // aproximación isotrópica; error ≤ 5 % en Santa Cruz (lat −17,8°)
   try {
+    // `eps` en metros porque la geometría va proyectada al CRS métrico (§9.2). El `::int` no es
+    // decorativo: sin él, `ST_Transform(geometry, unknown)` es ambiguo con la variante de texto.
     const filas = await ex.consultar<FilaReporte & { cid: number }>(
       `SELECT ${COLUMNAS_AGRUPACION},
-              ST_ClusterDBSCAN(geom, eps := $1, minpoints := 1) OVER () AS cid
+              ST_ClusterDBSCAN(ST_Transform(geom, $2::int), eps := $1, minpoints := 1) OVER () AS cid
        FROM reporte_inundacion WHERE estado IN ('validado', 'resuelto')`,
-      [epsGrados],
+      [radioM, crsMetrico],
     );
     const grupos = new Map<number, FilaReporte[]>();
     for (const f of filas) {
@@ -72,10 +82,18 @@ async function agruparEnPostgis(
   }
 }
 
-async function agruparEnNode(ex: Ejecutor, radioM: number): Promise<Map<number, FilaReporte[]>> {
-  const filas = await ex.consultar<FilaReporte>(
-    `SELECT ${COLUMNAS_AGRUPACION}
-     FROM reporte_inundacion WHERE estado IN ('validado', 'resuelto')`,
+async function agruparEnNode(
+  ex: Ejecutor,
+  radioM: number,
+  crsMetrico: number,
+): Promise<Map<number, FilaReporte[]>> {
+  // Las mismas coordenadas proyectadas que usa ST_ClusterDBSCAN: la distancia en Node es la plana
+  // en metros del CRS métrico, no una aproximación sobre grados.
+  const filas = await ex.consultar<FilaReporte & { x: number; y: number }>(
+    `SELECT ${COLUMNAS_AGRUPACION}, ST_X(geom_m) AS x, ST_Y(geom_m) AS y
+     FROM (SELECT *, ST_Transform(geom, $1::int) AS geom_m FROM reporte_inundacion
+           WHERE estado IN ('validado', 'resuelto')) AS r`,
+    [crsMetrico],
   );
   // Union-find sobre pares a distancia ≤ radio. Prefiltro por celda de rejilla de tamaño radio.
   const padre = filas.map((_, i) => i);
@@ -96,9 +114,10 @@ async function agruparEnNode(ex: Ejecutor, radioM: number): Promise<Map<number, 
     const rb = buscar(b);
     if (ra !== rb) padre[ra] = rb;
   };
-  const celda = radioM / METROS_POR_GRADO;
+  const celda = radioM;
   const rejilla = new Map<string, number[]>();
-  const clave = (f: FilaReporte) => `${Math.floor(f.lon / celda)}:${Math.floor(f.lat / celda)}`;
+  const clave = (f: { x: number; y: number }) =>
+    `${Math.floor(f.x / celda)}:${Math.floor(f.y / celda)}`;
   // `push` y no `set(k, [...viejo, i])`: lo segundo copia el array entero en CADA inserción, o
   // sea O(n²) sobre el número de puntos que caen en la misma celda. Con la densidad real de una
   // ciudad eso es el cuello de botella de todo el recálculo.
@@ -109,14 +128,14 @@ async function agruparEnNode(ex: Ejecutor, radioM: number): Promise<Map<number, 
     else rejilla.set(k, [i]);
   });
   filas.forEach((f, i) => {
-    const cx = Math.floor(f.lon / celda);
-    const cy = Math.floor(f.lat / celda);
+    const cx = Math.floor(f.x / celda);
+    const cy = Math.floor(f.y / celda);
     for (let dx = -1; dx <= 1; dx++)
       for (let dy = -1; dy <= 1; dy++)
         for (const j of rejilla.get(`${cx + dx}:${cy + dy}`) ?? []) {
           if (j <= i) continue;
           const g = filas[j]!;
-          if (distanciaAproximadaM(f.lat, f.lon, g.lat, g.lon) <= radioM) unir(i, j);
+          if (Math.hypot(f.x - g.x, f.y - g.y) <= radioM) unir(i, j);
         }
   });
   const grupos = new Map<number, FilaReporte[]>();
@@ -169,20 +188,23 @@ function diametroM(miembros: FilaReporte[]): number {
  * transacción; quien llama ya se encargó de disolver los puntos que quedan obsoletos.
  *
  * `grupos = null` significa reconstrucción total: se recalculan todos los grupos y se vacía la
- * tabla antes de insertar. Es lo que usan el CLI de reparación y los seeds.
+ * tabla antes de insertar. Es lo que usan el CLI de reparación y los seeds. `crsMetrico` solo se
+ * usa en ese caso; por defecto, `CRS_METRICO_EPSG`.
  */
 export async function construirPuntosCriticos(
   tx: Ejecutor,
   radioM: number,
   grupos: FilaReporte[][] | null,
+  crsMetrico?: number,
 ): Promise<ResumenPuntosCriticos> {
   let motor: 'postgis' | 'node' = 'postgis';
   let porGrupo = grupos;
   if (porGrupo === null) {
-    let calculados = await agruparEnPostgis(tx, radioM);
+    const crs = crsMetrico ?? crsMetricoEpsg();
+    let calculados = await agruparEnPostgis(tx, radioM, crs);
     if (!calculados) {
       motor = 'node';
-      calculados = await agruparEnNode(tx, radioM);
+      calculados = await agruparEnNode(tx, radioM, crs);
     }
     porGrupo = [...calculados.values()];
     await tx.ejecutar(
@@ -259,17 +281,22 @@ let enCurso: Promise<unknown> = Promise.resolve();
 export function recalcularPuntosCriticos(
   ex: Ejecutor,
   radioM = CONFIG_DOMINIO.RECURRENCIA_RADIO_M,
+  crsMetrico?: number,
 ): Promise<ResumenPuntosCriticos> {
   const siguiente = enCurso
     .catch(() => {})
-    .then(() =>
-      ex.transaccion(async (tx) => {
+    .then(() => {
+      // El CRS se resuelve aquí dentro y no como valor por defecto del parámetro: una variable
+      // mal escrita tiene que llegar como promesa rechazada, no como excepción síncrona que se
+      // salta el `.catch()` de quien llama (el mantenimiento de api-core).
+      const crs = crsMetrico ?? crsMetricoEpsg();
+      return ex.transaccion(async (tx) => {
         // `enCurso` solo serializa dentro de ESTE proceso. Con varias réplicas hace falta que la
         // exclusión viva en la base, y con la misma clave que usa el recálculo incremental.
         await tx.consultar('SELECT pg_advisory_xact_lock($1)', [CLAVE_LOCK_PUNTOS_CRITICOS]);
-        return construirPuntosCriticos(tx, radioM, null);
-      }),
-    );
+        return construirPuntosCriticos(tx, radioM, null, crs);
+      });
+    });
   enCurso = siguiente;
   return siguiente;
 }

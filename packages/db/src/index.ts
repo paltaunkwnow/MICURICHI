@@ -1,4 +1,6 @@
 export * from './cliente.js';
+export * from './configuracion.js';
+export * from './cuentas.js';
 export * from './ejecutor.js';
 export * as esquema from './esquema/index.js';
 export * from './geometria-publica.js';

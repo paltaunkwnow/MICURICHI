@@ -98,7 +98,9 @@ beforeAll(async () => {
     ids.push(fila!.id);
   }
 
-  resultado = await aplicarMigraciones(ex);
+  // Hasta 0011 inclusive: las posteriores (0012 en adelante) se prueban en su propio archivo. Sin
+  // el límite, «0011 es la única pendiente» dejaba de ser cierto con la primera migración nueva.
+  resultado = await aplicarMigraciones(ex, { hasta: '0011' });
 }, 240_000);
 
 afterAll(async () => {

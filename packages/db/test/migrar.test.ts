@@ -76,6 +76,9 @@ afterEach(() => {
 
 const ES_LOCK = (sql: string) => sql.includes('pg_advisory_xact_lock');
 const CREA_TABLA = (sql: string) => /CREATE TABLE IF NOT EXISTS _migraciones/i.test(sql);
+/** Ajuste de plazos de la propia transacción: no toca el esquema ni lee nada. */
+const ES_PLAZO = (sql: string) =>
+  /^SET LOCAL (statement_timeout|lock_timeout) = \d+$/.test(sql.trim());
 
 describe('arranque de las migraciones con varias réplicas (§7)', () => {
   it('no toca el esquema antes de tomar el advisory lock', async () => {
@@ -85,9 +88,10 @@ describe('arranque de las migraciones con varias réplicas (§7)', () => {
 
     const primerLock = pasos.findIndex((p) => ES_LOCK(p.sql));
     expect(primerLock, 'nunca se tomó el advisory lock').toBeGreaterThanOrEqual(0);
-    // Antes del primer lock solo puede haber un BEGIN. Cualquier DDL o SELECT anterior es
-    // justamente la carrera que este test existe para impedir.
-    const antes = pasos.slice(0, primerLock).filter((p) => p.tipo !== 'begin');
+    // Antes del primer lock solo puede haber un BEGIN y los SET LOCAL de los plazos, que no tocan
+    // el esquema (y tienen que ir antes: ver «plazos de las migraciones»). Cualquier DDL o SELECT
+    // anterior es justamente la carrera que este test existe para impedir.
+    const antes = pasos.slice(0, primerLock).filter((p) => p.tipo !== 'begin' && !ES_PLAZO(p.sql));
     expect(antes, `se ejecutó algo antes del lock: ${antes.map((p) => p.sql).join(' | ')}`).toEqual(
       [],
     );
@@ -129,4 +133,135 @@ describe('arranque de las migraciones con varias réplicas (§7)', () => {
     expect(pasos.some((p) => ES_LOCK(p.sql))).toBe(true);
     expect(pasos.some((p) => p.sql.includes('INSERT INTO _migraciones'))).toBe(false);
   });
+});
+
+/** Sentencias de cada transacción, en orden (sin los BEGIN/COMMIT que la delimitan). */
+function porTransaccion(pasos: Paso[]): Paso[][] {
+  const grupos: Paso[][] = [];
+  let actual: Paso[] | null = null;
+  for (const p of pasos) {
+    if (p.tipo === 'begin' && p.enTransaccion === 0) actual = [];
+    else if (p.tipo === 'commit' && p.enTransaccion === 0) {
+      if (actual) grupos.push(actual);
+      actual = null;
+    } else actual?.push(p);
+  }
+  return grupos;
+}
+
+const indice = (tx: Paso[], cumple: (sql: string) => boolean) => tx.findIndex((p) => cumple(p.sql));
+const SIN_STATEMENT_TIMEOUT = (sql: string) => /^SET LOCAL statement_timeout = 0$/.test(sql.trim());
+const LOCK_TIMEOUT = (ms: number) => (sql: string) =>
+  new RegExp(`^SET LOCAL lock_timeout = ${ms}$`).test(sql.trim());
+const ES_SQL_DE_MIGRACION = (sql: string) => /^-- \d{4}_/.test(sql);
+
+/**
+ * Revisión de producción (2026-09-26): 0010 y 0011 reescriben `reporte_inundacion`. Medido en la
+ * Fase 4 con un millón de filas, tardarían ~56 s y ~34 s, y el pool corta toda sentencia a los
+ * 30 s (`DB_STATEMENT_TIMEOUT_MS`): la migración se cancelaba, hacía ROLLBACK y el despliegue la
+ * reintentaba en bucle sin avanzar nunca. Y sin `lock_timeout`, un ALTER TABLE que espera su lock
+ * exclusivo detrás de una lectura larga deja en cola, detrás de él, a TODO el tráfico de la tabla.
+ *
+ * PGlite no aplica `statement_timeout` (no tiene temporizadores) ni puede tener dos sesiones que
+ * compitan por un lock, así que, como el resto de este archivo, se comprueba la invariante que lo
+ * evita: el orden de las sentencias en cada transacción.
+ */
+describe('plazos de las migraciones (statement_timeout y lock_timeout)', () => {
+  it('cada transacción desactiva statement_timeout ANTES de esperar el advisory lock', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql']);
+    const { ex, pasos } = ejecutorEspia();
+    await aplicarMigraciones(ex, dir);
+    const transacciones = porTransaccion(pasos);
+    expect(transacciones).toHaveLength(3);
+    for (const tx of transacciones) {
+      const sinPlazo = indice(tx, SIN_STATEMENT_TIMEOUT);
+      // Antes del lock y no después: una réplica que espera a otra que está reescribiendo una
+      // tabla grande también estaría «ejecutando una sentencia» de más de 30 s.
+      expect(sinPlazo, 'falta SET LOCAL statement_timeout = 0').toBeGreaterThanOrEqual(0);
+      expect(sinPlazo).toBeLessThan(indice(tx, ES_LOCK));
+    }
+  });
+
+  it('espera el lock sin plazo y fija lock_timeout después, antes del SQL de la migración', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql']);
+    const { ex, pasos } = ejecutorEspia();
+    await aplicarMigraciones(ex, dir);
+    for (const tx of porTransaccion(pasos)) {
+      const lock = indice(tx, ES_LOCK);
+      const esperaSinPlazo = indice(tx, LOCK_TIMEOUT(0));
+      const plazo = indice(tx, LOCK_TIMEOUT(10_000));
+      expect(esperaSinPlazo, 'lock_timeout = 0 antes del advisory lock').toBeGreaterThanOrEqual(0);
+      expect(esperaSinPlazo).toBeLessThan(lock);
+      expect(plazo, 'lock_timeout = 10000 tras el advisory lock').toBeGreaterThan(lock);
+      const migracion = indice(tx, ES_SQL_DE_MIGRACION);
+      if (migracion >= 0) expect(plazo).toBeLessThan(migracion);
+    }
+  });
+
+  it('el plazo sale de lockTimeoutMs o de MIGRAR_LOCK_TIMEOUT_MS', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql']);
+    const conOpcion = ejecutorEspia();
+    await aplicarMigraciones(conOpcion.ex, { directorio: dir, lockTimeoutMs: 2500 });
+    expect(conOpcion.pasos.some((p) => LOCK_TIMEOUT(2500)(p.sql))).toBe(true);
+
+    const previo = process.env.MIGRAR_LOCK_TIMEOUT_MS;
+    try {
+      process.env.MIGRAR_LOCK_TIMEOUT_MS = '4000';
+      const conVariable = ejecutorEspia();
+      await aplicarMigraciones(conVariable.ex, dir);
+      expect(conVariable.pasos.some((p) => LOCK_TIMEOUT(4000)(p.sql))).toBe(true);
+
+      // Un valor ilegible no cae en silencio al defecto: falla antes de tocar la base.
+      process.env.MIGRAR_LOCK_TIMEOUT_MS = 'diez segundos';
+      const malConfigurado = ejecutorEspia();
+      await expect(aplicarMigraciones(malConfigurado.ex, dir)).rejects.toThrow(
+        /MIGRAR_LOCK_TIMEOUT_MS/,
+      );
+      expect(malConfigurado.pasos).toEqual([]);
+    } finally {
+      if (previo === undefined) delete process.env.MIGRAR_LOCK_TIMEOUT_MS;
+      else process.env.MIGRAR_LOCK_TIMEOUT_MS = previo;
+    }
+  });
+});
+
+/**
+ * Revisión de producción (2026-09-26): `respaldo-y-restauracion.md` restauraba migrando a la ÚLTIMA
+ * versión y cargando después los datos con `pg_restore --data-only`. Un respaldo anterior a 0010
+ * trae columnas y valores de enum que ya no existen, y la carga falla. Con `hasta` se crea el
+ * esquema del respaldo, se cargan los datos y después se migra el resto, que es lo que convierte
+ * los datos viejos (0010 recalcula la severidad, 0011 mapea el sumidero).
+ */
+describe('hasta: migrar solo hasta una versión (restaurar respaldos viejos)', () => {
+  it('aplica hasta esa migración inclusive y deja las posteriores en pendientes', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql', '0003_c.sql', '0004_d.sql']);
+    const { ex } = ejecutorEspia();
+    const r = await aplicarMigraciones(ex, { directorio: dir, hasta: '0002' });
+    expect(r.aplicadas).toEqual(['0001_a.sql', '0002_b.sql']);
+    expect(r.pendientes).toEqual(['0003_c.sql', '0004_d.sql']);
+  });
+
+  it('admite el nombre completo del archivo', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql', '0003_c.sql']);
+    const { ex } = ejecutorEspia();
+    const r = await aplicarMigraciones(ex, { directorio: dir, hasta: '0002_b.sql' });
+    expect(r.aplicadas).toEqual(['0001_a.sql', '0002_b.sql']);
+  });
+
+  it('sin hasta no queda nada pendiente', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql']);
+    const { ex } = ejecutorEspia();
+    const r = await aplicarMigraciones(ex, dir);
+    expect(r.pendientes).toEqual([]);
+  });
+
+  it.each(['0009', '9', 'abc', '0002_otra.sql'])(
+    'un hasta inexistente o mal escrito («%s») falla antes de tocar la base',
+    async (hasta) => {
+      const dir = directorioConMigraciones(['0001_a.sql', '0002_b.sql']);
+      const { ex, pasos } = ejecutorEspia();
+      await expect(aplicarMigraciones(ex, { directorio: dir, hasta })).rejects.toThrow(/hasta/i);
+      expect(pasos).toEqual([]);
+    },
+  );
 });

@@ -12,13 +12,13 @@
  * crítico, y corría dentro de la petición HTTP en cada validación.
  */
 import { CONFIG_DOMINIO } from 'contracts';
+import { crsMetricoEpsg } from './configuracion.js';
 import type { Ejecutor } from './ejecutor.js';
 import {
   CLAVE_LOCK_PUNTOS_CRITICOS,
   COLUMNAS_AGRUPACION,
   construirPuntosCriticos,
   type FilaReporte,
-  METROS_POR_GRADO,
 } from './puntos-criticos.js';
 
 /** Si la componente afectada supera este tamaño se recalcula todo: algo encadenó de más. */
@@ -50,25 +50,39 @@ interface Arista {
 }
 
 /**
- * Vecinos (a menos de `radioM`) de un conjunto de reportes, en una sola ida a la base.
- * El `&&` con ST_Expand es el que usa el índice GIST: `ST_DWithin(geom::geography, ...)` por sí
- * solo no puede, porque el cast a geography es una expresión y el índice está sobre `geom`.
+ * Metros de más en el prefiltro. La caja se construye en el CRS métrico y se lleva a 4326 por sus
+ * esquinas; el margen cubre de sobra la curvatura de esa transformación en unas decenas de metros.
  */
-async function vecinosDe(ex: Ejecutor, ids: string[], radioM: number): Promise<Arista[]> {
+const MARGEN_PREFILTRO_M = 1;
+
+/**
+ * Vecinos (a `radioM` o menos) de un conjunto de reportes, en una sola ida a la base, con la MISMA
+ * métrica que `ST_ClusterDBSCAN` en el recálculo completo: distancia plana en el CRS métrico.
+ *
+ * El `&&` es el que usa el índice GIST, que está sobre `geom` en 4326: `ST_DWithin` sobre la
+ * geometría transformada no puede usarlo. La caja del prefiltro se construye en metros (en el CRS
+ * métrico) y se lleva a 4326, así cubre el radio entero a cualquier latitud. Antes se expandía
+ * «radio / 111 320 × 1,05» grados en los dos ejes, que razonaba al revés: fuera del ecuador un grado
+ * de longitud mide MENOS metros, así que a −18° la caja ya no llegaba a los 25 m y a −34° (otra
+ * ciudad) se quedaba en ~21,6 m.
+ */
+async function vecinosDe(
+  ex: Ejecutor,
+  ids: string[],
+  radioM: number,
+  crsMetrico: number,
+): Promise<Arista[]> {
   if (!ids.length) return [];
-  // Un grado de longitud mide menos que uno de latitud fuera del ecuador, así que expandir el
-  // mismo número de grados en ambos ejes siempre cubre de sobra el círculo real. 1,05 es margen.
-  const grados = (radioM / METROS_POR_GRADO) * 1.05;
   return ex.consultar<Arista>(
     `SELECT a.id::text AS origen, b.id::text AS vecino
      FROM reporte_inundacion a
      JOIN reporte_inundacion b
        ON b.id <> a.id
       AND b.estado IN ('validado', 'resuelto')
-      AND b.geom && ST_Expand(a.geom, $2)
-      AND ST_DWithin(b.geom::geography, a.geom::geography, $3)
+      AND b.geom && ST_Transform(ST_Expand(ST_Transform(a.geom, $3::int), $4::float8), 4326)
+      AND ST_DWithin(ST_Transform(b.geom, $3::int), ST_Transform(a.geom, $3::int), $2::float8)
      WHERE a.id = ANY($1::uuid[])`,
-    [ids, grados, radioM],
+    [ids, radioM, crsMetrico, radioM + MARGEN_PREFILTRO_M],
   );
 }
 
@@ -77,13 +91,14 @@ async function expandirComponentes(
   ex: Ejecutor,
   semillas: string[],
   radioM: number,
+  crsMetrico: number,
 ): Promise<{ nodos: Set<string>; aristas: Arista[]; desbordado: boolean }> {
   const nodos = new Set(semillas);
   const aristas: Arista[] = [];
   let frontera = [...semillas];
   while (frontera.length) {
     if (nodos.size > MAX_AFECTADOS) return { nodos, aristas, desbordado: true };
-    const encontradas = await vecinosDe(ex, frontera, radioM);
+    const encontradas = await vecinosDe(ex, frontera, radioM, crsMetrico);
     const siguiente: string[] = [];
     for (const a of encontradas) {
       aristas.push(a);
@@ -131,12 +146,15 @@ function componentes(nodos: string[], aristas: Arista[]): Map<string, string[]> 
 /**
  * Recalcula solo los puntos críticos que pudo alterar el cambio de estado de un reporte.
  * Devuelve `completo: true` si la componente era tan grande que convino rehacer la tabla entera.
+ * `crsMetrico`, por defecto `CRS_METRICO_EPSG`: el mismo que usa el recálculo completo.
  */
 export async function recalcularEntornoDeReporte(
   ex: Ejecutor,
   reporteId: string,
   radioM: number = CONFIG_DOMINIO.RECURRENCIA_RADIO_M,
+  crsMetrico?: number,
 ): Promise<ResumenEntorno> {
+  const crs = crsMetrico ?? crsMetricoEpsg();
   return ex.transaccion(async (tx) => {
     // Un lock de transacción serializa los recálculos concurrentes también entre procesos:
     // sin él, dos validaciones sobre la misma zona leen el mismo grafo y crean puntos duplicados.
@@ -162,7 +180,12 @@ export async function recalcularEntornoDeReporte(
       for (const c of companeros) semillas.add(c.id);
     }
 
-    const { nodos, aristas, desbordado } = await expandirComponentes(tx, [...semillas], radioM);
+    const { nodos, aristas, desbordado } = await expandirComponentes(
+      tx,
+      [...semillas],
+      radioM,
+      crs,
+    );
     if (desbordado) {
       // Antes, aquí se lanzaba el recálculo COMPLETO de la tabla. Medido en la Fase 4 con 750 021
       // reportes publicables: **41,9 segundos**. Esto corre dentro de un `PATCH /estado`, con el

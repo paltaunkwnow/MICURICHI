@@ -98,7 +98,7 @@ export async function verificarPrivilegios(
   const estado = await leerEstadoPrivilegios(pool);
   const sobra = privilegiosDeMas(estado);
   if (sobra.length) {
-    const detalle = `${o.servicio}: el rol de PostgreSQL «${estado.usuario}» tiene privilegios de más:\n - ${sobra.join('\n - ')}\nUsá el rol de aplicación (${o.rolEsperado ?? 'curichi_api / curichi_geo'}) en DATABASE_URL; ver infra/sql/01-roles.sh y la migración 0008.`;
+    const detalle = `${o.servicio}: el rol de PostgreSQL «${estado.usuario}» tiene privilegios de más:\n - ${sobra.join('\n - ')}\nUsá el rol de aplicación (${o.rolEsperado ?? 'curichi_api / curichi_geo'}) en la URL del servicio (API_DATABASE_URL o GEO_DATABASE_URL; si no está, DATABASE_URL); ver infra/sql/01-roles.sh y la migración 0008.`;
     if (o.produccion) throw new Error(detalle);
     o.registrar?.(detalle);
   } else if (o.rolEsperado && estado.usuario !== o.rolEsperado) {
