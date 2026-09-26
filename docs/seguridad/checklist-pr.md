@@ -40,3 +40,15 @@ Aplicar a todo PR que toque `services/api-core`, manejo de fotos, autenticación
 ## Auditoría y cabeceras
 - [ ] Transiciones de estado, reclasificaciones, fusiones y activaciones de capa escriben en `auditoria`.
 - [ ] CORS restringido a los orígenes de las Partes 1 y 2; cabeceras de seguridad configuradas.
+
+## Infraestructura y CI (si el PR toca `infra/`, `.github/` o `docker-compose.yml`)
+- [ ] Toda acción de GitHub nueva o actualizada va fijada por SHA de commit, con la versión en un
+      comentario; los jobs nuevos no amplían `permissions` más allá de lo que usan.
+- [ ] Toda imagen nueva va fijada por versión y digest; ningún `latest`.
+- [ ] Nada publica un puerto en `0.0.0.0`; bases, S3 y paneles de monitoreo quedan en `127.0.0.1`.
+- [ ] Ningún servicio de perfil usa `${VAR:?…}` (rompe todo el Compose); valida al arrancar.
+- [ ] `TRUST_PROXY` sigue siendo `0` por defecto y la guía de producción dice `1` (o la lista de IP
+      de las apps): con `2`, el cliente se elige la IP (produccion.md, «La IP del cliente»).
+- [ ] Credenciales separadas: api-core no usa la root de MinIO ni la de los respaldos; el trabajo de
+      respaldos no usa la de las fotos.
+- [ ] Nada que se sube fuera de la máquina (respaldos) sale sin cifrar.

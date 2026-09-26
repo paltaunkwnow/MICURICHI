@@ -42,7 +42,9 @@ Ambos devuelven `trazado-abc-123`; sin cabecera, api-core genera uno propio.
 ## 3. Métricas: `/metrics`
 
 Formato de exposición de Prometheus. Se apaga con `METRICAS_RUTA=` (vacío) y se protege con
-`METRICAS_TOKEN` (cabecera `X-Token-Metricas`) cuando el endpoint es alcanzable desde fuera.
+`METRICAS_TOKEN` (cabecera `X-Token-Metricas`) cuando el endpoint es alcanzable desde fuera. El
+Prometheus del perfil `observabilidad` manda esa cabecera (§6); si cambiás `METRICAS_RUTA`, cambiá
+también `metrics_path` en `infra/observabilidad/prometheus.yml`.
 
 | Métrica | Tipo | Etiquetas | Por qué está |
 |---|---|---|---|
@@ -69,21 +71,116 @@ sin cota. Para investigar un caso concreto están los logs con su `ipHash`.
 - El detalle de los errores internos va al log; la respuesta HTTP solo lleva un código estable y
   un mensaje en español sin detalles del sistema.
 
-## 5. Alertas sugeridas (pendiente de la Fase 2)
+## 5. Alertas
 
-No se configuran aquí porque no hay todavía sistema de alertas, pero estas son las que importan:
+Configuradas en `infra/observabilidad/alertas.yml` y activas con el perfil `observabilidad` del
+Compose (ver §6). Cada una lleva `gravedad`, `servicio` e `instalacion` (la ciudad, de
+`INSTALACION_NOMBRE`).
 
-| Condición | Gravedad |
-|---|---|
-| `/ready` en 503 más de 2 minutos | Crítica |
-| Tasa de `curichi_errores_5xx_total` > 1 % durante 5 minutos | Crítica |
-| p95 de `curichi_http_duracion_segundos` > 1 s durante 10 minutos | Alta |
-| `curichi_rate_limit_total` con una subida súbita | Media: o hay abuso, o el límite molesta a gente real |
-| `curichi_reportes_creados_total` sin crecer en 24 h en temporada de lluvias | Media: el formulario puede estar roto sin dar error |
+| Alerta | Condición | Gravedad | Qué hacer |
+|---|---|---|---|
+| `ServicioCaido` | Una réplica no entrega `/metrics` durante 2 min | Crítica | `docker compose ps` y `logs` del servicio. Si todas las demás métricas están bien, revisar que `METRICAS_TOKEN` sea el mismo en Prometheus y en el servicio |
+| `ServicioSinReplicas` | Ninguna réplica de api-core (o de geo-service) sana durante 2 min | Crítica | Lo mismo; sin geo-service no se ubica ningún reporte |
+| `NoListo` | `/ready` no da 200 durante 2 min | Crítica | En api-core solo pasa sin base: `docker compose logs postgis`, conexiones, disco |
+| `Degradado` | `/ready` da 200 con `"degradado": true` durante 5 min | Alta | `/ready` dice si es `geo` (geo-service) o `fotos` (almacén). El mapa sigue; crear reportes o subir fotos, no |
+| `TasaDeErrores5xx` | Más del 1 % de 5xx durante 5 min (con un mínimo de tráfico) | Crítica | Logs por `reqId`; los 503 por base saturada también cuentan |
+| `LatenciaAlta` | p95 > 1 s durante 10 min (sin la exportación) | Alta | Mirar primero `curichi_db_pool_esperando` (§«Qué mirar primero») |
+| `PoolDeConexionesSaturado` | Peticiones esperando conexión en cada lectura de 5 min | Alta | Falta CPU en la base o sobra concurrencia. Subir el pool NO sirve sin CPU (produccion.md) |
+| `BaseNoDisponible` | api-core respondió 503 por base saturada o caída | Alta | Capacidad de la base |
+| `RateLimitDisparado` | Más de 50 rechazos por límite en 15 min en una ruta | Media | Abuso, o un límite que molesta. Si todos los rechazos comparten `ipHash`, `TRUST_PROXY` está mal (produccion.md) |
+| `CuotaDeFotosRechazando` | Más de 20 subidas de fotos rechazadas por cuota en 1 h | Media | Subidas en masa, o un tope por cuenta corto |
+| `ReportesSinCrecer` | Ningún reporte nuevo en 24 h, con api-core en marcha, durante 6 h | Media | En temporada de lluvias: probar el formulario a mano. Fuera de temporada, silenciarla |
+| `PuntosCriticosFallando` | El recálculo de puntos críticos falló | Media | Logs de api-core; el mantenimiento lo reintenta |
+| `AppCaida` | Una réplica de web-ciudadano o panel-admin no da 200 en `/` durante 2 min | Crítica | `docker compose ps` y `logs` de esa app. Si quedan réplicas sanas, el proxy ya reparte entre ellas |
+| `AppSinReplicas` | Ninguna réplica de una de las dos apps da 200 en `/` durante 2 min | Crítica | Lo mismo. Inhibe el `ProxyNoResponde` de ese sitio, que es consecuencia |
+| `ProxyNoResponde` | Un sitio no da 200 entrando por el proxy como un navegador (TLS con su nombre) durante 2 min | Crítica | `docker compose ps proxy` y `logs proxy`. Con `PROXY_TLS=acme` salta también si el certificado no valida o venció |
+| `CertificadoPorVencer` | Al certificado público de un sitio le quedan menos de 10 días, durante 1 h (solo `PROXY_TLS=acme`) | Alta | Caddy renueva a un tercio de la vida: la renovación lleva días fallando. `docker compose logs proxy \| grep -i acme`: DNS, puerto 80, límite de la autoridad |
+| `RespaldoFallido` | La envía el propio trabajo de respaldos al fallar | Crítica | `docker compose logs respaldo` y respaldo-y-restauracion.md |
+| `AlertasSinSalir` | Alertmanager no consigue entregar avisos durante 15 min | Alta | `ALERTAS_WEBHOOK_URL` y `docker compose logs alertmanager` |
+| `PrometheusSinAlertmanager` | Prometheus no encuentra a Alertmanager | Alta | Las reglas se evalúan pero nadie se entera |
 
-> Esa última existe por experiencia propia de este repositorio: el formulario público estuvo
-> completamente inutilizable y ningún indicador técnico lo delataba, porque el fallo era una
+> `ReportesSinCrecer` existe por experiencia propia de este repositorio: el formulario público
+> estuvo completamente inutilizable y ningún indicador técnico lo delataba, porque el fallo era una
 > validación de cliente que ni siquiera llegaba a hacer la petición.
+
+La «cola de fotos» no tiene métrica propia: api-core no expone cuántas imágenes esperan a
+procesarse. Se cubre con `Degradado` (almacén caído) y `CuotaDeFotosRechazando`; una métrica de
+cola del procesado de imágenes queda pendiente para la Parte 3.
+
+## 6. Monitoreo con el perfil `observabilidad`
+
+```bash
+docker compose --profile servicios --profile observabilidad up -d
+```
+
+| Servicio | Qué hace | Interfaz |
+|---|---|---|
+| `prometheus` | Lee `/metrics` de **todas** las réplicas de api-core y geo-service cada 15 s (las descubre por DNS, así que `--scale` no requiere tocar nada), con el `METRICAS_TOKEN` en la cabecera `X-Token-Metricas`. Evalúa las reglas | `http://127.0.0.1:9090` |
+| `blackbox` | Prueba `/ready` de cada réplica de los servicios y distingue «no lista» de «degradada»; `/` de cada réplica de las apps (no tienen ruta de salud propia); y cada sitio a través del proxy como un navegador: TLS con el nombre del sitio (el parámetro `hostname` fija la cabecera Host y el SNI), proxy y app. Con `PROXY_TLS=acme` verifica el certificado y mide cuánto le queda | — |
+| `alertmanager` | Agrupa, deduplica, inhibe (con la réplica caída no avisa también de su latencia) y envía | `http://127.0.0.1:9093` |
+
+Prometheus necesita además `DOMINIO_PUBLICO`, `DOMINIO_PANEL` y `PROXY_TLS`, los mismos del proxy:
+su envoltorio rellena con ellos el job `proxy` y elige el módulo del blackbox (sin ellos no
+arranca y lo dice). Esa sonda entra por el contenedor del proxy, no por el DNS público: el DNS y el
+cortafuegos de la máquina los tiene que vigilar un servicio **externo** (el mismo tipo de vigilante
+que `RESPALDO_URL_LATIDO`). Las reglas de la entrada tienen pruebas propias
+(`infra/observabilidad/alertas.test.yml`, `promtool test rules`, en el CI). Comprobado el 2026-09-26
+con la pila levantada: las cuatro sondas en 1; con el panel congelado (`docker pause`), `AppCaida`,
+`AppSinReplicas` y `ProxyNoResponde` del panel en *firing* y nada de la app pública, y en
+Alertmanager el `ProxyNoResponde` quedó inhibido; al reanudar, todo volvió a 1.
+
+Las dos interfaces quedan en `127.0.0.1` del servidor. Para verlas desde fuera, un túnel:
+`ssh -L 9090:127.0.0.1:9090 -L 9093:127.0.0.1:9093 usuario@servidor`. No se publican a internet:
+enumeran rutas y tráfico, lo mismo que protege `METRICAS_TOKEN`.
+
+Retención de métricas: `PROMETHEUS_RETENCION` (30 días) o `PROMETHEUS_RETENCION_TAMANO` (5 GB), lo
+que llegue antes. Todas las imágenes van fijadas por versión y digest.
+
+### Adónde llegan las alertas
+
+A un webhook, cuya URL va en `ALERTAS_WEBHOOK_URL` (`[SENSIBLE]`: suele llevar el secreto dentro).
+Alertmanager le hace un `POST` con su JSON estándar (`status`, `alerts[]` con `labels` y
+`annotations`) al abrirse la alerta, cada `repeat_interval` mientras siga (1 h las críticas, 4 h las
+altas, 24 h el resto) y al resolverse. Sin la variable, Alertmanager arranca igual, sin destino, y lo
+avisa en su log: las alertas se ven en su interfaz pero no salen de la máquina.
+
+Si el destino no entiende ese JSON, hay dos caminos:
+
+- **Un receptor nativo de Alertmanager** en `infra/observabilidad/alertmanager.yml`: Slack
+  (`slack_configs` con `api_url_file`), Microsoft Teams (`msteamsv2_configs` con
+  `webhook_url_file`), Telegram (`telegram_configs`), Discord, correo (`email_configs`, necesita
+  SMTP) o PagerDuty. Los `*_file` leen el secreto de un archivo: se escribe desde una variable en
+  `arrancar-alertmanager.sh`, igual que se hace hoy con el webhook.
+- **Un servicio que acepte webhooks genéricos** (ntfy, Uptime Kuma, Better Stack…) y los reenvíe
+  al teléfono.
+
+### Probar que las alertas llegan
+
+Antes de dar el monitoreo por bueno, una alerta de prueba de punta a punta:
+
+```bash
+docker compose exec alertmanager amtool alert add PruebaDeAlertas gravedad=media servicio=prueba \
+  instalacion=manual --annotation='resumen="Alerta de prueba: si la ves, las alertas llegan"' \
+  --alertmanager.url=http://127.0.0.1:9093
+```
+
+Tiene que llegar al destino en menos de un minuto. Y conviene un **vigilante del vigilante**: un
+servicio externo que avise si deja de recibir el latido de los respaldos (`RESPALDO_URL_LATIDO`),
+porque si el servidor entero se cae, nada de lo que corre dentro puede avisar.
+
+### Retención de logs
+
+- **Hoy:** cada contenedor rota su log a 10 MB × 3 archivos (`x-comun` del Compose). Es decir,
+  unos 30 MB por contenedor: días u horas según el tráfico. Sirve para diagnosticar lo reciente,
+  no para investigar un abuso de hace dos semanas.
+- **Qué hay en los logs:** JSON de pino, una línea por petición, con `reqId`, ruta, código, tiempo
+  e `ipHash` (hash con sal, nunca la IP). Aun así es un dato personal seudonimizado (§13): la
+  retención no debe superar la de `ip_hash` en la base, **30 días**.
+- **Para producción** (`PENDIENTE`): enviar los logs a un almacén con retención fija, con el
+  recolector que tenga el hosting o uno propio (Grafana Loki con Promtail o Alloy, Vector,
+  Fluent Bit) leyendo los logs de Docker; retención de 30 días, acceso solo para operación. El
+  formato JSON no necesita ningún parseo especial: todos los servicios, el job de migraciones y
+  el de respaldos escriben la misma forma.
 
 ## Configuración por entorno
 

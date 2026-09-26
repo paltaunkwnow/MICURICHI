@@ -82,7 +82,11 @@ desplegada en ningún sitio.**
 
 ### Qué no está implementado
 
-- **Despliegue.** No hay dominio, TLS, CDN, respaldos automáticos ni monitoreo. Es la Fase 2 y
+- **Despliegue.** No hay dominio ni CDN, ni ninguna instalación en marcha. Lo necesario para
+  instalarla en una ciudad ya está en el Compose y lo publica el CI: imágenes de las dos apps, proxy
+  de entrada con TLS automático (probado en local con la CA interna, **no** con certificados
+  públicos), respaldos cifrados y monitoreo con alertas (perfiles `respaldos` y `observabilidad`;
+  ver [producción](docs/operaciones/produccion.md)), pero nadie lo opera todavía. Es la Fase 2 y
   todavía no está aprobada.
 - **Notificaciones** de cualquier tipo (correo, SMS, push). Eso significa, en concreto, que el
   alta de cuenta **no verifica el correo** y que no hay recuperación de contraseña: quien la
@@ -216,19 +220,27 @@ Biome y esbuild. Si se corta con `ERR_PNPM_IGNORED_BUILDS`, mirá
 cp .env.example .env
 ```
 
-Y editá **al menos** estas cuatro, que el Compose exige y que no tienen valor por defecto:
+Y editá **al menos** estas tres, que el Compose exige para levantar PostgreSQL:
 
 ```bash
 POSTGRES_PASSWORD=...     # rol dueño de PostgreSQL
 API_DB_PASSWORD=...       # rol de api-core (privilegios mínimos)
 GEO_DB_PASSWORD=...       # rol de geo-service (solo lectura)
-MINIO_ROOT_PASSWORD=...   # administración de MinIO
 ```
 
-Para generar cada una:
+Para generar cada una (base64url: nada que haya que escapar dentro de una URL):
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+```
+
+Con ellas, poné las URL con que cada servicio se conecta con **su** rol desde la máquina (si
+quedan vacías, caen a `DATABASE_URL`, que es el rol dueño):
+
+```bash
+DATABASE_URL=postgresql://curichi:<POSTGRES_PASSWORD>@127.0.0.1:5432/curichi
+API_DATABASE_URL=postgresql://curichi_api:<API_DB_PASSWORD>@127.0.0.1:5432/curichi
+GEO_DATABASE_URL=postgresql://curichi_geo:<GEO_DB_PASSWORD>@127.0.0.1:5432/curichi
 ```
 
 `.env.example` documenta **todas** las variables, una por una, con su etiqueta:
@@ -236,38 +248,34 @@ node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
 valores de ahí a producción: ninguno es real y los servicios **se niegan a arrancar** con
 `NODE_ENV=production` si detectan los de ejemplo.
 
-### Camino A — con Docker (lo más parecido a producción)
+### Arranque local con Docker (recomendado)
+
+PostgreSQL 18 + PostGIS de verdad en un contenedor; los servicios y las apps en la máquina, con
+recarga en caliente:
 
 ```bash
-docker compose --profile servicios up -d
+docker compose up -d postgis                                # PostgreSQL en 127.0.0.1:5432
+export DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env)"  # rol dueño (ver abajo)
+pnpm db:migrate                                             # esquema
+pnpm etl:load -- --version DM_UV_MZ_2025                    # capas del municipio (ver abajo)
+pnpm db:seed:samples                                        # cuentas de desarrollo y reportes sintéticos
+pnpm dev                                                    # api-core 3001, geo-service 3002, apps 3000 y 3100
 ```
 
-**El `--profile servicios` importa.** Sin él, `docker compose up -d` levanta solo PostgreSQL y
-MinIO, y los dos servicios se quedan fuera: es el modo pensado para desarrollar api-core y
-geo-service en la máquina contra una base de verdad. Con el perfil se levanta todo.
+- La primera vez, `docker compose up -d postgis` crea el volumen y, con él, los roles de
+  aplicación (`infra/sql/01-roles.sh`, que lee `API_DB_PASSWORD` y `GEO_DB_PASSWORD`).
+- **Los comandos de pnpm no leen `.env`**: `db:migrate`, `etl:load` y `db:seed:samples` usan el
+  `DATABASE_URL` del entorno y, sin él, van a la base local sin Docker (`127.0.0.1:5433`). De ahí el
+  `export`. En PowerShell:
+  `$env:DATABASE_URL = ((Get-Content .env) -match '^DATABASE_URL=')[0] -replace '^DATABASE_URL=', ''`
+- `pnpm dev` sí lo lee: api-core y geo-service cargan el `.env` raíz y se conectan con
+  `API_DATABASE_URL` y `GEO_DATABASE_URL`.
+- `etl:load` carga la salida del ETL de `data/processed/DM_UV_MZ_2025/`, que genera
+  `pnpm etl:run -- --version DM_UV_MZ_2025` a partir de la entrega del municipio en `data/raw/`
+  ([Datos geográficos](#datos-geográficos)). **Sin la entrega, saltá ese paso**: el seed carga
+  capas sintéticas y el proyecto funciona igual.
 
-Esperá a que los cuatro digan `healthy` (la primera vez construye las imágenes y tarda varios
-minutos):
-
-```bash
-docker compose ps
-```
-
-Después, migraciones y datos de desarrollo:
-
-```bash
-pnpm db:migrate
-pnpm db:seed:samples
-```
-
-Y las dos aplicaciones, que siempre corren fuera de Docker:
-
-```bash
-pnpm --filter web-ciudadano dev   # http://localhost:3000
-pnpm --filter panel-admin dev     # http://localhost:3100
-```
-
-### Camino B — sin Docker
+### Alternativa sin Docker (PGlite)
 
 PostGIS corre dentro de Node con PGlite (ADR 0002) y las fotos van a disco.
 
@@ -284,6 +292,47 @@ pnpm dev               # api-core 3001, geo-service 3002, apps 3000 y 3100
 
 `pnpm db:local` aplica las migraciones pendientes al arrancar, así que no hace falta
 `pnpm db:migrate` aparte.
+
+**Límite conocido:** PGlite es PostgreSQL compilado a WebAssembly dentro de un solo proceso Node.
+Tras unas horas de uso, o después de suspender la máquina, deja de responder (las peticiones se
+quedan colgadas o fallan) y hay que cerrar `pnpm db:local` y volver a abrirlo; los datos siguen en
+`infra/.pglite`. Tampoco sirve para probar concurrencia (es de una sola conexión). Para trabajar
+un día entero, Docker.
+
+### La pila entera en Docker (lo más parecido a producción)
+
+```bash
+docker compose --profile servicios --profile minio up -d --build
+docker compose ps                     # migraciones «Exited (0)», el resto «healthy»
+```
+
+La misma topología que en producción: **proxy de entrada** (Caddy, TLS) → **las dos apps** →
+**api-core y geo-service** → PostgreSQL. Primero corre el job `migraciones` (la imagen de api-core
+aplicando las pendientes con el rol dueño) y, solo si termina bien, arrancan los servicios, después
+las apps y al final el proxy, todos con `NODE_ENV=production`. Eso significa que exigen lo mismo
+que en producción: `IP_HASH_SAL`, `JITTER_SAL`, `GEO_TOKEN_INTERNO` y `METRICAS_TOKEN` de 32
+caracteres o más, y una credencial de fotos (`S3_ACCESS_KEY`) que no sea la root de MinIO. Si
+falta algo, el contenedor lo dice en su log y no arranca.
+
+Con los valores del `.env.example` (`PROXY_TLS=interno`, puertos en loopback):
+
+| Dónde | Qué |
+|---|---|
+| <https://curichi.localhost:8443> | Mapa público |
+| <https://panel.curichi.localhost:8443> | Panel técnico |
+
+El certificado lo firma la CA interna de Caddy, así que el navegador avisa (o se confía en ella:
+[producción](docs/operaciones/produccion.md#probar-la-topología-en-una-máquina-de-desarrollo)).
+La cookie de sesión es `Secure` como en producción, y por eso esta pila sí sirve para probar el
+login del panel con curl (`-k`). Para instalarla de verdad en una ciudad (dominios, certificados
+públicos, primer despliegue): [producción](docs/operaciones/produccion.md#topología).
+
+Las apps no publican ningún puerto (solo las alcanza el proxy). Los dos servicios publican uno
+**efímero** en `127.0.0.1`, para diagnóstico (`docker compose port api-core 3001` dice cuál).
+
+**Docker Desktop con el repositorio fuera de `C:`**: los contenedores nuevos no pueden montar
+carpetas del repositorio y geo-service no arranca (monta `data/processed`). Las imágenes se
+construyen igual; ver [infra/docker/README.md](infra/docker/README.md#cosas-que-aparecieron-al-levantar-esto).
 
 ### Comprobar que está arriba
 
@@ -353,38 +402,43 @@ documento. Las crea `pnpm db:seed:samples`; son solo de desarrollo.
 
 ## Docker
 
-| Contenedor | Puerto (en `127.0.0.1`) | Depende de | Qué es |
+| Servicio | Perfil | Puerto (en `127.0.0.1`) | Qué es |
 |---|---|---|---|
-| `curichi-postgis` | 5432 | — | PostgreSQL 18 + PostGIS 3.6 |
-| `curichi-minio` | 9000, 9001 | — | Almacenamiento S3 de fotos |
-| `curichi-api-core` | 3001 | postgis, minio | API y reglas de negocio |
-| `curichi-geo-service` | 3002 | postgis | Servicio geoespacial |
+| `postgis` (contenedor `curichi-postgis`) | — | 5432 | PostgreSQL 18 + PostGIS 3.6 |
+| `migraciones` | `servicios` | — | Job: aplica las migraciones con el rol dueño y termina |
+| `api-core` | `servicios` | efímero | API y reglas de negocio. Arranca cuando `migraciones` terminó bien |
+| `geo-service` | `servicios` | efímero | Servicio geoespacial. Ídem |
+| `web-ciudadano`, `panel-admin` | `servicios` | ninguno | Las dos apps Next (`infra/docker/app.Dockerfile`). Solo las alcanza el proxy |
+| `proxy` | `servicios` | 8080 y 8443 en local; **80 y 443** en producción | Caddy: TLS, IP real del cliente, reparto entre réplicas. Lo único que se publica hacia fuera |
+| `minio` + `minio-init` | `minio` | 9000, 9001 | S3 **local** de fotos; `minio-init` crea el bucket privado y el usuario limitado de api-core |
+| `respaldo` | `respaldos` | — | Respaldo diario cifrado a un S3 externo, con retención |
+| `prometheus`, `alertmanager`, `blackbox` | `observabilidad` | 9090, 9093 | Métricas, reglas y alertas |
 
-`api-core` y `geo-service` están bajo el **perfil `servicios`**: sin `--profile servicios` no se
-levantan, y eso es a propósito —así se puede tener la base en Docker y los servicios en la
-máquina mientras se trabaja en ellos—. Hay además un `minio-init` que crea el bucket y termina.
-**Todos los puertos se publican en `127.0.0.1`**: nada sale de la máquina.
-
-```bash
-docker compose --profile servicios up -d      # levantar todo
-docker compose up -d                          # solo PostgreSQL y MinIO
-docker compose ps                             # salud de cada uno
-docker compose logs -f api-core               # ver logs
-docker compose restart api-core               # reiniciar uno
-docker compose stop                           # parar sin borrar
-docker compose down                           # parar y borrar contenedores (los datos quedan)
-docker compose --profile servicios build --no-cache api-core   # reconstruir una imagen
-```
-
-**Borrar todo y empezar de cero** (se pierden la base y las fotos):
+Sin perfil, `docker compose up -d` levanta **solo PostgreSQL**: es el modo para desarrollar con
+`pnpm dev`. Ni los servicios ni las apps tienen `container_name` ni puerto fijo, así que se pueden
+escalar (`--scale api-core=3 --scale web-ciudadano=2`; el proxy reparte por DNS);
+`docker compose port api-core 3001` dice el puerto de cada réplica de un servicio. En local **todo
+se publica en `127.0.0.1`**: nada sale de la máquina. En producción, el proxy publica 80 y 443
+(`PROXY_PUERTO_HTTP` y `PROXY_PUERTO_HTTPS` vacías) y nada más.
 
 ```bash
-docker compose down -v
+docker compose up -d postgis                                    # solo PostgreSQL
+docker compose --profile servicios --profile minio up -d        # la pila de la aplicación
+docker compose ps                                               # salud de cada uno
+docker compose logs -f api-core                                 # ver logs
+docker compose restart api-core                                 # reiniciar uno
+docker compose stop                                             # parar sin borrar
+docker compose --profile servicios build --no-cache api-core    # reconstruir una imagen
 ```
+
+`docker compose down` para y borra los contenedores (los volúmenes, con la base y las fotos,
+quedan). **Borrar todo y empezar de cero**, base y fotos incluidas, es `docker compose down -v`:
+solo en una máquina de desarrollo y sabiendo lo que se pierde.
 
 Los servicios corren con la imagen base fijada **por versión y por digest**, en solo lectura, sin
 capabilities y sin poder escalar privilegios. Si `docker compose build` falla diciendo que la
-versión de Node no coincide, es esa comprobación funcionando: la etiqueta flotante cambió.
+imagen base trae otra versión mayor de Node, es esa comprobación funcionando: solo va Node LTS.
+Despliegue, respaldos y monitoreo: [producción](docs/operaciones/produccion.md).
 
 ---
 
@@ -425,8 +479,8 @@ Comprobar la conexión:
 docker compose exec postgis psql -U curichi -d curichi -c "select postgis_version();"
 ```
 
-Resetear en desarrollo: `docker compose down -v && docker compose up -d`, luego `pnpm db:migrate`
-y `pnpm db:seed:samples`.
+Resetear en desarrollo: `docker compose down -v && docker compose up -d postgis`, luego
+`pnpm db:migrate` y `pnpm db:seed:samples` (con `DATABASE_URL` exportada).
 
 ### En producción, nunca
 
@@ -462,13 +516,18 @@ data/raw/DM_UV_MZ_2025/
 ```
 
 ```bash
-pnpm etl:inspect -- --version DM_UV_MZ_2025            # qué trae, sin tocar nada
-pnpm etl:run     -- --version DM_UV_MZ_2025            # reproyectar, validar, simplificar
-pnpm etl:load    -- --version DM_UV_MZ_2025 --activar  # cargar en PostGIS y activar la versión
-pnpm etl:test                                          # pruebas del ETL
+pnpm etl:inspect -- --version DM_UV_MZ_2025   # qué trae, sin tocar nada
+pnpm etl:run     -- --version DM_UV_MZ_2025   # reproyectar, validar, simplificar
+pnpm etl:load    -- --version DM_UV_MZ_2025   # cargar en PostGIS: todas las capas o ninguna
+pnpm etl:test                                 # pruebas del ETL
 ```
 
-El resultado queda en `data/processed/<capa>/<version>/`, con `reporte_calidad.md` (qué
+`etl:load` **no activa versiones**: activar una es acción del administrador desde el panel
+(**Capas → Activar**) y queda en auditoría. La única excepción es una base sin ninguna versión
+vigente de esa capa (el primer arranque): ahí la carga la activa, porque sin capa vigente no se
+puede ubicar ningún reporte, y lo deja en `auditoria` sin actor y con el motivo «arranque del ETL».
+
+El resultado queda en `data/processed/<version>/<capa>/`, con `reporte_calidad.md` (qué
 geometrías estaban rotas y qué se hizo con ellas) y `metadata.json` (CRS de origen, número de
 features, sha256, versiones de las herramientas).
 
@@ -584,9 +643,12 @@ dice qué se probó y qué no.
 | `ERR_PNPM_IGNORED_BUILDS` al instalar | Un paquete con script de instalación no está declarado en `allowBuilds` de `pnpm-workspace.yaml`. Añadilo con `true` (se compila) o `false` (se omite a propósito) y explicá por qué |
 | `EBADENGINE` o errores raros de TypeScript | Node equivocado. Pedimos 24 LTS: `node -v` tiene que decir `v24.x`. Con nvm, `nvm use` |
 | `Unsupported pnpm version` | `corepack enable` y dejá que use la versión de `packageManager` |
-| `docker compose up` falla con `variable is not set` | Faltan `POSTGRES_PASSWORD`, `API_DB_PASSWORD`, `GEO_DB_PASSWORD` o `MINIO_ROOT_PASSWORD` en `.env`. El Compose se niega a levantar sin ellas, a propósito |
-| `bind: address already in use` | Otro proceso ocupa 3000, 3001, 3002, 3100, 5432 o 9000. Cambiá el puerto en `.env` o liberalo (`netstat -ano \| findstr :3001` en Windows, `lsof -i :3001` en Linux/macOS) |
-| `/ready` devuelve 503 con `"db":"error"` | PostgreSQL todavía no aceptó conexiones. `docker compose ps` hasta que diga `healthy`. Si tarda siempre, revisá `docker compose logs postgis` |
+| `docker compose up` falla con `variable is not set` | Faltan `POSTGRES_PASSWORD`, `API_DB_PASSWORD` o `GEO_DB_PASSWORD` (o `MINIO_ROOT_PASSWORD` con el perfil `minio`) en `.env`. El Compose se niega a levantar sin ellas, a propósito |
+| `pnpm db:migrate` o `etl:load` dicen `ECONNREFUSED 127.0.0.1:5433` | No tienen `DATABASE_URL` en el entorno y van a la base sin Docker. Los comandos de pnpm no leen `.env`: `export DATABASE_URL=…` (ver [Arranque local con Docker](#arranque-local-con-docker-recomendado)) |
+| `minio-init` sale con «S3_ACCESS_KEY no puede ser el usuario root» | api-core ya no usa la credencial root de MinIO. Poné un `S3_ACCESS_KEY` / `S3_SECRET_KEY` propios en `.env` (p. ej. `curichi-fotos`) |
+| `migraciones` sale con 1 y api-core no arranca | `docker compose logs migraciones`. Con SQLSTATE `55P03` es un lock ocupado por el tráfico: repetir el `up` |
+| `bind: address already in use` | Otro proceso ocupa 3000, 3001, 3002, 3100, 5432, 8080, 8443 o 9000. Cambiá el puerto en `.env` (`PROXY_PUERTO_HTTP`, `PROXY_PUERTO_HTTPS` para el proxy) o liberalo (`netstat -ano \| findstr :3001` en Windows, `lsof -i :3001` en Linux/macOS) |
+| El contenedor `proxy` sale con «configuración inválida, no arranco» | Falta `DOMINIO_PUBLICO`, `DOMINIO_PANEL` o (con `PROXY_TLS=acme`) `ACME_EMAIL`, o los dos dominios son iguales. El log dice cuál. Si es api-core el que no arranca por `PANEL_ADMIN_URL`, es el mismo motivo: sale de `DOMINIO_PANEL` || `/ready` devuelve 503 con `"db":"error"` | PostgreSQL todavía no aceptó conexiones. `docker compose ps` hasta que diga `healthy`. Si tarda siempre, revisá `docker compose logs postgis` |
 | Las migraciones fallan con `permission denied` | `DATABASE_URL` apunta a `curichi_api` en vez de al rol dueño. Las migraciones van con `curichi` |
 | `relation "reporte_inundacion" does not exist` | Falta `pnpm db:migrate` |
 | `/ready` dice `"fotos":"error"` y `degradado:true` | MinIO no está. La app sigue sirviendo el mapa y los reportes, pero no guarda ni devuelve fotos. Es intencional: no se saca de rotación por eso |

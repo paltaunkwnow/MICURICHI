@@ -392,7 +392,7 @@ Todo esto se atacó y aguantó. No se cambió nada.
 | **Traversal** | 5 variantes sobre `/api/v1/fotos/:key`, incluida doble codificación y byte nulo | 404; la clave se valida con expresión regular antes de tocar disco o S3 |
 | **CORS** | Origen arbitrario, `null`, preflight de `PATCH` | Sin `ACAO` para orígenes ajenos; `allow-methods` no incluye `PATCH` |
 | **Evasión de rate limit** | `X-Forwarded-For` distinto en cada petición, `X-Real-IP`, `Forwarded`, cabecera duplicada | El contador baja igual: con `TRUST_PROXY=0` no se mira ninguna |
-| **Confianza en proxy acotada** | Con `TRUST_PROXY=2`, cliente antepone entradas falsas a `X-Forwarded-For` | Gana la IP escrita por un proxy de confianza; `true` y `*` ya no se aceptan |
+| **Confianza en proxy acotada** | Con `TRUST_PROXY=2`, cliente antepone entradas falsas a `X-Forwarded-For` | Gana la IP escrita por un proxy de confianza; `true` y `*` ya no se aceptan. **Corrección del 2026-09-26:** la prueba suponía dos proxies que añaden entrada. En la topología real (proxy TLS → Next → servicio) Next no añade ninguna, así que con `2` el servicio se quedaba con la entrada que escribe el cliente. El valor correcto es `1` (o la lista de IP de las apps); ver `docs/operaciones/produccion.md`, «La IP del cliente» |
 | **Host header** | `Host: evil.example` y `host@evil.example` | Sin efecto: no se construyen URLs con datos del cliente; las de fotos son relativas |
 | **`/metrics`** | Sin token, en los dos servicios | 403 |
 | **Ruta interna de invalidación** | Sin token y con token incorrecto | 403; comparación en tiempo constante |

@@ -2,6 +2,9 @@
 
 Este documento dice **dónde quedó el trabajo**, **qué funciona verificado**, **qué falta** y **cómo retomarlo**. Léelo junto con `CLAUDE.md`, que es el manual operativo y no cambia con el traspaso.
 
+> **Lo último está en §15** (revisión para producción, 2026-09-26): decisiones del usuario, ramas,
+> cómo levantar la pila con Docker y lo que quedó pendiente.
+
 - **Fase 0 (manual):** aprobada.
 - **Fase 1 (local):** las cinco partes corren y la tarea 9 está cerrada: los E2E se ejecutaron (17 en verde, 1 omitido en móvil a propósito), la revisión de seguridad está escrita en `docs/seguridad/revision-fase1.md` y el ADR 0002 registrado. Falta la **aprobación explícita del usuario** para cruzar a la Fase 2.
 - **Fase 2 (web):** no empezada. Requiere decisiones del usuario (§6).
@@ -40,7 +43,7 @@ pnpm db:local
 # Terminal 2 — datos. Solo la primera vez o al reiniciar la base:
 pnpm --filter geodata-etl samples:generar          # muestra sintética (opcional si ya hay capas reales)
 pnpm etl:run  -- --version DM_UV_MZ_2025 --forzar  # ver §3.1 sobre --forzar
-pnpm etl:load -- --version DM_UV_MZ_2025 --activar
+pnpm etl:load -- --version DM_UV_MZ_2025          # base nueva: la activa sola y queda en auditoría
 pnpm db:seed:samples                               # reportes sintéticos + usuarios locales
 
 # Terminal 2 — servicios y apps
@@ -49,6 +52,8 @@ pnpm --filter api-core dev       # http://127.0.0.1:3001  (OpenAPI en /docs)
 pnpm --filter web-ciudadano dev  # http://localhost:3000
 pnpm --filter panel-admin dev    # http://localhost:3100
 ```
+
+`etl:load` ya no tiene `--activar` (2026-09-26): en una base sin capas vigentes activa la versión sola y lo deja en `auditoria` como «arranque del ETL»; si ya rige otra versión de esa capa, la nueva queda cargada sin activar y la activa un administrador desde el panel (**Capas → Activar**).
 
 `pnpm dev` (Turborepo) arranca los cuatro servicios juntos y **ya no** intenta levantar la base: `packages/db` dejó de tener script `dev` y la base se levanta solo con `pnpm db:local` (§3.6, corregido).
 
@@ -1334,3 +1339,55 @@ Resultado: lint 256 archivos · typecheck 9 paquetes · 363 tests + 6 omitidos �
 Docker desde volumen vacío, 4 contenedores sanos.
 
 Sin commit, sin push, sin PR.
+
+---
+
+## 15. Revisión para producción (2026-09-25 y 2026-09-26)
+
+Dos días de trabajo con subagentes especializados. El detalle completo, hallazgo por hallazgo, está
+en [`docs/revision/2026-09-26-revision-produccion.md`](revision/2026-09-26-revision-produccion.md).
+Las ramas van en cadena sobre `feat/repo/cuentas-ciudadanas-y-auditoria`:
+
+| Rama | Qué trae |
+|---|---|
+| `feat/repo/sdd-verificacion-de-cambios` | Proceso `/sdd` (spec → pruebas en rojo → código → verificación) con seis subagentes; solo se usa cuando el usuario lo pide |
+| `feat/repo/quitar-campos-del-reporte` | Sin manzana, dirección aproximada, duración ni afectación en el reporte; severidad v2 (`2·P + F`) |
+| `feat/repo/profundidad-sumidero-fotos-y-panel-ejecutivo` | Profundidad estimada, sumidero Sí/No y Tapado/No tapado, foto por cámara, rol y panel ejecutivo |
+| `fix/repo/revision-produccion` | Correcciones de la revisión de once revisores, contracts 0.6.0 y 0.7.0, configuración por ciudad, infraestructura de producción |
+
+### Decisiones del usuario
+
+1. **Reporte con cuenta obligatoria.** `CLAUDE.md` actualizado.
+2. **Panel ejecutivo:** «activas» = nuevas + validadas, «N verificadas · M en revisión».
+3. **Una instalación por ciudad** ([ADR 0004](decisiones/0004-una-instalacion-por-ciudad.md)).
+4. **Base local en Docker** ([ADR 0005](decisiones/0005-base-local-en-docker.md)): Docker Desktop
+   quedó instalado y la base local es `curichi-postgis` (PostgreSQL 18 + PostGIS 3.6).
+
+### Cómo levantar la pila local ahora
+
+```bash
+docker compose up -d postgis
+pnpm dev
+```
+
+Los servicios leen el `.env` raíz y atienden con sus roles de mínimo privilegio (`API_DATABASE_URL`,
+`GEO_DATABASE_URL`). Una instalación desde cero: `pnpm db:migrate`, `pnpm etl:load -- --version
+DM_UV_MZ_2025`, `pnpm db:seed:samples`. El primer administrador de una instalación de producción se
+crea con `node node_modules/db/dist/cli/cuentas.js crear …` dentro del contenedor de api-core.
+
+### Trampas de este entorno (Windows)
+
+- El `pnpm` del sistema está roto: usar `npx -y pnpm@12.4.1`.
+- Docker Desktop no puede montar carpetas de la unidad A: en contenedores nuevos: las
+  configuraciones de contenedores van horneadas en sus imágenes.
+- No correr `next build` con `next dev` en marcha (corrompe `.next`).
+- Turbopack puede reventar por falta de pila: `RUST_MIN_STACK=67108864`.
+- Varias pruebas con bases efímeras o Argon2id fallaban por tiempo con la suite en paralelo; ahora
+  tienen plazos propios y comentados.
+
+### Qué quedó pendiente
+
+Ver la sección «Pendiente, fuera de esta rama» del informe de revisión: rate limit compartido entre
+réplicas, invalidación de cachés entre réplicas, CSP con nonce, S3 gestionado en producción, RPO y
+RTO con el municipio, certificados ACME reales (no hay dominio todavía) y número de emergencias por
+país.

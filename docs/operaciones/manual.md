@@ -36,7 +36,29 @@ niegan a arrancar con los valores de ejemplo (ver [`produccion.md`](produccion.m
 
 Dos maneras, y las dos están probadas. La diferencia es de dónde sale PostGIS.
 
-### Sin Docker (la más rápida)
+### Con Docker (la recomendada)
+
+PostgreSQL de verdad en un contenedor; servicios y apps en la máquina:
+
+```bash
+docker compose up -d postgis                                # PostgreSQL 18 + PostGIS en 127.0.0.1:5432
+export DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env)"  # rol dueño: los comandos de pnpm no leen .env
+pnpm db:migrate
+pnpm etl:load -- --version DM_UV_MZ_2025                    # si tenés la salida del ETL; si no, saltalo
+pnpm db:seed:samples
+pnpm dev                                                    # api-core 3001, geo-service 3002, apps 3000 y 3100
+```
+
+`pnpm dev` sí lee el `.env` raíz: api-core y geo-service se conectan con `API_DATABASE_URL` y
+`GEO_DATABASE_URL` (sus roles con privilegios mínimos; definilas, o caen al rol dueño). La primera
+vez, `docker compose up -d postgis` crea el volumen y los roles de aplicación. En PowerShell, el
+`export` es `$env:DATABASE_URL = ((Get-Content .env) -match '^DATABASE_URL=')[0] -replace '^DATABASE_URL=', ''`.
+
+> No uses `set -a; . ./.env; set +a` para cargar el `.env` en bash: `CIUDAD_NOMBRE=Santa Cruz de la
+> Sierra` lleva espacios sin comillas, y bash intenta ejecutar `Cruz`. Docker Compose y Node
+> (`--env-file`) sí lo leen bien.
+
+### Sin Docker (PGlite)
 
 ```bash
 pnpm db:local        # PostGIS dentro de Node (PGlite) en 127.0.0.1:5433; aplica migraciones
@@ -49,6 +71,10 @@ pnpm db:seed:samples # usuarios locales + reportes SINTÉTICOS dentro de las UV 
 pnpm dev             # api-core 3001, geo-service 3002, app pública 3000, panel 3100
 ```
 
+**Su límite:** tras unas horas de uso o después de suspender la máquina, PGlite deja de responder
+(peticiones colgadas o cortadas) y hay que cerrar `pnpm db:local` y abrirlo otra vez; los datos
+siguen en `infra/.pglite`. Es de una sola conexión, así que tampoco sirve para probar concurrencia.
+
 Usuarios de desarrollo: `tecnico@curichi.local` / `curichi-tecnico-local`,
 `admin@curichi.local` / `curichi-admin-local` y `vecina@curichi.local` /
 `curichi-vecina-local`.
@@ -58,40 +84,53 @@ mapa no). Cada cuenta puede enviar un reporte cada 60 minutos; si al probar reci
 código `CUOTA_DE_REPORTES`, es eso y no un fallo. Para probar con varios reportes seguidos, creá
 varias cuentas o bajá `REPORTE_MINUTOS_ENTRE_ENVIOS` **solo en desarrollo**.
 
-### Con Docker
+### La pila entera en Docker
+
+La que más se parece a producción:
 
 ```bash
-docker compose up -d                          # solo PostGIS y MinIO
-pnpm db:migrate && pnpm dev                   # el resto, en la máquina
+docker compose --profile servicios --profile minio up -d --build
 ```
 
-O la pila entera, que es la que más se parece a producción:
-
-```bash
-docker compose --profile servicios up -d --build
-```
-
-Con el perfil `servicios`, api-core y geo-service corren dentro de Docker con
-**`NODE_ENV=production`**. Eso tiene una consecuencia que conviene saber antes de tropezarse con
-ella: en ese modo `COOKIE_SEGURA` es obligatoriamente `1`, así que la cookie de sesión sale
-marcada como `Secure` y **solo viaja por HTTPS**. Un navegador la manda igual contra `localhost`
-—lo trata como contexto seguro—, pero un cliente HTTP que no sea navegador, no. Por eso los E2E
-de Playwright se corren contra `pnpm dev` y no contra el Compose.
+Con el perfil `servicios`, primero corre el job `migraciones` y, si termina bien, arrancan
+api-core y geo-service, después las dos apps y al final el **proxy de entrada** (Caddy), todos con
+**`NODE_ENV=production`**. Se entra por el proxy: con los valores del `.env.example`,
+<https://curichi.localhost:8443> y <https://panel.curichi.localhost:8443>, con un certificado de la
+CA interna de Caddy (el navegador avisa). En ese modo la cookie de sesión es `Secure` y **solo
+viaja por HTTPS**, así que curl necesita `-k` y HTTPS. Los E2E de Playwright se siguen corriendo
+contra `pnpm dev`. Las apps no publican puertos; los dos servicios publican uno **efímero** en
+`127.0.0.1` (`docker compose port api-core 3001`). Topología, variables y primer despliegue:
+[`produccion.md`](produccion.md#topología).
 
 ## Docker
 
 ```bash
 docker compose --profile servicios build      # de a uno si la máquina va justa de memoria
-docker compose --profile servicios up -d
-docker compose ps                             # los cuatro tienen que llegar a `healthy`
+docker compose --profile servicios --profile minio up -d
+docker compose ps                             # migraciones y minio-init «Exited (0)»; el resto «healthy»
 docker compose logs -f api-core
-docker compose --profile servicios down       # sin -v: los volúmenes (base y fotos) se conservan
+docker compose --profile servicios --profile minio down   # sin -v: los volúmenes se conservan
 ```
 
-Los cuatro servicios son `postgis`, `minio`, `api-core` y `geo-service`. Los dos últimos están
-bajo el perfil `servicios` para que `docker compose up -d` a secas levante solo lo que hace falta
-para desarrollar. `minio-init` crea el bucket una vez y termina: que aparezca como `Exited (0)`
-es lo correcto.
+| Perfil | Servicios | Para qué |
+|---|---|---|
+| (ninguno) | `postgis` | Desarrollar con `pnpm dev` |
+| `servicios` | `migraciones` (job), `api-core`, `geo-service`, `web-ciudadano`, `panel-admin`, `proxy` | La aplicación en contenedores, como en producción. Solo el proxy publica puertos hacia fuera |
+| `minio` | `minio`, `minio-init` (job) | S3 local para las fotos. En producción, S3 gestionado |
+| `respaldos` | `respaldo` | Respaldo diario cifrado a un S3 externo ([respaldo-y-restauracion.md](respaldo-y-restauracion.md)) |
+| `observabilidad` | `prometheus`, `alertmanager`, `blackbox` | Métricas y alertas ([observabilidad.md](observabilidad.md)) |
+
+Los jobs (`migraciones`, `minio-init`) terminan: que aparezcan como `Exited (0)` es lo correcto.
+`minio-init` crea el bucket privado y el usuario de api-core con acceso solo a ese bucket, y se
+niega a seguir si `S3_ACCESS_KEY` es la credencial root. Los servicios y las apps no tienen
+`container_name` (se llaman `mi-curichi-api-core-1`, …) para poder escalarlos con `--scale`; el
+proxy reparte entre las réplicas de las apps por el DNS de Docker.
+
+> **Windows y la unidad A:** el 2026-09-26, en la máquina de desarrollo, Docker Desktop no podía
+> montar carpetas de la unidad `A:` en contenedores nuevos (`mkdir /run/desktop/mnt/host/a: file
+> exists`); los que ya estaban creados seguían funcionando. Afecta a todo lo que el Compose monta
+> desde el repositorio (`infra/sql`, `infra/minio`, `infra/observabilidad`, `data/processed`). Si
+> aparece, reiniciar Docker Desktop o trabajar con el repositorio en `C:`.
 
 Detalle de las imágenes, las tres etapas del Dockerfile y los límites de recursos:
 [`infra/docker/README.md`](../../infra/docker/README.md).
@@ -134,8 +173,8 @@ Está medido, no supuesto, y el ETL lo reporta en `data/processed/DM_UV_MZ_2025/
 | Geometrías inválidas | 1 en UV, 358 en MZ | `-clean` de mapshaper; lo que PostGIS siga viendo inválido se repara con `ST_MakeValid` al cargar (2 + 1 + 17 filas) |
 | Duplicados exactos de geometría | 70 en MZ | Se excluye la segunda copia |
 | Unidades vecinales sin código | 7 | Se usa `OBJECTID` como respaldo |
-| Códigos de unidad vecinal repetidos | 25 | Se desambiguan con sufijo `-2`, `-3`… estable por orden de archivo |
-| **Manzanas sin identificador único** | — | `OBJECTID` vale 0 en 6 596 filas y solo tiene 20 001 valores distintos de 27 527. Ningún campo ni combinación de campos es única (ver los números en `config/capas.yaml`). El id de manzana es, por tanto, un **subrogado del ETL**, estable mientras el archivo no cambie |
+| Códigos de unidad vecinal repetidos | 25 | Se desambiguan con sufijo `-2`, `-3`… asignado por la geometría, no por el orden del archivo |
+| **Manzanas sin identificador único** | — | `OBJECTID` vale 0 en 6 596 filas y solo tiene 20 001 valores distintos de 27 527. Ningún campo ni combinación de campos es única (ver los números en `config/capas.yaml`). El id de manzana es, por tanto, un **subrogado del ETL**: no depende del orden de las filas, pero puede cambiar si cambia la geometría de alguna manzana que comparte código |
 | Manzanas que declaran un padre inexistente | 879 unidades vecinales, 97 distritos | Se usa el polígono que las contiene; si no hay ninguno, se dejan en `NULL`. Nunca se guarda una referencia que no resuelva |
 | Manzanas sin ningún padre | 454 sin unidad vecinal, 24 sin distrito | Quedan en `NULL` y contadas |
 
@@ -151,17 +190,33 @@ pnpm etl:load    -- --version DM_UV_MZ_2025   # carga a PostGIS
 pnpm etl:all                                  # run + load de todas las versiones cuya carpeta exista
 ```
 
-`etl:load` marca la versión como vigente **solo si no hay otra vigente** para esa capa. Activar
-una versión cuando ya rige otra es una decisión del administrador y se hace desde el panel
-(**Capas → Activar**), no desde la línea de comandos; `--activar` existe para automatizar el
-primer arranque de un entorno nuevo.
+`etl:load` carga todas las capas de la versión en **una sola transacción**: si falla una, no
+queda ninguna a medias. **No activa versiones**: activar es decisión del administrador y se hace
+desde el panel (**Capas → Activar**), que la deja en `auditoria` con su usuario. La única
+excepción es el arranque: si una capa no tiene **ninguna** versión vigente (base nueva), la carga
+la activa, porque sin capa vigente no se puede ubicar ningún reporte, y lo registra en `auditoria`
+sin actor, con `activado_en` y el motivo «arranque del ETL». Recargar la versión que ya rige no
+cambia su activación. La opción `--activar` ya no existe.
+
+Cuando la reparación topológica corre sobre una capa cuyas features no tienen una clave única
+(pasa en unidades vecinales y manzanas de la entrega real), el control de cambio de área por
+feature no se puede aplicar: `etl:run` lo avisa con `!! AVISO` en consola y al principio de
+`reporte_calidad.md`.
+
+Los códigos repetidos se desambiguan con `-2`, `-3`… **por la geometría de cada feature, no por
+el orden del archivo**, así que una reentrega con las filas en otro orden da los mismos ids. Esto
+cambió el 2026-09-26: regenerar con este ETL una versión que se cargó con uno anterior puede
+reasignar los sufijos de los códigos repetidos, y los reportes guardan el id de su unidad
+vecinal. No la recargues encima de la versión vigente: declarala como otra versión (una entrada
+nueva en `config/capas.yaml`, con otro `version` y la misma `carpeta`), cargala y activala
+desde el panel.
 
 `etl:load` habla con la base por `DATABASE_URL`. Si no está en el entorno del proceso, usa la del
 modo local (`127.0.0.1:5433`), **no** la del `.env`: los comandos de pnpm no leen ese archivo.
 Contra el PostGIS del Compose hay que pasarla:
 
 ```bash
-set -a && . ./.env && set +a    # carga DATABASE_URL (rol dueño) desde tu .env
+export DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env)"   # rol dueño, desde tu .env
 pnpm etl:load -- --version DM_UV_MZ_2025
 ```
 
@@ -203,15 +258,18 @@ El script de init no vuelve a ejecutarse sobre un volumen creado. Para una base 
 marcha (o un servidor del municipio), se aplica a mano una vez:
 
 ```bash
-set -a; . ./.env; set +a
-docker exec -e API_DB_PASSWORD="$API_DB_PASSWORD" -e GEO_DB_PASSWORD="$GEO_DB_PASSWORD" \
-  -e POSTGRES_USER=curichi -e POSTGRES_DB=curichi \
+export API_DB_PASSWORD="$(sed -n 's/^API_DB_PASSWORD=//p' .env)"
+export GEO_DB_PASSWORD="$(sed -n 's/^GEO_DB_PASSWORD=//p' .env)"
+docker exec -e API_DB_PASSWORD -e GEO_DB_PASSWORD -e POSTGRES_USER=curichi -e POSTGRES_DB=curichi \
   -i curichi-postgis bash < infra/sql/01-roles.sh
 ```
+
+(`-e VARIABLE` sin valor la toma del entorno: la contraseña no queda en la línea de órdenes.)
 
 Y después las migraciones, que son las que conceden los permisos:
 
 ```bash
+export DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env)"
 pnpm db:migrate && pnpm privilegios
 ```
 
@@ -271,18 +329,25 @@ archivo:
 
 ## Producción
 
-[`produccion.md`](produccion.md) tiene la lista completa. En una línea: secretos generados,
-`COOKIE_SEGURA=1`, `CORS_ORIGENES` con los orígenes reales, `TRUST_PROXY` con el número de saltos
-real, `/metrics` con token o apagado, PostGIS de verdad con `sslmode=require`, respaldos fuera de
-la máquina y un mapa base que no sea el servidor público de OpenStreetMap.
+[`produccion.md`](produccion.md) tiene la lista completa. En una línea: una instalación por
+ciudad con las cinco imágenes del CI por SHA, `DOMINIO_PUBLICO` y `DOMINIO_PANEL` distintos con
+`PROXY_TLS=acme` (el proxy saca los certificados solo), secretos generados (`GEO_TOKEN_INTERNO`
+incluido, de 32 caracteres o más), la IP del cliente comprobada con una cabecera falsa (el Compose
+ya pone `TRUST_PROXY=1` y `PROXY_DE_CONFIANZA=1`), `/metrics` con token, migraciones por el job `migraciones`,
+TLS con la base con `sslmode=verify-full` y su CA, fotos en un S3 gestionado, perfiles
+`respaldos` y `observabilidad` en marcha, y un mapa base que no sea el servidor público de
+OpenStreetMap.
 
 ## Respaldo y restauración
 
-[`respaldo-y-restauracion.md`](respaldo-y-restauracion.md). El simulacro completo —respalda, crea
-una base nueva, restaura, compara y borra la base de prueba— es un comando:
+[`respaldo-y-restauracion.md`](respaldo-y-restauracion.md). En producción los hace el servicio
+`respaldo` (perfil `respaldos`): diario, cifrado, a un S3 externo, con retención y alerta si falla.
+En la máquina de desarrollo, el simulacro completo —respalda sin `_migraciones`, crea una base
+nueva, la migra `--hasta` la versión del respaldo, carga los datos, migra el resto, compara y
+borra la base de prueba— es un comando:
 
 ```bash
-node scripts/respaldo.mjs simulacro
+node --env-file=.env scripts/respaldo.mjs simulacro
 ```
 
 Devuelve código distinto de cero si algo no coincide, así que se puede enganchar a una tarea
