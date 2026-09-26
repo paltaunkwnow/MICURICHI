@@ -1,5 +1,18 @@
-# CI de Mi Curichi (Parte 5). Corre en cada PR y en main: lint, typecheck, test, build.
-# Versiones de las actions: verificar en la primera ejecución real (no había remoto al escribirlas).
+# CI/CD de Mi Curichi (Parte 5).
+#
+#   En cada PR y en cada push a main: secretos, lint, typecheck, test, build; migraciones, roles,
+#   privilegios, seeds y simulacro de recuperación contra PostgreSQL real; imágenes construidas y
+#   escaneadas con Trivy; Compose, scripts y configuración de monitoreo validados.
+#   Solo en main, y solo si todo lo anterior pasó: las cinco imágenes (api-core, geo-service,
+#   web-ciudadano, panel-admin y el proxy de entrada) se publican en GHCR con tag = SHA del commit,
+#   con SBOM y procedencia adjuntos.
+#
+# TODAS las acciones van fijadas por SHA de commit, no por etiqueta. Una etiqueta se puede mover:
+# el 19-03-2026 alguien con credenciales robadas reescribió 76 etiquetas de aquasecurity/trivy-action
+# para que apuntaran a un ladrón de secretos, y todo el que la usaba por etiqueta lo ejecutó. El
+# comentario de cada `uses:` dice a qué versión corresponde el SHA (obtenido con
+# `git ls-remote https://github.com/<dueño>/<repo> refs/tags/<versión>` el 2026-09-26). Dependabot
+# (.github/dependabot.yml) propone las actualizaciones con SHA nuevo.
 name: CI
 
 on:
@@ -8,9 +21,15 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Mínimo privilegio: el token de cada job solo puede LEER el repositorio, salvo que el job pida
+# algo más de forma explícita (y solo lo hacen dos: gitleaks y la publicación de imágenes).
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # En main no se cancela: un push nuevo no debe cortar a medias la publicación del anterior.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   TURBO_TELEMETRY_DISABLED: 1
@@ -23,11 +42,16 @@ jobs:
     name: gitleaks (historial)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      # La acción lista los commits del PR por la API.
+      pull-requests: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+          persist-credentials: false
+      - uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -36,11 +60,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -91,9 +117,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -104,10 +132,12 @@ jobs:
       - name: Navegador de Playwright
         run: pnpm --filter e2e exec playwright install --with-deps chromium
 
+      # wait-on con versión fija: `npx --yes wait-on` a secas bajaba la última publicada en npm,
+      # es decir, código de terceros distinto en cada ejecución.
       - name: Base local (PGlite + PostGIS) en segundo plano
         run: |
           pnpm db:local > db-local.log 2>&1 &
-          npx --yes wait-on tcp:127.0.0.1:5433 -t 180000
+          npx --yes wait-on@9.1.0 tcp:127.0.0.1:5433 -t 180000
 
       - name: Datos sintéticos
         run: pnpm db:seed:samples
@@ -118,7 +148,7 @@ jobs:
 
       - name: Informe
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
           path: e2e/playwright-report
@@ -128,13 +158,13 @@ jobs:
   #
   # Las migraciones solo se probaban contra PGlite, que es de conexión única: el entorno donde se
   # prueban las carreras era justamente uno donde no puede haber carreras. Aquí se aplican contra
-  # PostgreSQL 18 + PostGIS de verdad y se arranca a la vez desde varios procesos, que es cómo un
-  # despliegue con réplicas las ejecuta. Ese fallo existía: una de ocho réplicas moría con
-  # `duplicate key value violates unique constraint "pg_type_typname_nsp_index"`.
+  # PostgreSQL 18 + PostGIS de verdad, con el MISMO comando que el job `migraciones` del Compose, y
+  # con los roles de aplicación creados como en producción: sin ellos, la migración 0008 se saltaba
+  # sus GRANT en silencio y la matriz de privilegios no se comprobaba nunca.
   postgres-real:
-    name: migraciones y seeds contra PostgreSQL real
+    name: migraciones, privilegios y recuperación contra PostgreSQL real
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgis:
         image: postgis/postgis:18-3.6
@@ -151,10 +181,15 @@ jobs:
           --health-retries 12
     env:
       DATABASE_URL: postgresql://curichi:curichi@127.0.0.1:5432/curichi
+      # Solo de esta base efímera de CI: contraseñas de los roles de aplicación.
+      API_DB_PASSWORD: ci-api-solo-para-esta-base-efimera
+      GEO_DB_PASSWORD: ci-geo-solo-para-esta-base-efimera
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version-file: .nvmrc
           cache: pnpm
@@ -162,29 +197,51 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
-      # `db` importa `contracts` y los dos se consumen por su `dist/` (las réplicas concurrentes,
-      # los seeds y la prueba de la cuota). Sin construir `contracts` primero, `pnpm build` de
-      # `db` fallaba con «Cannot find module 'contracts'» (primer PR, 2026-09-24).
+      # `db` importa `contracts` y los dos se consumen por su `dist/` (el CLI de migraciones, las
+      # réplicas concurrentes, los seeds y la prueba de la cuota). Sin construir `contracts`
+      # primero, `pnpm build` de `db` fallaba con «Cannot find module 'contracts'» (2026-09-24).
       - name: Construir contracts y db
         run: pnpm --filter contracts build && pnpm --filter db build
+
+      # El mismo script que ejecuta el contenedor de PostgreSQL al crear su volumen. Aquí la base
+      # es un servicio del runner, así que psql llega por TCP (PGHOST) y no por el socket.
+      - name: Roles de aplicación (infra/sql/01-roles.sh)
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGPASSWORD: curichi
+          POSTGRES_USER: curichi
+          POSTGRES_DB: curichi
+        run: bash infra/sql/01-roles.sh
 
       - name: Extensiones de PostGIS
         run: psql "$DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS postgis;'
 
-      - name: Migraciones desde cero
-        run: pnpm db:migrate
+      # El comando de producción: el compilado, con NODE_ENV=production (sin DATABASE_URL se
+      # negaría a caer a la base local). Es lo que corre el job `migraciones` del Compose.
+      - name: Migraciones desde cero (comando de producción)
+        env:
+          NODE_ENV: production
+        run: node packages/db/dist/cli/migrar.js
 
       # Se afirma lo positivo: la segunda pasada tiene que decir «ninguna». Antes se buscaba solo
       # «migraciones aplicadas:», pero el mensaje de «ninguna (al día)» también lo contiene, así
       # que el paso fallaba justo cuando las migraciones SÍ eran idempotentes (primer PR, 2026-09-24).
       - name: Migraciones idempotentes (segunda pasada no aplica nada)
+        env:
+          NODE_ENV: production
         run: |
-          salida=$(pnpm db:migrate 2>&1)
+          salida=$(node packages/db/dist/cli/migrar.js 2>&1)
           echo "$salida"
           if ! echo "$salida" | grep -q "migraciones aplicadas: ninguna"; then
             echo "::error::La segunda pasada aplicó migraciones: no son idempotentes."
             exit 1
           fi
+
+      # Compara la matriz efectiva de privilegios de curichi_api y curichi_geo con la documentada:
+      # falla si sobra o falta un solo permiso.
+      - name: Privilegios mínimos efectivos
+        run: pnpm privilegios
 
       # Ocho procesos arrancando a la vez contra la MISMA base, como un despliegue con réplicas.
       # Ninguno puede fallar y las migraciones tienen que quedar registradas exactamente una vez.
@@ -262,43 +319,322 @@ jobs:
           END $$;
           FIN
 
-  # Construir las imágenes en CI. No se ejecutan (harían falta secretos), pero sí se comprueba que
-  # el Dockerfile sigue construyendo: en la Fase 4 se descubrió que `minio/minio` ya no existe en
-  # Docker Hub, y ese tipo de rotura solo aparece cuando alguien intenta construir o levantar.
+      # El simulacro de docs/operaciones/respaldo-y-restauracion.md en cada PR: respaldo sin
+      # `_migraciones` → base nueva migrada --hasta la versión del respaldo → solo datos → resto de
+      # migraciones → conteos iguales al original. Si un cambio de esquema rompe la restauración de
+      # los respaldos, se ve aquí y no el día que haga falta restaurar.
+      - name: Simulacro de recuperación
+        env:
+          PG_CONTENEDOR: ${{ job.services.postgis.id }}
+          POSTGRES_USER: curichi
+          POSTGRES_PASSWORD: curichi
+          POSTGRES_DB: curichi
+        run: node scripts/respaldo.mjs simulacro
+
+  # Construir las imágenes en cada PR y escanearlas. Los servicios no se ejecutan (harían falta
+  # secretos y una base); las apps y el proxy sí se arrancan, endurecidos como en el Compose, hasta
+  # `healthy`. Además se comprueba que ninguna trae vulnerabilidades altas o críticas CON arreglo
+  # disponible (las que no tienen arreglo no dependen de nosotros y quedan fuera con
+  # `ignore-unfixed`; se revisan en el informe completo de la publicación).
+  #
+  # Una fila de la matriz por imagen. `servicio.Dockerfile` y `app.Dockerfile` son uno para dos
+  # paquetes cada uno; lo que cambia va en `args`. La caché de GHA va por imagen (`scope`).
   imagenes-docker:
-    name: construcción de las imágenes
+    name: imagen ${{ matrix.imagen }} (construcción y Trivy)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - paquete: api-core
-            puerto: 3001
-          - paquete: geo-service
-            puerto: 3002
+          - imagen: api-core
+            tipo: servicio
+            contexto: .
+            archivo: infra/docker/servicio.Dockerfile
+            args: |
+              PAQUETE=api-core
+              PUERTO=3001
+          - imagen: geo-service
+            tipo: servicio
+            contexto: .
+            archivo: infra/docker/servicio.Dockerfile
+            args: |
+              PAQUETE=geo-service
+              PUERTO=3002
+          - imagen: web-ciudadano
+            tipo: app
+            contexto: .
+            archivo: infra/docker/app.Dockerfile
+            args: |
+              APP=web-ciudadano
+              PUERTO=3000
+          - imagen: panel-admin
+            tipo: app
+            contexto: .
+            archivo: infra/docker/app.Dockerfile
+            args: |
+              APP=panel-admin
+              PUERTO=3100
+          # Contexto = infra/ y la configuración de Caddy horneada (infra/proxy/).
+          - imagen: proxy
+            tipo: proxy
+            contexto: infra
+            archivo: infra/docker/proxy.Dockerfile
+            args: ""
     steps:
-      - uses: actions/checkout@v5
-      - uses: docker/setup-buildx-action@v3
-      - name: Construir ${{ matrix.paquete }}
-        uses: docker/build-push-action@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          context: .
-          file: infra/docker/servicio.Dockerfile
-          build-args: |
-            PAQUETE=${{ matrix.paquete }}
-            PUERTO=${{ matrix.puerto }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Construir ${{ matrix.imagen }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.contexto }}
+          file: ${{ matrix.archivo }}
+          build-args: ${{ matrix.args }}
           push: false
-          load: false
-          cache-from: type=gha,scope=${{ matrix.paquete }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.paquete }}
+          load: true
+          tags: mi-curichi-${{ matrix.imagen }}:ci
+          cache-from: type=gha,scope=${{ matrix.imagen }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.imagen }}
 
-      - name: El Compose sigue siendo válido
+      # El comando de migración de producción tiene que estar DENTRO de la imagen: lo usa el job
+      # `migraciones` del Compose. `--hasta 9999` falla antes de conectarse y, al hacerlo, lista la
+      # última migración: prueba a la vez el CLI y la carpeta de migraciones.
+      - name: El CLI de migraciones está en la imagen
+        if: matrix.imagen == 'api-core'
+        run: |
+          salida=$(docker run --rm --network none mi-curichi-api-core:ci node node_modules/db/dist/cli/migrar.js --hasta 9999 2>&1 || true)
+          echo "$salida"
+          echo "$salida" | grep -q 'no hay ninguna migración' || { echo "::error::El CLI de migraciones no está en la imagen."; exit 1; }
+
+      # La app arranca SIN api-core (la ciudad cae a la de por defecto) y con el mismo endurecimiento
+      # que en el Compose: solo lectura, sin capabilities, `no-new-privileges`. El HEALTHCHECK de la
+      # imagen pide un archivo de public/: si el standalone quedó sin public/ o sin .next/static,
+      # o si Next no escucha en 0.0.0.0, no llega a `healthy`.
+      - name: La app arranca endurecida y sirve (healthy)
+        if: matrix.tipo == 'app'
+        run: |
+          docker run -d --name humo --network none --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges mi-curichi-${{ matrix.imagen }}:ci
+          for _ in $(seq 1 40); do
+            estado=$(docker inspect -f '{{.State.Health.Status}}' humo)
+            [ "$estado" = healthy ] && { echo "healthy"; exit 0; }
+            [ "$estado" = unhealthy ] && break
+            sleep 2
+          done
+          docker logs humo
+          echo "::error::La imagen de ${{ matrix.imagen }} no llegó a healthy ($estado)."
+          exit 1
+
+      # El proxy: sin variables se niega a arrancar y dice qué falta; con la CA interna arranca sin
+      # root, en solo lectura y sin capabilities (la base trae NET_BIND_SERVICE en el binario y, sin
+      # quitarla, `cap_drop: ALL` impide incluso ejecutarlo).
+      - name: El proxy valida su configuración y arranca endurecido
+        if: matrix.tipo == 'proxy'
+        run: |
+          salida=$(docker run --rm --network none mi-curichi-proxy:ci 2>&1 || true)
+          echo "$salida"
+          echo "$salida" | grep -q 'DOMINIO_PUBLICO está vacía' || { echo "::error::El proxy arrancó sin DOMINIO_PUBLICO."; exit 1; }
+          docker run -d --name humo --network none --read-only --cap-drop ALL \
+            --security-opt no-new-privileges --tmpfs /tmp --tmpfs /config \
+            --tmpfs /data:uid=10001,gid=10001 \
+            -e PROXY_TLS=interno -e DOMINIO_PUBLICO=curichi.localhost -e DOMINIO_PANEL=panel.curichi.localhost \
+            mi-curichi-proxy:ci
+          for _ in $(seq 1 30); do
+            estado=$(docker inspect -f '{{.State.Health.Status}}' humo)
+            [ "$estado" = healthy ] && { echo "healthy"; exit 0; }
+            [ "$estado" = unhealthy ] && break
+            sleep 2
+          done
+          docker logs humo
+          echo "::error::El proxy no llegó a healthy ($estado)."
+          exit 1
+
+      - name: Vulnerabilidades (Trivy) — falla con HIGH o CRITICAL que tengan arreglo
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: mi-curichi-${{ matrix.imagen }}:ci
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+  # Lo que no es código de la aplicación pero se despliega igual: el Compose con todos sus
+  # perfiles, los scripts de infraestructura, la configuración de Prometheus y Alertmanager y la
+  # imagen del trabajo de respaldos.
+  infra:
+    name: compose · scripts · monitoreo · respaldos
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Scripts de infraestructura (shellcheck)
+        run: |
+          shellcheck --version
+          shellcheck -x infra/respaldo/respaldo.sh infra/minio/inicializar.sh \
+            infra/observabilidad/arrancar-prometheus.sh infra/observabilidad/arrancar-alertmanager.sh \
+            infra/sql/01-roles.sh infra/proxy/arrancar.sh
+
+      # Con el .env.example TAL CUAL: es lo que hace quien clona el repositorio. Si una variable
+      # obligatoria (`:?`) aparece en un servicio de un perfil, rompe también
+      # `docker compose up -d postgis`, y eso es lo que este paso detecta.
+      - name: El Compose es válido, con y sin perfiles
         run: |
           cp .env.example .env
-          # Valores de relleno solo para que `config` pueda resolver las variables obligatorias.
-          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/' .env
-          sed -i 's/^MINIO_ROOT_PASSWORD=.*/MINIO_ROOT_PASSWORD=ci/' .env
-          sed -i 's/^IP_HASH_SAL=.*/IP_HASH_SAL=ci/' .env
-          sed -i 's/^JITTER_SAL=.*/JITTER_SAL=ci/' .env
-          sed -i 's/^GEO_TOKEN_INTERNO=.*/GEO_TOKEN_INTERNO=ci/' .env
-          docker compose --profile servicios config > /dev/null
+          docker compose config --quiet
+          docker compose --profile servicios --profile minio --profile respaldos --profile observabilidad config --quiet
+
+      # La configuración se genera con el envoltorio REAL (`arrancar-prometheus.sh comprobar`), en
+      # los tres modos del proxy, y `promtool check config` revisa también las reglas. Después, las
+      # pruebas unitarias de las alertas de la entrada (alertas.test.yml).
+      - name: Reglas y configuración de Prometheus y Alertmanager
+        env:
+          PROMETHEUS_IMAGEN: quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+        run: |
+          for modo in acme interno no; do
+            docker run --rm --network none -v "$PWD/infra/observabilidad:/etc/prometheus:ro" \
+              -e METRICAS_TOKEN=ci -e INSTALACION_NOMBRE=ci -e PROXY_TLS="$modo" \
+              -e DOMINIO_PUBLICO=mapa.ejemplo.org -e DOMINIO_PANEL=panel.ejemplo.org \
+              --entrypoint /bin/sh "$PROMETHEUS_IMAGEN" /etc/prometheus/arrancar-prometheus.sh comprobar
+          done
+          docker run --rm --network none -v "$PWD/infra/observabilidad:/etc/prometheus:ro" \
+            --entrypoint /bin/promtool "$PROMETHEUS_IMAGEN" test rules /etc/prometheus/alertas.test.yml
+          docker run --rm --network none -v "$PWD/infra/observabilidad:/cfg:ro" --entrypoint /bin/amtool \
+            quay.io/prometheus/alertmanager:v0.34.1@sha256:e9733bafb1bdef9b00e25a21f8f99dc26a22224bf16641ad754d1649f4c3357a \
+            check-config /cfg/alertmanager.yml /cfg/alertmanager-sin-destino.yml
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - name: Imagen del trabajo de respaldos
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: infra
+          file: infra/docker/respaldo.Dockerfile
+          push: false
+          load: false
+          cache-from: type=gha,scope=respaldo
+          cache-to: type=gha,mode=max,scope=respaldo
+
+  # Publicación: solo en main, solo después de que todo lo anterior haya pasado, y solo la imagen
+  # escaneada. Tag = SHA completo del commit: inmutable, así cada ciudad sabe exactamente qué código
+  # corre y volver atrás es cambiar las IMAGEN_* del .env al SHA anterior. Las cinco salen del MISMO
+  # commit: se despliegan juntas. No se publica `latest`: una etiqueta que se mueve es justo lo que
+  # no se quiere en un despliegue.
+  publicar-imagenes:
+    name: publicar ${{ matrix.imagen }} en GHCR
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [secretos-historial, verificar, postgres-real, imagenes-docker, infra]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      # La misma matriz que `imagenes-docker` (sin `tipo`): si cambia allí, cambia aquí.
+      matrix:
+        include:
+          - imagen: api-core
+            contexto: .
+            archivo: infra/docker/servicio.Dockerfile
+            args: |
+              PAQUETE=api-core
+              PUERTO=3001
+          - imagen: geo-service
+            contexto: .
+            archivo: infra/docker/servicio.Dockerfile
+            args: |
+              PAQUETE=geo-service
+              PUERTO=3002
+          - imagen: web-ciudadano
+            contexto: .
+            archivo: infra/docker/app.Dockerfile
+            args: |
+              APP=web-ciudadano
+              PUERTO=3000
+          - imagen: panel-admin
+            contexto: .
+            archivo: infra/docker/app.Dockerfile
+            args: |
+              APP=panel-admin
+              PUERTO=3100
+          - imagen: proxy
+            contexto: infra
+            archivo: infra/docker/proxy.Dockerfile
+            args: ""
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      # GHCR exige el nombre en minúsculas y el repositorio es `MICURICHI`.
+      - name: Nombre de la imagen
+        run: echo "IMAGEN=ghcr.io/${GITHUB_REPOSITORY,,}/${{ matrix.imagen }}:${GITHUB_SHA}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir ${{ matrix.imagen }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.contexto }}
+          file: ${{ matrix.archivo }}
+          build-args: ${{ matrix.args }}
+          push: false
+          load: true
+          tags: ${{ env.IMAGEN }}
+          cache-from: type=gha,scope=${{ matrix.imagen }}
+
+      # Se escanea la imagen que se va a publicar, no la del PR: entre uno y otro puede haber
+      # cambiado la base o haber salido un aviso nuevo.
+      - name: Vulnerabilidades (Trivy) — falla con HIGH o CRITICAL que tengan arreglo
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGEN }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      - name: SBOM (CycloneDX)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGEN }}
+          format: cyclonedx
+          output: sbom-${{ matrix.imagen }}.cdx.json
+
+      - name: Guardar el SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.imagen }}
+          path: sbom-${{ matrix.imagen }}.cdx.json
+          retention-days: 90
+
+      # Mismo contexto y misma caché que el paso de construcción: BuildKit reutiliza todas las
+      # capas y solo añade el SBOM y la procedencia como atestaciones de la imagen en el registro.
+      - name: Publicar ${{ env.IMAGEN }}
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.contexto }}
+          file: ${{ matrix.archivo }}
+          build-args: ${{ matrix.args }}
+          push: true
+          tags: ${{ env.IMAGEN }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=${{ matrix.imagen }}

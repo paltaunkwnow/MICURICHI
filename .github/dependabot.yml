@@ -1,0 +1,83 @@
+# Dependabot (Parte 5): propone las actualizaciones de dependencias como PR, que pasan por el
+# mismo CI que cualquier otro cambio (incluido el escaneo de Trivy de las imágenes).
+#
+#   npm             el monorepo pnpm (un solo lockfile en la raíz)
+#   docker          imágenes base de infra/docker/*.Dockerfile (FROM literal y fijado por digest)
+#   docker-compose  imágenes del docker-compose.yml (PostGIS, MinIO, Prometheus, Alertmanager…)
+#   github-actions  acciones del CI, fijadas por SHA: Dependabot cambia el SHA y el comentario
+#
+# `cooldown`: una versión recién publicada es justo donde aparecen los paquetes comprometidos
+# (se retiran en horas o días). Esperar una semana antes de proponerla cuesta poco.
+#
+# Los mensajes de commit siguen commitlint.config.js (Conventional Commits con scope obligatorio):
+# Dependabot añade los dos puntos tras el paréntesis.
+#
+# OJO con pnpm 12: la documentación de Dependabot lista pnpm hasta la v10. El lockfile es v9, que
+# sí entiende, pero si sus PR de npm fallan al regenerarlo, la alternativa es Renovate.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/La_Paz
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 10
+    groups:
+      menores-y-parches:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: build(repo)
+
+  - package-ecosystem: docker
+    directories:
+      - /infra/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/La_Paz
+    cooldown:
+      default-days: 3
+    ignore:
+      # Solo Node LTS (CLAUDE.md §8.1): el salto de versión mayor es una decisión, no un parche.
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+      # PostgreSQL 19 exige volcar y restaurar la base: tampoco es un parche.
+      - dependency-name: postgis/postgis
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: build(infra)
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/La_Paz
+    cooldown:
+      default-days: 3
+    ignore:
+      - dependency-name: postgis/postgis
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: build(infra)
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/La_Paz
+    cooldown:
+      default-days: 7
+    groups:
+      acciones:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: ci(infra)
