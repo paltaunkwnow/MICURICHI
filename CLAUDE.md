@@ -2,7 +2,7 @@
 
 > **Manual operativo permanente del repositorio.** Cualquier agente o persona que trabaje aquí debe leer este archivo completo antes de tocar nada.
 > Estado actual: **Fase 1 — Local, en curso.** Fase 0 aprobada el 2026-09-13. Las cinco partes están escritas y corren con los datos reales del municipio; queda la tarea 9 (E2E, seguridad, cierre). El estado exacto, los defectos abiertos y cómo retomar están en **`docs/TRASPASO.md`**.
-> Última actualización: 2026-09-25 (severidad v2; se quitan direccion_aprox, duracion_estimada, afectacion y manzana_id del reporte; tirante_estimado pasa a profundidad_estimada; sumidero con respuestas cerradas; rol ejecutivo y panel ejecutivo).
+> Última actualización: 2026-09-26 (revisión para producción: reportar exige cuenta; panel ejecutivo con inundación activa = nuevos + validados; una instalación por ciudad (ADR 0004); base local en PostgreSQL con Docker (ADR 0005); endpoints, ETL, comandos y seguridad al día con el código).
 > Versiones de software verificadas el 2026-09-13 (ver §8). Distribución del trabajo en **5 partes** fijada por el usuario (§4).
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)
@@ -32,7 +32,7 @@
 
 | Usuario | Qué hace | Parte |
 |---|---|---|
-| Ciudadano / vecino | Reporta un punto (GPS o clic en el mapa), adjunta foto, consulta el mapa público | Parte 1 (`apps/web-ciudadano`) |
+| Ciudadano / vecino | Consulta el mapa público sin cuenta; para reportar un punto (GPS o clic en el mapa) y adjuntar foto crea su cuenta e inicia sesión | Parte 1 (`apps/web-ciudadano`) |
 | Técnico municipal / analista | Valida, rechaza, fusiona duplicados, reclasifica, filtra, exporta, analiza | Parte 2 (`apps/panel-admin`) |
 | Administrador | Gestiona capas base, usuarios, moderación y configuración | Parte 2 (`apps/panel-admin`) |
 | Ejecutivo (secretarios, concejales, alcalde) | Ve dónde y cuánto se está inundando y cómo va el trabajo: totales, pestañas por severidad, coropleta y gráficas por distrito, actualización cada 60 s (`/ejecutivo`) | Parte 2 (`apps/panel-admin`) |
@@ -107,7 +107,7 @@
 - Analítica avanzada, series temporales, mapas de calor por período de retorno.
 - Gestión de órdenes de trabajo o seguimiento de obras.
 - Autenticación social, perfiles de ciudadano, gamificación.
-- Multi-municipio.
+- Multi-municipio (una plataforma compartida por varias ciudades). La estrategia de crecimiento es **una instalación por ciudad** (ADR 0004): la misma imagen sirve a otra ciudad o país cambiando configuración y capas (§8.2).
 
 ---
 
@@ -145,7 +145,7 @@ flowchart LR
     DB[(PostgreSQL + PostGIS)]
   end
   subgraph P5[Parte 5 · GIS / DevOps / seguridad / calidad]
-    ETL[pipelines/geodata-etl<br/>Python + GDAL]
+    ETL[pipelines/geodata-etl<br/>TypeScript + mapshaper]
     INFRA[infra/ · docker-compose · .github · e2e/]
     RAW[/data/raw shapefiles/]
     PROC[/data/processed GeoJSON + PMTiles/]
@@ -170,7 +170,7 @@ flowchart LR
   C -.-> ADM
   C -.-> API
   C -.-> GEO
-  C -.dominio.json.-> ETL
+  C -.tipos.-> ETL
 ```
 
 Reglas de dependencia: los frontends (Partes 1 y 2) **nunca** hablan directo con la base de datos. `api-core` (Parte 3) es el único que escribe reportes. `geo-service` (Parte 4) es de **solo lectura**. Solo `packages/db` (Parte 4) cambia el esquema, vía migraciones. Solo el ETL (Parte 5) escribe las tablas de capas.
@@ -182,8 +182,8 @@ Reglas de dependencia: los frontends (Partes 1 y 2) **nunca** hablan directo con
 | **Propósito** | Que cualquier vecino, desde el celular, vea el mapa y reporte un punto en menos de 2 minutos. |
 | **Responsabilidades** | Mapa MapLibre con capa base atribuida, capa de UV/distritos, puntos con clustering visual; popup/panel de detalle; formulario de reporte con geolocalización, selección manual, subida de foto, validación de campos con Zod + React Hook Form; previsualización de la UV resuelta antes de enviar; PWA instalable; mobile-first; WCAG 2.2 AA; español; texto de limitaciones (§9.5) visible. |
 | **NO le corresponde** | Calcular severidad, distrito o UV (los muestra, no los decide). Moderar. Almacenar fotos directamente. Hablar con la base de datos. Definir tipos de intercambio por su cuenta. |
-| **Entradas** | `GET /api/v1/reportes` (GeoJSON público), `GET /api/v1/reportes/:id`, `POST /geo/v1/resolver` (previsualización), capas de `geo-service`, configuración pública. |
-| **Salidas** | `POST /api/v1/reportes`, `POST /api/v1/fotos`. |
+| **Entradas** | `GET /api/v1/reportes` (GeoJSON público), `GET /api/v1/reportes/:id`, `POST /geo/v1/resolver` (previsualización), capas de `geo-service`, `GET /api/v1/configuracion` (la ciudad: nombre, zona horaria, locale, centro y zoom inicial del mapa, leída en tiempo de ejecución), `GET /api/v1/auth/yo` (sesión y turno de reporte). |
+| **Salidas** | `POST /api/v1/reportes` y `POST /api/v1/fotos`, **con sesión**: reportar exige cuenta, ver el mapa no. `POST /api/v1/auth/registro` (alta de cuenta ciudadana), `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`. |
 | **Dependencias** | `packages/contracts`; Parte 3 (`api-core`); Parte 4 (`geo-service`, capas). |
 | **Comandos** | `pnpm --filter web-ciudadano dev / build / test / test:e2e / lint / typecheck` |
 | **Definition of Done** | Compila; lint + typecheck + Vitest verdes; Playwright propio cubre: (a) abrir mapa, clic en punto, ver distrito y UV en el panel; (b) crear reporte por selección manual con foto; README con comandos; `.env.example`; Lighthouse accesibilidad ≥ 90 en local `<umbral a confirmar>`. |
@@ -193,7 +193,7 @@ Reglas de dependencia: los frontends (Partes 1 y 2) **nunca** hablan directo con
 | Aspecto | Detalle |
 |---|---|
 | **Propósito** | Que el técnico municipal convierta reportes crudos en un inventario validado, exportable y consultable. |
-| **Responsabilidades** | Login (técnico/admin); tabla + mapa sincronizados con filtros (distrito, UV, severidad, estado, rango de fechas); moderación: validar / rechazar (con motivo) / fusionar duplicados / reclasificar severidad (con motivo); exportación CSV y GeoJSON de la selección filtrada; indicadores básicos: reportes por UV, por distrito, por estado, recurrencia (puntos críticos con n ≥ 2); coropletas por UV. Admin: gestión de usuarios técnicos y activación de la versión vigente de capas. |
+| **Responsabilidades** | Login (técnico, admin y ejecutivo; una cuenta ciudadana no entra al panel); tabla + mapa sincronizados con filtros (distrito, UV, severidad, estado, rango de fechas); moderación: validar / rechazar (con motivo) / fusionar duplicados / reclasificar severidad (con motivo); exportación CSV y GeoJSON de la selección filtrada; indicadores básicos: reportes por UV, por distrito, por estado, recurrencia (puntos críticos con n ≥ 2); coropletas por UV. **Panel ejecutivo** (`/ejecutivo`, única pantalla del rol ejecutivo; técnico y admin también la ven): la cifra grande es la inundación activa (reportes `nuevo` + `validado`), con «N verificadas · M en revisión» debajo; pestañas por severidad, coropleta y gráficas por distrito; los resueltos van a «Cómo va el trabajo»; se refresca cada 60 s con consultas marcadas como sondeo (`x-curichi-sondeo`), que no renuevan la inactividad de la sesión. Admin: gestión de usuarios técnicos y activación de la versión vigente de capas. |
 | **NO le corresponde** | Ejecutar el ETL (solo ve y activa versiones cargadas). Calcular severidad ni puntos críticos (los solicita). Analítica avanzada. |
 | **Entradas** | Endpoints autenticados de `api-core`; capas y agregados de `geo-service`. |
 | **Salidas** | `PATCH /api/v1/reportes/:id/estado`, `PATCH /api/v1/reportes/:id/severidad`, `POST /api/v1/reportes/:id/fusionar`, `GET /api/v1/exportar`, `POST /api/v1/admin/capas/:id/activar`. |
@@ -234,18 +234,18 @@ Reglas de dependencia: los frontends (Partes 1 y 2) **nunca** hablan directo con
 | **Propósito** | Que los datos oficiales entren limpios y versionados, que todo se levante con un comando, que nada inseguro llegue a `main` y que la calidad se mida en vez de suponerse. |
 | **Responsabilidades (5 frentes)** | **GIS**: pipeline completo de §6 (inspección, reproyección, validación topológica, normalización, simplificación, PMTiles, carga a PostGIS, reporte de calidad, manifiestos). **DevOps**: monorepo pnpm + Turborepo, Biome, Husky/lint-staged/commitlint, Dockerfiles, Docker Compose, GitHub Actions, README raíz. **Seguridad**: política de §13, escaneo de secretos en pre-commit y CI, auditoría de dependencias, cabeceras y CORS en infraestructura, revisión de seguridad de cada PR que toque `api-core`, fotos o autenticación. **Infraestructura**: volúmenes, redes Docker, healthchecks, `pg_dump` manual, observabilidad mínima (logs JSON, `/metrics`). **Calidad**: umbrales de cobertura `<a confirmar>`, E2E transversal en `e2e/` (recorrido ciudadano → técnico → mapa público → exportación), auditoría de accesibilidad y rendimiento (§14), checklist de DoD en la plantilla de PR. |
 | **NO le corresponde** | Lógica de negocio (Parte 3). Esquema de base de datos ni migraciones (Parte 4; el ETL carga en tablas que Parte 4 define). Interfaz (Partes 1 y 2). Implementar la seguridad dentro del código de otras partes: la define, la configura en infra/CI y la audita; cada parte la implementa en lo suyo. |
-| **Entradas** | `data/raw/<capa>/<version>/` + `MANIFEST.md` (solo lectura); código de las demás partes para construir, probar y auditar. |
+| **Entradas** | `data/raw/<version>/` + `MANIFEST.md` (solo lectura); código de las demás partes para construir, probar y auditar. |
 | **Salidas** | `data/processed/` y `data/samples/`; tablas `geo.*` cargadas; imágenes Docker; pipelines de CI; reportes de E2E, accesibilidad, rendimiento y seguridad. |
-| **Dependencias** | GDAL, mapshaper, tippecanoe, Python + GeoPandas/Shapely/pyogrio, Docker, PostGIS; `packages/contracts` (`dominio.json`). |
+| **Dependencias** | mapshaper y `@turf/turf` (ETL en TypeScript, ADR 0002; GDAL, tippecanoe y Python + GeoPandas/Shapely/pyogrio quedan como referencia de §6), Docker, PostGIS; `packages/contracts` (importado directamente). |
 | **Comandos** | `pnpm etl:inspect / etl:run / etl:load / etl:all / etl:test`; `docker compose up -d`; `pnpm lint / typecheck / test / build`; `pnpm test:e2e` (ver §11). |
-| **Definition of Done** | `pnpm etl:all` regenera todo `data/processed/` desde cero sin intervención manual y pytest cubre reproyección, reparación reportada, normalización y detección de solape/hueco con fixture sintético; `docker compose up -d` deja todos los servicios `healthy`; CI verde en cada PR; `pnpm test:e2e` verde con el recorrido completo; escaneo de secretos activo; README raíz con la secuencia de arranque; `.env.example` raíz. |
+| **Definition of Done** | `pnpm etl:all` regenera todo `data/processed/` desde cero sin intervención manual y las pruebas del ETL con Vitest (ADR 0002) cubren reproyección, reparación reportada, normalización y detección de solape/hueco con fixture sintético; `docker compose --profile servicios up -d` deja todos los servicios `healthy` (sin perfil solo levanta `postgis`); CI verde en cada PR; `pnpm test:e2e` verde con el recorrido completo; escaneo de secretos activo; README raíz con la secuencia de arranque; `.env.example` raíz. |
 
 ### 4.8 Transversal — `packages/contracts` (custodia: Parte 3)
 
 - Contiene: enums del dominio, esquemas Zod de cada payload y respuesta, tipos TypeScript inferidos (`z.infer`), especificación **OpenAPI 3.1** (`openapi/openapi.yaml`), **tabla de severidad** (§9.1) como constante versionada, constantes de configuración de dominio (radio de recurrencia, jitter, límites de foto).
 - Regla: **ninguna parte define un tipo de intercambio por su cuenta.** Si lo necesita, lo agrega aquí en una tarea que lo anuncie explícitamente; la Parte 3 revisa el cambio.
 - Los cambios de contrato son **breaking por defecto**: se versionan (`/api/v1`), se documentan en `packages/contracts/CHANGELOG.md`, y las partes consumidoras se adaptan en sus propias tareas.
-- El ETL en Python (Parte 5) consume los enums vía un JSON exportado por `contracts` (`pnpm --filter contracts build` genera `dist/dominio.json`), para que los valores de `tipo` de capa y nombres de campos sean los mismos en ambos lenguajes.
+- El ETL (Parte 5), en TypeScript desde el ADR 0002, importa los enums directamente de `contracts`, así que los valores de `tipo` de capa y los nombres de campos son los mismos por construcción. `pnpm --filter contracts build` sigue generando `dist/dominio.json` para consumidores en otros lenguajes.
 
 ---
 
@@ -274,15 +274,15 @@ MI CURICHI/
     contracts/              # Transversal — tipos, Zod, OpenAPI, severidad (custodia Parte 3)
     db/                     # Parte 4 — esquema Drizzle, migraciones, seeds sintéticos, cliente
   pipelines/
-    geodata-etl/            # Parte 5 — ETL shapefile → GeoJSON → PostGIS (Python + uv)
+    geodata-etl/            # Parte 5 — ETL shapefile → GeoJSON → PostGIS (TypeScript + mapshaper, ADR 0002)
   e2e/                      # Parte 5 — Playwright transversal (recorrido completo)
   data/
     raw/                    # shapefiles originales. INMUTABLE. Solo lectura. No se versiona.
-      <capa>/<version>/     # p. ej. unidad_vecinal/2026-09/
+      <version>/            # p. ej. DM_UV_MZ_2025/: las capas tal como las entrega el municipio
         *.shp *.shx *.dbf *.prj *.cpg
         MANIFEST.md         # fuente, fecha de recepción, sha256 de cada archivo, CRS declarado
     processed/              # generado por el ETL (Parte 5). Reproducible. No se versiona.
-      <capa>/<version>/
+      <version>/<capa>/     # p. ej. DM_UV_MZ_2025/unidad_vecinal/
     samples/                # muestras pequeñas (< 1 MB c/u), SINTÉTICAS, versionables (Parte 5)
   docs/
     decisiones/             # ADRs; cada parte escribe los suyos; índice a cargo de Parte 5
@@ -333,7 +333,7 @@ Todo el pipeline vive en `pipelines/geodata-etl/` y es responsabilidad de la **P
 Comando subyacente:
 
 ```bash
-ogrinfo -al -so "data/raw/unidad_vecinal/2026-09/unidad_vecinal.shp"
+ogrinfo -al -so "data/raw/DM_UV_MZ_2025/UV.shp"
 ```
 
 El ETL emite `reporte_calidad.md` sección "Inspección" con: CRS detectado (nombre + EPSG si se resuelve), número de features, tipos de geometría (y si hay mezcla Polygon/MultiPolygon), listado de atributos con tipo, conteo de nulos por atributo, encoding detectado/asumido, extensión (bbox) en CRS origen y en EPSG:4326.
@@ -352,8 +352,8 @@ ogr2ogr -f GeoJSON \
   -makevalid \
   -lco RFC7946=YES \
   -lco COORDINATE_PRECISION=7 \
-  "data/processed/unidad_vecinal/2026-09/unidad_vecinal.full.geojson" \
-  "data/raw/unidad_vecinal/2026-09/unidad_vecinal.shp"
+  "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.full.geojson" \
+  "data/raw/DM_UV_MZ_2025/UV.shp"
 ```
 
 Notas: `-nlt PROMOTE_TO_MULTI` homogeneiza a MultiPolygon; `-makevalid` repara geometrías inválidas (ver 6.4, se reporta antes/después); `COORDINATE_PRECISION=7` ≈ 1 cm, suficiente para precisión completa. Si se pasó `--crs-origen`, se agrega `-s_srs EPSG:xxxxx`.
@@ -388,7 +388,7 @@ Se ejecuta **antes y después** de la reparación, y cada corrección se lista c
 | `fuente` | string | ✔ | ✔ |
 | `fecha_vigencia` | date ISO o null | ✔ | ✔ |
 
-- El mapeo de campos originales → normalizados se declara en `pipelines/geodata-etl/config/<capa>.yaml` (p. ej. `NOM_UV → nombre`, `COD_UV → codigo`). Los nombres reales de los campos del municipio están `<a confirmar>` hasta ver los shapefiles.
+- El mapeo de campos originales → normalizados se declara en `pipelines/geodata-etl/config/<capa>.yaml` (p. ej. `NOM_UV → nombre`, `COD_UV → codigo`). Para `DM_UV_MZ_2025` el mapeo real ya está en `pipelines/geodata-etl/config/capas.yaml`: `DIS` y `UV` como código, sin campo de nombre (se genera «Distrito {codigo}» y «Unidad Vecinal {codigo}»), y `OBJECTID` para las manzanas.
 - Encoding de salida **UTF-8** siempre.
 
 ### 6.6 Simplificación (dos salidas)
@@ -401,11 +401,11 @@ Se ejecuta **antes y después** de la reparación, y cada corrección se lista c
 Comando subyacente:
 
 ```bash
-npx mapshaper "data/processed/unidad_vecinal/2026-09/unidad_vecinal.full.geojson" \
+npx mapshaper "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.full.geojson" \
   -simplify visvalingam interval=3 keep-shapes \
   -clean \
   -o format=geojson precision=0.000001 \
-     "data/processed/unidad_vecinal/2026-09/unidad_vecinal.web.geojson"
+     "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.web.geojson"
 ```
 
 Se usa mapshaper y no `ogr2ogr -simplify` porque mapshaper simplifica **preservando la topología entre polígonos vecinos** (los bordes compartidos no se separan ni se cruzan). `keep-shapes` evita que desaparezcan UV pequeñas. La tolerancia usada queda en `metadata.json`.
@@ -413,20 +413,20 @@ Se usa mapshaper y no `ogr2ogr -simplify` porque mapshaper simplifica **preserva
 ### 6.7 Teselas vectoriales (si `web.geojson` > 5 MB)
 
 ```bash
-tippecanoe -o "data/processed/unidad_vecinal/2026-09/unidad_vecinal.pmtiles" \
+tippecanoe -o "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.pmtiles" \
   -l unidad_vecinal \
   -Z 9 -z 15 \
   --detect-shared-borders \
   --no-feature-limit --no-tile-size-limit \
   --force \
-  "data/processed/unidad_vecinal/2026-09/unidad_vecinal.full.geojson"
+  "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.full.geojson"
 ```
 
 Rango de zoom `9–15` es inicial `<ajustar>`. En ese caso `geo-service` sirve el `.pmtiles` (archivo estático con *range requests*) y el frontend lo consume con el protocolo `pmtiles://` de MapLibre.
 
 ### 6.8 Salida y metadatos
 
-`data/processed/<capa>/<version>/` contiene:
+`data/processed/<version>/<capa>/` (p. ej. `data/processed/DM_UV_MZ_2025/unidad_vecinal/`) contiene:
 
 - `<capa>.full.geojson`, `<capa>.web.geojson`, opcional `<capa>.pmtiles`.
 - `reporte_calidad.md` (humano) y `reporte_calidad.json` (máquina).
@@ -443,10 +443,14 @@ ogr2ogr -f PostgreSQL "PG:$DATABASE_URL" \
   -nlt MULTIPOLYGON \
   -t_srs EPSG:4326 \
   -overwrite \
-  "data/processed/unidad_vecinal/2026-09/unidad_vecinal.full.geojson"
+  "data/processed/DM_UV_MZ_2025/unidad_vecinal/unidad_vecinal.full.geojson"
 ```
 
-Luego un SQL versionado en `pipelines/geodata-etl/sql/promover_capa.sql` inserta desde `*_stage` a la tabla definitiva con `version_capa`, crea la fila en `capa_version` (con `vigente = false`), y verifica: `ST_IsValid(geom)` en todas las filas, índice GIST presente (`\d geo.unidad_vecinal`), `SELECT count(*)` = `n_features_salida`. **Activar** una versión (`vigente = true`) es acción del administrador desde el panel administrativo (Parte 2), no del ETL.
+Luego un SQL versionado en `pipelines/geodata-etl/sql/promover_capa.sql` inserta desde `*_stage` a la tabla definitiva con `version_capa`, crea la fila en `capa_version` (con `vigente = false`, salvo la excepción de abajo), y verifica: `ST_IsValid(geom)` en todas las filas, índice GIST presente (`\d geo.unidad_vecinal`), `SELECT count(*)` = `n_features_salida`.
+
+**La carga de una versión es una sola transacción**: todas sus capas entran juntas o no entra ninguna, y una falla a mitad no deja capas a medias. En la implementación de Fase 1 (ADR 0002), `etl:load` inserta por lotes directamente en `geo.<capa>` (sin tabla `*_stage`), repara con `ST_MakeValid` y reporta lo que PostGIS declare inválido, comprueba el conteo y crea o actualiza la fila de `capa_version`.
+
+**Activar** una versión (`vigente = true`) es acción del administrador desde el panel administrativo (Parte 2), que la deja en `auditoria`. Única excepción: si la capa **no tiene ninguna versión vigente** (primera carga en una base nueva), el ETL activa esa versión, porque sin ella el sistema no puede resolver reportes, y lo registra en `auditoria` sin actor. Las versiones siguientes se cargan sin activar y se activan desde el panel; el ETL no tiene opción para activarlas.
 
 ### 6.10 Reglas duras
 
@@ -476,7 +480,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 | `geom` | `geometry(Point, 4326)` | índice GIST; coordenada exacta (solo visible a técnico/admin) |
 | `creado_en` / `actualizado_en` | `timestamptz` | |
 | `evento_en` | `timestamptz` null | cuándo ocurrió el anegamiento; si null se asume `creado_en` |
-| `autor_id` | `uuid` null FK `usuario` | null = anónimo |
+| `autor_id` | `uuid` null FK `usuario` | autor, tomado de la sesión: todo reporte nuevo lo tiene (reportar exige cuenta desde la migración 0009). Null solo en reportes anteriores a las cuentas ciudadanas o si se borró la cuenta (`ON DELETE SET NULL`) |
 | `distrito_id` | `text` FK `geo.distrito_municipal.id` | **calculado por el sistema** |
 | `unidad_vecinal_id` | `text` FK `geo.unidad_vecinal.id` | **calculado por el sistema** |
 | `version_capa` | `text` | versión de capa con la que se resolvió; permite recalcular si cambia la capa |
@@ -505,7 +509,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 
 ### 7.2 Tablas complementarias
 
-**`reporte_foto`**: `id uuid`, `reporte_id uuid FK`, `objeto_key text` (clave en MinIO), `mime text`, `bytes int`, `ancho int`, `alto int`, `exif_sanitizado boolean NOT NULL DEFAULT false` (debe ser `true` antes de servirse), `creado_en`. La API expone `foto_url[]` firmadas/temporales.
+**`reporte_foto`**: `id uuid`, `reporte_id uuid FK`, `objeto_key text` (clave en MinIO), `mime text`, `bytes int`, `ancho int`, `alto int`, `exif_sanitizado boolean NOT NULL DEFAULT false` (debe ser `true` antes de servirse), `subido_por uuid null FK usuario` (cuenta que la subió; migración 0012, `ON DELETE SET NULL`, null en las fotos anteriores), `creado_en`. Una foto solo se asocia a un reporte de su autor: la cuenta que crea el reporte tiene que ser la que la subió, dentro de las 24 h siguientes a la subida; las fotos sin `subido_por` no se aceptan. La API expone `foto_url[]` firmadas/temporales.
 
 **`geo.distrito_municipal`**, **`geo.unidad_vecinal`** y **`geo.manzana`**: `id text`, `codigo text`, `nombre text`, `geom geometry(MultiPolygon, 4326)` con **GIST**, `version_capa text`, `fuente text`, `fecha_vigencia date null`, `distrito_id text` (UV y manzana), `unidad_vecinal_id text` (solo manzana), `distrito_inferido boolean` (UV). PK compuesta `(id, version_capa)`; vistas `geo.<capa>_vigente` filtran por `capa_version.vigente = true`. La manzana es capa de render; el reporte no la guarda.
 
@@ -513,7 +517,7 @@ El modelo de datos es propiedad de la **Parte 4**: el esquema Drizzle y las migr
 
 **`punto_critico`**: `id uuid`, `geom geometry(Point, 4326)` (centroide), `n_reportes int`, `primer_reporte_en`, `ultimo_reporte_en`, `severidad_max`, `distrito_id`, `unidad_vecinal_id`, `radio_m numeric`, `calculado_en`. Ver §9.2.
 
-**`usuario`**: `id`, `email` (único), `nombre`, `rol` enum `ciudadano` \| `tecnico` \| `ejecutivo` \| `admin`, `activo`, `creado_en`. Contraseñas: hash con Argon2id `<a confirmar proveedor de auth, ver §16>`.
+**`usuario`**: `id`, `email` (único), `nombre`, `rol` enum `ciudadano` \| `tecnico` \| `ejecutivo` \| `admin`, `activo`, `creado_en`. Contraseñas: hash con Argon2id (§8.2). La autenticación es propia de `api-core` (sesión por cookie), sin proveedor externo (§16, punto 4).
 
 **`auditoria`**: `id`, `entidad`, `entidad_id`, `accion`, `actor_id null`, `antes jsonb`, `despues jsonb`, `creado_en`. Se escribe en cada transición de estado, reclasificación, fusión y activación de capa.
 
@@ -531,9 +535,11 @@ nuevo ──validar──▶ validado ──resolver──▶ resuelto
 |---|---|---|
 | `nuevo → validado` | técnico, admin | — |
 | `nuevo → rechazado` | técnico, admin | `estado_motivo` |
-| `nuevo/validado → duplicado` | técnico, admin | `fusionado_en_id` (debe estar `validado`) |
+| `nuevo/validado → duplicado` | técnico, admin | `fusionado_en_id` de **otro** reporte, que debe estar `validado`; `estado_motivo` |
 | `validado → resuelto` | técnico, admin | `estado_motivo` (qué se hizo) |
 | `rechazado → nuevo` | admin | `estado_motivo` (reapertura) |
+
+Fusión: un reporte no se fusiona consigo mismo (`409 FUSION_CONSIGO_MISMO`); el reporte y su canónico se bloquean juntos, en orden de id, para que dos fusiones cruzadas no formen un ciclo; y los reportes que apuntaban al fusionado pasan a apuntar al nuevo canónico, con una entrada de `auditoria` (`fusion:reapuntar`) por cada uno.
 
 Vista pública: solo `validado` y `resuelto`. `nuevo` no se publica (moderación previa). Al pasar a `validado` se recalcula el punto crítico de su entorno.
 
@@ -573,32 +579,39 @@ Respuesta:
 
 | Método y ruta | Rol | Descripción |
 |---|---|---|
-| `POST /reportes` | público (rate limited) | Crea un reporte en `nuevo`. Body validado con `ReporteCrearSchema`. Resuelve UV vía `geo-service`, calcula severidad. |
-| `POST /fotos` | público (rate limited) | Multipart; máx. `FOTO_MAX_BYTES` (propuesto 8 MB) y 3 fotos por reporte `<a confirmar>`; solo `image/jpeg`, `image/png`, `image/webp`, `image/heic` `<HEIC a confirmar>`; devuelve `objeto_key` temporal a asociar. |
-| `GET /reportes` | público / técnico | Query: `bbox`, `estado`, `distrito_id`, `unidad_vecinal_id`, `severidad`, `desde`, `hasta`, `pagina`, `limite`. Público: solo `validado`/`resuelto`, con jitter y sin autor. Técnico: todo, exacto. Responde `FeatureCollection`. |
-| `GET /reportes/:id` | público / técnico | Detalle; misma política de visibilidad. |
+| `POST /reportes` | autenticado, cualquier rol (rate limited) | Crea un reporte en `nuevo`; el autor sale de la sesión (el cuerpo no tiene campo de autor). Sin sesión, `401 SIN_SESION`. Además del límite por IP, un reporte por cuenta cada 60 min (`429 CUOTA_DE_REPORTES`, con `Retry-After`). Body validado con `ReporteCrearSchema`. Resuelve UV vía `geo-service`, calcula severidad. |
+| `POST /fotos` | autenticado, cualquier rol (rate limited) | Multipart; máx. `FOTO_MAX_BYTES` (propuesto 8 MB) y 3 fotos por reporte `<a confirmar>`; solo `image/jpeg`, `image/png` e `image/webp` por *magic bytes* (HEIC no: su cargador está bloqueado en sharp). Además del límite por IP, 12 fotos por hora por cuenta (`429 CUOTA_DE_FOTOS`). Devuelve `objeto_key` temporal, que solo esa cuenta puede asociar a su reporte (§7.2). |
+| `GET /fotos/:key` | público (rate limited) | Sirve una foto ya sanitizada. La de un reporte sin publicar da `404` salvo a técnico y admin; la que aún no tiene reporte se sirve (es la miniatura del formulario). `Cache-Control`: `public, max-age=3600` si el reporte está publicado; si no, `private, no-store`. |
+| `GET /reportes` | público | **Siempre vista pública**, traiga o no cookie de sesión: solo `validado`/`resuelto`, con jitter y sin autor. Query: `bbox`, `estado`, `distrito_id`, `unidad_vecinal_id`, `punto_critico_id`, `severidad`, `desde`, `hasta`, `pagina`, `limite`. Responde `FeatureCollection`. |
+| `GET /reportes/:id` | público | Detalle público; `404` si aún no está publicado, también para técnicos. |
+| `GET /tecnico/reportes`, `GET /tecnico/reportes/:id` | técnico, admin | Vista técnica: todos los estados, coordenada exacta y propiedades de moderación; mismos filtros que `GET /reportes`. `Cache-Control: private, no-store`. |
 | `PATCH /reportes/:id/estado` | técnico, admin | `{ estado, estado_motivo?, fusionado_en_id? }` según §7.3. |
 | `PATCH /reportes/:id/severidad` | técnico, admin | `{ severidad_manual, severidad_motivo }` o `null` para volver a la calculada. |
-| `POST /reportes/:id/fusionar` | técnico, admin | Atajo: marca `:id` como `duplicado` de `{ canonico_id }`. |
-| `GET /exportar` | técnico, admin | `formato=csv|geojson` + mismos filtros de `GET /reportes`. |
-| `GET /indicadores` | técnico, admin | Conteos por UV, distrito, estado, severidad; puntos críticos con `n_reportes ≥ 2`. |
-| `GET /ejecutivo/resumen` | ejecutivo, tecnico, admin | Totales, por severidad, por estado y por distrito (query `ventana=7d\|30d\|todo`) para el panel ejecutivo |
-| `POST /auth/login`, `POST /auth/logout`, `GET /auth/yo` | — / autenticado | Sesión para técnico, admin y ejecutivo. |
-| `GET /admin/capas`, `POST /admin/capas/:id/activar` | admin | Lista versiones cargadas; activa una. |
-| `GET /health`, `GET /ready` | público | Liveness / readiness (DB, MinIO, geo-service). |
+| `POST /reportes/:id/fusionar` | técnico, admin | Atajo: marca `:id` como `duplicado` de `{ canonico_id }` (reglas de fusión en §7.3). |
+| `GET /exportar` | técnico, admin | `formato=csv\|geojson` + mismos filtros de `GET /reportes`, en la vista técnica. Hasta `EXPORTAR_MAX_FILAS` (50 000) filas; si la selección tiene más, no recorta en silencio: el GeoJSON trae `total`, `exportados` y `truncado`, el CSV lo dice en su encabezado y la respuesta lleva `X-Curichi-Truncado: 1`. |
+| `GET /indicadores` | técnico, admin | `total` y conteos por UV, distrito y severidad sin rechazados ni duplicados; `por_estado` con todos los estados; puntos críticos con `n_reportes ≥ 2`. Caché de 30 s que se invalida al moderar. |
+| `GET /ejecutivo/resumen` | ejecutivo, tecnico, admin | Query `ventana=7d\|30d\|todo`. `activas` (inundación activa = `nuevo` + `validado`: `total`, `verificadas`, `en_revision` y `por_severidad` con la severidad efectiva), `resueltas`, `por_estado` y `por_distrito` (cada distrito con sus `activas`, `por_estado` y `en_capa_vigente`); `ultimo_reporte_en` truncado al minuto. Forma exacta en `packages/contracts/CHANGELOG.md` (0.6.0). |
+| `GET /configuracion` | público | Ciudad de la instalación: `{ ciudad: { nombre, pais, zona_horaria, locale, centro: { lon, lat }, zoom_inicial } }`, que las apps leen en tiempo de ejecución (§8.2). `Cache-Control: public, max-age=300`. |
+| `POST /auth/registro` | público (rate limited) | Alta de cuenta ciudadana: el rol siempre es `ciudadano`. Responde igual (`201 CUENTA_LISTA`) exista o no el correo y no inicia sesión; `429 DEMASIADAS_CUENTAS` por IP. |
+| `POST /auth/login`, `POST /auth/logout`, `GET /auth/yo` | — / autenticado | Sesión para todos los roles; el login rota la sesión. `/auth/yo` devuelve además `puede_reportar_desde` y, solo a técnico, admin y ejecutivo, `panel_url` (URL del panel, o `null` si el despliegue no la configuró). |
+| `GET /admin/capas` | técnico, admin | Lista versiones cargadas. |
+| `POST /admin/capas/:id/activar` | admin | Activa una versión, con auditoría, e invalida la caché de capas de `geo-service`. |
+| `GET /health`, `GET /ready` | público | Liveness / readiness. `/ready` comprueba la base, `geo-service` (su `/health`) y el almacén de fotos (solo con S3: en disco no comprueba que se pueda escribir). Responde `503` solo si falla la base; con `geo-service` o las fotos caídos, `200` con `degradado: true`. |
 | `GET /docs` | público en local | OpenAPI UI. |
 
 ### 7.6 Endpoints de `geo-service` — Parte 4 (prefijo `/geo/v1`)
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /resolver` | `{ lat, lon }` → §7.4. Interno (red Docker) y también público para que el formulario muestre la UV antes de enviar. |
-| `GET /capas/distritos` | GeoJSON `web` de la versión vigente, o `302` al `.pmtiles`. Cache-Control largo con ETag por `version_capa`. |
-| `GET /capas/unidades-vecinales` | Ídem. |
-| `GET /capas/vigentes` | `{ distrito_municipal: "2026-09", unidad_vecinal: "2026-09" }`. |
-| `GET /agregados/unidades-vecinales` | Conteo de reportes validados por UV (para coropletas en la Parte 2). |
-| `GET /puntos-criticos?bbox=` | Puntos críticos §9.2. |
-| `GET /health`, `GET /ready` | |
+| `POST /resolver` | `{ lat, lon }` → §7.4 (distrito, UV y manzana). Lo llama `api-core` al crear un reporte y también es público, para que el formulario muestre la UV antes de enviar. La previsualización pública tiene cupo por IP (`GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO`); las llamadas de `api-core` llevan la cabecera interna `x-token-interno` (`GEO_TOKEN_INTERNO`) y quedan fuera del rate limit. |
+| `GET /capas` | Información de las capas vigentes: si cada una se sirve como GeoJSON o por teselas. |
+| `GET /capas/vigentes` | Versión vigente por capa: `{ distrito_municipal, unidad_vecinal, manzana }`. |
+| `GET /capas/{capa}` | `capa` = `distrito_municipal` \| `unidad_vecinal` \| `manzana`. GeoJSON web de la versión vigente, con `ETag` por versión (`304` si no cambió). `413 USAR_TESELAS` si supera `UMBRAL_TESELAS_BYTES`. |
+| `GET /teselas/{capa}/{z}/{x}/{y}.mvt` | Teselas vectoriales generadas al vuelo desde la capa vigente (`geojson-vt` + `vt-pbf`), con `ETag` y `304`; `204` si la tesela está vacía. |
+| `GET /agregados/unidades-vecinales` | Reportes publicados (validados y resueltos) por UV, con puntos críticos y severidad máxima, para las coropletas. Caché de 30 s (`GEO_CACHE_AGREGADOS_MS`). |
+| `GET /puntos-criticos?bbox=` | Puntos críticos §9.2, con el centroide público (`geom_publico`); como mucho 5000 por respuesta. |
+| `POST /capas/invalidar` | **Interna**: la llama `api-core` al activar una versión de capa. Exige `x-token-interno` (`403` sin él), no figura en el OpenAPI y el proxy de entrada la corta con `404`. |
+| `GET /health`, `GET /ready`, `GET /metrics` | `/metrics` con token (`METRICAS_TOKEN`, obligatorio en producción). |
 
 ### 7.7 Dónde vive cada contrato
 
@@ -606,7 +619,7 @@ Respuesta:
 - `packages/contracts/src/dominio/severidad.ts` — tabla de puntos, pesos, bandas y reglas de escalamiento (§9.1).
 - `packages/contracts/src/esquemas/reporte.ts`, `geo.ts`, `auth.ts`, `admin.ts` — Zod.
 - `packages/contracts/openapi/openapi.yaml` — generado desde Zod (`pnpm --filter contracts build`), no editado a mano.
-- `packages/contracts/dist/dominio.json` — export para Python (ETL).
+- `packages/contracts/dist/dominio.json` — export en JSON de enums y configuración de dominio, para consumidores en otros lenguajes (el ETL, en TypeScript desde el ADR 0002, importa `contracts` directamente).
 
 ---
 
@@ -621,7 +634,7 @@ Fuentes: registro npm (`npm view <pkg> version`), `nodejs.org/dist/index.json`, 
 | Node.js | **24.x LTS** (24.21.0 "Krypton") | Node 26 es *Current* (26.8.2), no LTS todavía → **no usar**. Fijar en `.nvmrc` y `engines`. |
 | pnpm | 12.4.x | Gestor del monorepo. |
 | Turborepo | 2.10.x | Orquestación de tareas y caché. |
-| TypeScript | 7.0.x | `strict: true`. Si alguna herramienta del monorepo aún no soporta TS 7, fijar **5.9.x** `<a confirmar al instalar>`. |
+| TypeScript | 5.9.x (instalada 5.9.3) | `strict: true`. La primera opción era 7.0.x; al instalar se fijó la alternativa prevista, **5.9.x**, en todos los paquetes (TS 7 solo llega como dependencia interna de commitlint). |
 | Next.js | 16.3.x (App Router) | Partes 1 y 2. |
 | React | 19.3.x | |
 | Tailwind CSS | 4.3.x | |
@@ -630,23 +643,23 @@ Fuentes: registro npm (`npm view <pkg> version`), `nodejs.org/dist/index.json`, 
 | Zod | 4.6.x | Validación compartida en `contracts`. |
 | React Hook Form | 7.88.x | Formulario de reporte. |
 | MapLibre GL JS | 6.9.x | Mapa. Sin servicios propietarios de pago. |
-| pmtiles (JS) | 4.5.x | Protocolo `pmtiles://` para MapLibre. |
+| pmtiles (JS) | 4.5.x (no instalado) | No se usa en Fase 1: `geo-service` genera las teselas al vuelo con `geojson-vt` + `vt-pbf` y el mapa las pide por URL `{z}/{x}/{y}` (ADR 0002). Se instala si se adoptan PMTiles (§6.7). |
 | deck.gl | — | **No** en Misión 1. Solo si los puntos superan ~50 000 en pantalla `<umbral a confirmar>`; se decidirá con ADR. |
 | Fastify | 5.12.x | `api-core` y `geo-service`. |
 | Drizzle ORM | 0.45.x | Prisma está en **8.0.0-rc** (no estable) → descartado por ahora. Geometría vía SQL crudo tipado con la plantilla `sql` de Drizzle (p. ej. `ST_Contains`). |
 | PostgreSQL + PostGIS | imagen `postgis/postgis:18-3.6` (PG 18, PostGIS 3.6) | PG 19 está en beta → no usar. |
-| MinIO | imagen oficial `<tag a confirmar>` | Almacenamiento S3-compatible de fotos en local. |
+| MinIO | `ghcr.io/coollabsio/minio:RELEASE.2025-10-15T17-29-55Z`, fijada por digest | Solo desarrollo (perfil `minio`): almacenamiento S3-compatible de fotos en local. MinIO archivó su edición comunitaria en abril de 2026 y ya no publica imágenes (`minio/minio` salió de Docker Hub y `quay.io/minio/minio` rechaza las descargas anónimas); esta es la misma versión compilada desde el código oficial. En producción, un S3 gestionado. |
 | sharp | 0.35.x | Redimensionado y **eliminación de EXIF** en `api-core`. |
-| Vitest | 5.0.x (recién publicada) | Si los plugins de Next/React no la soportan al instalar, usar **4.x** `<a confirmar>`. |
+| Vitest | 4.1.x (instalada 4.1.11) | La primera opción era 5.0.x; al instalar se fijó la alternativa prevista, **4.x**, en todos los paquetes que la usan. |
 | Playwright | 1.63.x | E2E de mapa y formulario. |
 | Biome | 2.5.x | Lint + formato en un solo binario (elegido sobre ESLint + Prettier). Reglas a11y incluidas. |
-| Husky + lint-staged + commitlint | vigentes `<versiones a confirmar>` | Conventional Commits. |
+| Husky + lint-staged + commitlint | 9.1.x / 17.5.x / 21.2.x (instaladas 9.1.7, 17.5.1 y 21.2.2) | Conventional Commits. |
 | GDAL | 3.13.x | `ogrinfo`, `ogr2ogr`. |
 | mapshaper | 0.7.x | Simplificación con topología. |
 | tippecanoe (felt) | 2.79.x | PMTiles. |
-| Python | 3.12+ `<a confirmar>` | Solo para el ETL. Gestionado con `uv` `<versión a confirmar>`. |
-| GeoPandas / Shapely / pyogrio | 1.1.x / 2.1.x / 0.13.x | Validación topológica y reporte de calidad. |
-| pytest | vigente `<a confirmar>` | Tests del ETL. |
+| Python | 3.12+ | No se usa en Fase 1: el ETL está en TypeScript (ADR 0002). Referencia del diseño original de §6. |
+| GeoPandas / Shapely / pyogrio | 1.1.x / 2.1.x / 0.13.x | Referencia de §6.4; en Fase 1 la validación topológica y el reporte de calidad usan `@turf/turf` (ADR 0002). |
+| pytest | — | No se usa: las pruebas del ETL son de Vitest (ADR 0002). |
 
 ### 8.2 Justificación de cada elección
 
@@ -655,19 +668,21 @@ Fuentes: registro npm (`npm view <pkg> version`), `nodejs.org/dist/index.json`, 
 - **Next.js App Router para las Partes 1 y 2.** Un solo framework para ambos frontends, PWA soportada, renderizado en servidor para la página pública (SEO y primera carga en móvil), y ecosistema shadcn/ui + Tailwind para construir rápido con accesibilidad razonable de base.
 - **MapLibre GL JS.** Open source, sin token ni cuota, render vectorial por GPU, clustering nativo, y soporte de PMTiles. Los mapas base se sirven con atribución correcta (ver §14). No se depende de Mapbox ni Google Maps.
 - **Fastify para `api-core`.** Ligero, rápido, con validación por esquema JSON integrada (se enchufan los esquemas Zod de `contracts`) y generación de OpenAPI. NestJS se descartó por añadir capas de abstracción que no aportan en dos servicios pequeños.
-- **`geo-service` en Node + PostGIS (no Python).** Decisión propuesta `<a confirmar en §16>`. Razones: (1) el trabajo pesado (PIP, bbox, agregaciones) lo hace PostGIS con GIST, no el lenguaje del servicio; (2) comparte `contracts` en TypeScript sin traducción; (3) una sola toolchain en runtime simplifica Docker y CI; (4) FastAPI + GeoPandas brillaría si hubiera que hacer geometría en memoria por petición, y aquí no hay que hacerlo. Python queda donde sí aporta: el ETL.
-- **ETL en Python (GeoPandas/Shapely/pyogrio) + CLI de GDAL/mapshaper/tippecanoe.** GeoPandas ofrece `make_valid`, `sjoin`, `overlaps`, `unary_union` y `explain_validity` listos para el reporte de calidad; pyogrio lee shapefiles rápido y respeta encoding. Corre offline, no en el camino de una petición, así que el segundo lenguaje no afecta la latencia ni el despliegue de los servicios.
+- **`geo-service` en Node + PostGIS (no Python).** Decisión propuesta `<a confirmar en §16>`. Razones: (1) el trabajo pesado (PIP, bbox, agregaciones) lo hace PostGIS con GIST, no el lenguaje del servicio; (2) comparte `contracts` en TypeScript sin traducción; (3) una sola toolchain en runtime simplifica Docker y CI; (4) FastAPI + GeoPandas brillaría si hubiera que hacer geometría en memoria por petición, y aquí no hay que hacerlo. Con el ADR 0002 también el ETL pasó a TypeScript, así que Python no se usa en Fase 1.
+- **ETL en TypeScript con mapshaper (ADR 0002).** El diseño original era Python (GeoPandas/Shapely/pyogrio) + CLI de GDAL/mapshaper/tippecanoe, pero la máquina de desarrollo no tiene GDAL, Python ni tippecanoe. mapshaper lee los shapefiles con su `.prj`, reproyecta, limpia topología y simplifica preservando bordes compartidos; `@turf/turf` arma el reporte de calidad; las pruebas son de Vitest. Corre offline, no en el camino de una petición. Los comandos de GDAL/tippecanoe de §6 quedan como referencia equivalente.
 - **PostgreSQL + PostGIS.** Estándar de facto para datos espaciales: índices GIST, `ST_Contains`, `ST_ClusterDBSCAN`, `geography` para distancias en metros, y un solo motor para reportes y capas.
 - **Drizzle ORM.** Migraciones versionadas en SQL legible, tipos inferidos del esquema y `sql` crudo tipado para PostGIS. Esquema y migraciones centralizados en `packages/db` (Parte 4), consumidos por `api-core` y `geo-service`. Prisma está en RC (8.0.0-rc.14) al momento de esta verificación.
-- **Docker Compose.** `postgis`, `minio`, `api-core`, `geo-service` y (opcional) los frontends. `pnpm dev` + `docker compose up -d` levantan todo.
-- **Modo local sin Docker (ADR 0002).** Como la máquina de desarrollo no tiene Docker, la Fase 1 corre PostGIS **dentro de Node** con PGlite (Postgres compilado a WASM) + la extensión oficial `@electric-sql/pglite-postgis` (experimental), expuesto por protocolo de PostgreSQL con `@electric-sql/pglite-socket` en el puerto 5433 con multiplexado de conexiones. `api-core` y `geo-service` se conectan con el driver `pg` y la misma `DATABASE_URL` que usarían contra Docker; el SQL (ST_Contains, GIST, ST_ClusterDBSCAN) es el mismo. Las fotos se guardan en disco (`infra/.storage/`) mediante un adaptador con interfaz S3-compatible; MinIO se usa cuando exista Docker. `pnpm db:local` levanta esa base y aplica migraciones pendientes.
+- **Docker Compose.** Sin perfiles levanta solo `postgis`; el perfil `servicios` suma el job de migraciones, `api-core`, `geo-service`, las dos apps y el proxy HTTPS (Caddy), y los perfiles `minio`, `respaldos` y `observabilidad` completan la pila (§11). En desarrollo, `docker compose up -d postgis` + `pnpm dev` levantan todo.
+- **Base local en Docker (ADR 0005).** Desde el 2026-09-26 la máquina de desarrollo tiene Docker Desktop y la base local es el contenedor `postgis` (`postgis/postgis:18-3.6`, la misma versión que producción), levantado con `docker compose up -d postgis`. Cada servicio usa también en local su rol de mínimo privilegio: `api-core` con `API_DATABASE_URL` (`curichi_api`) y `geo-service` con `GEO_DATABASE_URL` (`curichi_geo`), leídas del `.env` raíz al arrancar con `pnpm dev`; migraciones, ETL y seeds van con el rol dueño (`DATABASE_URL`). Así se prueban en local las migraciones desde cero, los privilegios (`pnpm privilegios`), los bloqueos y la concurrencia. Las fotos van a disco (`infra/.storage/`) mediante un adaptador con interfaz S3-compatible, o a S3 con `S3_ENDPOINT` (MinIO del perfil `minio` en local, un S3 gestionado en producción).
+- **PGlite como alternativa sin Docker (ADR 0002 y 0003).** PostGIS **dentro de Node** con PGlite (Postgres compilado a WASM) + la extensión oficial `@electric-sql/pglite-postgis` (experimental), expuesto por protocolo de PostgreSQL con `@electric-sql/pglite-socket` en el puerto 5433 con multiplexado de conexiones; `pnpm db:local` levanta esa base y aplica migraciones pendientes. `api-core` y `geo-service` se conectan igual, con el driver `pg` y una `DATABASE_URL`. Es de una sola conexión, así que no sirve para probar concurrencia, bloqueos ni privilegios; se sigue usando para las bases efímeras de las pruebas.
+- **Configuración de la ciudad en tiempo de ejecución (ADR 0004).** Una instalación por ciudad con la misma imagen: de una ciudad a otra cambian las variables `CIUDAD_NOMBRE`, `CIUDAD_PAIS`, `CIUDAD_LOCALE`, `CIUDAD_CENTRO_LON`, `CIUDAD_CENTRO_LAT`, `CIUDAD_ZOOM_INICIAL`, `ZONA_HORARIA` y `CRS_METRICO_EPSG` (por defecto, Santa Cruz: `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO` en `contracts`), las capas que carga el ETL y las credenciales, dominios y respaldos. `api-core` valida la ciudad al arrancar (un valor inválido impide arrancar) y la publica en `GET /api/v1/configuracion`; las apps la leen en tiempo de ejecución, así que cambiar de ciudad no exige recompilar. `ZONA_HORARIA` define qué día es «hoy» en los filtros por fecha y en la exportación; `CRS_METRICO_EPSG`, la proyección en metros de §9.2.
 - **Fuentes tipográficas** vía `@fontsource` (Sora y Source Sans 3 empaquetadas, sin llamadas a Google Fonts en runtime).
 - **Componentes de UI** hechos a medida siguiendo el UI kit del usuario (§14.4); shadcn/ui no se usa en Fase 1 para no depender de su registro remoto con la red lenta disponible.
-- **Contraseñas** con `scrypt` de Node (sin dependencias nativas); Argon2id queda `<a confirmar>` para Fase 2.
+- **Contraseñas** con Argon2id (parámetros de OWASP: m = 19 MiB, t = 2, p = 1), calculado en hilos de trabajo con `node:crypto` y con `hash-wasm` de respaldo, sin dependencias nativas (ADR 0002). Los hashes `scrypt` anteriores se migran solos a Argon2id en el siguiente inicio de sesión correcto.
 - **Biome.** Un binario para lint y formato, mucho más rápido que ESLint + Prettier, con reglas de accesibilidad. Si en Fase 1 se necesita una regla que Biome no tiene (p. ej. específica de Next), se evalúa añadir ESLint solo para eso, con ADR.
-- **Vitest + Playwright + pytest.** Vitest comparte config con Vite/Next y es rápido; Playwright es el estándar para E2E con soporte de geolocalización simulada (`context.setGeolocation`), esencial para probar el formulario; pytest para el ETL.
+- **Vitest + Playwright.** Vitest comparte config con Vite/Next y es rápido; Playwright es el estándar para E2E con soporte de geolocalización simulada (`context.setGeolocation`), esencial para probar el formulario. El ETL también se prueba con Vitest: está escrito en TypeScript (ADR 0002), así que pytest no se usa.
 - **GitHub Actions.** Lint, typecheck, test y build en cada PR, con caché de Turborepo.
-- **Observabilidad mínima.** Logs JSON (pino en Fastify), `X-Request-Id` propagado de `api-core` a `geo-service`, `/health` y `/ready`, y métricas básicas (latencia por ruta, reportes creados, rechazos por rate limit) expuestas en `/metrics` `<formato a confirmar, propuesto Prometheus>`.
+- **Observabilidad mínima.** Logs JSON (pino en Fastify), `X-Request-Id` propagado de `api-core` a `geo-service`, `/health` y `/ready`, y métricas básicas (latencia por ruta, reportes creados, rechazos por rate limit) expuestas en `/metrics` en formato de texto de Prometheus (con token), que recogen Prometheus y Alertmanager en el perfil `observabilidad` del Compose (§16, punto 12).
 
 ---
 
@@ -730,7 +745,7 @@ Los pesos, cortes y reglas son **parámetros iniciales** propuestos por este doc
 
 - **Objetivo:** que varios reportes del mismo charco se vean como **un punto crítico** con historial, sin perder ningún reporte individual.
 - **Radio:** `RECURRENCIA_RADIO_M = 25` (configurable en `contracts`) `<a confirmar>`. Justificación: cubre el error típico de GPS de celular en calle urbana más el ancho de una calzada; radios mayores empiezan a fusionar esquinas distintas.
-- **Algoritmo:** `ST_ClusterDBSCAN(geom_m, eps := RECURRENCIA_RADIO_M, minpoints := 1) OVER ()` sobre los reportes en estado `validado` o `resuelto`, con `geom_m` = `ST_Transform(geom, 32720)` `<EPSG métrico a confirmar>` para que `eps` esté en metros. Se eligió DBSCAN porque es determinista, no requiere fijar el número de grupos y agrupa por cercanía transitiva.
+- **Algoritmo:** `ST_ClusterDBSCAN(geom_m, eps := RECURRENCIA_RADIO_M, minpoints := 1) OVER ()` sobre los reportes en estado `validado` o `resuelto`, con `geom_m` = `ST_Transform(geom, CRS_METRICO_EPSG)` para que `eps` esté en metros. `CRS_METRICO_EPSG` es el CRS métrico de la ciudad, configurable por instalación (§8.2); el valor por defecto es el de Santa Cruz, 32720 (WGS 84 / UTM 20S). El recálculo incremental de la vecindad mide en la misma proyección (`ST_DWithin` sobre `ST_Transform(geom, CRS_METRICO_EPSG)`), así que el completo y el incremental miden la misma distancia. Se eligió DBSCAN porque es determinista, no requiere fijar el número de grupos y agrupa por cercanía transitiva.
 - **Salida:** tabla `punto_critico` (§7.2) con centroide, `n_reportes`, primer y último reporte, `severidad_max` (de `severidad_efectiva`), distrito y UV (resueltos por PIP del centroide). Cada reporte guarda `punto_critico_id`.
 - **Cuándo se recalcula:** en cada transición a `validado`/`resuelto`/`duplicado` (para la vecindad del reporte) y con un job completo bajo demanda (`pnpm --filter db puntos-criticos:recalcular`). La consulta DBSCAN y el script viven en `packages/db` (Parte 4); `api-core` (Parte 3) dispara el recálculo en cada transición; `geo-service` (Parte 4) expone el resultado.
 - **Limitación conocida:** DBSCAN encadena; una fila de reportes a lo largo de una calle puede unirse en un solo grupo alargado. Se reporta como advertencia cuando el diámetro del grupo supera `4 × radio`; el técnico decide si fusiona o separa manualmente `<a confirmar>`.
@@ -818,24 +833,36 @@ Los nombres de estos comandos **son el contrato**; se implementan en la primera 
 | Comando | Qué hace |
 |---|---|
 | `pnpm install` | Instala todo el monorepo (Node 24 LTS, ver `.nvmrc`). |
-| `docker compose up -d` | Levanta `postgis`, `minio`, `geo-service`, `api-core`. |
-| `pnpm dev` | Turborepo: todos los `dev` en paralelo (frontends y servicios). |
-| `pnpm db:local` | Levanta PostGIS local sin Docker (PGlite + pglite-socket en `localhost:5433`) y aplica migraciones pendientes. `pnpm dev` lo incluye. |
+| `docker compose up -d` | Sin perfiles levanta solo `postgis` (PostgreSQL 18 + PostGIS 3.6 en `127.0.0.1:5432`), la base local de desarrollo (ADR 0005). Perfiles: `servicios` (job `migraciones`, `api-core`, `geo-service`, `web-ciudadano`, `panel-admin` y el proxy HTTPS Caddy, lo único que publica puertos hacia fuera), `minio` (S3 local para las fotos), `respaldos` (respaldo diario cifrado a un S3 externo) y `observabilidad` (Prometheus, Alertmanager y blackbox). La pila local entera: `docker compose --profile servicios --profile minio up -d --build`. |
+| `pnpm dev` | Turborepo: todos los `dev` en paralelo (api-core 3001, geo-service 3002, web-ciudadano 3000, panel-admin 3100). **No** levanta la base: antes, `docker compose up -d postgis` (o `pnpm db:local` en otra terminal). |
+| `pnpm db:local` | Alternativa sin Docker: PostGIS dentro de Node (PGlite + pglite-socket en `localhost:5433`); aplica migraciones pendientes al arrancar. `pnpm dev` **no** lo incluye: se deja corriendo en otra terminal. |
 | `pnpm db:generate` | Crea un archivo de migración SQL nuevo con marca de tiempo en `packages/db/migraciones/` (Parte 4). |
 | `pnpm db:migrate` | Aplica las migraciones de `packages/db` (Parte 4): extensiones PostGIS, esquemas `public` y `geo`, índices GIST, vistas vigentes. |
+| `node dist/cli/migrar.js [--hasta NNNN]` | Migrar en producción, sin tsx y con el rol dueño (`DATABASE_URL`): en `packages/db` compilado (`pnpm --filter db migrate:prod`) o, en la imagen de `api-core`, `node node_modules/db/dist/cli/migrar.js`, que es lo que corre el job `migraciones` del perfil `servicios` (`docker compose --profile servicios run --rm migraciones`). `--hasta NNNN` aplica solo hasta esa migración, inclusive (p. ej. al restaurar un respaldo anterior). |
 | `pnpm db:seed:samples` | Carga reportes **sintéticos** y capas de `data/samples/` (script de `packages/db`). |
-| `pnpm etl:inspect --capa unidad_vecinal --version 2026-09` | Inspección previa (§6.2). |
-| `pnpm etl:run --capa unidad_vecinal --version 2026-09` | Reproyección, validación, normalización, simplificación, tiles, reporte (§6.3–6.8). |
-| `pnpm etl:load --capa unidad_vecinal --version 2026-09` | Carga a PostGIS (§6.9). |
+| `pnpm etl:inspect -- --version DM_UV_MZ_2025 [--capa unidad_vecinal]` | Inspección previa (§6.2). |
+| `pnpm etl:run -- --version DM_UV_MZ_2025` | Reproyección, validación, normalización, simplificación y reporte de calidad de todas las capas de la versión (§6.3–6.8). |
+| `pnpm etl:load -- --version DM_UV_MZ_2025 [--capa unidad_vecinal]` | Carga a PostGIS, en una sola transacción por versión (§6.9). |
 | `pnpm etl:all` | `run` + `load` para todas las capas/versiones declaradas en `pipelines/geodata-etl/config/capas.yaml`. **Un solo comando regenera todo.** |
-| `pnpm etl:test` | pytest del ETL. |
+| `pnpm etl:test` | Pruebas del ETL con Vitest (ADR 0002). |
 | `pnpm lint` / `pnpm typecheck` / `pnpm test` | En todo el monorepo vía Turborepo. |
 | `pnpm test:e2e` | Playwright transversal de `e2e/` (Parte 5) más los E2E propios de cada app (requiere `docker compose up` y `pnpm dev`). |
 | `pnpm build` | Build de todos los paquetes. |
 | `pnpm --filter <paquete> <script>` | Cualquier script de un paquete concreto. |
 | `pnpm contracts:build` | Regenera OpenAPI y `dominio.json` desde Zod. |
 
-Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13 (`brew install gdal`), tippecanoe (`brew install tippecanoe`), Python 3.12+ y `uv` `<a confirmar>`. mapshaper se instala vía npm en el workspace.
+Arranque local con Docker (ADR 0005; detalle en el `README.md`):
+
+```bash
+docker compose up -d postgis                                # PostgreSQL 18 + PostGIS 3.6 en 127.0.0.1:5432
+export DATABASE_URL="$(sed -n 's/^DATABASE_URL=//p' .env)"  # rol dueño: los comandos de pnpm no leen .env
+pnpm db:migrate                                             # esquema
+pnpm etl:load -- --version DM_UV_MZ_2025                    # capas del municipio (si no está la entrega, se salta)
+pnpm db:seed:samples                                        # cuentas de desarrollo y reportes sintéticos
+pnpm dev                                                    # api-core 3001, geo-service 3002, apps 3000 y 3100
+```
+
+Requisitos del sistema en local: Docker Desktop (sin él, la alternativa es `pnpm db:local`), Node 24 LTS (`.nvmrc`), pnpm 12. GDAL, tippecanoe, Python y `uv` **no** hacen falta: el ETL está escrito en TypeScript (ADR 0002). mapshaper se instala vía npm en el workspace.
 
 ---
 
@@ -880,18 +907,19 @@ Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13
 
 | Tema | Regla |
 |---|---|
-| **Ubicación como dato sensible** | Reporte **anónimo permitido** (`autor_id` null). La identidad del reportante **nunca** aparece en el mapa público ni en exportaciones públicas. |
+| **Ubicación como dato sensible** | Reportar exige **cuenta** (decisión del 2026-09-26): el autor sale de la sesión, nunca del cuerpo de la petición, y queda rastro ante abuso. La identidad del reportante **nunca** aparece en el mapa público ni en exportaciones públicas. |
 | **Jitter público** | Si `ubicacion_tipo = vivienda_o_predio`, la vista pública aplica un desplazamiento **determinista** (semilla = `id`) de hasta `JITTER_PUBLICO_M = 30` `<a confirmar>`. El técnico ve la coordenada exacta. Además, la vista pública redondea coordenadas a 5 decimales. |
 | **EXIF** | `api-core` reprocesa cada imagen con sharp (re-encode sin metadatos) **antes** de guardarla en MinIO. `exif_sanitizado = true` es condición para servir la foto. Test obligatorio que sube una foto con GPS y verifica que el objeto guardado no lo tiene. |
-| **Rate limiting** | `POST /reportes` y `POST /fotos`: límite por IP (propuesto 10/h `<a confirmar>`) y por sesión; respuesta `429` con `Retry-After`. Honeypot en el formulario. `ip_hash` con sal rotativa, borrado a los N días. |
-| **Moderación previa** | Nada se publica en estado `nuevo`. |
+| **Rate limiting** | `POST /reportes` y `POST /fotos`: límite por IP (propuesto 10 reportes/h `<a confirmar>`; el triple para fotos) y cuota por cuenta: un reporte cada 60 min (`CUOTA_DE_REPORTES`) y 12 fotos por hora (`CUOTA_DE_FOTOS`); respuesta `429` con `Retry-After`. El límite por IP es por proceso; la cuota por cuenta vive en la base y vale igual con varias réplicas. Honeypot en el formulario. `ip_hash` con sal rotativa, borrado a los N días. |
+| **Moderación previa** | Nada se publica en estado `nuevo`. La foto de un reporte sin publicar solo la ven técnico y admin, y toda foto no publicada (sin reporte todavía, o de un reporte sin publicar) se sirve con `Cache-Control: private, no-store`: a cachés compartidas solo van las de reportes publicados. |
 | **Secretos** | Nunca en el repo. `.env.example` con nombres y descripción, sin valores. `.env` en `.gitignore`. En CI, GitHub Secrets. Escaneo de secretos en pre-commit `<herramienta a confirmar>`. |
 | **Validación en servidor** | Todos los payloads pasan por los esquemas Zod de `contracts` en `api-core`. La validación del cliente es solo UX. |
 | **Archivos** | Tipos permitidos por *magic bytes*, no por extensión; tamaño máximo; redimensionado a un ancho máximo `<propuesto 1600 px, a confirmar>`; nombres de objeto generados por el servidor (uuid), nunca el nombre original. |
 | **Autorización** | Por rol en cada handler; los endpoints de moderación y export exigen `tecnico` o `admin`; el rol `ejecutivo` solo accede a `/ejecutivo/resumen` (y a crear reportes); recibe 403 en moderación, exportación, indicadores y admin. `geo-service` no expone escritura. |
 | **Auditoría** | Toda transición de estado, reclasificación, fusión y activación de capa queda en `auditoria` con actor y antes/después. |
 | **Cabeceras** | CSP, HSTS (Fase 2), `X-Content-Type-Options`, CORS restringido a los orígenes de las Partes 1 y 2. |
-| **Datos personales** | Se recoge lo mínimo: para anónimos, nada identificable salvo `ip_hash` temporal. Para técnicos, email y nombre. Política de retención `<a confirmar con el municipio>`. |
+| **IP del cliente detrás del proxy** | Topología de producción: proxy HTTPS → app Next → servicio. El proxy (Caddy) **reemplaza** el `X-Forwarded-For` que mande el cliente por la IP real (y descarta `X-Real-IP`, `Forwarded` y similares) y quita de las respuestas `x-middleware-rewrite`, que publicaría la URL interna de los servicios. Next no agrega `X-Forwarded-For`, así que `api-core` y `geo-service` van con `TRUST_PROXY=1`: con `2` el cliente elige su IP y se salta el rate limit, el freno del login y el antispam; `true` y `*` no se aceptan. Comprobación: `docs/operaciones/produccion.md`, «La IP del cliente». |
+| **Datos personales** | Se recoge lo mínimo: de cada cuenta (vecino, técnico, admin o ejecutivo), email, nombre y el hash de la contraseña; para el antispam, `ip_hash` temporal. Política de retención `<a confirmar con el municipio>`. |
 | **Backups** | Fase 2. En Fase 1, volumen Docker + `pg_dump` manual documentado. |
 
 ---
@@ -951,10 +979,14 @@ Requisitos del sistema en local: Docker Desktop, Node 24 LTS, pnpm 12, GDAL 3.13
 | Media | Capas adicionales: red de drenaje, sumideros, canales, curvas de nivel | Si el municipio las provee; nuevo tipo de capa en el ETL. |
 | Media | Notificaciones al reportante sobre cambio de estado | Requiere contacto opcional y consentimiento. |
 | Media | Órdenes de trabajo y seguimiento de intervención | Integración con sistemas municipales `<a confirmar>`. |
+| Media | Rate limit compartido entre réplicas | Hoy el límite por IP se cuenta por proceso: con N réplicas se multiplica por N. Almacén compartido o límite en el proxy de entrada. La cuota por cuenta ya vive en la base. |
+| Media | CSP con nonce | En lugar de `'unsafe-inline'` en las dos apps; posible ahora que todas las páginas son dinámicas. |
 | Baja | App móvil nativa | La PWA cubre el MVP. |
 | Baja | Modelo de priorización de inversión | Requiere estudio técnico; el sistema solo aporta insumos. |
 | Baja | Modelación hidráulica (método racional, IDF, SWMM u otro) | Fuera del propósito del sistema; posible exportación de insumos. |
-| Baja | Multi-municipio | Requiere multi-tenant en capas y usuarios. |
+| Baja | Multi-municipio: plataforma multi-ciudad compartida | Hoy, una instalación por ciudad (ADR 0004). Una base compartida exige municipio en cada tabla, ids de capa que no choquen entre ciudades, versión vigente por municipio y membresía usuario ↔ municipio detrás de `requerirRol`. |
+| Baja | Invalidación de cachés entre réplicas | `LISTEN/NOTIFY` de PostgreSQL. Hoy moderar o activar una capa invalida solo la caché del proceso que atiende la petición; las demás réplicas esperan su TTL (30 s en indicadores y resumen ejecutivo). |
+| Baja | Número de emergencias por país en la configuración de la ciudad | Hoy la app pública tiene el 911 escrito en el código. |
 | Baja | deck.gl para volúmenes grandes de puntos | Solo con ADR y medición. |
 
 ---
@@ -966,15 +998,16 @@ Cada ítem se cierra con una respuesta del usuario y se actualiza en este archiv
 | # | Punto | Supuesto provisional adoptado | Decisión necesaria |
 |---|---|---|---|
 | 1 | Ciudad, país y fuente oficial de las capas | Santa Cruz de la Sierra, Bolivia; capas del Gobierno Autónomo Municipal `<a confirmar>` | Confirmar ciudad y quién entrega los shapefiles (oficina, fecha, licencia de uso). |
-| 2 | Existencia y CRS de los shapefiles | Carpeta `DM_UV_MZ_2025` anunciada por el usuario, aún no entregada. El ETL se desarrolla con muestra sintética hasta tenerla. | Copiarla a `data/raw/DM_UV_MZ_2025/` con `MANIFEST.md`. ¿Traen `.prj`? ¿CRS? (probable EPSG:32720 o EPSG:24880). |
-| 3 | Nombres de campos originales de las capas | `<a confirmar>`; el mapeo vive en `config/<capa>.yaml`. | Ver el `.dbf` real. |
-| 4 | Autenticación en el MVP | Reporte ciudadano **anónimo** sin cuenta; login solo para técnico/admin con email + contraseña (Argon2id) gestionado por `api-core`. | Confirmar; alternativa: proveedor externo de identidad en Fase 2. |
-| 5 | Lenguaje de `geo-service` (Parte 4) | **Node + Fastify + PostGIS** (§8.2). ETL en Python (Parte 5). | Confirmar o pedir Python/FastAPI. |
-| 6 | Hosting en Fase 2 | Ninguno asumido. | ¿Servidor municipal on-premise, nube, presupuesto, dominio institucional? |
+| 2 | Existencia y CRS de los shapefiles | **Cerrado:** la carpeta `DM_UV_MZ_2025` se recibió el 2026-09-13 y está en `data/raw/DM_UV_MZ_2025/` con su `MANIFEST.md`. Las tres capas traen `.prj` (WGS 84 / UTM 20S = EPSG:32720) y `.cpg` (UTF-8); el ETL las procesa y las carga: 16 distritos, 576 unidades vecinales y 27 527 manzanas. | Ninguna. Siguen abiertas la fuente oficial, la vigencia y la licencia de uso (punto 1). |
+| 3 | Nombres de campos originales de las capas | Cerrado para `DM_UV_MZ_2025`: el mapeo real está en `pipelines/geodata-etl/config/capas.yaml` (§6.5). | Confirmar con el municipio el código de manzana (hoy `OBJECTID`, repetido en miles de filas; TRASPASO §3.7). |
+| 4 | Autenticación en el MVP | **Cerrado el 2026-09-26 (decisión del usuario):** reportar exige cuenta ciudadana (alta en `POST /auth/registro`, rol siempre `ciudadano`); ver el mapa no. Email + contraseña (Argon2id) gestionados por `api-core` para todos los roles. Se mantiene por el autor, la cuota por cuenta y el rastro ante abuso. | Ninguna. Un proveedor externo de identidad queda como alternativa para Fase 2. |
+| 5 | Lenguaje de `geo-service` (Parte 4) | **Node + Fastify + PostGIS** (§8.2). El ETL (Parte 5) está en TypeScript con Vitest (ADR 0002); los comandos de GDAL de §6 quedan como referencia. | Confirmar o pedir Python/FastAPI. |
+| 6 | Hosting en Fase 2 | Unidad de despliegue decidida el 2026-09-26 (ADR 0004): una instalación por ciudad, en una máquina con el `docker-compose.yml` del repositorio y las imágenes del CI (`docs/operaciones/produccion.md`). Proveedor: ninguno elegido. | ¿Servidor municipal on-premise o nube, presupuesto, dominio institucional? |
 | 7 | Parámetros de dominio | Severidad (§9.1), radio 25 m, jitter 30 m, tolerancia de hueco 20 m, rate limit 10/h, foto 8 MB × 3 | Validar con técnico municipal en Fase 1. |
 | 8 | Git y remoto | Repo local sin remoto hasta indicación. | ¿Inicializar git ahora? ¿Crear remoto en GitHub (org/usuario)? |
 | 9 | README y estructura vacía | No creados en Fase 0 (solo `CLAUDE.md`). | Autorizar su creación como primera tarea de la Parte 5 en Fase 1. |
-| 10 | Versiones marcadas `<a confirmar>` en §8.1 | Rango de minor fijado; patch se congela al instalar. | Ninguna; se resuelven al ejecutar `pnpm install` en Fase 1 y se anotan aquí. |
+| 10 | Versiones marcadas `<a confirmar>` en §8.1 | Rango de minor fijado; el patch exacto queda en `pnpm-lock.yaml`. Resueltas al instalar (anotadas en §8.1 el 2026-09-26): TypeScript 5.9.3 y Vitest 4.1.11 (las alternativas previstas), Husky 9.1.7, lint-staged 17.5.1, commitlint 21.2.2 y la imagen de MinIO; Python y pytest no se usan (ADR 0002). | Ninguna. |
 | 11 | Retención de `ip_hash` y de datos personales | 30 días para `ip_hash`. | Confirmar con el municipio. |
-| 12 | Formato de métricas | Prometheus. | Confirmar. |
+| 12 | Formato de métricas | **Decidido e implementado:** formato de texto de Prometheus en `/metrics` de `api-core` y `geo-service` (con token), recogido por Prometheus, Alertmanager y blackbox en el perfil `observabilidad` del Compose (`docs/operaciones/observabilidad.md`). | Ninguna. |
 | 13 | Fuente de curvas IDF y normativa local de drenaje/pavimento | Ninguna citada. | Solo relevante para fases futuras; documentar cuando exista. |
+| 14 | Crecimiento a otras ciudades o países | **Decidido el 2026-09-26 (ADR 0004):** una instalación por ciudad. La misma imagen sirve a otra ciudad cambiando configuración (`CIUDAD_*`, `ZONA_HORARIA`, `CRS_METRICO_EPSG`, §8.2), capas, credenciales, dominios y respaldos; el foco actual sigue siendo Santa Cruz de la Sierra. | Ninguna por ahora. La plataforma multi-ciudad compartida queda en el backlog (§15). |
