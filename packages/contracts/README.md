@@ -6,7 +6,8 @@
 |---|---|
 | Enums y etiquetas en español | `src/dominio/enums.ts` |
 | Severidad (función pura, §9.1) | `src/dominio/severidad.ts` |
-| Parámetros (radio 25 m, jitter 30 m, fotos) | `src/dominio/config.ts` |
+| Parámetros (radio 25 m, jitter 30 m, fotos, fecha del evento, exportación, zona horaria y ciudad por defecto) | `src/dominio/config.ts` |
+| Configuración pública de la ciudad (`GET /api/v1/configuracion`) | `src/esquemas/configuracion.ts` |
 | Esquemas Zod | `src/esquemas/*.ts` |
 | Jitter determinista | `src/geo/jitter.ts` |
 | OpenAPI 3.1 generado | `openapi/openapi.yaml` (no editar a mano) |

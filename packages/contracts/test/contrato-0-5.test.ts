@@ -120,59 +120,16 @@ describe('0.5.0: rol ejecutivo', () => {
   });
 });
 
-const conteoSeveridad = { critica: 1, alta: 2, media: 3, baja: 4 };
-const conteoEstado = { nuevo: 5, validado: 4, resuelto: 1 };
-const resumenValido = {
-  generado_en: '2026-09-25T12:00:00.000Z',
-  ventana: { desde: null, hasta: null },
-  total: 10,
-  por_severidad: conteoSeveridad,
-  por_estado: conteoEstado,
-  por_distrito: [
-    {
-      distrito_id: 'distrito_municipal:07',
-      codigo: '07',
-      nombre: 'Distrito 7',
-      total: 10,
-      por_severidad: conteoSeveridad,
-      por_estado: conteoEstado,
-      ultimo_reporte_en: '2026-09-24T20:15:00.000Z',
-    },
-  ],
-  ultimo_reporte_en: '2026-09-24T20:15:00.000Z',
-};
-
+/*
+ * La forma del resumen cambió en 0.6.0 (inundación activa separada de lo resuelto): las pruebas
+ * de su forma, ejemplos válidos y distritos mal formados, están en contrato-0-6.test.ts. Aquí
+ * quedan la query y la ruta, que no cambiaron.
+ */
 describe('0.5.0: ResumenEjecutivoSchema', () => {
-  it('acepta un ejemplo válido, también con ventana acotada y sin reportes', () => {
-    expect(ResumenEjecutivoSchema.safeParse(resumenValido).success).toBe(true);
-    expect(
-      ResumenEjecutivoSchema.safeParse({
-        ...resumenValido,
-        ventana: { desde: '2026-09-18T12:00:00.000Z', hasta: '2026-09-25T12:00:00.000Z' },
-        total: 0,
-        por_distrito: [],
-        ultimo_reporte_en: null,
-      }).success,
-    ).toBe(true);
-  });
-
-  it('rechaza por_distrito mal formado', () => {
-    const distrito = resumenValido.por_distrito[0];
-    const malos = [
-      { ...distrito, distrito_id: undefined },
-      { ...distrito, total: -1 },
-      { ...distrito, total: '10' },
-      { ...distrito, por_severidad: { critica: 1, alta: 2, media: 3 } },
-      { ...distrito, por_estado: { nuevo: 1, validado: 1 } },
-      { ...distrito, ultimo_reporte_en: 'ayer' },
-    ];
-    for (const malo of malos)
-      expect(
-        ResumenEjecutivoSchema.safeParse({ ...resumenValido, por_distrito: [malo] }).success,
-      ).toBe(false);
-    expect(ResumenEjecutivoSchema.safeParse({ ...resumenValido, por_distrito: {} }).success).toBe(
-      false,
-    );
+  it('por_distrito tiene que ser una lista', () => {
+    const r = ResumenEjecutivoSchema.safeParse({ por_distrito: {} });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join('.'))).toContain('por_distrito');
   });
 
   it('la query acepta 7d, 30d y todo, con todo por defecto', () => {

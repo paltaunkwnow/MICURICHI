@@ -3,6 +3,7 @@ import { CONFIG_DOMINIO } from '../dominio/config.js';
 import {
   CAUSAS_PRESUNTAS,
   ESTADOS_REPORTE,
+  type EstadoReporte,
   FRECUENCIAS,
   PROFUNDIDADES,
   SEVERIDADES,
@@ -20,33 +21,86 @@ import {
   UnidadAdministrativaSchema,
 } from './comunes.js';
 
+const MS_POR_MINUTO = 60_000;
+const MS_POR_DIA = 86_400_000;
+
+/** Instante en ms de una fecha ISO 8601, o null si no se puede leer (el formato lo informa zod). */
+function instante(iso: string): number | null {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * Los límites se miden contra el reloj del momento de validar, no contra una fecha fija: el mismo
+ * payload puede valer hoy y no dentro de un año. En el formulario el reloj es el del celular, y
+ * por eso la tolerancia hacia el futuro; el que decide es el de api-core.
+ */
+const EventoEnSchema = z.iso
+  .datetime({ offset: true })
+  .refine((v) => {
+    const t = instante(v);
+    return (
+      t === null || t <= Date.now() + CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN * MS_POR_MINUTO
+    );
+  }, 'La fecha del evento no puede ser futura. Elegí hoy o un día anterior.')
+  .refine((v) => {
+    const t = instante(v);
+    return t === null || t >= Date.now() - CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS * MS_POR_DIA;
+  }, `La fecha del evento no puede tener más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días. Elegí una fecha más reciente.`);
+
 /** Payload de creación de reporte (ciudadano). Validado en servidor por api-core. */
-export const ReporteCrearSchema = z.object({
-  lat: LatSchema,
-  lon: LonSchema,
-  ubicacion_metodo: z.enum(UBICACION_METODOS),
-  precision_gps_m: z.number().nonnegative().max(10_000).nullable().optional(),
-  ubicacion_tipo: z.enum(UBICACION_TIPOS),
-  descripcion: z
-    .string()
-    .trim()
-    .min(
-      CONFIG_DOMINIO.DESCRIPCION_MIN,
-      `Escribí al menos ${CONFIG_DOMINIO.DESCRIPCION_MIN} caracteres para poder enviar.`,
-    )
-    .max(CONFIG_DOMINIO.DESCRIPCION_MAX, `Máximo ${CONFIG_DOMINIO.DESCRIPCION_MAX} caracteres.`),
-  profundidad_estimada: z.enum(PROFUNDIDADES),
-  frecuencia: z.enum(FRECUENCIAS),
-  causa_presunta: z.enum(CAUSAS_PRESUNTAS).default('desconocida'),
-  sumidero_cercano: z.enum(SUMIDERO_CERCANO).nullable().optional(),
-  sumidero_estado: z.enum(SUMIDERO_ESTADOS).nullable().optional(),
-  agua_brota_sumidero: z.boolean().nullable().optional(),
-  evento_en: z.iso.datetime({ offset: true }).nullable().optional(),
-  /** Claves de objeto devueltas por POST /fotos, máximo 3. */
-  fotos: z.array(z.string().min(1).max(200)).max(CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE).default([]),
-  /** Honeypot antispam: los humanos no lo ven; si viene con contenido se rechaza. */
-  sitio_web: z.string().max(0, 'Solicitud rechazada.').optional(),
-});
+export const ReporteCrearSchema = z
+  .object({
+    lat: LatSchema,
+    lon: LonSchema,
+    ubicacion_metodo: z.enum(UBICACION_METODOS),
+    precision_gps_m: z.number().nonnegative().max(10_000).nullable().optional(),
+    ubicacion_tipo: z.enum(UBICACION_TIPOS),
+    descripcion: z
+      .string()
+      .trim()
+      .min(
+        CONFIG_DOMINIO.DESCRIPCION_MIN,
+        `Escribí al menos ${CONFIG_DOMINIO.DESCRIPCION_MIN} caracteres para poder enviar.`,
+      )
+      .max(CONFIG_DOMINIO.DESCRIPCION_MAX, `Máximo ${CONFIG_DOMINIO.DESCRIPCION_MAX} caracteres.`),
+    profundidad_estimada: z.enum(PROFUNDIDADES),
+    frecuencia: z.enum(FRECUENCIAS),
+    causa_presunta: z.enum(CAUSAS_PRESUNTAS).default('desconocida'),
+    sumidero_cercano: z.enum(SUMIDERO_CERCANO).nullable().optional(),
+    sumidero_estado: z.enum(SUMIDERO_ESTADOS).nullable().optional(),
+    agua_brota_sumidero: z.boolean().nullable().optional(),
+    evento_en: EventoEnSchema.nullable()
+      .optional()
+      .meta({
+        description:
+          `Cuándo ocurrió el anegamiento; null = se asume creado_en. Entre ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días atrás ` +
+          `y ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} minutos adelante del reloj del servidor.`,
+      }),
+    /** Claves de objeto devueltas por POST /fotos, máximo 3. */
+    fotos: z
+      .array(z.string().min(1).max(200))
+      .max(CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE)
+      .default([]),
+    /** Honeypot antispam: los humanos no lo ven; si viene con contenido se rechaza. */
+    sitio_web: z.string().max(0, 'Solicitud rechazada.').optional(),
+  })
+  .superRefine((v, ctx) => {
+    // Sin sumidero cercano no hay nada que esté tapado ni de dónde brote el agua.
+    if (v.sumidero_cercano !== 'no') return;
+    if (v.sumidero_estado != null)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['sumidero_estado'],
+        message: 'Indicaste que no hay sumidero cercano: no se puede decir si está tapado.',
+      });
+    if (v.agua_brota_sumidero === true)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['agua_brota_sumidero'],
+        message: 'Indicaste que no hay sumidero cercano: el agua no puede brotar de él.',
+      });
+  });
 export type ReporteCrear = z.infer<typeof ReporteCrearSchema>;
 export type ReporteCrearEntrada = z.input<typeof ReporteCrearSchema>;
 
@@ -134,6 +188,34 @@ export const ReporteFeatureCollectionSchema = z.object({
 });
 export type ReporteFeatureCollection = z.infer<typeof ReporteFeatureCollectionSchema>;
 
+/**
+ * Feature de la vista técnica: `/api/v1/tecnico/reportes/{id}` y las respuestas de moderación.
+ * Coordenada exacta y todas las propiedades de moderación; nunca sale por una ruta pública (§13).
+ */
+export const ReporteTecnicoFeatureSchema = ReporteFeatureSchema.extend({
+  geometry: PuntoGeoJsonSchema.meta({ description: 'Coordenada exacta: sin jitter ni redondeo' }),
+  properties: ReporteTecnicoSchema,
+});
+export type ReporteTecnicoFeature = z.infer<typeof ReporteTecnicoFeatureSchema>;
+
+/** Listado técnico (`/api/v1/tecnico/reportes`): la misma paginación que el público. */
+export const ReporteTecnicoFeatureCollectionSchema = ReporteFeatureCollectionSchema.extend({
+  features: z.array(ReporteTecnicoFeatureSchema),
+});
+export type ReporteTecnicoFeatureCollection = z.infer<typeof ReporteTecnicoFeatureCollectionSchema>;
+
+/**
+ * Estados a los que solo se llega diciendo por qué. `nuevo` está porque la única transición que
+ * lo alcanza es reabrir un rechazado (§7.3): sin motivo, la auditoría registraba la reapertura
+ * pero no su porqué.
+ */
+const ESTADOS_CON_MOTIVO: readonly EstadoReporte[] = [
+  'nuevo',
+  'rechazado',
+  'resuelto',
+  'duplicado',
+];
+
 /** Transiciones de la máquina de estados (CLAUDE.md §7.3). */
 export const ReporteCambiarEstadoSchema = z
   .object({
@@ -142,11 +224,14 @@ export const ReporteCambiarEstadoSchema = z
     fusionado_en_id: z.uuid().optional(),
   })
   .superRefine((v, ctx) => {
-    if (['rechazado', 'resuelto', 'duplicado'].includes(v.estado) && !v.estado_motivo) {
+    if (ESTADOS_CON_MOTIVO.includes(v.estado) && !v.estado_motivo) {
       ctx.addIssue({
         code: 'custom',
         path: ['estado_motivo'],
-        message: `El estado ${v.estado} requiere un motivo.`,
+        message:
+          v.estado === 'nuevo'
+            ? 'Reabrir un reporte requiere un motivo.'
+            : `El estado ${v.estado} requiere un motivo.`,
       });
     }
     if (v.estado === 'duplicado' && !v.fusionado_en_id) {

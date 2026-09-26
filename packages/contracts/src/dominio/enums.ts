@@ -40,6 +40,14 @@ export const ESTADOS_PUBLICOS = [
 export const ROLES = ['ciudadano', 'tecnico', 'admin', 'ejecutivo'] as const;
 export type Rol = (typeof ROLES)[number];
 
+/**
+ * Roles que trabajan en el panel (`apps/panel-admin`): los únicos a los que `/auth/yo` les manda
+ * `panel_url`. Es una lista de permitidos a propósito: un rol nuevo no recibe la dirección del
+ * panel hasta que alguien lo agregue aquí.
+ */
+export const ROLES_DEL_PANEL = ['tecnico', 'admin', 'ejecutivo'] as const satisfies readonly Rol[];
+export type RolDelPanel = (typeof ROLES_DEL_PANEL)[number];
+
 export const UBICACION_METODOS = ['gps', 'manual'] as const;
 export type UbicacionMetodo = (typeof UBICACION_METODOS)[number];
 

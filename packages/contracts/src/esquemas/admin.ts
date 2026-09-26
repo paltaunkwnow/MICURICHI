@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { CONFIG_DOMINIO } from '../dominio/config.js';
 import { SEVERIDADES, TIPOS_CAPA } from '../dominio/enums.js';
-import { ReporteFiltrosSchema } from './reporte.js';
+import { ReporteFiltrosSchema, ReporteTecnicoFeatureSchema } from './reporte.js';
 
 export const CapaVersionSchema = z.object({
   id: z.uuid(),
@@ -20,9 +21,36 @@ export type CapaVersion = z.infer<typeof CapaVersionSchema>;
 export const FORMATOS_EXPORTACION = ['csv', 'geojson'] as const;
 export const ExportarQuerySchema = ReporteFiltrosSchema.extend({
   formato: z.enum(FORMATOS_EXPORTACION).default('geojson'),
-  limite: z.coerce.number().int().min(1).max(50_000).default(10_000),
+  limite: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(CONFIG_DOMINIO.EXPORTAR_MAX_FILAS)
+    .default(CONFIG_DOMINIO.EXPORTAR_MAX_FILAS),
 });
 export type ExportarQuery = z.infer<typeof ExportarQuerySchema>;
+
+const Conteo = z.number().int().nonnegative();
+
+/**
+ * Respuesta de `GET /api/v1/exportar?formato=geojson`. `total` cuenta la selección entera sin
+ * tope; si no cabe en `limite`, el archivo trae `exportados` features y `truncado = true`, para
+ * que nadie tome un recorte por el inventario completo.
+ */
+export const ExportacionGeoJsonSchema = z.object({
+  type: z.literal('FeatureCollection'),
+  nota_metodologica: z
+    .string()
+    .meta({ description: 'Limitaciones del dato (CLAUDE.md §9.5); va en toda exportación' }),
+  generado_en: z.iso.datetime({ offset: true }),
+  total: Conteo.meta({ description: 'Reportes que casan con los filtros, contados sin tope' }),
+  exportados: Conteo.meta({ description: 'Features incluidas en este archivo' }),
+  truncado: z
+    .boolean()
+    .meta({ description: 'true si total > exportados: el archivo no trae toda la selección' }),
+  features: z.array(ReporteTecnicoFeatureSchema),
+});
+export type ExportacionGeoJson = z.infer<typeof ExportacionGeoJsonSchema>;
 
 export const IndicadoresSchema = z.object({
   total: z.number().int(),

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
-import { ROLES } from '../dominio/enums.js';
+import { ROLES, ROLES_DEL_PANEL, type Rol } from '../dominio/enums.js';
 
 /**
  * Normalización del correo. Se hace en el contrato y no en cada ruta para que el mismo valor
@@ -64,8 +64,34 @@ export type Usuario = z.infer<typeof UsuarioSchema>;
  * Existe para que la interfaz pueda avisar ANTES de que alguien rellene cinco pantallas y se
  * encuentre un 429 al final. No es el control: el control es el UPDATE atómico del servidor al
  * crear, y este campo no lo sustituye ni lo relaja.
+ *
+ * `panel_url` (desde 0.7.0) es la dirección del panel, y solo existe para `ROLES_DEL_PANEL`.
+ * Antes viajaba fijada en el JavaScript público de la app ciudadana, a la vista de cualquiera.
+ * Esconderla no protege el panel (lo protegen el propio panel y los 403 de api-core), pero no hay
+ * por qué publicarla. Por eso el esquema rechaza una sesión de ciudadano que la traiga, aunque
+ * sea null.
  */
 export const SesionActualSchema = UsuarioSchema.extend({
   puede_reportar_desde: z.iso.datetime({ offset: true }).nullable(),
+  panel_url: z
+    // `abort`: con una URL que no se puede leer, la comprobación de credenciales no llega a correr.
+    .url({ protocol: /^https?$/, abort: true, message: 'URL absoluta http o https.' })
+    .refine((url) => {
+      const { username, password } = new URL(url);
+      return !username && !password;
+    }, 'Sin usuario ni contraseña en la URL.')
+    .nullable()
+    .optional()
+    .meta({
+      description:
+        'URL base del panel (http/https). Solo para tecnico, admin y ejecutivo; null si el despliegue no la configuró. Ausente para ciudadano.',
+    }),
+}).refine((s) => s.panel_url === undefined || esRolDelPanel(s.rol), {
+  path: ['panel_url'],
+  message: 'panel_url solo se manda a los roles del panel.',
 });
 export type SesionActual = z.infer<typeof SesionActualSchema>;
+
+function esRolDelPanel(rol: Rol): boolean {
+  return (ROLES_DEL_PANEL as readonly Rol[]).includes(rol);
+}

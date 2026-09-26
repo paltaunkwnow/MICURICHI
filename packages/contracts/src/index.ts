@@ -4,6 +4,7 @@ export * from './dominio/severidad.js';
 export * from './esquemas/admin.js';
 export * from './esquemas/auth.js';
 export * from './esquemas/comunes.js';
+export * from './esquemas/configuracion.js';
 export * from './esquemas/ejecutivo.js';
 export * from './esquemas/geo.js';
 export * from './esquemas/reporte.js';

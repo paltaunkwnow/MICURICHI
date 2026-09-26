@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from './dominio/config.js';
 import { SEVERIDAD_VERSION } from './dominio/severidad.js';
-import { CapaVersionSchema, ExportarQuerySchema, IndicadoresSchema } from './esquemas/admin.js';
+import {
+  CapaVersionSchema,
+  ExportacionGeoJsonSchema,
+  ExportarQuerySchema,
+  IndicadoresSchema,
+} from './esquemas/admin.js';
 import { LoginSchema, RegistroSchema, SesionActualSchema, UsuarioSchema } from './esquemas/auth.js';
 import { ErrorApiSchema } from './esquemas/comunes.js';
+import { ConfiguracionPublicaSchema } from './esquemas/configuracion.js';
 import { ResumenEjecutivoQuerySchema, ResumenEjecutivoSchema } from './esquemas/ejecutivo.js';
 import {
   AgregadoUvSchema,
@@ -22,6 +28,8 @@ import {
   ReporteFiltrosSchema,
   ReporteFusionarSchema,
   ReporteReclasificarSchema,
+  ReporteTecnicoFeatureCollectionSchema,
+  ReporteTecnicoFeatureSchema,
   ReporteTecnicoSchema,
 } from './esquemas/reporte.js';
 
@@ -33,6 +41,8 @@ export const COMPONENTES = {
   ReporteFeature: ReporteFeatureSchema,
   ReporteFeatureCollection: ReporteFeatureCollectionSchema,
   ReporteTecnico: ReporteTecnicoSchema,
+  ReporteTecnicoFeature: ReporteTecnicoFeatureSchema,
+  ReporteTecnicoFeatureCollection: ReporteTecnicoFeatureCollectionSchema,
   ReporteCambiarEstado: ReporteCambiarEstadoSchema,
   ReporteReclasificar: ReporteReclasificarSchema,
   ReporteFusionar: ReporteFusionarSchema,
@@ -41,8 +51,10 @@ export const COMPONENTES = {
   Registro: RegistroSchema,
   Usuario: UsuarioSchema,
   SesionActual: SesionActualSchema,
+  ConfiguracionPublica: ConfiguracionPublicaSchema,
   CapaVersion: CapaVersionSchema,
   ExportarQuery: ExportarQuerySchema,
+  ExportacionGeoJson: ExportacionGeoJsonSchema,
   Indicadores: IndicadoresSchema,
   ResumenEjecutivo: ResumenEjecutivoSchema,
   ResolverEntrada: ResolverEntradaSchema,
@@ -103,6 +115,7 @@ export function construirOpenApi(): Record<string, unknown> {
       { name: 'auth', description: 'api-core (Parte 3)' },
       { name: 'admin', description: 'api-core (Parte 3)' },
       { name: 'ejecutivo', description: 'api-core (Parte 3)' },
+      { name: 'configuracion', description: 'api-core (Parte 3)' },
       { name: 'geo', description: 'geo-service (Parte 4)' },
     ],
     components: {
@@ -124,7 +137,9 @@ export function construirOpenApi(): Record<string, unknown> {
                 description: 'Reporte creado en estado nuevo',
                 content: json(ref('ReporteFeature')),
               },
-              '400': error('Payload inválido'),
+              '400': error(
+                `PAYLOAD_INVALIDO. Además del formato: evento_en con más de ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} min de adelanto o más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días de antigüedad, y respuestas del sumidero incoherentes (con sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero = true)`,
+              ),
               '401': error('SIN_SESION: hay que iniciar sesión para reportar'),
               '422': error('FUERA_DE_COBERTURA: el punto no cae en el municipio'),
               '429': error(
@@ -173,7 +188,7 @@ export function construirOpenApi(): Record<string, unknown> {
             responses: {
               '200': {
                 description: 'FeatureCollection técnica (Cache-Control: private, no-store)',
-                content: json(ref('ReporteFeatureCollection')),
+                content: json(ref('ReporteTecnicoFeatureCollection')),
               },
               '401': error('SIN_SESION'),
               '403': error('SIN_PERMISO: el rol no permite la vista técnica'),
@@ -188,7 +203,7 @@ export function construirOpenApi(): Record<string, unknown> {
           responses: {
             '200': {
               description: 'Feature técnica (Cache-Control: private, no-store)',
-              content: json(ref('ReporteFeature')),
+              content: json(ref('ReporteTecnicoFeature')),
             },
             '401': error('SIN_SESION'),
             '403': error('SIN_PERMISO'),
@@ -197,15 +212,26 @@ export function construirOpenApi(): Record<string, unknown> {
         }),
       },
       '/api/v1/reportes/{id}/estado': {
-        patch: op('Cambiar estado (máquina de estados §7.3)', 'reportes', {
-          security: seguridadSesion,
-          parameters: [idParam()],
-          requestBody: { required: true, content: json(ref('ReporteCambiarEstado')) },
-          responses: {
-            '200': { description: 'Reporte actualizado', content: json(ref('ReporteTecnico')) },
-            '409': error('Transición no permitida'),
+        patch: op(
+          'Cambiar estado (máquina de estados §7.3). Rechazar, fusionar, resolver y reabrir (volver a nuevo) exigen estado_motivo.',
+          'reportes',
+          {
+            security: seguridadSesion,
+            parameters: [idParam()],
+            requestBody: { required: true, content: json(ref('ReporteCambiarEstado')) },
+            responses: {
+              '200': {
+                description: 'Reporte actualizado, en la vista técnica',
+                content: json(ref('ReporteTecnicoFeature')),
+              },
+              '400': error('PAYLOAD_INVALIDO: p. ej. falta estado_motivo'),
+              '401': error('SIN_SESION'),
+              '403': error('SIN_PERMISO'),
+              '404': error('NO_EXISTE'),
+              '409': error('TRANSICION_NO_PERMITIDA'),
+            },
           },
-        }),
+        ),
       },
       '/api/v1/reportes/{id}/severidad': {
         patch: op('Reclasificar severidad (manual) o volver a la calculada', 'reportes', {
@@ -213,7 +239,14 @@ export function construirOpenApi(): Record<string, unknown> {
           parameters: [idParam()],
           requestBody: { required: true, content: json(ref('ReporteReclasificar')) },
           responses: {
-            '200': { description: 'Reporte actualizado', content: json(ref('ReporteTecnico')) },
+            '200': {
+              description: 'Reporte actualizado, en la vista técnica',
+              content: json(ref('ReporteTecnicoFeature')),
+            },
+            '400': error('PAYLOAD_INVALIDO: p. ej. reclasificación sin severidad_motivo'),
+            '401': error('SIN_SESION'),
+            '403': error('SIN_PERMISO'),
+            '404': error('NO_EXISTE'),
           },
         }),
       },
@@ -224,9 +257,16 @@ export function construirOpenApi(): Record<string, unknown> {
           requestBody: { required: true, content: json(ref('ReporteFusionar')) },
           responses: {
             '200': {
-              description: 'Reporte marcado como duplicado',
-              content: json(ref('ReporteTecnico')),
+              description: 'Reporte marcado como duplicado, en la vista técnica',
+              content: json(ref('ReporteTecnicoFeature')),
             },
+            '400': error('PAYLOAD_INVALIDO'),
+            '401': error('SIN_SESION'),
+            '403': error('SIN_PERMISO'),
+            '404': error('NO_EXISTE'),
+            '409': error(
+              'TRANSICION_NO_PERMITIDA: el canónico debe existir, ser otro y estar validado',
+            ),
           },
         }),
       },
@@ -252,6 +292,9 @@ export function construirOpenApi(): Record<string, unknown> {
               '401': error('SIN_SESION'),
               '413': error('Archivo demasiado grande'),
               '415': error('Tipo no permitido'),
+              '429': error(
+                `Demasiadas subidas: límite por IP y por cuenta (${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora)`,
+              ),
             },
           },
         ),
@@ -263,11 +306,26 @@ export function construirOpenApi(): Record<string, unknown> {
         }),
       },
       '/api/v1/exportar': {
-        get: op('Exportar CSV o GeoJSON con nota metodológica', 'admin', {
-          security: seguridadSesion,
-          parameters: parametrosDesde(ExportarQuerySchema),
-          responses: { '200': { description: 'Archivo' } },
-        }),
+        get: op(
+          `Exportar CSV o GeoJSON con nota metodológica, en la vista técnica. Hasta ${CONFIG_DOMINIO.EXPORTAR_MAX_FILAS} filas por archivo (limite); si la selección tiene más, la respuesta lo declara con total, exportados y truncado en vez de recortar en silencio.`,
+          'admin',
+          {
+            security: seguridadSesion,
+            parameters: parametrosDesde(ExportarQuerySchema),
+            responses: {
+              '200': {
+                description: 'Archivo (Content-Disposition: attachment)',
+                content: {
+                  'application/geo+json': { schema: ref('ExportacionGeoJson') },
+                  'text/csv': { schema: { type: 'string' } },
+                },
+              },
+              '400': error('FILTROS_INVALIDOS: p. ej. limite fuera de rango'),
+              '401': error('SIN_SESION'),
+              '403': error('SIN_PERMISO'),
+            },
+          },
+        ),
       },
       '/api/v1/indicadores': {
         get: op('Indicadores básicos', 'admin', {
@@ -277,7 +335,7 @@ export function construirOpenApi(): Record<string, unknown> {
       },
       '/api/v1/ejecutivo/resumen': {
         get: op(
-          'Resumen del panel ejecutivo: totales por severidad efectiva, por estado y por distrito. Exige rol ejecutivo, tecnico o admin. Cuenta solo reportes en estado nuevo, validado o resuelto.',
+          'Resumen del panel ejecutivo. Exige rol ejecutivo, tecnico o admin. Inundación activa = reportes en nuevo (en revisión) o validado (verificadas), con su severidad efectiva; los resueltos cuentan aparte (resueltas, por_estado) como trabajo hecho. Por distrito, en_capa_vigente separa los que solo existen en una capa anterior. ultimo_reporte_en va truncado al minuto.',
           'ejecutivo',
           {
             security: seguridadSesion,
@@ -323,9 +381,30 @@ export function construirOpenApi(): Record<string, unknown> {
           responses: { '204': { description: 'Sesión cerrada' } },
         }),
       },
+      '/api/v1/configuracion': {
+        get: op(
+          'Configuración pública del despliegue: la ciudad (nombre, país, zona horaria, locale, centro y zoom inicial del mapa). Mi Curichi se despliega una vez por ciudad con la misma imagen, y los clientes leen esto en tiempo de ejecución en vez de fijarlo al compilar. Pública y sin sesión.',
+          'configuracion',
+          {
+            responses: {
+              '200': {
+                description: 'Configuración de la ciudad',
+                headers: {
+                  'Cache-Control': {
+                    description:
+                      'public: la respuesta es la misma para cualquiera que pregunte y solo cambia al reconfigurar el despliegue, así que la puede guardar cualquier caché.',
+                    schema: { type: 'string' },
+                  },
+                },
+                content: json(ref('ConfiguracionPublica')),
+              },
+            },
+          },
+        ),
+      },
       '/api/v1/auth/yo': {
         get: op(
-          'Usuario de la sesión, más `puede_reportar_desde` (ISO 8601 o null): cuándo vuelve a tener turno de reporte esta cuenta. Es información para la interfaz; la cuota la aplica el servidor al crear.',
+          'Usuario de la sesión, más `puede_reportar_desde` (ISO 8601 o null): cuándo vuelve a tener turno de reporte esta cuenta. Es información para la interfaz; la cuota la aplica el servidor al crear. Para tecnico, admin y ejecutivo lleva además `panel_url`: la URL base del panel, o null si el despliegue no la configuró. Al ciudadano no se le manda nunca.',
           'auth',
           {
             security: seguridadSesion,

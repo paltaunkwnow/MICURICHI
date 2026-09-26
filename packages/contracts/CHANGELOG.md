@@ -1,5 +1,175 @@
 # Changelog — contracts
 
+## 0.7.0 — 2026-09-26
+
+**Aditivo.** Mi Curichi se despliega una vez por ciudad con la misma imagen. La ciudad (centro,
+locale, nombre, zona horaria) estaba escrita en el código de las apps y la URL del panel viajaba
+en el JavaScript público de la app ciudadana. Ahora las dos cosas llegan desde api-core en tiempo
+de ejecución.
+
+### Configuración pública (`GET /api/v1/configuracion`, pública y cacheable)
+
+- `ConfiguracionPublicaSchema` (`type ConfiguracionPublica`) = `{ ciudad: CiudadSchema }`, en
+  `src/esquemas/configuracion.ts`. `CiudadSchema` (`type Ciudad`):
+
+  ```
+  { nombre, pais, zona_horaria, locale, centro: { lon, lat }, zoom_inicial }
+  ```
+
+  | Campo | Regla |
+  |---|---|
+  | `nombre` | texto de 1 a 100 caracteres, sin espacios sobrantes |
+  | `pais` | ISO 3166-1 alfa-2 en mayúsculas (`BO`) |
+  | `zona_horaria` | nombre IANA que `Intl` reconoce (`America/La_Paz`); un desfase como `-04:00` no sirve. Es el mismo criterio que ya aplica api-core a `ZONA_HORARIA` |
+  | `locale` | BCP 47 en forma canónica: idioma y, si hacen falta, escritura y región (`es-BO`, `es-419`). `es_BO` se rechaza porque hace que `Intl` lance RangeError en el cliente; `es-bo` también, para que haya una sola forma |
+  | `centro.lon` / `centro.lat` | −180..180 / −90..90 (EPSG:4326) |
+  | `zoom_inicial` | 0..22; admite fracciones, como MapLibre |
+
+- `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO`: Santa Cruz de la Sierra, `BO`, `ZONA_HORARIA_POR_DEFECTO`,
+  `es-BO`, centro `{ lon: -63.18, lat: -17.78 }` y zoom 13. Son el centro y el zoom con los que
+  abre hoy el mapa público, así que la instalación actual no necesita configurar nada. También
+  sale en `dist/dominio.json`.
+
+### Sesión (`GET /api/v1/auth/yo`)
+
+- `SesionActualSchema.panel_url`, opcional: `string | null`. URL base del panel, absoluta
+  `http`/`https` y sin usuario ni contraseña (la misma regla que aplicaba la app ciudadana a
+  `PANEL_ADMIN_URL`). `null` = el despliegue no configuró el panel.
+- Solo para `ROLES_DEL_PANEL` (nueva constante: `tecnico`, `admin`, `ejecutivo`; tipo
+  `RolDelPanel`). Una sesión de `ciudadano` con `panel_url`, aunque sea `null`, no pasa el
+  esquema: al ciudadano el campo no se le manda.
+- Cambio de comportamiento del esquema, no de la forma: `SesionActualSchema` lleva ahora un
+  refinamiento, así que zod no permite `.pick()`, `.omit()` ni `.partial()` sobre él. Nadie lo
+  hacía.
+
+### OpenAPI
+
+- `GET /api/v1/configuracion` (etiqueta nueva `configuracion`, sin seguridad): 200 →
+  `ConfiguracionPublica`, con la cabecera `Cache-Control` documentada.
+- `GET /api/v1/auth/yo`: la descripción explica `panel_url`; el componente `SesionActual` lo
+  incluye como opcional.
+- Componente nuevo: `ConfiguracionPublica`.
+
+### Qué tienen que hacer los consumidores
+
+- `api-core`: servir `GET /api/v1/configuracion` con `CIUDAD_POR_DEFECTO` sobrescrita por su
+  configuración (y la zona tomada de `ZONA_HORARIA`, que ya lee), validada con
+  `ConfiguracionPublicaSchema` al arrancar; `Cache-Control: public`. En `/auth/yo`, agregar
+  `panel_url` solo si el rol está en `ROLES_DEL_PANEL`.
+- `web-ciudadano` y `panel-admin`: leer la ciudad de `/api/v1/configuracion` en lugar de las
+  constantes (`CENTRO_INICIAL`, `'es-BO'`, «Santa Cruz», zona horaria).
+- `web-ciudadano`: tomar la URL del panel de `panel_url` y dejar de fijar `PANEL_ADMIN_URL` al
+  compilar. Para `ejecutivo` sigue agregando la ruta `ejecutivo`, igual que hoy.
+
+## 0.6.0 — 2026-09-26
+
+**Cambio con ruptura en el resumen ejecutivo.** El resto es aditivo o valida más estricto.
+
+### Con ruptura: resumen ejecutivo (`ResumenEjecutivoSchema`)
+
+La cifra grande del panel pasa a ser la **inundación activa**: reportes en `nuevo` (en revisión)
+o `validado` (verificadas). Los `resuelto` salen de ella y cuentan solo como trabajo hecho.
+
+| 0.5.0 | 0.6.0 |
+|---|---|
+| `total` (nuevo + validado + resuelto) | `activas.total` (nuevo + validado) |
+| `por_severidad` (los tres estados) | `activas.por_severidad` (solo las activas, severidad efectiva) |
+| — | `activas.verificadas` (= `validado`), `activas.en_revision` (= `nuevo`) |
+| — | `resueltas` |
+| `por_estado` | sin cambios (gráfica del trabajo) |
+| `por_distrito[].total`, `por_distrito[].por_severidad` | `por_distrito[].activas` (misma forma que en la raíz) |
+| — | `por_distrito[].en_capa_vigente` (`false` = distrito que solo existe en una capa anterior) |
+| `ultimo_reporte_en` (raíz y distrito) | igual, **truncado al minuto** (privacidad) |
+
+Forma exacta:
+
+```
+{ generado_en, ventana: { desde, hasta },
+  activas: { total, verificadas, en_revision, por_severidad: { critica, alta, media, baja } },
+  resueltas,
+  por_estado: { nuevo, validado, resuelto },
+  por_distrito: [{ distrito_id, codigo, nombre, en_capa_vigente,
+                   activas: { total, verificadas, en_revision, por_severidad },
+                   por_estado: { nuevo, validado, resuelto }, ultimo_reporte_en }],
+  ultimo_reporte_en }
+```
+
+El esquema valida además estas igualdades. api-core parsea su propia respuesta con él, así que un
+desajuste da 500 en vez de llegar al panel como cifras que no cuadran:
+
+- `activas.total = verificadas + en_revision` y `critica + alta + media + baja = activas.total`.
+- `activas.verificadas = por_estado.validado` y `activas.en_revision = por_estado.nuevo`, en la
+  raíz y en cada distrito; `resueltas = por_estado.resuelto` en la raíz.
+- `ultimo_reporte_en`, en la raíz y en cada distrito, con segundos y milisegundos en cero.
+- No se exige que la raíz sea la suma de los distritos: un reporte sin distrito cuenta en la raíz
+  y no tiene fila propia.
+
+Nuevo `ConteoActivasSchema` (`type ConteoActivas`). Siguen `ConteoPorSeveridadSchema`,
+`ConteoPorEstadoResumenSchema`, `ResumenDistritoSchema` y `ResumenEjecutivoQuerySchema`.
+
+### Valida más estricto
+
+- `ReporteCambiarEstadoSchema`: pasar a `nuevo` (reabrir un rechazado, §7.3) exige
+  `estado_motivo`, igual que rechazar, fusionar y resolver. Antes se reabría sin motivo y la
+  auditoría no guardaba el porqué.
+- `ReporteCrearSchema.evento_en`: se rechaza si es posterior a ahora +
+  `EVENTO_TOLERANCIA_FUTURO_MIN` (10 min) o anterior a ahora − `EVENTO_MAX_DIAS_ATRAS` (365 días).
+  Compara instantes, así que la zona horaria del cliente no cambia el resultado. Antes
+  `2099-01-01` daba 201. «Ahora» es el reloj del momento de validar: el del celular en el
+  formulario y el de api-core en el servidor, que es el que decide.
+- `ReporteCrearSchema`: con `sumidero_cercano: 'no'`, `sumidero_estado` tiene que ser `null` o
+  ausente y `agua_brota_sumidero` no puede ser `true`. El error va en ese campo.
+- `ExportarQuerySchema.limite`: el valor por defecto pasa de 10 000 a `EXPORTAR_MAX_FILAS`
+  (50 000, que ya era el máximo). Quien no mandaba `limite` recibía como mucho 10 000 filas sin
+  ningún aviso.
+
+### Aditivo
+
+- `ReporteTecnicoFeatureSchema` (`type ReporteTecnicoFeature`): Feature con la coordenada exacta y
+  `properties` = `ReporteTecnicoSchema`. `ReporteTecnicoFeatureCollectionSchema`
+  (`type ReporteTecnicoFeatureCollection`): la misma paginación que la colección pública
+  (`total`, `total_exacto?`, `pagina`, `limite`).
+- `ExportacionGeoJsonSchema` (`type ExportacionGeoJson`): `{ type, nota_metodologica,
+  generado_en, total, exportados, truncado, features: ReporteTecnicoFeature[] }`. `total` cuenta
+  la selección sin tope y `truncado` es `total > exportados`.
+- `CONFIG_DOMINIO`: `EVENTO_TOLERANCIA_FUTURO_MIN` (10), `EVENTO_MAX_DIAS_ATRAS` (365),
+  `EXPORTAR_MAX_FILAS` (50 000), `FOTOS_POR_HORA_POR_CUENTA` (12) y `ZONA_HORARIA_POR_DEFECTO`
+  (`'America/La_Paz'`: es el valor por defecto de un despliegue por ciudad y api-core lo
+  sobrescribe con la variable `ZONA_HORARIA`). Salen también en `dist/dominio.json`.
+- `ErrorApiSchema` no cambia: `codigo` es texto libre, así que `PAYLOAD_INVALIDO` no necesita alta.
+
+### OpenAPI
+
+- `PATCH /reportes/{id}/estado`, `PATCH /reportes/{id}/severidad`, `POST /reportes/{id}/fusionar`
+  y `GET /tecnico/reportes/{id}` responden `ReporteTecnicoFeature`; `GET /tecnico/reportes`
+  responde `ReporteTecnicoFeatureCollection`. Antes declaraban `ReporteTecnico` plano o
+  `ReporteFeature` (propiedades públicas), y api-core devuelve una Feature técnica. Se documentan
+  los 400/401/403/404/409 de la moderación.
+- `GET /exportar`: 200 `application/geo+json` → `ExportacionGeoJson` y `text/csv`; 400, 401, 403.
+- `POST /fotos`: 429 por IP y por cuenta.
+- Componentes nuevos: `ReporteTecnicoFeature`, `ReporteTecnicoFeatureCollection`,
+  `ExportacionGeoJson`.
+
+### Qué tienen que hacer los consumidores
+
+- `api-core`:
+  - resumen ejecutivo: calcular `activas` y `resueltas`, `en_capa_vigente` (el distrito está en la
+    capa vigente) y truncar `ultimo_reporte_en` al minuto en la raíz y en cada distrito. Con la
+    forma vieja, su `ResumenEjecutivoSchema.parse` falla.
+  - `/exportar`: contar sin el tope del listado y devolver `exportados` y `truncado` (en el CSV,
+    en el encabezado).
+  - `POST /fotos`: cuota por cuenta con `FOTOS_POR_HORA_POR_CUENTA`.
+  - zona horaria: `ZONA_HORARIA` o, si no está, `ZONA_HORARIA_POR_DEFECTO`.
+  - `{ estado: 'nuevo' }` sin motivo ahora es 400 `PAYLOAD_INVALIDO` antes de mirar la transición:
+    la prueba que esperaba 409 para `validado → nuevo` tiene que mandar motivo.
+- `panel-admin`: usar `ReporteTecnicoFeature` y `ReporteTecnicoFeatureCollection` del contrato
+  en lugar de los tipos hechos a mano, y el panel ejecutivo con la forma nueva.
+- `web-ciudadano`: el formulario valida con `ReporteCrearSchema`, así que las reglas nuevas
+  también corren en el navegador. La fecha del evento se guarda como `T12:00:00Z` del día
+  elegido, y elegir hoy antes de las 11:50 UTC (07:50 en La Paz) queda en el futuro. La casilla
+  «El agua brota del sumidero» se ve aunque se conteste «No». Ninguno de los dos errores tiene
+  hoy un mensaje visible en su paso.
+
 ## 0.5.0 — 2026-09-25
 
 **Cambio con ruptura.** «Tirante estimado» pasa a llamarse «Profundidad estimada» en todo el
