@@ -28,11 +28,14 @@ const poly = (x0: number, y0: number, x1: number, y1: number) => ({
 });
 
 let dir: string;
+/** Salida del pipeline: una carpeta temporal, nunca data/processed/ (§6.10). */
+let salida: string;
 let cfg: Config;
 let version: VersionConfig;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'curichi-etl-'));
+  salida = mkdtempSync(join(tmpdir(), 'curichi-etl-salida-'));
   // Distrito D1 con dos UV (A, B) que se SOLAPAN 10 m y dejan un HUECO al este; escritas en UTM 20S con .prj
   const distritos = {
     type: 'FeatureCollection' as const,
@@ -86,7 +89,10 @@ beforeAll(async () => {
   version = cfg.versiones[0]!;
 }, 60_000);
 
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+afterAll(() => {
+  rmSync(dir, { recursive: true, force: true });
+  rmSync(salida, { recursive: true, force: true });
+});
 
 describe('descubrimiento e inspección', () => {
   it('lista el conjunto completo y detecta la capa por nombre', () => {
@@ -141,7 +147,9 @@ describe('descubrimiento e inspección', () => {
         },
       },
     };
-    await expect(procesarVersion(cfg, v, { log: () => {} })).rejects.toThrow(ErrorEtl);
+    await expect(
+      procesarVersion(cfg, v, { log: () => {}, dirSalida: join(salida, 'SINPRJ') }),
+    ).rejects.toThrow(ErrorEtl);
     rmSync(sinPrj, { recursive: true, force: true });
   });
 });
@@ -315,7 +323,11 @@ describe('calidad', () => {
 
 describe('pipeline completo sobre shapefiles de prueba', () => {
   it('reproyecta, repara el solape (reportado), normaliza, simplifica y escribe salidas', async () => {
-    const r = await procesarVersion(cfg, version, { forzar: true, log: () => {} });
+    const r = await procesarVersion(cfg, version, {
+      forzar: true,
+      log: () => {},
+      dirSalida: join(salida, 'PRUEBA'),
+    });
     expect(r.map((x) => x.capa)).toEqual(['distrito_municipal', 'unidad_vecinal']);
     const uv = r[1]!;
     expect(uv.n_salida).toBe(2);

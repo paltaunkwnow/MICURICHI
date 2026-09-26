@@ -38,9 +38,10 @@ versiones:
           #   DM+UV+Mz    17 420 combinaciones distintas
           #   OBJECTID    20 001 distintos; vale 0 en 6 596 filas
           # Se usa OBJECTID por ser el que deja menos códigos sintéticos, y el ETL desambigua los
-          # repetidos con un sufijo -2, -3… estable por orden de archivo. Quedan contados en
-          # reporte_calidad.md como "codigo_repetido". La solución de fondo es que el municipio
-          # entregue un código de manzana único; hasta entonces el id es un subrogado del ETL.
+          # repetidos con un sufijo -2, -3… asignado por la geometría de cada manzana, no por el
+          # orden del archivo. Quedan contados en reporte_calidad.md como "codigo_repetido". La
+          # solución de fondo es que el municipio entregue un código de manzana único; hasta
+          # entonces el id es un subrogado del ETL.
           codigo: OBJECTID
           nombre: null
           plantilla_nombre: "Manzana {codigo}"

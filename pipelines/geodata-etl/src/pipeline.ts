@@ -15,6 +15,7 @@ import {
   detectarHuecos,
   detectarSolapes,
   estadisticas,
+  etiquetadorCrudo,
   geometriaVacia,
   type Hallazgo,
   idDe,
@@ -164,6 +165,8 @@ export interface ResultadoCapa {
   bytes_web: number;
   reparada: boolean;
   hallazgos: Record<string, number>;
+  /** Controles que no se pudieron aplicar (también destacados en reporte_calidad.md). */
+  avisos: string[];
   salida_dir: string;
 }
 
@@ -188,6 +191,9 @@ function reporteMarkdown(
     '',
     `Generado por pipelines/geodata-etl (Parte 5). Fuente: ${v.fuente}.`,
     '',
+    ...(r.avisos.length
+      ? ['## Avisos', '', ...r.avisos.flatMap((a) => [`> **AVISO:** ${a}`, ''])]
+      : []),
     '## Inspección',
     `- Archivo: \`${insp.archivo}\``,
     `- Conjunto completo: ${insp.conjunto_completo ? 'sí' : `NO, faltan: ${insp.faltantes.join(', ')}`}`,
@@ -229,6 +235,8 @@ function reporteMarkdown(
 export interface OpcionesRun {
   forzar?: boolean;
   log?: (m: string) => void;
+  /** Carpeta de salida de la versión; por defecto data/processed/<version>. Las pruebas usan una temporal. */
+  dirSalida?: string;
 }
 
 /** Procesa todas las capas de una versión. Las capas padre se procesan primero para inferir jerarquías. */
@@ -239,7 +247,7 @@ export async function procesarVersion(
 ): Promise<ResultadoCapa[]> {
   const log = o.log ?? console.log;
   const capas = resolverCapas(v);
-  const salidaDir = dirProcessed(v.version);
+  const salidaDir = o.dirSalida ?? dirProcessed(v.version);
   mkdirSync(salidaDir, { recursive: true });
   const procesadas = new Map<TipoCapa, FeatureCollection>();
   const resultados: ResultadoCapa[] = [];
@@ -254,6 +262,7 @@ export async function procesarVersion(
     }
     const insp = await inspeccionar(v, cr);
     const hallazgos: Hallazgo[] = [];
+    const avisos: string[] = [];
     const proceso: Record<string, unknown> = {};
 
     // 1) reproyección
@@ -273,39 +282,49 @@ export async function procesarVersion(
         `${cr.capa}: no se pudo determinar el campo de código. Campos: ${campos.join(', ')}. Fijalo en config/capas.yaml.`,
       );
     const campoNombre = cr.campos.nombre ?? autodetectarCampo(campos, 'nombre', cr.capa);
+    const camposClave = [
+      campoCodigo,
+      cr.campos.respaldo,
+      cr.campos.distrito,
+      cr.campos.unidad_vecinal,
+    ].filter((c): c is string => !!c);
     const claveDe = (f: Feature): string | null => {
       const p = f.properties ?? {};
-      const partes = [campoCodigo, cr.campos.respaldo, cr.campos.distrito, cr.campos.unidad_vecinal]
-        .filter((c): c is string => !!c)
-        .map((c) => String(p[c] ?? ''));
-      const clave = partes.join('|');
+      const clave = camposClave.map((c) => String(p[c] ?? '')).join('|');
       return clave.replace(/\|/g, '') ? clave : null;
     };
     const claves = crudo.features.map(claveDe);
-    const clavesUnicas =
-      claves.every((k) => k !== null) && new Set(claves as string[]).size === claves.length;
+    const usos = new Map<string, number>();
+    for (const k of claves) if (k !== null) usos.set(k, (usos.get(k) ?? 0) + 1);
+    // features que no se pueden seguir una por una: sin clave o con una clave compartida
+    const sinClavePropia = claves.filter((k) => k === null || (usos.get(k) ?? 0) > 1).length;
+    const clavesUnicas = sinClavePropia === 0;
     const identificar = (f: Feature, i: number) => claveDe(f) ?? idDe(f, i);
     proceso.claves = clavesUnicas
-      ? `únicas por (${[campoCodigo, cr.campos.respaldo].filter(Boolean).join(', ')})`
+      ? `únicas por (${camposClave.join(', ')})`
       : 'NO únicas: la reparación se verifica por área total de la capa, no feature por feature';
+    const etiqueta = etiquetadorCrudo(cr.capa, campoCodigo, cr.campos.respaldo);
 
     // 3) validación antes de reparar
     const antes = [
-      ...validarGeometrias(crudo),
-      ...(cr.capa === 'manzana' ? [] : detectarSolapes(crudo)),
+      ...validarGeometrias(crudo, etiqueta),
+      ...(cr.capa === 'manzana' ? [] : detectarSolapes(crudo, etiqueta)),
     ];
     hallazgos.push(...antes);
 
-    // 4) exclusión de geometrías vacías y duplicadas (antes de reparar, para no arrastrarlas)
-    const excluir = new Set(
-      antes
-        .filter((h) => h.tipo === 'vacia')
-        .flatMap((h) => h.ids)
-        .concat(antes.filter((h) => h.tipo === 'duplicada').map((h) => h.ids[1] as string)),
-    );
+    // 4) exclusión de geometrías vacías y duplicadas (antes de reparar, para no arrastrarlas).
+    //    Por POSICIÓN: el id legible puede repetirse (OBJECTID = 0 en miles de manzanas reales) y
+    //    excluir por id se llevaría a todas las que comparten código con la vacía o la duplicada.
+    const excluir = new Set<number>([
+      ...antes.filter((h) => h.tipo === 'vacia').flatMap((h) => h.posiciones ?? []),
+      ...antes
+        .filter((h) => h.tipo === 'duplicada')
+        .map((h) => h.posiciones?.[1])
+        .filter((p): p is number => p !== undefined),
+    ]);
     let fc: FeatureCollection = {
       type: 'FeatureCollection',
-      features: crudo.features.filter((f, i) => !excluir.has(idDe(f, i))),
+      features: crudo.features.filter((_, i) => !excluir.has(i)),
     };
     if (excluir.size) log(`  excluidas ${excluir.size} geometrías vacías o duplicadas`);
 
@@ -346,8 +365,8 @@ export async function procesarVersion(
         });
       }
       const despues = [
-        ...validarGeometrias(limpio),
-        ...(cr.capa === 'manzana' ? [] : detectarSolapes(limpio)),
+        ...validarGeometrias(limpio, etiqueta),
+        ...(cr.capa === 'manzana' ? [] : detectarSolapes(limpio, etiqueta)),
       ];
       proceso.reparacion = {
         modo: teselada
@@ -362,6 +381,13 @@ export async function procesarVersion(
       };
       const limite = cfg.tolerancia_cambio_area;
       const limiteFeature = cfg.tolerancia_cambio_area_feature;
+      if (!clavesUnicas) {
+        // Antes esto solo constaba como texto en «Proceso»: con los datos reales pasa en UV y en
+        // manzanas, y el control que detecta una geometría destrozada quedaba apagado sin que se viera.
+        const aviso = `control de reparación por feature INACTIVO: la clave (${camposClave.join(', ')}) no identifica a cada feature (${sinClavePropia} de ${crudo.features.length} la comparten o no la tienen), así que el cambio de área de cada feature tras la reparación NO se comparó con tolerancia_cambio_area_feature (${limiteFeature * 100} %). Solo se verificó el área total de la capa (cambio ${(cambioTotal * 100).toFixed(4)} %, límite ${limite * 100} %). Una geometría deformada por la reparación pasaría sin detectarse: revisá los hallazgos de abajo o declará como 'respaldo' en config/capas.yaml un campo que sea único.`;
+        avisos.push(aviso);
+        log(`  !! AVISO [${cr.capa}] ${aviso}`);
+      }
       if (cambioTotal > limite && !o.forzar)
         throw new ErrorEtl(
           `${cr.capa}: la reparación cambia el área total de la capa un ${(cambioTotal * 100).toFixed(3)} % (límite ${limite * 100} %). Revisá ${join(salidaDir, cr.capa, 'reporte_calidad.md')} y reejecutá con --forzar si es aceptable.`,
@@ -394,7 +420,7 @@ export async function procesarVersion(
       const padres = procesadas.get('distrito_municipal');
       if (padres) {
         const campoDistrito = cr.campos.distrito ?? autodetectarCampo(campos, 'distrito', cr.capa);
-        const r = asignarPadre(fc, padres, campoDistrito);
+        const r = asignarPadre(fc, padres, campoDistrito, etiqueta);
         // asignarPadre devuelve ids ya normalizados del padre (distrito_municipal:XX) y resuelve
         // por su cuenta declarado vs. contención, así que su resultado es el que manda.
         padreResuelto = r.asignacion;
@@ -411,7 +437,7 @@ export async function procesarVersion(
       if (uvs) {
         const campoUv =
           cr.campos.unidad_vecinal ?? autodetectarCampo(campos, 'unidad_vecinal', cr.capa);
-        const r = asignarPadre(fc, uvs, campoUv);
+        const r = asignarPadre(fc, uvs, campoUv, etiqueta);
         uvResuelta = r.asignacion;
         hallazgos.push(...r.hallazgos);
         proceso.unidad_vecinal = {
@@ -473,6 +499,7 @@ export async function procesarVersion(
       n_salida: normalizado.features.length,
       hallazgos,
       resumen: resumir(hallazgos),
+      avisos,
     };
     writeFileSync(join(dirCapa, 'reporte_calidad.json'), `${JSON.stringify(reporte, null, 2)}\n`);
     writeFileSync(join(dirCapa, 'reporte_calidad.md'), reporteMarkdown(v, reporte, insp, proceso));
@@ -519,6 +546,7 @@ export async function procesarVersion(
       bytes_web: bytesWeb,
       reparada,
       hallazgos: reporte.resumen,
+      avisos,
       salida_dir: dirCapa,
     });
   }

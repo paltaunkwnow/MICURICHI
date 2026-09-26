@@ -4,8 +4,10 @@
  * respecto de la capa contenedora (solo distrito/UV), y unidades sin padre o con centroide fuera del padre.
  */
 import * as turf from '@turf/turf';
+import type { TipoCapa } from 'contracts';
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import RBush from 'rbush';
+import { idCapa } from './normalizar.js';
 
 export interface Hallazgo {
   tipo:
@@ -22,6 +24,12 @@ export interface Hallazgo {
     | 'sin_codigo'
     | 'codigo_repetido';
   ids: string[];
+  /**
+   * Posición de cada feature de `ids` en la colección analizada (en la validación previa, el
+   * número de registro del .shp, base 0). Los ids legibles pueden repetirse; la exclusión de
+   * vacías y duplicadas va por posición para no llevarse a las que solo comparten código.
+   */
+  posiciones?: number[];
   detalle?: string;
   area_m2?: number;
 }
@@ -35,7 +43,12 @@ export interface ReporteCalidad {
   bbox: [number, number, number, number] | null;
   hallazgos: Hallazgo[];
   resumen: Record<string, number>;
+  /** Controles que no se pudieron aplicar a la capa; van destacados al principio del .md. */
+  avisos: string[];
 }
+
+/** Cómo se nombra una feature en los hallazgos. */
+export type Etiquetador = (f: Feature, i: number) => string;
 
 type Poli = Feature<Polygon | MultiPolygon>;
 
@@ -60,6 +73,28 @@ export function geometriaVacia(f: Feature): boolean {
 
 export function idDe(f: Feature, i: number): string {
   return String(f.id ?? f.properties?.id ?? f.properties?.codigo ?? `#${i}`);
+}
+
+/**
+ * Nombre de una feature CRUDA en los hallazgos (§6.4 pide el id afectado). Sus propiedades todavía
+ * no tienen `id` ni `codigo`, así que `idDe` caía siempre en la posición (`#12`), que no sirve para
+ * encontrarla. Se usa el código configurado, después su respaldo (p. ej. OBJECTID) y, solo si no
+ * hay nada, la posición. Tiene la forma del id final (`<capa>:<codigo>`) salvo el sufijo de
+ * desambiguación de los códigos repetidos.
+ */
+export function etiquetadorCrudo(
+  capa: TipoCapa,
+  campoCodigo: string | null,
+  campoRespaldo: string | null,
+): Etiquetador {
+  const valor = (f: Feature, campo: string | null): string => {
+    const v = campo ? f.properties?.[campo] : null;
+    return v === null || v === undefined ? '' : String(v).trim();
+  };
+  return (f, i) => {
+    const codigo = valor(f, campoCodigo) || valor(f, campoRespaldo);
+    return codigo ? idCapa(capa, codigo) : idDe(f, i);
+  };
 }
 
 export function estadisticas(
@@ -92,29 +127,34 @@ function esPoligono(f: Feature): f is Poli {
   return f.geometry?.type === 'Polygon' || f.geometry?.type === 'MultiPolygon';
 }
 
-export function validarGeometrias(fc: FeatureCollection): Hallazgo[] {
+export function validarGeometrias(fc: FeatureCollection, etiqueta: Etiquetador = idDe): Hallazgo[] {
   const h: Hallazgo[] = [];
-  const vistos = new Map<string, string>();
+  const vistos = new Map<string, { id: string; i: number }>();
   fc.features.forEach((f, i) => {
-    const id = idDe(f, i);
+    const id = etiqueta(f, i);
     if (geometriaVacia(f)) {
-      h.push({ tipo: 'vacia', ids: [id] });
+      h.push({ tipo: 'vacia', ids: [id], posiciones: [i] });
       return;
     }
     if (!esPoligono(f)) return;
     if (!turf.booleanValid(f) || turf.kinks(f).features.length > 0) {
       // una "pajarita" (auto-intersección) tiene área de fórmula 0: es inválida, no vacía
-      h.push({ tipo: 'invalida', ids: [id], detalle: 'auto-intersección o anillo mal formado' });
+      h.push({
+        tipo: 'invalida',
+        ids: [id],
+        posiciones: [i],
+        detalle: 'auto-intersección o anillo mal formado',
+      });
       return;
     }
     if (turf.area(f) === 0) {
-      h.push({ tipo: 'vacia', ids: [id] });
+      h.push({ tipo: 'vacia', ids: [id], posiciones: [i] });
       return;
     }
     const firma = JSON.stringify(f.geometry.coordinates);
     const previo = vistos.get(firma);
-    if (previo) h.push({ tipo: 'duplicada', ids: [previo, id] });
-    else vistos.set(firma, id);
+    if (previo) h.push({ tipo: 'duplicada', ids: [previo.id, id], posiciones: [previo.i, i] });
+    else vistos.set(firma, { id, i });
   });
   return h;
 }
@@ -140,7 +180,12 @@ function indexar(fc: FeatureCollection): RBush<Caja> {
 }
 
 /** Solapes entre polígonos de la misma capa con área de intersección. `minArea` filtra deslizamientos de vértices. */
-export function detectarSolapes(fc: FeatureCollection, minAreaM2 = 1, maxPares = 5000): Hallazgo[] {
+export function detectarSolapes(
+  fc: FeatureCollection,
+  etiqueta: Etiquetador = idDe,
+  minAreaM2 = 1,
+  maxPares = 5000,
+): Hallazgo[] {
   const h: Hallazgo[] = [];
   const arbol = indexar(fc);
   let pares = 0;
@@ -159,7 +204,8 @@ export function detectarSolapes(fc: FeatureCollection, minAreaM2 = 1, maxPares =
         if (area >= minAreaM2)
           h.push({
             tipo: 'solape',
-            ids: [idDe(f, i), idDe(g, c.i)],
+            ids: [etiqueta(f, i), etiqueta(g, c.i)],
+            posiciones: [i, c.i],
             area_m2: Math.round(area * 100) / 100,
           });
       } catch {
@@ -213,11 +259,15 @@ export function detectarHuecos(
   return h;
 }
 
-/** Asigna padre por el punto representativo de cada hijo. Devuelve el mapa hijo→padre y hallazgos. */
+/**
+ * Asigna padre por el punto representativo de cada hijo. Devuelve el mapa hijo→padre y hallazgos.
+ * Los hijos llegan crudos (sin normalizar): `etiqueta` los nombra en los hallazgos.
+ */
 export function asignarPadre(
   hijos: FeatureCollection,
   padres: FeatureCollection,
   campoDeclarado: string | null,
+  etiqueta: Etiquetador = idDe,
 ): { asignacion: Map<number, string>; inferidos: Set<number>; hallazgos: Hallazgo[] } {
   const arbol = indexar(padres);
   const asignacion = new Map<number, string>();
@@ -239,7 +289,7 @@ export function asignarPadre(
       }
     }
     const declarado = campoDeclarado ? c.properties?.[campoDeclarado] : null;
-    const idHijo = idDe(c, i);
+    const idHijo = etiqueta(c, i);
     if (declarado !== null && declarado !== undefined && declarado !== '') {
       // el código declarado ("D01") se compara con el id normalizado del padre ("distrito_municipal:D01")
       const tipoPadre = padres.features[0]?.properties?.tipo as string | undefined;

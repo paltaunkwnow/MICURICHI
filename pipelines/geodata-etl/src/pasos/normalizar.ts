@@ -1,5 +1,6 @@
 /** Normalización de atributos (CLAUDE.md §6.5): snake_case sin tildes, campos mínimos, ids estables. */
 
+import { createHash } from 'node:crypto';
 import type { TipoCapa } from 'contracts';
 import type { Feature, FeatureCollection } from 'geojson';
 
@@ -95,32 +96,97 @@ export function idCapa(capa: TipoCapa, codigo: string): string {
   return `${capa}:${codigo}`;
 }
 
+const texto = (v: unknown): string => (v === null || v === undefined ? '' : String(v).trim());
+
+/**
+ * Orden estable entre features que comparten código: huella de la geometría redondeada a la
+ * precisión de salida (7 decimales) y, si la geometría coincide, de los atributos. No depende de
+ * la posición en el archivo.
+ */
+function huella(f: Feature): string {
+  const r = (c: unknown): unknown =>
+    typeof c === 'number' ? Math.round(c * 1e7) / 1e7 : Array.isArray(c) ? c.map(r) : c;
+  const g = f.geometry as { type?: string; coordinates?: unknown } | null;
+  const atributos = Object.entries(f.properties ?? {}).sort(([a], [b]) => (a < b ? -1 : 1));
+  const hash = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
+  return `${hash([g?.type ?? null, r(g?.coordinates ?? null)])}${hash(atributos)}`;
+}
+
+interface CodigoAsignado {
+  codigo: string;
+  /** Código de origen si hubo que desambiguarlo (repetido). */
+  repetido?: { original: string; veces: number };
+  /** Campo del que salió el código cuando el configurado venía vacío (null = correlativo). */
+  sinCodigo?: { respaldo: string | null };
+}
+
+/**
+ * Código final de cada feature. El código vacío toma el respaldo (OBJECTID); los repetidos se
+ * desambiguan con -2, -3… y los que no tienen nada reciben sin_codigo_1, _2…
+ *
+ * Los sufijos se asignaban por orden de aparición: si el municipio reentregaba la misma capa con
+ * las filas en otro orden, cambiaban los ids (y con ellos a qué polígono apunta un reporte). Ahora
+ * se asignan por la huella de cada feature, y ningún sufijo pisa un código que ya existe en la capa
+ * (un «12-2» real conserva su id aunque «12» esté repetido).
+ */
+function asignarCodigos(fc: FeatureCollection, o: OpcionesNormalizacion): CodigoAsignado[] {
+  const asignados: CodigoAsignado[] = fc.features.map((f) => {
+    const p = f.properties ?? {};
+    const codigo = texto(p[o.campoCodigo]);
+    if (codigo) return { codigo };
+    // sin código: el campo de respaldo (OBJECTID) para no perder la geometría ni colisionar
+    const respaldo = o.campoRespaldo ? texto(p[o.campoRespaldo]) : '';
+    return { codigo: respaldo, sinCodigo: { respaldo: respaldo ? o.campoRespaldo! : null } };
+  });
+  const existentes = new Set(asignados.map((a) => a.codigo).filter(Boolean));
+  const grupos = new Map<string, number[]>();
+  asignados.forEach((a, i) => {
+    const g = grupos.get(a.codigo);
+    if (g) g.push(i);
+    else grupos.set(a.codigo, [i]);
+  });
+  for (const [codigo, indices] of grupos) {
+    if (codigo && indices.length === 1) continue;
+    const huellas = new Map(indices.map((i) => [i, huella(fc.features[i]!)]));
+    // a igual huella las features son indistinguibles: cualquier orden da la misma salida
+    const orden = [...indices].sort((a, b) => {
+      const ha = huellas.get(a)!;
+      const hb = huellas.get(b)!;
+      return ha < hb ? -1 : ha > hb ? 1 : a - b;
+    });
+    let n = codigo ? 2 : 1;
+    orden.forEach((i, k) => {
+      if (codigo && k === 0) return; // la primera conserva el código tal cual
+      let candidato: string;
+      do {
+        candidato = codigo ? `${codigo}-${n}` : `sin_codigo_${n}`;
+        n++;
+      } while (existentes.has(candidato));
+      const a = asignados[i]!;
+      if (codigo) a.repetido = { original: codigo, veces: indices.length };
+      a.codigo = candidato;
+    });
+  }
+  return asignados;
+}
+
 export function normalizar(fc: FeatureCollection, o: OpcionesNormalizacion): FeatureCollection {
-  const vistos = new Map<string, number>();
+  const codigos = asignarCodigos(fc, o);
   const features: Feature[] = fc.features.map((f, i) => {
     const p = f.properties ?? {};
-    let codigo = String(p[o.campoCodigo] ?? '').trim();
-    if (!codigo) {
-      // sin código: se usa el campo de respaldo (OBJECTID) para no perder la geometría ni colisionar
-      const respaldo = o.campoRespaldo ? String(p[o.campoRespaldo] ?? '').trim() : '';
-      codigo = respaldo || `sin_codigo_${i + 1}`;
+    const { codigo, repetido, sinCodigo } = codigos[i]!;
+    if (sinCodigo)
       o.alResolverId?.({
         tipo: 'codigo_vacio',
         id: idCapa(o.capa, codigo),
-        detalle: `feature ${i + 1} sin ${o.campoCodigo}; se usó ${o.campoRespaldo ?? 'un correlativo'}`,
+        detalle: `feature ${i + 1} sin ${o.campoCodigo}; se usó ${sinCodigo.respaldo ?? 'un correlativo estable (por geometría)'}`,
       });
-    }
-    const repeticiones = vistos.get(codigo) ?? 0;
-    vistos.set(codigo, repeticiones + 1);
-    if (repeticiones > 0) {
-      const original = codigo;
-      codigo = `${codigo}-${repeticiones + 1}`;
+    if (repetido)
       o.alResolverId?.({
         tipo: 'id_repetido',
         id: idCapa(o.capa, codigo),
-        detalle: `el código ${original} aparece ${repeticiones + 1} veces; esta geometría quedó como ${codigo}`,
+        detalle: `el código ${repetido.original} aparece ${repetido.veces} veces; esta geometría quedó como ${codigo}`,
       });
-    }
     const nombreOriginal = o.campoNombre ? p[o.campoNombre] : null;
     const nombre = String(
       nombreOriginal ??
