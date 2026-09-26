@@ -1,6 +1,15 @@
+import { CONFIG_DOMINIO } from 'contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from './api';
-import { esCancelado, esPlazoAgotado, mensajeDeEnvio, mensajeDeError } from './errores';
+import {
+  esCancelado,
+  esCuotaAgotada,
+  esPlazoAgotado,
+  esSesionCaducada,
+  mensajeDeEnvio,
+  mensajeDeError,
+  mensajeDeFoto,
+} from './errores';
 import { motivoDeRechazoDeFoto } from './foto';
 
 /** Lo que lanza `AbortSignal.timeout` cuando vence: no es un Error corriente. */
@@ -54,6 +63,45 @@ describe('mensaje del envío del reporte', () => {
     const e = new ErrorApi('PAYLOAD_INVALIDO', 'x', 400);
     expect(mensajeDeEnvio(e)).not.toMatch(/duplicar/i);
     expect(mensajeDeEnvio(e)).toBe(mensajeDeError(e));
+  });
+});
+
+describe('respuestas que cambian el flujo del formulario', () => {
+  it('un 401 (del envío o de la subida de una foto) es una sesión que se cerró', () => {
+    expect(esSesionCaducada(new ErrorApi('NO_AUTENTICADO', 'x', 401))).toBe(true);
+    expect(esSesionCaducada(new ErrorApi('PROHIBIDO', 'x', 403))).toBe(false);
+    expect(esSesionCaducada(new TypeError('Failed to fetch'))).toBe(false);
+  });
+
+  it('el 429 de cuota de fotos muestra el mensaje del servidor junto a la foto', () => {
+    const delServidor =
+      'Llegaste al máximo de 12 fotos por hora. Vas a poder subir otra en 20 minutos.';
+    const e = new ErrorApi('CUOTA_DE_FOTOS', delServidor, 429, {
+      disponible_en: '2026-09-26T15:40:00.000Z',
+    });
+    expect(mensajeDeFoto(e)).toBe(delServidor);
+    expect(mensajeDeFoto(e)).not.toMatch(/inesperado/i);
+  });
+
+  it('sin mensaje en el cuerpo, la cuota de fotos igual se explica (no «Error 429»)', () => {
+    // `pedir` escribe «Error 429» cuando el cuerpo no trae `mensaje`.
+    const m = mensajeDeFoto(new ErrorApi('CUOTA_DE_FOTOS', 'Error 429', 429));
+    expect(m).toContain(`${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora`);
+    expect(m).not.toContain('Error 429');
+  });
+
+  it('cualquier otro fallo de la foto se explica como los demás', () => {
+    const red = new TypeError('Failed to fetch');
+    expect(mensajeDeFoto(red)).toBe(mensajeDeError(red));
+    const pesada = new ErrorApi('ARCHIVO_DEMASIADO_GRANDE', 'La foto supera los 8 MB.', 413);
+    expect(mensajeDeFoto(pesada)).toBe(mensajeDeError(pesada));
+  });
+
+  it('solo el 429 de cuota de la cuenta es «ya enviaste uno hace poco»', () => {
+    expect(esCuotaAgotada(new ErrorApi('CUOTA_DE_REPORTES', 'x', 429))).toBe(true);
+    // El 429 por IP es otra cosa: no cambia el turno de la cuenta.
+    expect(esCuotaAgotada(new ErrorApi('DEMASIADAS_SOLICITUDES', 'x', 429))).toBe(false);
+    expect(esCuotaAgotada(new ErrorApi('CUOTA_DE_REPORTES', 'x', 400))).toBe(false);
   });
 });
 

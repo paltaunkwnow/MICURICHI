@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  combinarSeñales,
   crearCuenta,
   crearReporte,
   iniciarSesion,
@@ -8,6 +9,25 @@ import {
   obtenerYo,
   subirFoto,
 } from './api';
+import { esPlazoAgotado } from './errores';
+
+/**
+ * Simula un navegador sin `AbortSignal.any` (Safari/iOS anterior a 17.4) mientras dura `fn`.
+ * Se reemplaza la propiedad y se restaura tal cual estaba, sin tocar tipos.
+ */
+async function sinAbortSignalAny(fn: () => Promise<void> | void) {
+  const original = Object.getOwnPropertyDescriptor(AbortSignal, 'any');
+  Object.defineProperty(AbortSignal, 'any', {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
+  try {
+    await fn();
+  } finally {
+    if (original) Object.defineProperty(AbortSignal, 'any', original);
+  }
+}
 
 function fingirRespuesta(cuerpo: unknown = {}) {
   const llamadas: Array<{ url: string; init: RequestInit }> = [];
@@ -97,5 +117,62 @@ describe('cliente de la API pública', () => {
     const cabeceras = llamadas.map((l) => l.init.headers as Record<string, string>);
     expect(cabeceras[0]?.['idempotency-key']).toBe('clave-1');
     expect(cabeceras[1]?.['idempotency-key']).toBeUndefined();
+  });
+});
+
+describe('plazo de las peticiones sin AbortSignal.any (iOS < 17.4)', () => {
+  it('el plazo corta aunque el llamador también haya pasado su propia señal', async () => {
+    await sinAbortSignalAny(() => {
+      const propia = new AbortController();
+      const plazo = new AbortController();
+      const s = combinarSeñales(propia.signal, plazo.signal);
+      expect(s.aborted).toBe(false);
+      plazo.abort(new DOMException('tarde', 'TimeoutError'));
+      expect(s.aborted).toBe(true);
+      expect(esPlazoAgotado(s.reason)).toBe(true);
+    });
+  });
+
+  it('cancelar desde fuera (la vista cambió) también corta', async () => {
+    await sinAbortSignalAny(() => {
+      const propia = new AbortController();
+      const s = combinarSeñales(propia.signal, new AbortController().signal);
+      propia.abort();
+      expect(s.aborted).toBe(true);
+    });
+  });
+
+  it('si una de las dos ya venía cortada, la combinada nace cortada', async () => {
+    await sinAbortSignalAny(() => {
+      const cortada = new AbortController();
+      cortada.abort();
+      expect(combinarSeñales(new AbortController().signal, cortada.signal).aborted).toBe(true);
+    });
+  });
+
+  it('una lectura cuyo plazo vence termina en «tardó demasiado», no en una cancelación', async () => {
+    await sinAbortSignalAny(async () => {
+      const timeoutOriginal = Object.getOwnPropertyDescriptor(AbortSignal, 'timeout');
+      // El plazo ya vencido, y con un motivo genérico: así lo reportan algunos navegadores.
+      Object.defineProperty(AbortSignal, 'timeout', {
+        value: () => AbortSignal.abort(new DOMException('Aborted', 'AbortError')),
+        configurable: true,
+        writable: true,
+      });
+      vi.stubGlobal('fetch', (_url: string, init: RequestInit) =>
+        init.signal?.aborted
+          ? Promise.reject(new DOMException('Aborted', 'AbortError'))
+          : Promise.resolve({ ok: true, json: () => Promise.resolve({ features: [] }) }),
+      );
+      try {
+        const error = await obtenerReportes({}, new AbortController().signal).then(
+          () => null,
+          (e: unknown) => e,
+        );
+        expect(esPlazoAgotado(error)).toBe(true);
+      } finally {
+        if (timeoutOriginal) Object.defineProperty(AbortSignal, 'timeout', timeoutOriginal);
+      }
+    });
   });
 });

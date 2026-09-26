@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
 import { Bienvenida } from '@/componentes/Bienvenida';
 import { Portada } from '@/componentes/Portada';
+import { descripcionDeInicio } from '@/lib/ciudad';
+import { obtenerCiudad } from '@/lib/ciudad-servidor';
 
-export const metadata: Metadata = {
-  title: 'Inicio',
-  description:
-    'Mi Curichi: el mapa de los puntos donde se junta el agua en Santa Cruz de la Sierra, hecho por los vecinos.',
-};
+/** La descripción nombra la ciudad de la instalación, que llega en tiempo de ejecución. */
+export async function generateMetadata(): Promise<Metadata> {
+  return { title: 'Inicio', description: descripcionDeInicio(await obtenerCiudad()) };
+}
 
 /**
  * Misma portada en dos formatos, como en el prototipo: en escritorio la página de inicio con el

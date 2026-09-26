@@ -5,6 +5,7 @@ import { Image as IconoImagen, List } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ErrorApi, obtenerReporte, type ReporteFeature } from '@/lib/api';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import { etiquetaSeveridad, fechaCorta, urlFotoRelativa } from '@/lib/formato';
 import { leerMisReportes, olvidarReportes, type ReporteLocal } from '@/lib/misReportes';
 import { Aviso } from './Aviso';
@@ -65,20 +66,29 @@ export function useMisReportes() {
     for (const c of consultas) if (c.isError) c.refetch();
   };
 
-  return { seguidos, listo: locales !== null, reintentar };
+  /**
+   * Borra la lista del dispositivo Y de la pantalla. Antes solo se borraba el almacenamiento: la
+   * lista que ya estaba en memoria seguía a la vista y el vecino creía que no se había borrado.
+   */
+  const olvidar = () => {
+    olvidarReportes();
+    setLocales([]);
+  };
+
+  return { seguidos, listo: locales !== null, reintentar, olvidar };
 }
 
 export function MisReportes() {
-  const { seguidos, listo, reintentar } = useMisReportes();
+  const { seguidos, listo, reintentar, olvidar } = useMisReportes();
+  const ciudad = useCiudad();
   const toast = useToast();
-  const [version, setVersion] = useState(0);
 
   const publicados = seguidos.filter((s) => s.publico).length;
   const enRevision = seguidos.filter((s) => s.enRevision).length;
   const fallidos = seguidos.filter((s) => s.error);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" key={version}>
+    <div className="flex min-h-0 flex-1 flex-col">
       <div className="mx-auto w-full max-w-3xl flex-1 px-5 pt-5 pb-8 md:px-6 md:pt-8">
         <h1 className="titular text-[22px]">Mis reportes</h1>
 
@@ -87,7 +97,10 @@ export function MisReportes() {
             Buscando los reportes de este dispositivo…
           </p>
         ) : seguidos.length === 0 ? (
-          <div className="grid place-items-center px-2.5 py-10 text-center">
+          <div
+            className="grid place-items-center px-2.5 py-10 text-center"
+            data-testid="mis-reportes-vacio"
+          >
             <div className="grid h-16 w-16 place-items-center rounded-full bg-fondo text-tinta-300">
               <List size={26} aria-hidden="true" />
             </div>
@@ -155,10 +168,10 @@ export function MisReportes() {
                         <span className="titular mt-[7px] block text-[16px]">{local.titulo}</span>
                         <span className="mt-1 block text-[14px] text-tinta-600">
                           {p
-                            ? `${fechaCorta(p.creado_en)} · severidad ${etiquetaSeveridad(p.severidad).toLowerCase()}`
+                            ? `${fechaCorta(p.creado_en, ciudad)} · severidad ${etiquetaSeveridad(p.severidad).toLowerCase()}`
                             : error
-                              ? `Enviado el ${fechaCorta(local.enviado_en)} · no pudimos consultar su estado`
-                              : `Enviado el ${fechaCorta(local.enviado_en)} · esperando revisión`}
+                              ? `Enviado el ${fechaCorta(local.enviado_en, ciudad)} · no pudimos consultar su estado`
+                              : `Enviado el ${fechaCorta(local.enviado_en, ciudad)} · esperando revisión`}
                         </span>
                       </span>
                     </Link>
@@ -177,9 +190,9 @@ export function MisReportes() {
             <button
               type="button"
               className="btn btn-fantasma btn-sm mt-3"
+              data-testid="boton-borrar-lista"
               onClick={() => {
-                olvidarReportes();
-                setVersion((v) => v + 1);
+                olvidar();
                 toast('Lista borrada de este dispositivo');
               }}
             >

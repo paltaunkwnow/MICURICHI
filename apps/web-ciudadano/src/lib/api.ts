@@ -39,12 +39,32 @@ export const PLAZOS_MS = {
   subida: 180_000,
 } as const;
 
-/** Combina la señal del llamador con el plazo, sin romper en navegadores sin `AbortSignal.any`. */
-function señalConPlazo(propia: AbortSignal | null | undefined, plazoMs: number): AbortSignal {
-  const plazo = AbortSignal.timeout(plazoMs);
-  if (!propia) return plazo;
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([propia, plazo]);
-  return propia;
+/**
+ * Una señal que se corta cuando se corta cualquiera de las dos: la del llamador (TanStack Query
+ * cancela lo que quedó viejo) o la del plazo.
+ *
+ * `AbortSignal.any` no existe en Safari/iOS anteriores a 17.4. Antes, en ese caso se devolvía
+ * solo la señal del llamador y el plazo se perdía: justo en los teléfonos más viejos, una lectura
+ * con la red a medias quedaba colgada para siempre. El reemplazo hace lo mismo a mano.
+ */
+export function combinarSeñales(a: AbortSignal, b: AbortSignal): AbortSignal {
+  if (typeof AbortSignal.any === 'function') return AbortSignal.any([a, b]);
+  const control = new AbortController();
+  const cortada = a.aborted ? a : b.aborted ? b : null;
+  if (cortada) {
+    control.abort(cortada.reason);
+    return control.signal;
+  }
+  const alCortar = (s: AbortSignal) => () => {
+    control.abort(s.reason);
+    a.removeEventListener('abort', deA);
+    b.removeEventListener('abort', deB);
+  };
+  const deA = alCortar(a);
+  const deB = alCortar(b);
+  a.addEventListener('abort', deA, { once: true });
+  b.addEventListener('abort', deB, { once: true });
+  return control.signal;
 }
 
 /**
@@ -70,37 +90,48 @@ async function pedir<T>(
   plazoMs: number = PLAZOS_MS.lectura,
   credenciales: Credenciales = 'omit',
 ): Promise<T> {
-  const r = await fetch(url, {
-    ...init,
-    credentials: credenciales,
-    // TanStack Query pasa su `signal` en cada `queryFn`: al cambiar la vista del mapa, la
-    // consulta anterior se marca obsoleta y esta señal la aborta. Sin esto, arrastrar el mapa
-    // deja en vuelo una petición por cada movimiento, todas compitiendo por el mismo límite de
-    // lecturas, y la respuesta de una vista vieja puede llegar después y pisar a la nueva.
-    signal: señalConPlazo(init?.signal, plazoMs),
-    headers: {
-      accept: 'application/json',
-      ...(init?.body && !(init.body instanceof FormData)
-        ? { 'content-type': 'application/json' }
-        : {}),
-      ...init?.headers,
-    },
-  });
-  if (!r.ok) {
-    let cuerpo: { codigo?: string; mensaje?: string; detalles?: unknown } = {};
-    try {
-      cuerpo = await r.json();
-    } catch {
-      /* sin cuerpo */
+  const plazo = AbortSignal.timeout(plazoMs);
+  const propia = init?.signal ?? null;
+  try {
+    const r = await fetch(url, {
+      ...init,
+      credentials: credenciales,
+      // TanStack Query pasa su `signal` en cada `queryFn`: al cambiar la vista del mapa, la
+      // consulta anterior se marca obsoleta y esta señal la aborta. Sin esto, arrastrar el mapa
+      // deja en vuelo una petición por cada movimiento, todas compitiendo por el mismo límite de
+      // lecturas, y la respuesta de una vista vieja puede llegar después y pisar a la nueva.
+      signal: propia ? combinarSeñales(propia, plazo) : plazo,
+      headers: {
+        accept: 'application/json',
+        ...(init?.body && !(init.body instanceof FormData)
+          ? { 'content-type': 'application/json' }
+          : {}),
+        ...init?.headers,
+      },
+    });
+    if (!r.ok) {
+      let cuerpo: { codigo?: string; mensaje?: string; detalles?: unknown } = {};
+      try {
+        cuerpo = await r.json();
+      } catch {
+        /* sin cuerpo */
+      }
+      throw new ErrorApi(
+        cuerpo.codigo ?? 'ERROR',
+        cuerpo.mensaje ?? `Error ${r.status}`,
+        r.status,
+        cuerpo.detalles,
+      );
     }
-    throw new ErrorApi(
-      cuerpo.codigo ?? 'ERROR',
-      cuerpo.mensaje ?? `Error ${r.status}`,
-      r.status,
-      cuerpo.detalles,
-    );
+    return (await r.json()) as T;
+  } catch (e) {
+    // Con la señal combinada a mano, hay navegadores que rechazan con un `AbortError` genérico
+    // aunque lo que venció fue el plazo: se leería como una cancelación y no como «tardó
+    // demasiado». Si fue el plazo (y no el llamador quien canceló), se dice que fue el plazo.
+    if (!(e instanceof ErrorApi) && plazo.aborted && !propia?.aborted)
+      throw new DOMException('El servidor tardó demasiado en responder.', 'TimeoutError');
+    throw e;
   }
-  return r.json() as Promise<T>;
 }
 
 export type ReporteFeature = ReporteFeatureCollection['features'][number];

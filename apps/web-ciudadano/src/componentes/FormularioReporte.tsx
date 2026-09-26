@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BANDAS,
   CONFIG_DOMINIO,
@@ -18,52 +18,65 @@ import { Camera, Check, ChevronLeft, Copy, Navigation, Plus, ShieldCheck, X } fr
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { type ChangeEvent, useEffect, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
-import { useForm } from 'react-hook-form';
-import {
-  crearReporte,
-  ErrorApi,
-  nuevaClaveIdempotencia,
-  resolverPunto,
-  subirFoto,
-} from '@/lib/api';
+import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { type FieldErrors, useForm } from 'react-hook-form';
+import { crearReporte, nuevaClaveIdempotencia, resolverPunto, subirFoto } from '@/lib/api';
 import {
   type Borrador,
   borradorTieneContenido,
+  type FotoDelBorrador,
   guardarBorrador,
   leerBorrador,
   olvidarBorrador,
-  PASOS_REPORTE as PASOS,
 } from '@/lib/borrador';
-import { detallesDeError, mensajeDeEnvio, mensajeDeError } from '@/lib/errores';
+import { centroDeCiudad } from '@/lib/ciudad';
+import { useCiudad } from '@/lib/ciudad-contexto';
+import {
+  detallesDeError,
+  esCuotaAgotada,
+  esSesionCaducada,
+  mensajeDeEnvio,
+  mensajeDeError,
+  mensajeDeFoto,
+} from '@/lib/errores';
 import {
   contadorDescripcion,
   etiquetaDistrito,
   etiquetaUnidadVecinal,
+  horaCorta,
   urlFotoRelativa,
 } from '@/lib/formato';
+import {
+  armarEnvio,
+  campoFechaDesdeIso,
+  camposSinLugar,
+  centroDelPaso1,
+  type EstadoParaAvanzar,
+  isoDesdeCampoFecha,
+  limitesFechaEvento,
+  MENSAJE_FALTA_UBICACION,
+  mosaicoDeFotos,
+  PASOS_REPORTE as PASOS,
+  pasoDelError,
+  problemaFechaEvento,
+  puedeAvanzar,
+  respuestasSumidero,
+  type Sumidero,
+  type Ubicacion,
+  ubicacionDelEnlace,
+  ubicacionDesdeGps,
+  valoresIniciales,
+} from '@/lib/formulario-reporte';
 import { motivoDeRechazoDeFoto } from '@/lib/foto';
-import { CENTRO_INICIAL, leerCoordenadas } from '@/lib/geo';
+import { leerCoordenadas } from '@/lib/geo';
 import { recordarReporte } from '@/lib/misReportes';
-import { useSesion } from '@/lib/sesion';
+import { refrescarSesion, useSesion } from '@/lib/sesion';
 import { AccesoRequerido } from './AccesoRequerido';
 import { Aviso } from './Aviso';
 import { ChipSeveridad } from './ChipSeveridad';
+import { ErrorDeCarga } from './ErrorDeCarga';
 import { MapaDiferido } from './MapaDiferido';
 import { useToast } from './Toast';
-
-interface Ubicacion {
-  lat: number;
-  lon: number;
-  metodo: 'gps' | 'manual';
-  precisionM: number | null;
-}
-
-interface FotoLista {
-  objeto_key: string;
-  url: string;
-}
 
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
 const CAUSAS = [
@@ -84,11 +97,16 @@ const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
  * sacudida del pulgar sería una llamada a `POST /geo/v1/resolver`, que tiene límite por IP.
  */
 const ESPERA_RESOLVER_MS = 600;
-
-/** Espacio de foto abierto con «¿Querés añadir otro detalle?»; se consume al subir su foto. */
-interface EspacioCamara {
-  id: number;
-}
+/**
+ * Margen para el `change` de la cámara una vez que la página recupera el foco: en algunos
+ * teléfonos llega un poco después. Pasado el margen se quita el espacio vacío; si llegó una foto,
+ * su subida ya se ve aparte.
+ */
+const ESPERA_REGRESO_CAMARA_MS = 1000;
+const MAX_FOTOS = CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE;
+const TEXTO_FOTOS_COMPLETAS = `Ya llegaste al máximo de ${MAX_FOTOS} fotos. Quitá una si querés cambiarla.`;
+const TEXTO_UBICACION_APROXIMADA =
+  'Tu ubicación es aproximada; mové el mapa hasta el punto exacto.';
 
 /** Opción en tarjeta con radio real escondido: el aspecto es del prototipo, el control es nativo. */
 function Opcion({
@@ -152,10 +170,67 @@ function Pastilla({
   );
 }
 
+/**
+ * Mensaje de error de un campo, en su lugar de la pantalla. `role="alert"` para que se anuncie al
+ * aparecer, y `data-campo-con-error` para que, tras un rechazo, la vista pueda ir hasta él.
+ */
+function MensajeDeCampo({ campo, mensaje }: { campo: string; mensaje?: string | null }) {
+  if (!mensaje) return null;
+  return (
+    <p
+      id={`error-${campo}`}
+      className="error"
+      role="alert"
+      data-testid={`error-campo-${campo}`}
+      data-campo-con-error=""
+    >
+      {mensaje}
+    </p>
+  );
+}
+
+/**
+ * «×» de una miniatura. El círculo se ve de 28 px, pero se toca en 48 × 48 (CLAUDE.md §14.4):
+ * antes medía 24 px y en un teléfono quitar una foto era cuestión de puntería.
+ */
+function BotonQuitar({ etiqueta, onClick }: { etiqueta: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="absolute top-0 right-0 grid h-12 w-12 place-items-center"
+      aria-label={etiqueta}
+      onClick={onClick}
+    >
+      <span
+        aria-hidden="true"
+        className="grid h-7 w-7 place-items-center rounded-full bg-white/95 text-[15px] font-bold shadow-sm"
+      >
+        ×
+      </span>
+    </button>
+  );
+}
+
+/** Texto del error de un campo cualquiera, incluso uno que el tipo del formulario no conoce. */
+function mensajeDe(errores: FieldErrors<ReporteCrearEntrada>, campo: string): string {
+  const e = (errores as Record<string, { message?: unknown } | undefined>)[campo];
+  return typeof e?.message === 'string' ? e.message : '';
+}
+
 export function FormularioReporte() {
   const parametros = useSearchParams();
   const toast = useToast();
-  const { usuario, cargando: comprobandoSesion, puedeReportarDesde } = useSesion();
+  const cliente = useQueryClient();
+  /** Centro del mapa sin punto elegido, locale y zona de las horas: los de esta instalación. */
+  const ciudad = useCiudad();
+  const {
+    usuario,
+    cargando: comprobandoSesion,
+    errorDeCarga: errorSesion,
+    reintentando: reintentandoSesion,
+    reintentar: reintentarSesion,
+    puedeReportarDesde,
+  } = useSesion();
   /**
    * La sesión se fue a mitad del formulario. Se guarda aparte de `usuario` porque son dos cosas
    * distintas: «nunca tuviste cuenta» y «la tenías y venció mientras escribías». La segunda
@@ -167,54 +242,58 @@ export function FormularioReporte() {
   const [resuelto, setResuelto] = useState<ResolverRespuesta | null>(null);
   const [resolviendo, setResolviendo] = useState(false);
   const [errorUbicacion, setErrorUbicacion] = useState<string | null>(null);
+  /** Aviso que no es error: la ubicación del teléfono llegó con kilómetros de imprecisión. */
+  const [avisoUbicacion, setAvisoUbicacion] = useState<string | null>(null);
   const [mostrarCoordenadas, setMostrarCoordenadas] = useState(false);
   const [latTexto, setLatTexto] = useState('');
   const [lonTexto, setLonTexto] = useState('');
-  const [fotos, setFotos] = useState<FotoLista[]>([]);
+  const [fotos, setFotos] = useState<FotoDelBorrador[]>([]);
   const [errorFoto, setErrorFoto] = useState<string | null>(null);
   const [creado, setCreado] = useState<{ id: string } | null>(null);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [retomado, setRetomado] = useState(false);
-  const [espaciosCamara, setEspaciosCamara] = useState<EspacioCamara[]>([]);
+  /** Se abrió la cámara para «otro detalle» y todavía no volvió con una foto. */
+  const [esperandoCamara, setEsperandoCamara] = useState(false);
+  /**
+   * El borrador ya se leyó. El mapa del paso 1 no se monta antes: se crea UNA vez con su centro, y
+   * si naciera en el centro por defecto mientras el borrador trae otro punto, el marcador clavado
+   * en el medio de la pantalla mostraría un lugar distinto del que se va a enviar.
+   */
+  const [borradorLeido, setBorradorLeido] = useState(false);
+  /** Tras un rechazo: llevar la vista hasta el primer mensaje de error del paso. */
+  const [mostrarError, setMostrarError] = useState(false);
   const mapa = useRef<MapaGl | null>(null);
   const archivo = useRef<HTMLInputElement>(null);
-  const siguienteEspacio = useRef(1);
+  const camara = useRef<HTMLInputElement | null>(null);
+  const ubicacionRef = useRef<Ubicacion | null>(null);
+  ubicacionRef.current = ubicacion;
+  const pasoRef = useRef(paso);
+  pasoRef.current = paso;
 
   /**
    * «Me pasa a mí»: el detalle de un punto abre este flujo ya ubicado ahí. Si el reporte nuevo
    * cae dentro del radio de recurrencia, el sistema lo agrupa solo en el mismo punto crítico
    * (CLAUDE.md §9.2) — no hace falta un endpoint aparte para «sumarse».
    */
-  const centroInicial: [number, number] = (() => {
-    const lat = Number(parametros?.get('lat'));
-    const lon = Number(parametros?.get('lon'));
-    return Number.isFinite(lat) && Number.isFinite(lon) && (lat !== 0 || lon !== 0)
-      ? [lon, lat]
-      : CENTRO_INICIAL;
-  })();
+  const enlace = ubicacionDelEnlace(parametros?.get('lat'), parametros?.get('lon'));
 
   const form = useForm<ReporteCrearEntrada>({
     resolver: zodResolver(ReporteCrearSchema),
     mode: 'onSubmit',
-    defaultValues: {
-      ubicacion_tipo: 'via_publica',
-      causa_presunta: 'desconocida',
-      descripcion: '',
-      fotos: [],
-      sitio_web: '',
-    },
+    defaultValues: valoresIniciales(),
   });
   const valores = form.watch();
 
-  const resolviendoRef = useRef<AbortController | null>(null);
-  const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (temporizador.current) clearTimeout(temporizador.current);
-      resolviendoRef.current?.abort();
-    },
-    [],
-  );
+  /** Ubicación para la que vale `resuelto` (la misma referencia): esa no se vuelve a preguntar. */
+  const resueltoPara = useRef<Ubicacion | null>(null);
+  const dejarDeVigilarCamara = useRef<(() => void) | null>(null);
+  useEffect(() => () => dejarDeVigilarCamara.current?.(), []);
+
+  // El mapa del paso 1 se destruye al salir del paso: su referencia no puede quedar apuntando a un
+  // mapa muerto, que el GPS o las coordenadas intentarían mover.
+  useEffect(() => {
+    if (paso !== 1) mapa.current = null;
+  }, [paso]);
 
   /**
    * Una clave por formulario, estable entre reintentos: si el envío se corta y el vecino vuelve a
@@ -228,18 +307,29 @@ export function FormularioReporte() {
   // Se restaura una sola vez, al montar. Si se restaurara en cada render, cada tecla del vecino
   // competiría con lo guardado y el formulario pelearía consigo mismo.
   const restaurado = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: se restaura una sola vez, al montar (ver arriba)
   useEffect(() => {
     if (restaurado.current) return;
     restaurado.current = true;
     const b = leerBorrador();
-    if (!b || !borradorTieneContenido(b)) return;
-    claveEnvio.current = b.clave;
-    form.reset({ ...form.getValues(), ...b.valores });
-    setFotos(b.fotos);
-    if (b.ubicacion) setUbicacion(b.ubicacion);
-    if (b.resuelto) setResuelto(b.resuelto as ResolverRespuesta);
-    setPaso(b.paso);
-    setRetomado(true);
+    if (b && borradorTieneContenido(b)) {
+      claveEnvio.current = b.clave;
+      form.reset({ ...form.getValues(), ...b.valores });
+      setFotos(b.fotos);
+      if (b.ubicacion && b.resuelto) {
+        resueltoPara.current = b.ubicacion;
+        setUbicacion(b.ubicacion);
+        setResuelto(b.resuelto as ResolverRespuesta);
+      } else if (b.ubicacion) {
+        // Se guardó mientras se resolvía: se vuelve a preguntar en vez de dejar «Continuar» trabado.
+        fijarUbicacion(b.ubicacion);
+      }
+      setPaso(b.paso);
+      setRetomado(true);
+    } else if (enlace) {
+      fijarUbicacion({ ...enlace, metodo: 'manual', precisionM: null, precargada: true });
+    }
+    setBorradorLeido(true);
   }, [form]);
 
   // Guardar en cada cambio. Es `sessionStorage`, así que escribir es barato y síncrono; lo que
@@ -259,48 +349,56 @@ export function FormularioReporte() {
   const empezarDeCero = () => {
     olvidarBorrador();
     claveEnvio.current = nuevaClaveIdempotencia();
-    form.reset({
-      ubicacion_tipo: 'via_publica',
-      causa_presunta: 'desconocida',
-      descripcion: '',
-      fotos: [],
-      sitio_web: '',
-    });
+    form.reset(valoresIniciales());
+    setResolviendo(false);
     setFotos([]);
     setUbicacion(null);
     setResuelto(null);
     setErrorEnvio(null);
     setErrorUbicacion(null);
+    setAvisoUbicacion(null);
+    setErrorFoto(null);
+    setEsperandoCamara(false);
     setRetomado(false);
     setPaso(1);
+    // Como recién abierto: el punto de partida vuelve a ser el del enlace, o el centro de la ciudad.
+    if (enlace) fijarUbicacion({ ...enlace, metodo: 'manual', precisionM: null, precargada: true });
+    mapa.current?.jumpTo({ center: centroDelPaso1(null, enlace, centroDeCiudad(ciudad)) });
   };
 
-  function fijarUbicacion(
-    lat: number,
-    lon: number,
-    metodo: 'gps' | 'manual',
-    precisionM: number | null,
-  ) {
-    setUbicacion({ lat, lon, metodo, precisionM });
+  function fijarUbicacion(u: Ubicacion) {
+    setUbicacion(u);
     // Estos cuatro campos no tienen control visible, pero SÍ están en ReporteCrearSchema, que es
     // el resolver del formulario. Si no se registran, `handleSubmit` falla la validación por
     // lat/lon indefinidos y no llega a llamar al callback: el botón de enviar no hacía nada.
-    form.setValue('lat', lat, { shouldValidate: false });
-    form.setValue('lon', lon, { shouldValidate: false });
-    form.setValue('ubicacion_metodo', metodo, { shouldValidate: false });
-    form.setValue('precision_gps_m', precisionM, { shouldValidate: false });
-    form.clearErrors(['lat', 'lon', 'ubicacion_metodo']);
+    form.setValue('lat', u.lat, { shouldValidate: false });
+    form.setValue('lon', u.lon, { shouldValidate: false });
+    form.setValue('ubicacion_metodo', u.metodo, { shouldValidate: false });
+    form.setValue('precision_gps_m', u.precisionM, { shouldValidate: false });
+    form.clearErrors(['lat', 'lon', 'ubicacion_metodo', 'precision_gps_m']);
     setErrorUbicacion(null);
+    setAvisoUbicacion(null);
+    // La unidad vecinal a la vista es la del punto anterior: se borra y «Continuar» espera la
+    // respuesta del punto nuevo, que pide el efecto de abajo.
+    setResuelto(null);
+    setResolviendo(true);
+  }
 
-    if (temporizador.current) clearTimeout(temporizador.current);
-    temporizador.current = setTimeout(async () => {
-      resolviendoRef.current?.abort();
-      const control = new AbortController();
-      resolviendoRef.current = control;
-      setResolviendo(true);
+  /**
+   * Cada punto nuevo se resuelve tras un momento de quietud; si cambia antes, la limpieza cancela
+   * la espera y la pregunta en vuelo (su respuesta sería la de otro punto). Es un efecto y no un
+   * temporizador suelto: en desarrollo React desmonta y vuelve a montar una vez, y el temporizador
+   * que se programaba al restaurar el borrador o al llegar por «Me pasa a mí» moría en ese
+   * desmontaje y nadie lo volvía a pedir.
+   */
+  useEffect(() => {
+    if (!ubicacion || resueltoPara.current === ubicacion) return;
+    const control = new AbortController();
+    const espera = setTimeout(async () => {
       try {
-        const r = await resolverPunto(lat, lon, control.signal);
+        const r = await resolverPunto(ubicacion.lat, ubicacion.lon, control.signal);
         if (control.signal.aborted) return;
+        resueltoPara.current = ubicacion;
         setResuelto(r);
         setErrorUbicacion(
           r.dentro_cobertura
@@ -315,7 +413,11 @@ export function FormularioReporte() {
         if (!control.signal.aborted) setResolviendo(false);
       }
     }, ESPERA_RESOLVER_MS);
-  }
+    return () => {
+      clearTimeout(espera);
+      control.abort();
+    };
+  }, [ubicacion]);
 
   function usarMiUbicacion() {
     if (!navigator.geolocation) {
@@ -327,17 +429,14 @@ export function FormularioReporte() {
     toast('Buscando tu ubicación…');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        mapa.current?.flyTo({
-          center: [pos.coords.longitude, pos.coords.latitude],
-          zoom: 17,
-          duration: 700,
-        });
-        fijarUbicacion(
-          pos.coords.latitude,
-          pos.coords.longitude,
-          'gps',
-          pos.coords.accuracy ?? null,
-        );
+        // Una respuesta tardía no mueve en silencio un punto que la persona ya dio por bueno.
+        if (pasoRef.current !== 1) return;
+        const { ubicacion: u, aproximada } = ubicacionDesdeGps(pos.coords);
+        // `flyTo` no trae `originalEvent`: el mapa no lo toma como un gesto y no pisa el método ni
+        // la precisión del GPS con los de una elección manual.
+        mapa.current?.flyTo({ center: [u.lon, u.lat], zoom: aproximada ? 14 : 17, duration: 700 });
+        fijarUbicacion(u);
+        if (aproximada) setAvisoUbicacion(TEXTO_UBICACION_APROXIMADA);
       },
       () =>
         setErrorUbicacion(
@@ -350,47 +449,131 @@ export function FormularioReporte() {
   const subir = useMutation({
     mutationFn: subirFoto,
     onSuccess: (f) => {
-      setFotos((prev) => [...prev, { objeto_key: f.objeto_key, url: f.url }]);
+      setFotos((prev) => [
+        ...prev,
+        { objeto_key: f.objeto_key, url: f.url, subida_en: Date.now() },
+      ]);
       setErrorFoto(null);
       toast('Foto agregada · metadatos eliminados');
     },
-    onError: (e) => setErrorFoto(mensajeDeError(e)),
+    onError: (e) => {
+      // 401: la sesión venció mientras se elegía la foto. Mismo camino que el envío («Se cerró tu
+      // sesión», con el borrador guardado) en vez de un error suelto que no dice qué hacer.
+      if (esSesionCaducada(e)) {
+        setSesionCaducada(true);
+        return;
+      }
+      // El resto (incluido el 429 de cuota de fotos, con su propio texto) va junto a las fotos y
+      // no toca nada más del formulario.
+      setErrorFoto(mensajeDeFoto(e));
+    },
+  });
+
+  const mosaico = mosaicoDeFotos({
+    subidas: fotos.length,
+    subiendo: subir.isPending,
+    esperandoCamara,
   });
 
   /**
-   * Único camino de subida, sea el «Agregar» de la galería o un espacio de «Foto de referencia»
-   * con la cámara. Se comprueba ANTES de subir: el servidor lo rechaza igual (413 / 415), pero
-   * llegar hasta ahí significa haber mandado hasta 8 MB por datos móviles para que le digan que
-   * no, y quien peor conexión tiene es quien más lo paga.
+   * Único camino de subida, sea el «Agregar» de la galería o la cámara de «otro detalle». Se
+   * comprueba ANTES de subir: el servidor lo rechaza igual (413 / 415), pero llegar hasta ahí
+   * significa haber mandado hasta 8 MB por datos móviles para que le digan que no, y quien peor
+   * conexión tiene es quien más lo paga.
    */
-  function alElegirFoto(e: ChangeEvent<HTMLInputElement>, alSubir?: () => void) {
+  function alElegirFoto(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = '';
     if (!f) return;
+    if (mosaico.completas) {
+      setErrorFoto(TEXTO_FOTOS_COMPLETAS);
+      return;
+    }
     const error = motivoDeRechazoDeFoto(f);
     if (error) {
       setErrorFoto(error);
       return;
     }
-    subir.mutate(f, alSubir ? { onSuccess: alSubir } : undefined);
+    subir.mutate(f);
   }
 
-  const quitarEspacio = (id: number) => setEspaciosCamara((p) => p.filter((x) => x.id !== id));
+  /**
+   * El input de la cámara está siempre montado (uno solo, no uno por espacio): quitar el espacio
+   * vacío nunca se lleva por delante una foto que todavía está llegando. `cancel` (Chrome 113+,
+   * Safari 16.4+, Firefox 91+) avisa que la persona cerró la cámara sin sacar nada.
+   */
+  const conectarCamara = useCallback((el: HTMLInputElement | null) => {
+    camara.current = el;
+    if (!el) return;
+    const alCancelar = () => setEsperandoCamara(false);
+    el.addEventListener('cancel', alCancelar);
+    return () => {
+      el.removeEventListener('cancel', alCancelar);
+      camara.current = null;
+    };
+  }, []);
 
-  // El tope cuenta también los espacios abiertos y sin foto: si no, se podrían abrir más
-  // espacios que fotos admite el reporte y el último fallaría al subir.
-  const lugaresOcupados = fotos.length + espaciosCamara.length;
-  const fotosCompletas = lugaresOcupados >= CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE;
+  /**
+   * Para los navegadores sin evento `cancel`: al volver de la cámara (la página recupera el foco o
+   * vuelve a estar visible) se quita el espacio vacío. Antes quedaba para siempre y ocupaba uno de
+   * los tres lugares de foto.
+   */
+  function vigilarRegresoDeLaCamara() {
+    dejarDeVigilarCamara.current?.();
+    let espera: ReturnType<typeof setTimeout> | null = null;
+    function quitarEscuchas() {
+      window.removeEventListener('focus', alVolver);
+      document.removeEventListener('visibilitychange', alVolver);
+    }
+    function alVolver() {
+      if (document.visibilityState !== 'visible') return;
+      quitarEscuchas();
+      espera = setTimeout(() => setEsperandoCamara(false), ESPERA_REGRESO_CAMARA_MS);
+    }
+    window.addEventListener('focus', alVolver);
+    document.addEventListener('visibilitychange', alVolver);
+    dejarDeVigilarCamara.current = () => {
+      quitarEscuchas();
+      if (espera) clearTimeout(espera);
+    };
+  }
 
   function abrirOtroDetalle() {
-    if (fotosCompletas) return;
-    const id = siguienteEspacio.current++;
-    // flushSync pinta el espacio ya, dentro del mismo toque: el `<input>` tiene que existir para
-    // abrir la cámara, y los navegadores solo la abren en respuesta directa a un gesto. Si aun así
-    // no se abre, el espacio queda a la vista con su propio botón y basta con tocarlo.
-    flushSync(() => setEspaciosCamara((p) => [...p, { id }]));
-    document.getElementById(`foto-referencia-${id}`)?.click();
+    if (mosaico.completas || subir.isPending) return;
+    setEsperandoCamara(true);
+    // El clic abre la cámara dentro del mismo toque, que es lo único que aceptan los navegadores.
+    // Si aun así no se abre, el espacio queda a la vista con su propio botón y basta con tocarlo.
+    camara.current?.click();
   }
+
+  /** Respuesta a «¿Hay sumidero cercano?», con las otras dos puestas en regla (contracts 0.6.0). */
+  function responderSumidero(cercano: Sumidero['sumidero_cercano']) {
+    const r = respuestasSumidero(cercano, form.getValues());
+    form.setValue('sumidero_cercano', r.sumidero_cercano);
+    form.setValue('sumidero_estado', r.sumidero_estado);
+    form.setValue('agua_brota_sumidero', r.agua_brota_sumidero);
+    form.clearErrors(['sumidero_cercano', 'sumidero_estado', 'agua_brota_sumidero']);
+  }
+
+  /** Lleva a la persona al paso del primer campo rechazado, que es donde está su mensaje. */
+  function llevarAlError(campos: string[]) {
+    const destino = pasoDelError(campos);
+    if (destino === 1) setErrorUbicacion(MENSAJE_FALTA_UBICACION);
+    setPaso(destino);
+    setMostrarError(true);
+  }
+
+  // Tras un rechazo, el paso del error ya está montado: se abre el bloque plegado si el mensaje
+  // quedó adentro y se lleva la vista hasta él. Un mensaje que no se ve es un botón que no hace
+  // nada (TRASPASO §3.8).
+  useEffect(() => {
+    if (!mostrarError) return;
+    setMostrarError(false);
+    const primero = document.querySelector<HTMLElement>('[data-campo-con-error]');
+    const plegado = primero?.closest('details');
+    if (plegado) plegado.open = true;
+    primero?.scrollIntoView({ block: 'center' });
+  }, [mostrarError]);
 
   const enviar = useMutation({
     mutationFn: (payload: ReporteCrearEntrada) =>
@@ -410,25 +593,31 @@ export function FormularioReporte() {
       // guardado significaría que el próximo reporte arrancaría con los datos de este.
       olvidarBorrador();
       setCreado({ id: p.id });
+      // El turno de la cuenta acaba de cambiar en el servidor; sin esto, el aviso de «ya enviaste
+      // uno hace poco» no salía hasta que caducara la consulta, cinco minutos después.
+      void refrescarSesion(cliente);
     },
     onError: (e) => {
       // 401: la sesión venció entre que se abrió el formulario y se pulsó «Enviar». El borrador
       // sigue guardado, así que se ofrece volver a entrar en vez de tirar el trabajo.
-      if (e instanceof ErrorApi && e.estado === 401) {
+      if (esSesionCaducada(e)) {
         setSesionCaducada(true);
         return;
       }
       // 429 de cuota: no es un fallo de red ni algo que se arregle reintentando, y el texto
       // genérico de «probá de nuevo» sería mentira. El servidor ya manda un mensaje con el
-      // tiempo que falta; se usa ese.
-      if (e instanceof ErrorApi && e.estado === 429 && e.codigo === 'CUOTA_DE_REPORTES') {
+      // tiempo que falta; se usa ese, y se vuelve a preguntar el turno para el aviso de arriba.
+      if (esCuotaAgotada(e)) {
         setErrorEnvio(e.message);
+        void refrescarSesion(cliente);
         return;
       }
       setErrorEnvio(mensajeDeEnvio(e));
-      for (const d of detallesDeError(e)) {
+      const detalles = detallesDeError(e);
+      for (const d of detalles) {
         form.setError(d.campo as keyof ReporteCrearEntrada, { message: d.mensaje });
       }
+      if (detalles.length) llevarAlError(detalles.map((d) => d.campo));
     },
   });
 
@@ -451,10 +640,28 @@ export function FormularioReporte() {
         Un momento…
       </p>
     );
+  // Que no se pueda preguntar por la sesión (plazo, API caída) NO es «no tenés cuenta»: a quien sí
+  // la tiene no se lo puede mandar a crear otra. Se dice lo que pasó y se ofrece reintentar; lo
+  // escrito sigue en el borrador.
+  if (errorSesion)
+    return (
+      <div className="flex flex-1 items-center justify-center p-5">
+        <div className="w-full max-w-md">
+          <ErrorDeCarga
+            error={errorSesion}
+            que="tu sesión"
+            alReintentar={reintentarSesion}
+            reintentando={reintentandoSesion}
+            testId="error-sesion"
+          />
+        </div>
+      </div>
+    );
   if (!usuario) return <AccesoRequerido />;
 
   // ---------------------------------------------------------------- pasos
 
+  const ahora = new Date();
   const severidad =
     valores.profundidad_estimada && valores.frecuencia
       ? calcularSeveridad({
@@ -463,43 +670,48 @@ export function FormularioReporte() {
         })
       : null;
 
-  const puedePaso2 = !!ubicacion && !!resuelto?.dentro_cobertura;
-  const puedePaso3 = !!valores.profundidad_estimada && !!valores.frecuencia;
-  const puedePaso4 = (valores.descripcion ?? '').trim().length >= CONFIG_DOMINIO.DESCRIPCION_MIN;
+  const estadoAvance: EstadoParaAvanzar = {
+    ubicacion,
+    resuelto,
+    resolviendo,
+    profundidad_estimada: valores.profundidad_estimada,
+    frecuencia: valores.frecuencia,
+    evento_en: valores.evento_en,
+    descripcion: valores.descripcion,
+    subiendoFoto: subir.isPending,
+    enviando: enviar.isPending,
+    ahora,
+  };
+  const errores = form.formState.errors;
+  const limitesFecha = limitesFechaEvento(ahora);
+  const errorFecha = errores.evento_en?.message ?? problemaFechaEvento(valores.evento_en, ahora);
 
   const irAdelante = () => setPaso((p) => Math.min(PASOS, p + 1));
   const irAtras = () => setPaso((p) => Math.max(1, p - 1));
 
   const enviarFormulario = form.handleSubmit(
     (datos) => {
+      // Defensa: con una foto subiendo el botón está deshabilitado, pero Enter también envía.
+      if (subir.isPending) return;
       if (!ubicacion) {
-        setErrorEnvio('Falta la ubicación: volvé al paso 1 y elegí el punto.');
+        setErrorUbicacion(MENSAJE_FALTA_UBICACION);
         setPaso(1);
         return;
       }
       setErrorEnvio(null);
-      enviar.mutate({
-        ...datos,
-        lat: ubicacion.lat,
-        lon: ubicacion.lon,
-        ubicacion_metodo: ubicacion.metodo,
-        precision_gps_m: ubicacion.precisionM,
-        fotos: fotos.map((f) => f.objeto_key),
-      });
+      enviar.mutate(armarEnvio(datos, ubicacion, fotos));
     },
-    (errores) => {
-      // Sin esto, un fallo de validación en un campo sin control visible (lat, lon,
-      // ubicacion_metodo) dejaba el botón sin efecto y sin ningún mensaje.
-      const ocultos = ['lat', 'lon', 'ubicacion_metodo', 'precision_gps_m'] as const;
-      if (ocultos.some((c) => errores[c])) {
-        setErrorEnvio('Falta la ubicación: volvé al paso 1 y elegí el punto.');
-        setPaso(1);
-        return;
-      }
-      const pasoDelError =
-        errores.profundidad_estimada || errores.frecuencia ? 2 : errores.descripcion ? 3 : 4;
-      setPaso(pasoDelError);
-      setErrorEnvio('Revisá los campos marcados y volvé a intentar.');
+    (rechazados) => {
+      // Cada error se muestra en su campo y se lleva a la persona al paso donde está. Antes todo
+      // iba a la revisión con un «revisá los campos marcados» genérico, lejos del campo: con la
+      // fecha del evento o el sumidero, un botón que no hacía nada (TRASPASO §3.8). Lo que no
+      // tiene un control propio se dice en la revisión, con su propio texto.
+      const campos = Object.keys(rechazados);
+      const sueltos = camposSinLugar(campos)
+        .map((c) => mensajeDe(rechazados, c))
+        .filter((m) => m !== '');
+      setErrorEnvio(sueltos.length ? sueltos.join(' ') : null);
+      llevarAlError(campos);
     },
   );
 
@@ -540,13 +752,8 @@ export function FormularioReporte() {
         <div className="px-5 pb-3">
           <Aviso tono="alerta">
             <b className="mb-1 block text-[14.5px]">Ya enviaste un reporte hace poco</b>
-            Vas a poder enviar otro a las{' '}
-            {puedeReportarDesde.toLocaleTimeString('es-BO', {
-              hour: '2-digit',
-              minute: '2-digit',
-              hour12: false,
-            })}
-            . Podés ir completando este mientras tanto.
+            Vas a poder enviar otro a las {horaCorta(puedeReportarDesde, ciudad)}. Podés ir
+            completando este mientras tanto.
           </Aviso>
         </div>
       )}
@@ -575,17 +782,25 @@ export function FormularioReporte() {
             <p className="preg">¿Dónde se junta el agua?</p>
           </div>
           <div className="relative mx-5 min-h-[260px] flex-1 overflow-hidden rounded-[20px]">
-            <MapaDiferido
-              className="map"
-              ariaLabel="Mapa para elegir la ubicación del reporte"
-              centro={centroInicial}
-              zoom={17}
-              seguirCentro
-              onUbicacion={(lat, lon) => fijarUbicacion(lat, lon, 'manual', null)}
-              alListo={(m) => {
-                mapa.current = m;
-              }}
-            />
+            {borradorLeido ? (
+              <MapaDiferido
+                className="map"
+                ariaLabel="Mapa para elegir la ubicación del reporte"
+                centro={centroDelPaso1(ubicacion, enlace, centroDeCiudad(ciudad))}
+                zoom={17}
+                seguirCentro
+                onUbicacion={(lat, lon) =>
+                  fijarUbicacion({ lat, lon, metodo: 'manual', precisionM: null })
+                }
+                alListo={(m) => {
+                  mapa.current = m;
+                  // Si el punto cambió mientras el mapa cargaba (llegó el GPS, se confirmaron
+                  // coordenadas), se lo lleva ahí. `jumpTo` no es un gesto: no elige nada.
+                  const u = ubicacionRef.current;
+                  if (u) m.jumpTo({ center: [u.lon, u.lat] });
+                }}
+              />
+            ) : null}
             {/* El marcador queda clavado en el centro y lo que se mueve es el mapa: con el
                 pulgar es más preciso que arrastrar un pin diminuto. */}
             <div className="flot pointer-events-none top-1/2 left-1/2 -translate-x-1/2 -translate-y-full">
@@ -639,7 +854,7 @@ export function FormularioReporte() {
                       className="campo"
                       value={latTexto}
                       onChange={(e) => setLatTexto(e.target.value)}
-                      placeholder="-17.78"
+                      placeholder={String(ciudad.centro.lat)}
                     />
                   </div>
                   <div className="flex-1">
@@ -652,7 +867,7 @@ export function FormularioReporte() {
                       className="campo"
                       value={lonTexto}
                       onChange={(e) => setLonTexto(e.target.value)}
-                      placeholder="-63.18"
+                      placeholder={String(ciudad.centro.lon)}
                     />
                   </div>
                 </div>
@@ -669,7 +884,7 @@ export function FormularioReporte() {
                       return;
                     }
                     mapa.current?.jumpTo({ center: [c.lon, c.lat], zoom: 17 });
-                    fijarUbicacion(c.lat, c.lon, 'manual', null);
+                    fijarUbicacion({ lat: c.lat, lon: c.lon, metodo: 'manual', precisionM: null });
                   }}
                 >
                   Confirmar ubicación
@@ -679,8 +894,13 @@ export function FormularioReporte() {
           </div>
 
           <div className="pie" aria-live="polite">
+            {avisoUbicacion ? (
+              <Aviso tono="alerta" className="mb-3" data-testid="aviso-ubicacion-aproximada">
+                {avisoUbicacion}
+              </Aviso>
+            ) : null}
             {errorUbicacion ? (
-              <Aviso tono="err" className="mb-3">
+              <Aviso tono="err" className="mb-3" data-testid="error-ubicacion">
                 {errorUbicacion}
               </Aviso>
             ) : resuelto?.dentro_cobertura ? (
@@ -696,7 +916,7 @@ export function FormularioReporte() {
                 Mové el mapa para ajustar el punto exacto.
               </Aviso>
             ) : (
-              <Aviso tono="info" className="mb-3">
+              <Aviso tono="info" className="mb-3" data-testid="ubicacion-pendiente">
                 {resolviendo
                   ? 'Buscando la unidad vecinal…'
                   : 'Mové el mapa hasta el punto exacto.'}
@@ -706,7 +926,7 @@ export function FormularioReporte() {
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedePaso2}
+              disabled={!puedeAvanzar(1, estadoAvance)}
               onClick={irAdelante}
             >
               Continuar
@@ -728,21 +948,29 @@ export function FormularioReporte() {
               </label>
               {/* Controlado: el paso 2 se desmonta al avanzar, y con un input sin `value` la
                   fecha elegida desaparecía de la pantalla al volver aunque siguiera en el
-                  formulario. Lo mismo al retomar un borrador. */}
+                  formulario. Lo mismo al retomar un borrador. Los límites y el valor van en la
+                  hora local de quien reporta, no en UTC. */}
               <input
                 id="evento"
                 type="date"
                 className="campo"
-                max={new Date().toISOString().slice(0, 10)}
-                value={valores.evento_en ? String(valores.evento_en).slice(0, 10) : ''}
-                onChange={(e) =>
+                min={limitesFecha.min}
+                max={limitesFecha.max}
+                value={campoFechaDesdeIso(valores.evento_en)}
+                aria-invalid={!!errorFecha}
+                aria-describedby={errorFecha ? 'ayuda-evento error-evento_en' : 'ayuda-evento'}
+                onChange={(e) => {
+                  form.clearErrors('evento_en');
                   form.setValue(
                     'evento_en',
-                    e.target.value ? new Date(`${e.target.value}T12:00:00Z`).toISOString() : null,
-                  )
-                }
+                    e.target.value ? isoDesdeCampoFecha(e.target.value, new Date()) : null,
+                  );
+                }}
               />
-              <p className="ayuda mt-1.5">Si la dejás vacía, tomamos la fecha de hoy.</p>
+              <p id="ayuda-evento" className="ayuda mt-1.5">
+                Si la dejás vacía, tomamos la fecha de hoy.
+              </p>
+              <MensajeDeCampo campo="evento_en" mensaje={errorFecha} />
             </div>
 
             <fieldset className="mt-5">
@@ -759,10 +987,17 @@ export function FormularioReporte() {
                     texto={ETIQUETAS.profundidad[p].corta}
                     detalle={ETIQUETAS.profundidad[p].rango}
                     marcado={valores.profundidad_estimada === p}
-                    onCambio={() => form.setValue('profundidad_estimada', p)}
+                    onCambio={() => {
+                      form.setValue('profundidad_estimada', p);
+                      form.clearErrors('profundidad_estimada');
+                    }}
                   />
                 ))}
               </div>
+              <MensajeDeCampo
+                campo="profundidad_estimada"
+                mensaje={errores.profundidad_estimada?.message}
+              />
             </fieldset>
 
             <fieldset className="mt-5">
@@ -775,10 +1010,14 @@ export function FormularioReporte() {
                     valor={f}
                     texto={ETIQUETAS.frecuencia[f]}
                     marcado={valores.frecuencia === f}
-                    onCambio={() => form.setValue('frecuencia', f)}
+                    onCambio={() => {
+                      form.setValue('frecuencia', f);
+                      form.clearErrors('frecuencia');
+                    }}
                   />
                 ))}
               </div>
+              <MensajeDeCampo campo="frecuencia" mensaje={errores.frecuencia?.message} />
             </fieldset>
 
             {severidad ? (
@@ -803,7 +1042,7 @@ export function FormularioReporte() {
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedePaso3}
+              disabled={!puedeAvanzar(2, estadoAvance)}
               onClick={irAdelante}
             >
               Continuar
@@ -826,49 +1065,40 @@ export function FormularioReporte() {
                     {/* biome-ignore lint/performance/noImgElement: miniatura de la foto ya subida */}
                     <img src={urlFotoRelativa(f.url)} alt="Foto que subiste" />
                   </span>
-                  <button
-                    type="button"
-                    className="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/95 text-[13px] font-bold"
-                    aria-label="Quitar esta foto"
+                  <BotonQuitar
+                    etiqueta="Quitar esta foto"
                     onClick={() => setFotos((p) => p.filter((x) => x.objeto_key !== f.objeto_key))}
-                  >
-                    ×
-                  </button>
+                  />
                 </li>
               ))}
-              {espaciosCamara.map((esp) => (
-                <li key={esp.id} className="relative aspect-square">
-                  <label
-                    htmlFor={`foto-referencia-${esp.id}`}
-                    className="grid h-full w-full cursor-pointer place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-verde-700"
+              {subir.isPending ? (
+                <li className="aspect-square">
+                  <div
+                    role="status"
+                    data-testid="foto-subiendo-mosaico"
+                    className="grid h-full w-full place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600"
                   >
                     <Camera size={20} aria-hidden="true" />
-                    {subir.isPending ? 'Subiendo…' : 'Foto de referencia'}
-                  </label>
-                  {/* `capture` pide la cámara trasera en el teléfono; en escritorio se comporta
-                      como un selector de archivos más. El tipo real lo decide el servidor por
-                      los bytes, y antes `motivoDeRechazoDeFoto` descarta lo que no se admite. */}
-                  <input
-                    id={`foto-referencia-${esp.id}`}
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    className="sr-only"
-                    aria-label="Foto de referencia"
-                    disabled={subir.isPending}
-                    onChange={(e) => alElegirFoto(e, () => quitarEspacio(esp.id))}
-                  />
-                  <button
-                    type="button"
-                    className="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-white/95 text-[13px] font-bold"
-                    aria-label="Quitar este espacio de foto"
-                    onClick={() => quitarEspacio(esp.id)}
-                  >
-                    ×
-                  </button>
+                    Subiendo…
+                  </div>
                 </li>
-              ))}
-              {lugaresOcupados < CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE ? (
+              ) : null}
+              {mosaico.espacioCamara ? (
+                <li className="relative aspect-square" data-testid="espacio-camara">
+                  <label
+                    htmlFor="foto-camara"
+                    className="grid h-full w-full cursor-pointer place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600"
+                  >
+                    <Camera size={20} aria-hidden="true" />
+                    Foto de referencia
+                  </label>
+                  <BotonQuitar
+                    etiqueta="Quitar este espacio de foto"
+                    onClick={() => setEsperandoCamara(false)}
+                  />
+                </li>
+              ) : null}
+              {mosaico.agregar ? (
                 <li className="aspect-square">
                   <button
                     type="button"
@@ -877,7 +1107,7 @@ export function FormularioReporte() {
                     disabled={subir.isPending}
                   >
                     <Plus size={20} aria-hidden="true" />
-                    {subir.isPending ? 'Subiendo…' : 'Agregar'}
+                    Agregar
                   </button>
                 </li>
               ) : null}
@@ -889,36 +1119,55 @@ export function FormularioReporte() {
               accept={CONFIG_DOMINIO.FOTO_MIME_PERMITIDOS.join(',')}
               className="sr-only"
               aria-label="Elegir una foto del punto"
-              onChange={(e) => alElegirFoto(e)}
+              disabled={subir.isPending}
+              onChange={alElegirFoto}
+            />
+            {/* `capture` pide la cámara trasera en el teléfono; en escritorio se comporta como un
+                selector de archivos más. El tipo real lo decide el servidor por los bytes, y
+                antes `motivoDeRechazoDeFoto` descarta lo que no se admite. */}
+            <input
+              ref={conectarCamara}
+              id="foto-camara"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="sr-only"
+              aria-label="Foto de referencia"
+              disabled={subir.isPending}
+              onClick={vigilarRegresoDeLaCamara}
+              onChange={(e) => {
+                setEsperandoCamara(false);
+                alElegirFoto(e);
+              }}
             />
             <button
               type="button"
               data-testid="boton-otro-detalle"
               className="btn btn-fantasma btn-bloque mt-2.5"
               onClick={abrirOtroDetalle}
-              disabled={fotosCompletas || subir.isPending}
+              disabled={mosaico.completas || subir.isPending}
               aria-describedby="ayuda-otro-detalle"
             >
               <Camera size={18} aria-hidden="true" />
               ¿Querés añadir otro detalle?
             </button>
             <p id="ayuda-otro-detalle" className="ayuda mt-1.5" aria-live="polite">
-              {fotosCompletas
-                ? `Ya llegaste al máximo de ${CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos. Quitá una si querés cambiarla.`
+              {mosaico.completas
+                ? TEXTO_FOTOS_COMPLETAS
                 : 'Abre la cámara para sacar una foto de referencia de otro detalle del lugar.'}
             </p>
             <div className="mt-1.5 flex justify-between text-[13.5px] text-tinta-600">
-              <span>Hasta {CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos</span>
+              <span>Hasta {MAX_FOTOS} fotos</span>
               <span>
-                {fotos.length}/{CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} ·{' '}
-                {CONFIG_DOMINIO.FOTO_MAX_BYTES / 1024 / 1024} MB c/u
+                {fotos.length}/{MAX_FOTOS} · {CONFIG_DOMINIO.FOTO_MAX_BYTES / 1024 / 1024} MB c/u
               </span>
             </div>
             {errorFoto ? (
-              <Aviso tono="err" className="mt-3">
+              <Aviso tono="err" className="mt-3" data-testid="error-foto">
                 {errorFoto}
               </Aviso>
             ) : null}
+            <MensajeDeCampo campo="fotos" mensaje={errores.fotos?.message} />
             <Aviso tono="ok" icono={ShieldCheck} className="mt-3">
               Antes de subirlas borramos los metadatos, incluida la ubicación que guarda la cámara.
             </Aviso>
@@ -932,18 +1181,14 @@ export function FormularioReporte() {
                 rows={4}
                 className="campo resize-none"
                 placeholder="Contanos qué ves: hasta dónde llega el agua, cuánto tarda en irse…"
-                aria-invalid={!!form.formState.errors.descripcion}
+                aria-invalid={!!errores.descripcion}
                 aria-describedby="contador-descripcion"
                 {...form.register('descripcion')}
               />
               <p id="contador-descripcion" className="ayuda mt-1.5">
                 {contadorDescripcion(valores.descripcion?.length ?? 0)}
               </p>
-              {form.formState.errors.descripcion ? (
-                <p className="error" aria-live="polite">
-                  {form.formState.errors.descripcion.message}
-                </p>
-              ) : null}
+              <MensajeDeCampo campo="descripcion" mensaje={errores.descripcion?.message} />
             </div>
 
             <details className="tarjeta mt-4 p-4">
@@ -966,6 +1211,10 @@ export function FormularioReporte() {
                       </option>
                     ))}
                   </select>
+                  <MensajeDeCampo
+                    campo="causa_presunta"
+                    mensaje={errores.causa_presunta?.message}
+                  />
                 </div>
                 {/* Radios y no <select>: «no contestó» tiene que ser `null`, nunca `''`. Con
                     los desplegables anteriores, uno sin elegir mandaba la cadena vacía y la
@@ -982,12 +1231,7 @@ export function FormularioReporte() {
                         valor={v}
                         texto={ETIQUETAS.sumidero_cercano[v]}
                         marcado={valores.sumidero_cercano === v}
-                        onCambio={() => {
-                          form.setValue('sumidero_cercano', v);
-                          // Sin sumidero no hay nada que esté tapado: la respuesta anterior no
-                          // puede viajar escondida en el envío.
-                          if (v === 'no') form.setValue('sumidero_estado', null);
-                        }}
+                        onCambio={() => responderSumidero(v)}
                       />
                     ))}
                   </div>
@@ -995,14 +1239,15 @@ export function FormularioReporte() {
                     <button
                       type="button"
                       className="mt-1.5 inline-flex min-h-12 items-center px-0.5 text-[14px] font-bold text-agua-700"
-                      onClick={() => {
-                        form.setValue('sumidero_cercano', null);
-                        form.setValue('sumidero_estado', null);
-                      }}
+                      onClick={() => responderSumidero(null)}
                     >
                       Dejar sin responder
                     </button>
                   ) : null}
+                  <MensajeDeCampo
+                    campo="sumidero_cercano"
+                    mensaje={errores.sumidero_cercano?.message}
+                  />
                 </fieldset>
                 {valores.sumidero_cercano === 'si' ? (
                   <fieldset>
@@ -1015,16 +1260,40 @@ export function FormularioReporte() {
                           valor={v}
                           texto={ETIQUETAS.sumidero_estado[v]}
                           marcado={valores.sumidero_estado === v}
-                          onCambio={() => form.setValue('sumidero_estado', v)}
+                          onCambio={() => {
+                            form.setValue('sumidero_estado', v);
+                            form.clearErrors('sumidero_estado');
+                          }}
                         />
                       ))}
                     </div>
                   </fieldset>
                 ) : null}
-                <label className="opc">
-                  <input type="checkbox" {...form.register('agua_brota_sumidero')} />
-                  <span>El agua brota del sumidero cuando llueve</span>
-                </label>
+                <MensajeDeCampo
+                  campo="sumidero_estado"
+                  mensaje={errores.sumidero_estado?.message}
+                />
+                {/* Controlada y con `null` como «sin contestar»: registrada, react-hook-form le
+                    escribía `false` al montarla y todo reporte decía que el agua no brotaba. Con
+                    «No» en el sumidero cercano no se pregunta: no hay de dónde brotar. */}
+                {valores.sumidero_cercano !== 'no' ? (
+                  <label className="opc">
+                    <input
+                      type="checkbox"
+                      name="agua_brota_sumidero"
+                      checked={valores.agua_brota_sumidero === true}
+                      onChange={(e) => {
+                        form.setValue('agua_brota_sumidero', e.target.checked ? true : null);
+                        form.clearErrors('agua_brota_sumidero');
+                      }}
+                    />
+                    <span>El agua brota del sumidero cuando llueve</span>
+                  </label>
+                ) : null}
+                <MensajeDeCampo
+                  campo="agua_brota_sumidero"
+                  mensaje={errores.agua_brota_sumidero?.message}
+                />
               </div>
             </details>
           </div>
@@ -1033,10 +1302,10 @@ export function FormularioReporte() {
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedePaso4}
+              disabled={!puedeAvanzar(3, estadoAvance)}
               onClick={irAdelante}
             >
-              Continuar
+              {subir.isPending ? 'Subiendo foto…' : 'Continuar'}
             </button>
           </div>
         </>
@@ -1104,10 +1373,24 @@ export function FormularioReporte() {
               />
               <FilaRevision
                 etiqueta="Fotos"
-                valor={`${fotos.length} ${fotos.length === 1 ? 'foto' : 'fotos'}`}
+                valor={`${fotos.length} ${fotos.length === 1 ? 'foto' : 'fotos'}${subir.isPending ? ' · subiendo otra' : ''}`}
                 alEditar={() => setPaso(3)}
               />
             </dl>
+
+            {/* Enviar con una foto a medio subir creaba el reporte sin ella y la dejaba huérfana
+                en el servidor: se espera, y se dice por qué el botón está quieto. */}
+            {subir.isPending ? (
+              <Aviso tono="info" className="mt-3.5" role="status" data-testid="foto-subiendo">
+                Subiendo foto… Esperá a que termine para enviar el reporte.
+              </Aviso>
+            ) : null}
+            {errorFoto ? (
+              <Aviso tono="err" className="mt-3.5" data-testid="error-foto">
+                <b className="mb-1 block text-[14.5px]">Foto sin subir</b>
+                {errorFoto}
+              </Aviso>
+            ) : null}
 
             <fieldset className="mt-4.5">
               <legend className="lbl">¿Qué hay en ese punto?</legend>
@@ -1119,10 +1402,14 @@ export function FormularioReporte() {
                     valor={t}
                     texto={ETIQUETAS.ubicacion_tipo[t]}
                     marcado={valores.ubicacion_tipo === t}
-                    onCambio={() => form.setValue('ubicacion_tipo', t)}
+                    onCambio={() => {
+                      form.setValue('ubicacion_tipo', t);
+                      form.clearErrors('ubicacion_tipo');
+                    }}
                   />
                 ))}
               </div>
+              <MensajeDeCampo campo="ubicacion_tipo" mensaje={errores.ubicacion_tipo?.message} />
             </fieldset>
             {valores.ubicacion_tipo === 'vivienda_o_predio' ? (
               <Aviso tono="alerta" className="mt-3">
@@ -1141,7 +1428,12 @@ export function FormularioReporte() {
             />
 
             {errorEnvio ? (
-              <Aviso tono="err" className="mt-3.5">
+              <Aviso
+                tono="err"
+                className="mt-3.5"
+                data-testid="error-envio"
+                data-campo-con-error=""
+              >
                 {errorEnvio}
               </Aviso>
             ) : null}
@@ -1151,9 +1443,13 @@ export function FormularioReporte() {
               type="submit"
               data-testid="boton-enviar"
               className="btn btn-bloque"
-              disabled={enviar.isPending}
+              disabled={!puedeAvanzar(4, estadoAvance)}
             >
-              {enviar.isPending ? 'Enviando…' : 'Enviar reporte'}
+              {enviar.isPending
+                ? 'Enviando…'
+                : subir.isPending
+                  ? 'Subiendo foto…'
+                  : 'Enviar reporte'}
             </button>
             <p className="ayuda mt-2 text-center">
               En el mapa nunca aparece quién reportó. Tu reporte pasa por revisión municipal antes

@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { ReporteFeature } from './api';
 import {
   BANDAS_CLUSTER,
+  claveDeUbicacion,
   conSeleccionado,
+  esGestoDelUsuario,
   MAX_PASTILLAS,
   numeroCompacto,
+  opcionesDelMarcadorDeSeleccion,
   radioCluster,
   tamanoTextoCluster,
   textoDelResumen,
@@ -20,32 +23,40 @@ function reporte(id: string): ReporteFeature {
   } as unknown as ReporteFeature;
 }
 
+/** Locale de la instalación actual; cada instalación manda el suyo en la configuración. */
+const LOCALE = 'es-BO';
+
 describe('numeroCompacto', () => {
+  it('usa el separador decimal del locale de la ciudad, no uno escrito en el código', () => {
+    expect(numeroCompacto(1200, 'es-BO')).toBe('1,2 mil');
+    expect(numeroCompacto(1200, 'es-MX')).toBe('1.2 mil');
+  });
+
   it('escribe la cantidad exacta por debajo de mil', () => {
     // Acá la precisión importa y el ancho no es problema: son como mucho tres cifras.
-    expect(numeroCompacto(1)).toBe('1');
-    expect(numeroCompacto(9)).toBe('9');
-    expect(numeroCompacto(27)).toBe('27');
-    expect(numeroCompacto(245)).toBe('245');
-    expect(numeroCompacto(999)).toBe('999');
+    expect(numeroCompacto(1, LOCALE)).toBe('1');
+    expect(numeroCompacto(9, LOCALE)).toBe('9');
+    expect(numeroCompacto(27, LOCALE)).toBe('27');
+    expect(numeroCompacto(245, LOCALE)).toBe('245');
+    expect(numeroCompacto(999, LOCALE)).toBe('999');
   });
 
   it('pasa a miles, en castellano y con coma decimal, a partir de mil', () => {
-    expect(numeroCompacto(1000)).toBe('1,0 mil');
-    expect(numeroCompacto(1200)).toBe('1,2 mil');
-    expect(numeroCompacto(5842)).toBe('5,8 mil');
-    expect(numeroCompacto(9999)).toBe('10,0 mil');
+    expect(numeroCompacto(1000, LOCALE)).toBe('1,0 mil');
+    expect(numeroCompacto(1200, LOCALE)).toBe('1,2 mil');
+    expect(numeroCompacto(5842, LOCALE)).toBe('5,8 mil');
+    expect(numeroCompacto(9999, LOCALE)).toBe('10,0 mil');
   });
 
   it('suelta el decimal a partir de diez mil, que ya no cabe', () => {
-    expect(numeroCompacto(12_000)).toBe('12 mil');
-    expect(numeroCompacto(123_456)).toBe('123 mil');
+    expect(numeroCompacto(12_000, LOCALE)).toBe('12 mil');
+    expect(numeroCompacto(123_456, LOCALE)).toBe('123 mil');
   });
 
   it('no rompe con entradas imposibles', () => {
-    expect(numeroCompacto(0)).toBe('0');
-    expect(numeroCompacto(-5)).toBe('0');
-    expect(numeroCompacto(Number.NaN)).toBe('');
+    expect(numeroCompacto(0, LOCALE)).toBe('0');
+    expect(numeroCompacto(-5, LOCALE)).toBe('0');
+    expect(numeroCompacto(Number.NaN, LOCALE)).toBe('');
   });
 });
 
@@ -131,5 +142,34 @@ describe('tope de pastillas', () => {
   it('es un número razonable de nodos del DOM', () => {
     expect(MAX_PASTILLAS).toBeGreaterThan(10);
     expect(MAX_PASTILLAS).toBeLessThanOrEqual(120);
+  });
+});
+
+describe('marcador de la ubicación elegida', () => {
+  it('se mueve solo cuando cambian las coordenadas, no cuando llega otro objeto igual', () => {
+    // `seleccionUbicacion={{ lat, lon }}` en línea crea un objeto nuevo en cada render.
+    expect(claveDeUbicacion({ lat: -17.78, lon: -63.18 })).toBe(
+      claveDeUbicacion({ lat: -17.78, lon: -63.18 }),
+    );
+    expect(claveDeUbicacion({ lat: -17.78, lon: -63.18 })).not.toBe(
+      claveDeUbicacion({ lat: -17.78, lon: -63.19 }),
+    );
+    expect(claveDeUbicacion(null)).toBeNull();
+    expect(claveDeUbicacion(undefined)).toBeNull();
+  });
+
+  it('en un mapa fijo (la revisión del reporte) no se puede arrastrar', () => {
+    expect(opcionesDelMarcadorDeSeleccion(true).draggable).toBe(false);
+    expect(opcionesDelMarcadorDeSeleccion(false).draggable).toBe(true);
+  });
+});
+
+describe('esGestoDelUsuario', () => {
+  it('solo un gesto de la persona cuenta; los movimientos del propio código no', () => {
+    // `flyTo` del GPS, `jumpTo` de las coordenadas y el `load` del mapa no traen `originalEvent`.
+    expect(esGestoDelUsuario(undefined)).toBe(false);
+    expect(esGestoDelUsuario({})).toBe(false);
+    expect(esGestoDelUsuario({ originalEvent: undefined })).toBe(false);
+    expect(esGestoDelUsuario({ originalEvent: { type: 'mouseup' } })).toBe(true);
   });
 });

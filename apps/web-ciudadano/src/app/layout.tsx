@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { BarraSuperior } from '@/componentes/BarraSuperior';
+import { obtenerCiudad } from '@/lib/ciudad-servidor';
 import { Proveedores } from './proveedores';
 import './globals.css';
 
@@ -25,8 +26,13 @@ export const viewport: Viewport = {
  * Armazón de la app. La barra superior solo existe en escritorio; en móvil navega la barra
  * inferior, que cada pantalla coloca porque no todas la llevan (el flujo de reporte, por
  * ejemplo, ocupa la pantalla entera a propósito).
+ *
+ * La ciudad de la instalación se lee aquí, en el servidor y antes del primer HTML, y se reparte por
+ * contexto: ninguna pantalla puede enseñar otra ciudad ni un instante. Leerla obliga a generar las
+ * páginas al pedirlas y no al compilar (ver `ciudad-servidor.ts`).
  */
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const ciudad = await obtenerCiudad();
   return (
     <html lang="es">
       <body>
@@ -36,7 +42,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           Ir al contenido
         </a>
-        <Proveedores>
+        <Proveedores ciudad={ciudad}>
           {/* Altura definida, no mínima: el mapa necesita que su contenedor sepa cuánto mide para
               poder ocuparlo entero. Con `min-h-dvh` la cadena de flex se resolvía por contenido y
               la columna del mapa crecía hasta la altura de la lista, dejando el mapa sin sitio.

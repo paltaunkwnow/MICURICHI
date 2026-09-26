@@ -12,6 +12,8 @@ import {
   obtenerReporte,
   obtenerReportes,
 } from '@/lib/api';
+import { tituloDelMapa } from '@/lib/ciudad';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import {
   colorSeveridad,
   distanciaDesde,
@@ -73,6 +75,7 @@ export function VistaMapa() {
   const { ubicacion, pedir: pedirUbicacion } = useUbicacionUsuario();
   const mapa = useRef<MapaGl | null>(null);
   const toast = useToast();
+  const ciudad = useCiudad();
 
   const filtros = useMemo(
     () => ({
@@ -472,7 +475,7 @@ export function VistaMapa() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* El título de la página no se dibuja: en móvil el mapa ocupa todo y en escritorio el
           encabezado de la lista ya dice cuántos puntos hay. Existe para los lectores de pantalla. */}
-      <h1 className="sr-only">Mapa de puntos de inundación de Santa Cruz de la Sierra</h1>
+      <h1 className="sr-only">{tituloDelMapa(ciudad)}</h1>
       <div className="split min-h-0 flex-1 md:grid-cols-[400px_minmax(0,1fr)]">
         {/* Columna izquierda de escritorio: la lista manda, y al elegir un punto la reemplaza
             su detalle para que el mapa nunca quede tapado (W-01 / W-02 del prototipo). */}
@@ -500,7 +503,7 @@ export function VistaMapa() {
                       ? 'Buscando puntos…'
                       : fallo
                         ? 'Sin conexión con el servidor'
-                        : `${numeroConMiles(total ?? features.length)} ${
+                        : `${numeroConMiles(total ?? features.length, ciudad.locale)} ${
                             (total ?? features.length) === 1
                               ? 'punto publicado'
                               : 'puntos publicados'
@@ -514,9 +517,9 @@ export function VistaMapa() {
                 </div>
                 {truncada ? (
                   <Aviso tono="tinta" className="mt-3" data-testid="aviso-vista-truncada">
-                    Se muestran {numeroConMiles(todas.length)} de {numeroConMiles(total as number)}{' '}
-                    puntos de esta vista: los más recientes. Acercá el mapa o filtrá por severidad
-                    para ver el resto.
+                    Se muestran {numeroConMiles(todas.length, ciudad.locale)} de{' '}
+                    {numeroConMiles(total as number, ciudad.locale)} puntos de esta vista: los más
+                    recientes. Acercá el mapa o filtrá por severidad para ver el resto.
                   </Aviso>
                 ) : null}
                 {hayFiltros ? (

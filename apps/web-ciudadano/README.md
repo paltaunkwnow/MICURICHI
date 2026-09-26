@@ -10,10 +10,64 @@ pnpm --filter web-ciudadano test       # Vitest
 pnpm --filter web-ciudadano build && pnpm --filter web-ciudadano start   # modo producción
 ```
 
-Variables: `API_CORE_URL` y `GEO_SERVICE_URL` (destino de los *rewrites* de Next; la app habla con
-los servicios por rutas relativas, así que el navegador nunca ve otro origen), y `PANEL_ADMIN_URL`
-(adónde lleva el botón «Panel técnico», que solo ven técnico y admin; por defecto
-`http://localhost:3100` y se fija al construir). Ver `.env.example`.
+## Una imagen, cualquier ciudad: variables de tiempo de ejecución
+
+Mi Curichi se instala una vez por ciudad con la **misma imagen**. Por eso la app no tiene ninguna
+variable de compilación que dependa del despliegue: todas se leen en el servidor, en cada
+petición, y cambiarlas no exige volver a construir. Ver `.env.example`.
+
+| Variable | Cuándo se lee | Para qué |
+|---|---|---|
+| `API_CORE_URL` | En cada petición (`src/proxy.ts`, `src/lib/ciudad-servidor.ts`) | Destino de `/api/*` y origen de la ciudad. Sin valor, `http://127.0.0.1:3001` |
+| `GEO_SERVICE_URL` | En cada petición (`src/proxy.ts`) | Destino de `/geo/*`. Sin valor, `http://127.0.0.1:3002` |
+| `PROXY_DE_CONFIANZA` | En cada petición (`src/proxy.ts`) | `1` solo con un proxy propio delante que reescriba `X-Forwarded-For` |
+| `HSTS` | En cada petición (`src/proxy.ts`) | `1` añade `Strict-Transport-Security`. Solo detrás de HTTPS |
+| `NODE_ENV` | Al compilar (`next.config.ts`) | Distingue `next dev` de la imagen: `'unsafe-eval'` en la CSP y el registro del service worker. No cambia entre despliegues |
+
+Lo que **ya no** se configura en esta app:
+
+- **La ciudad** (nombre, centro y zoom del mapa, locale, zona horaria): la sirve api-core en
+  `GET /api/v1/configuracion` (contracts 0.7.0) a partir de sus variables `CIUDAD_*`. El layout
+  raíz la lee **en el servidor, antes del primer HTML** (`src/lib/ciudad-servidor.ts`) y la
+  reparte por contexto (`useCiudad()`), así que ninguna pantalla enseña otra ciudad ni un
+  instante. Se guarda 5 minutos y se renueva por detrás (`src/lib/configuracion.ts`). Si api-core
+  no responde y nunca respondió, se usa `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO` (Santa Cruz), se
+  registra en el log del servidor y **no** se guarda: la petición siguiente vuelve a preguntar.
+  Consecuencia: todas las páginas se generan al pedirlas (`connection()`), nunca al compilar;
+  si no, `next build` dejaría escrita en el HTML la ciudad del momento de construir.
+- **La URL del panel**: llega en `panel_url` de `GET /api/v1/auth/yo`, que api-core solo manda a
+  técnico, admin y ejecutivo (se configura en api-core con `PANEL_ADMIN_URL`). Antes se fijaba al
+  compilar y viajaba en el JavaScript público.
+
+### Imagen de producción (`output: 'standalone'`)
+
+`next build` deja en `.next/standalone` un servidor mínimo con solo las dependencias que usa. En
+este monorepo la raíz del trazado es la del repositorio (Next la detecta por el lockfile), así
+que el servidor queda en `.next/standalone/apps/web-ciudadano/server.js`. Como indica Next,
+`public/` y `.next/static` no se copian solos:
+
+```bash
+cp -r public .next/standalone/apps/web-ciudadano/
+cp -r .next/static .next/standalone/apps/web-ciudadano/.next/
+PORT=3000 HOSTNAME=0.0.0.0 API_CORE_URL=http://api-core:3001 GEO_SERVICE_URL=http://geo-service:3002 \
+  node .next/standalone/apps/web-ciudadano/server.js
+```
+
+### El reenvío de `/api` y `/geo` (`src/proxy.ts`)
+
+El navegador solo habla con el propio origen; `src/proxy.ts` (Next 16: corre en el runtime de
+Node, en cada petición) reenvía `/api/*` a api-core y `/geo/*` a geo-service con
+`NextResponse.rewrite` a un origen externo. Next hace de proxy HTTP con la petición entera
+—método, cuerpo, cabeceras y cookies, y vuelven los `Set-Cookie`—, por el mismo camino que usaban
+antes los `rewrites` externos de `next.config.ts`. Límites de Next que aplican igual que antes:
+
+- **Cuerpo**: con proxy, Next guarda en memoria hasta 10 MB del cuerpo
+  (`experimental.proxyClientMaxBodySize`); por encima lo trunca y avisa en el log. La foto más
+  grande que admite api-core es de 8 MB, así que no se toca.
+- **Plazo**: el reenvío corta a los 30 s sin actividad (`experimental.proxyTimeout`).
+- Next añade a la respuesta la cabecera `x-middleware-rewrite` con la URL de destino, es decir,
+  la dirección interna de api-core o geo-service. No es un secreto, pero si no se quiere
+  publicar, el proxy TLS de delante debe quitarla.
 
 ## Pantallas
 
@@ -25,7 +79,7 @@ corresponde a una pantalla suya:
 |---|---|---|
 | `/` | C-01 en móvil, W-01 en escritorio | Mapa público. Buscador, filtros de severidad, capas, lista lateral en escritorio |
 | `/reporte/:id` | C-02 / W-02 | Detalle de un punto con enlace propio |
-| `/reportar` | C-07 a C-12 | Asistente de cinco pasos y confirmación con código de seguimiento |
+| `/reportar` | C-07 a C-12 | Asistente de cuatro pasos y confirmación con código de seguimiento |
 | `/mis-reportes` | C-16 | Reportes enviados desde este dispositivo |
 | `/mis-reportes/:id` | C-17 | Línea de tiempo del reporte propio |
 | `/como-funciona` | C-06 | Tres pestañas: los pasos, los colores, qué no es |
@@ -73,23 +127,33 @@ localmente, que es exactamente lo que hacía antes con todo el texto.
 
 ## El formulario no pierde lo escrito
 
-El asistente de cinco pasos guarda un borrador en `sessionStorage` (`src/lib/borrador.ts`). El
+El asistente de cuatro pasos guarda un borrador en `sessionStorage` (`src/lib/borrador.ts`). El
 caso que lo justifica es el teléfono: al tocar «Agregar» foto el navegador cede el control a la
 cámara, y en un móvil con poca memoria eso puede descartar la pestaña. El borrador conserva
 también **la clave de idempotencia**, para que reintentar el envío después de una recarga no cree
-un segundo reporte. Caduca a las 12 h, antes que el vale de 24 h de las fotos ya subidas, y vive
-en la sesión de la pestaña: no queda nada guardado en un teléfono prestado.
+un segundo reporte. Caduca a las 12 h **contadas desde que se empezó** (seguir escribiendo o
+restaurarlo no renueva el plazo), cada foto recuerda cuándo se subió y al restaurar se descartan
+las de más de 23 h, antes de que venza su vale de 24 h. Vive en la sesión de la pestaña: no queda
+nada guardado en un teléfono prestado. Abrir `/reportar` (o llegar desde «Me pasa a mí») sin
+tocar nada no deja borrador que retomar.
+
+Las reglas del asistente que no necesitan React (qué habilita cada paso, la fecha del evento en la
+hora local, el GPS aproximado, la coherencia del sumidero, el paso al que lleva cada error) viven
+en `src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`.
 
 ## Cabeceras
 
 `next.config.ts` aplica CSP, `Permissions-Policy`, `nosniff`, `X-Frame-Options: DENY` y
-`Referrer-Policy`. Dos avisos para quien las toque:
+`Referrer-Policy`: son fijas, no dependen del despliegue. Avisos para quien las toque:
 
 - El mapa base de MapLibre 6 pide las teselas raster con `fetch`, **no** con `<img>`: hace falta
   `connect-src`, con `img-src` solo el mapa queda en negro.
 - `'unsafe-eval'` está **solo** en desarrollo (lo necesita el recargado en caliente de Next). En
   producción no aparece; comprobado sobre `next start`.
-- `HSTS=1` añade `Strict-Transport-Security`. Solo detrás de HTTPS.
+- La CSP no nombra api-core ni geo-service: el navegador les habla por `/api` y `/geo` en el
+  propio origen. `src/lib/next-config.test.ts` falla si aparece un origen nuevo.
+- `HSTS=1` añade `Strict-Transport-Security`, y lo decide `src/proxy.ts` en cada petición (antes
+  quedaba fijado al compilar). Solo detrás de HTTPS.
 
 ## PWA y service worker
 

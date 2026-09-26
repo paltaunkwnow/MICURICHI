@@ -3,7 +3,7 @@
 import { LayoutDashboard, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { destinoDelPanel, textoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
+import { destinoDelPanelDeSesion, textoDelPanel } from '@/lib/panel';
 import { useSesion } from '@/lib/sesion';
 
 /**
@@ -23,8 +23,8 @@ const ENLACES = [
 
 export function BarraSuperior() {
   const ruta = usePathname();
-  const { usuario, cargando } = useSesion();
-  const panel = destinoDelPanel(usuario?.rol, URL_DEL_PANEL);
+  const { usuario, cargando, errorDeCarga } = useSesion();
+  const panel = destinoDelPanelDeSesion(usuario);
   const activo = (href: string) =>
     href === '/' ? ruta === '/' : ruta === href || ruta.startsWith(`${href}/`);
   return (
@@ -62,8 +62,10 @@ export function BarraSuperior() {
         )}
         {/* Mientras no se sabe si hay sesión no se enseña ninguna de las dos opciones: un
             «Iniciar sesión» que parpadea y se convierte en el nombre de la persona al medio
-            segundo es peor que un hueco que se rellena. */}
+            segundo es peor que un hueco que se rellena. Tampoco si /auth/yo falló: no saber
+            no es «no hay sesión». */}
         {!cargando &&
+          !errorDeCarga &&
           (usuario ? (
             <Link
               href="/cuenta"

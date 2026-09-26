@@ -5,6 +5,7 @@ import { ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ErrorApi, obtenerReporte } from '@/lib/api';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import {
   etiquetaDistrito,
   etiquetaSeveridad,
@@ -29,6 +30,7 @@ interface Hito {
  * entender la máquina de estados.
  */
 export function SeguimientoReporte({ id }: { id: string }) {
+  const ciudad = useCiudad();
   const [local, setLocal] = useState<ReporteLocal | null | undefined>(undefined);
   useEffect(() => setLocal(leerMisReportes().find((r) => r.id === id) ?? null), [id]);
 
@@ -59,7 +61,11 @@ export function SeguimientoReporte({ id }: { id: string }) {
   const hitos: Hito[] = [
     {
       titulo: 'Lo enviaste',
-      detalle: local ? fechaCorta(local.enviado_en) : p ? fechaCorta(p.creado_en) : '—',
+      detalle: local
+        ? fechaCorta(local.enviado_en, ciudad)
+        : p
+          ? fechaCorta(p.creado_en, ciudad)
+          : '—',
       hecho: true,
     },
     {

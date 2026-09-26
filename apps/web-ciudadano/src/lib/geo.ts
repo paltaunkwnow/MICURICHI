@@ -1,13 +1,9 @@
 /**
  * Utilidades geográficas puras (sin MapLibre) para poder usarlas en el servidor y en tests.
+ *
+ * El centro inicial del mapa ya no vive acá: es de la ciudad de la instalación y llega en tiempo
+ * de ejecución (`centroDeCiudad` en `ciudad.ts`).
  */
-
-/**
- * Centro inicial del mapa: Santa Cruz de la Sierra (la muestra sintética está alrededor).
- * Mismo valor que `CENTRO_INICIAL` en `componentes/Mapa.tsx`; se duplica acá para no importar
- * MapLibre fuera del navegador.
- */
-export const CENTRO_INICIAL: [number, number] = [-63.18, -17.78];
 
 /** Centro de un bbox "minLon,minLat,maxLon,maxLat" (orden GeoJSON). */
 export function centroDeBbox(bbox: string): { lat: number; lon: number } | null {

@@ -1,7 +1,53 @@
+import type { SesionActual } from 'contracts';
 import { describe, expect, it } from 'vitest';
-import { destinoDelPanel, normalizarUrlDelPanel, textoDelPanel } from './panel';
+import * as moduloPanel from './panel';
+import {
+  destinoDelPanel,
+  destinoDelPanelDeSesion,
+  normalizarUrlDelPanel,
+  textoDelPanel,
+} from './panel';
 
 const PANEL = 'http://localhost:3100/';
+
+/** Solo lo que mira el botón: el rol y la URL que manda api-core en `/auth/yo`. */
+const sesion = (
+  rol: SesionActual['rol'],
+  panel_url?: string | null,
+): Pick<SesionActual, 'rol' | 'panel_url'> =>
+  panel_url === undefined ? { rol } : { rol, panel_url };
+
+describe('destinoDelPanelDeSesion (contracts 0.7.0: la URL llega por /auth/yo)', () => {
+  it('toma la URL del panel de la sesión, no del JavaScript público', () => {
+    expect(destinoDelPanelDeSesion(sesion('tecnico', 'https://panel.ejemplo.bo'))).toBe(
+      'https://panel.ejemplo.bo/',
+    );
+    expect(destinoDelPanelDeSesion(sesion('admin', 'http://localhost:3100'))).toBe(PANEL);
+    expect(destinoDelPanelDeSesion(sesion('ejecutivo', 'https://panel.ejemplo.bo/admin/'))).toBe(
+      'https://panel.ejemplo.bo/admin/ejecutivo',
+    );
+  });
+
+  it('sin URL no hay botón: despliegue sin panel (null) o api-core anterior a 0.7.0 (sin campo)', () => {
+    expect(destinoDelPanelDeSesion(sesion('tecnico', null))).toBeNull();
+    expect(destinoDelPanelDeSesion(sesion('admin'))).toBeNull();
+    expect(destinoDelPanelDeSesion(null)).toBeNull();
+    expect(destinoDelPanelDeSesion(undefined)).toBeNull();
+  });
+
+  it('a un ciudadano no se le ofrece aunque la respuesta trajera una URL', () => {
+    expect(destinoDelPanelDeSesion(sesion('ciudadano', 'https://panel.ejemplo.bo'))).toBeNull();
+  });
+
+  it('una URL que no es http(s) o que trae credenciales no se enlaza', () => {
+    expect(destinoDelPanelDeSesion(sesion('tecnico', 'javascript:alert(1)'))).toBeNull();
+    expect(destinoDelPanelDeSesion(sesion('tecnico', 'http://a:b@panel.ejemplo.bo'))).toBeNull();
+  });
+
+  it('la URL fijada al compilar desde PANEL_ADMIN_URL ya no existe', () => {
+    expect(Object.keys(moduloPanel)).not.toContain('URL_DEL_PANEL');
+  });
+});
 
 describe('destinoDelPanel', () => {
   it('técnico y administrador ven el botón', () => {
@@ -15,6 +61,11 @@ describe('destinoDelPanel', () => {
       'https://panel.ejemplo.bo/admin/ejecutivo',
     );
     expect(destinoDelPanel('ejecutivo', null)).toBeNull();
+    // Un panel servido bajo una subruta sin barra final: `new URL('ejecutivo', base)` se comía el
+    // último tramo y mandaba a https://panel.ejemplo.bo/ejecutivo.
+    expect(destinoDelPanel('ejecutivo', 'https://panel.ejemplo.bo/admin')).toBe(
+      'https://panel.ejemplo.bo/admin/ejecutivo',
+    );
     expect(textoDelPanel('ejecutivo')).toBe('Panel ejecutivo');
     expect(textoDelPanel('tecnico')).toBe('Panel técnico');
   });

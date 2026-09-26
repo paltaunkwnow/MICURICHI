@@ -68,18 +68,18 @@ export function tamanoTextoCluster(n: number): number {
  * `1234` dentro de un círculo de 64 px no se lee, y `123456789` taparía media ciudad. Se escribe
  * en castellano («1,2 mil») y no con la K inglesa porque todo el texto visible va en español
  * (CLAUDE.md §12.1). Por debajo de mil se mantiene el número exacto: ahí la precisión sí importa
- * y el ancho no es problema.
+ * y el ancho no es problema. El separador decimal es el del `locale` de la ciudad configurada.
  *
  * El mapa dibuja este mismo texto con una expresión de MapLibre —`expresionNumeroCompacto` en
  * `componentes/Mapa.tsx`—, porque `text-field` es una propiedad de layout y se evalúa dentro del
  * motor. Las dos tienen que dar lo mismo; esta es la de referencia y la que prueban los tests.
  */
-export function numeroCompacto(n: number): string {
+export function numeroCompacto(n: number, locale: string): string {
   if (!Number.isFinite(n)) return '';
   const entero = Math.max(0, Math.round(n));
   if (entero < 1000) return String(entero);
   const decimales = entero < 10_000 ? 1 : 0;
-  const miles = (entero / 1000).toLocaleString('es-BO', {
+  const miles = (entero / 1000).toLocaleString(locale, {
     minimumFractionDigits: decimales,
     maximumFractionDigits: decimales,
   });
@@ -156,4 +156,41 @@ export function textoDelResumen(r: ResumenMapa, estado: EstadoMapa = 'ok'): stri
  */
 export function vistaTruncada(total: number | undefined, mostrados: number): boolean {
   return typeof total === 'number' && total > mostrados;
+}
+
+/**
+ * ¿El movimiento del mapa lo hizo la persona? MapLibre solo pone `originalEvent` en los
+ * movimientos que nacen de un gesto (arrastre, rueda, teclado, doble toque). Los del propio
+ * código —el `load`, el `flyTo` del GPS, el `jumpTo` de las coordenadas— no lo traen.
+ *
+ * En el paso 1 del reporte, antes cualquiera de esos movimientos elegía el centro como punto:
+ * el `load` pisaba el punto ya elegido con el centro por defecto y el `flyTo` del GPS pisaba la
+ * ubicación GPS con una manual sin precisión.
+ */
+export function esGestoDelUsuario(evento: { originalEvent?: unknown } | null | undefined): boolean {
+  return !!evento?.originalEvent;
+}
+
+/**
+ * Identidad de una ubicación por sus coordenadas, para usarla como dependencia de un efecto.
+ *
+ * Quien pasa `seleccionUbicacion={{ lat, lon }}` en línea crea un objeto nuevo en cada render; con
+ * el objeto como dependencia, el mapa de la revisión del reporte hacía `easeTo` en cada render
+ * (cada tecla, cada aviso) aunque el punto fuera el mismo.
+ */
+export function claveDeUbicacion(
+  u: { lat: number; lon: number } | null | undefined,
+): string | null {
+  return u ? `${u.lat},${u.lon}` : null;
+}
+
+/**
+ * Opciones del marcador de la ubicación elegida. En un mapa fijo (la revisión del reporte) no se
+ * arrastra: antes se podía, el pin se movía en la pantalla y el punto que se iba a enviar no.
+ */
+export function opcionesDelMarcadorDeSeleccion(fijo: boolean): {
+  draggable: boolean;
+  anchor: 'bottom';
+} {
+  return { draggable: !fijo, anchor: 'bottom' };
 }

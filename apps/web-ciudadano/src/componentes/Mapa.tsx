@@ -9,25 +9,18 @@ import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ReporteFeature } from '@/lib/api';
+import { centroDeCiudad } from '@/lib/ciudad';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
 import {
   BANDAS_CLUSTER,
   type BandaCluster,
+  claveDeUbicacion,
+  esGestoDelUsuario,
   MAX_PASTILLAS,
+  opcionesDelMarcadorDeSeleccion,
   type ResumenMapa,
 } from '@/lib/mapa-datos';
-
-/**
- * Santa Cruz de la Sierra: el centro histórico, cerca de la plaza principal. Es dónde abre el
- * mapa antes de saber qué capa rige; en cuanto llegan las capas, el encuadre pasa a salir de su
- * propio bbox (`encuadrarACapas`), que es el dato y no una constante.
- *
- * Medido sobre la entrega real del municipio: los 16 distritos cubren
- * `-63,2567 −17,9587 … −62,8069 −17,6319` (unos 48 × 36 km), con centroide en
- * `-63,134 −17,801`. Ese centroide cae en la periferia sur; el centro histórico es mejor punto
- * de partida para alguien que abre la aplicación.
- */
-export const CENTRO_INICIAL: [number, number] = [-63.18, -17.78];
 
 /**
  * Base clara y desaturada, como en el prototipo: las teselas quedan casi en gris para que lo
@@ -99,9 +92,15 @@ export interface PropsMapa {
   onUbicacion?: (lat: number, lon: number) => void;
   /**
    * Modo del paso 1 del reporte: el marcador queda fijo en el centro de la pantalla y lo que se
-   * mueve es el mapa. Con el pulgar es más preciso que arrastrar un pin diminuto.
+   * mueve es el mapa. Con el pulgar es más preciso que arrastrar un pin diminuto. `onUbicacion`
+   * solo avisa cuando el mapa lo mueve la persona (ver `esGestoDelUsuario`).
    */
   seguirCentro?: boolean;
+  /**
+   * Dónde abre el mapa. Sin valor, el centro y el zoom de la ciudad de la instalación
+   * (`GET /api/v1/configuracion`); en cuanto llegan las capas, `encuadrarACapas` pasa a encuadrar
+   * con su bbox, que es el dato y no una configuración.
+   */
   centro?: [number, number];
   zoom?: number;
   className?: string;
@@ -111,10 +110,10 @@ export interface PropsMapa {
   /**
    * Encuadra el mapa sobre la capa administrativa vigente en cuanto se conoce su bbox.
    *
-   * Hace falta porque el centro y el zoom por defecto son una constante, y una constante no
-   * puede acertar con una ciudad que no conoce: con la muestra sintética (doce unidades
-   * vecinales alrededor del centro) el zoom 13 era correcto, y con los 48 km de Santa Cruz
-   * mostraba un barrio. El bbox lo publica geo-service en `/geo/v1/capas`.
+   * Hace falta porque el centro y el zoom de la configuración son un punto de partida, no el
+   * contorno de la ciudad: con la muestra sintética (doce unidades vecinales alrededor del
+   * centro) el zoom 13 era correcto, y con los 48 km de Santa Cruz mostraba un barrio. El bbox lo
+   * publica geo-service en `/geo/v1/capas`.
    *
    * No es geolocalización: no se consulta dónde está quien mira, solo dónde está la ciudad. Y se
    * hace UNA vez y solo si nadie tocó el mapa todavía, para no arrebatarle la vista a alguien
@@ -175,16 +174,16 @@ const RADIO_CLUSTER = 44;
  * `mapa-datos` fija el resultado esperado.
  *
  * No se usa `point_count_abbreviated` de MapLibre porque abrevia en inglés («1.2K») y toda la
- * interfaz va en castellano (CLAUDE.md §12.1).
+ * interfaz va en castellano (CLAUDE.md §12.1). El `locale` es el de la ciudad configurada.
  */
-function expresionNumeroCompacto(): maplibregl.ExpressionSpecification {
+function expresionNumeroCompacto(locale: string): maplibregl.ExpressionSpecification {
   const n: unknown = ['get', 'point_count'];
   const enMiles = (decimales: number) => [
     'concat',
     [
       'number-format',
       ['/', n, 1000],
-      { locale: 'es-BO', 'min-fraction-digits': decimales, 'max-fraction-digits': decimales },
+      { locale, 'min-fraction-digits': decimales, 'max-fraction-digits': decimales },
     ],
     ' mil',
   ];
@@ -250,8 +249,8 @@ export function Mapa({
   seleccionUbicacion,
   onUbicacion,
   seguirCentro = false,
-  centro = CENTRO_INICIAL,
-  zoom = 13,
+  centro,
+  zoom,
   className = '',
   ariaLabel = 'Mapa de puntos de inundación',
   fijo = false,
@@ -259,6 +258,8 @@ export function Mapa({
   onResumen,
   alListo,
 }: PropsMapa) {
+  /** Centro, zoom y locale de la instalación: el mapa se crea una vez y los toma al nacer. */
+  const ciudad = useCiudad();
   const contenedor = useRef<HTMLElement>(null);
   /**
    * ¿El mapa terminó de dibujar lo que pidió?
@@ -334,8 +335,8 @@ export function Mapa({
     const m = new maplibregl.Map({
       container: contenedor.current,
       style: ESTILO_BASE,
-      center: centro,
-      zoom,
+      center: centro ?? centroDeCiudad(ciudad),
+      zoom: zoom ?? ciudad.zoom_inicial,
       attributionControl: { compact: true },
       interactive: !fijo,
     });
@@ -481,7 +482,7 @@ export function Mapa({
         source: 'reportes',
         filter: ['has', 'point_count'],
         layout: {
-          'text-field': expresionNumeroCompacto(),
+          'text-field': expresionNumeroCompacto(ciudad.locale),
           'text-font': ['NotoSans-Bold'],
           'text-size': escalonPorCantidad((b) => b.texto),
           'text-allow-overlap': true,
@@ -574,13 +575,17 @@ export function Mapa({
           onSeleccionarRef.current?.(null);
       });
 
-      const avisar = () => {
+      const avisar = (evento?: { originalEvent?: unknown }) => {
         const b = m.getBounds();
         onMoverRef.current?.(
           `${b.getWest().toFixed(5)},${b.getSouth().toFixed(5)},${b.getEast().toFixed(5)},${b.getNorth().toFixed(5)}`,
           m.getZoom(),
         );
-        if (seguirCentroRef.current) {
+        // El centro es el punto elegido SOLO si lo movió la persona. Antes también contaban el
+        // `load` (que al volver al paso 1 pisaba el punto con el centro por defecto, y al solo
+        // abrir /reportar dejaba un borrador «con contenido») y el `flyTo` del GPS (que pisaba la
+        // ubicación GPS con una manual sin precisión).
+        if (seguirCentroRef.current && esGestoDelUsuario(evento)) {
           const c = m.getCenter();
           onUbicacionRef.current?.(c.lat, c.lng);
         }
@@ -603,7 +608,7 @@ export function Mapa({
       // `originalEvent` solo viene cuando el movimiento nace de un gesto (rueda, arrastre,
       // teclado); los `flyTo` del propio código no lo traen.
       m.on('movestart', (e) => {
-        if ((e as { originalEvent?: unknown }).originalEvent) movidoPorUsuario.current = true;
+        if (esGestoDelUsuario(e)) movidoPorUsuario.current = true;
       });
       listo.current = true;
       avisar();
@@ -625,6 +630,11 @@ export function Mapa({
       clearTimeout(topeDelAviso);
       for (const marca of vivos.values()) marca.remove();
       vivos.clear();
+      // El marcador de la ubicación elegida muere con su mapa: si sobreviviera, el efecto que lo
+      // pone creería que ya está y lo movería sobre un mapa que ya no existe (así pasaba al
+      // desmontar y volver a montar, que en desarrollo React hace siempre una vez).
+      marcador.current?.remove();
+      marcador.current = null;
       m.remove();
       mapa.current = null;
       listo.current = false;
@@ -657,13 +667,17 @@ export function Mapa({
     if (mapa.current && listo.current) sincronizarPines.current();
   }, [seleccionado, destacado]);
 
-  // Marcador de selección de ubicación (arrastrable). En modo `seguirCentro` no se usa: ahí el
-  // marcador lo dibuja la pantalla, clavado en el centro.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: onUbicacion se lee al arrastrar
+  // Marcador de selección de ubicación. En modo `seguirCentro` no se usa: ahí el marcador lo dibuja
+  // la pantalla, clavado en el centro. El efecto depende de la CLAVE de las coordenadas y no del
+  // objeto, y lee el punto y el callback por ref: con el objeto en línea como dependencia, el mapa
+  // se volvía a animar en cada render aunque el punto fuera el mismo.
+  const claveSeleccion = claveDeUbicacion(seleccionUbicacion);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: el punto se lee por ref; la clave es la dependencia
   useEffect(() => {
     const m = mapa.current;
+    const punto = seleccionUbicacionRef.current;
     if (!m || seguirCentro) return;
-    if (!seleccionUbicacion) {
+    if (!punto) {
       marcador.current?.remove();
       marcador.current = null;
       return;
@@ -672,19 +686,19 @@ export function Mapa({
       const el = document.createElement('div');
       el.style.cssText =
         'width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#1B6B38;border:3px solid #fff;box-shadow:0 2px 8px rgba(15,45,67,.4)';
-      marcador.current = new maplibregl.Marker({ element: el, draggable: true, anchor: 'bottom' })
-        .setLngLat([seleccionUbicacion.lon, seleccionUbicacion.lat])
+      marcador.current = new maplibregl.Marker({
+        element: el,
+        ...opcionesDelMarcadorDeSeleccion(fijo),
+      })
+        .setLngLat([punto.lon, punto.lat])
         .addTo(m);
       marcador.current.on('dragend', () => {
         const p = marcador.current?.getLngLat();
-        if (p) onUbicacion?.(p.lat, p.lng);
+        if (p) onUbicacionRef.current?.(p.lat, p.lng);
       });
-    } else marcador.current.setLngLat([seleccionUbicacion.lon, seleccionUbicacion.lat]);
-    m.easeTo({
-      center: [seleccionUbicacion.lon, seleccionUbicacion.lat],
-      zoom: Math.max(m.getZoom(), 16),
-    });
-  }, [seleccionUbicacion, seguirCentro]);
+    } else marcador.current.setLngLat([punto.lon, punto.lat]);
+    m.easeTo({ center: [punto.lon, punto.lat], zoom: Math.max(m.getZoom(), 16) });
+  }, [claveSeleccion, seguirCentro]);
 
   return (
     <section ref={contenedor} className={className} aria-label={ariaLabel}>

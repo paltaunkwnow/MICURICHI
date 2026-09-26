@@ -4,9 +4,12 @@ import { CONFIG_DOMINIO } from 'contracts';
 import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { destinoDelPanel, textoDelPanel, URL_DEL_PANEL } from '@/lib/panel';
+import { useCiudad } from '@/lib/ciudad-contexto';
+import { horaCorta } from '@/lib/formato';
+import { destinoDelPanelDeSesion, textoDelPanel } from '@/lib/panel';
 import { useCerrarSesion, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
+import { ErrorDeCarga } from './ErrorDeCarga';
 
 /**
  * Estado de la cuenta: quién está, cuándo vuelve a tener turno para reportar y cómo salir.
@@ -22,20 +25,35 @@ function faltaPara(momento: Date): string {
   return `${minutos} minutos`;
 }
 
-const hora = (d: Date) =>
-  d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit', hour12: false });
-
 export function PanelCuenta() {
   const router = useRouter();
-  const { usuario, cargando, puedeReportarDesde } = useSesion();
+  const { usuario, cargando, errorDeCarga, reintentar, reintentando, puedeReportarDesde } =
+    useSesion();
   const salir = useCerrarSesion();
-  const panel = destinoDelPanel(usuario?.rol, URL_DEL_PANEL);
+  const ciudad = useCiudad();
+  const panel = destinoDelPanelDeSesion(usuario);
 
   if (cargando)
     return (
       <p className="ayuda p-6" role="status">
         Comprobando la sesión…
       </p>
+    );
+
+  // Sin respuesta de /auth/yo no se sabe si hay sesión: decir «todavía no iniciaste sesión» a
+  // quien sí la tiene es mandarlo a entrar de nuevo por un fallo del servidor.
+  if (errorDeCarga)
+    return (
+      <div className="tarjeta w-full max-w-md p-7">
+        <h1 className="mb-4 text-2xl">Tu cuenta</h1>
+        <ErrorDeCarga
+          error={errorDeCarga}
+          que="tu sesión"
+          alReintentar={reintentar}
+          reintentando={reintentando}
+          testId="error-sesion"
+        />
+      </div>
     );
 
   if (!usuario)
@@ -90,7 +108,7 @@ export function PanelCuenta() {
       {puedeReportarDesde ? (
         <Aviso tono="alerta">
           Ya enviaste un reporte hace poco. Vas a poder enviar otro en{' '}
-          {faltaPara(puedeReportarDesde)}, a las {hora(puedeReportarDesde)}.
+          {faltaPara(puedeReportarDesde)}, a las {horaCorta(puedeReportarDesde, ciudad)}.
         </Aviso>
       ) : (
         <Aviso tono="ok">Podés enviar un reporte ahora.</Aviso>

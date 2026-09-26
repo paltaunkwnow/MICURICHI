@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ReporteFeature } from './api';
+import type { Regional } from './ciudad';
 import * as formato from './formato';
 import {
   contadorDescripcion,
@@ -7,12 +8,47 @@ import {
   etiquetaDistrito,
   etiquetaProfundidad,
   etiquetaUnidadVecinal,
+  fechaCorta,
+  horaCorta,
+  numeroConMiles,
   subtituloReporte,
   textoCapaOficial,
   tituloPuntos,
   tituloReporte,
   urlFotoRelativa,
 } from './formato';
+
+const LA_PAZ: Regional = { locale: 'es-BO', zona_horaria: 'America/La_Paz' };
+const MADRID: Regional = { locale: 'es-ES', zona_horaria: 'Europe/Madrid' };
+
+describe('fechas y cifras con el formato de la ciudad configurada', () => {
+  // Un servidor en UTC (lo normal en un contenedor) no puede mover el día que se muestra.
+  const TZ_ORIGINAL = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = 'UTC';
+  });
+  afterAll(() => {
+    if (TZ_ORIGINAL === undefined) delete process.env.TZ;
+    else process.env.TZ = TZ_ORIGINAL;
+  });
+
+  it('la fecha es la del día en la ciudad, no la del reloj del servidor ni del teléfono', () => {
+    // Las 02:00 UTC del 25 son todavía las 22:00 del 24 en La Paz (UTC−4) y ya el 25 en Madrid.
+    expect(fechaCorta('2026-09-25T02:00:00Z', LA_PAZ)).toBe('24 sept 2026');
+    expect(fechaCorta('2026-09-25T02:00:00Z', MADRID)).toBe('25 sept 2026');
+  });
+
+  it('la hora también sale en la zona de la ciudad, en 24 h', () => {
+    expect(horaCorta(new Date('2026-09-25T18:30:00Z'), LA_PAZ)).toBe('14:30');
+    expect(horaCorta(new Date('2026-09-25T18:30:00Z'), MADRID)).toBe('20:30');
+  });
+
+  it('los miles se separan como en el locale de la ciudad', () => {
+    expect(numeroConMiles(3488, 'es-BO')).toBe('3.488');
+    expect(numeroConMiles(3488, 'es-MX')).toBe('3,488');
+    expect(numeroConMiles(Number.NaN, 'es-BO')).toBe('');
+  });
+});
 
 const props = {
   id: '00000000-0000-0000-0000-000000000001',

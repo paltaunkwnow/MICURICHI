@@ -1,10 +1,12 @@
 'use client';
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { Ciudad } from 'contracts';
 import { type ReactNode, useEffect, useState } from 'react';
 import { ProveedorToast } from '@/componentes/Toast';
+import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 
-export function Proveedores({ children }: { children: ReactNode }) {
+export function Proveedores({ ciudad, children }: { ciudad: Ciudad; children: ReactNode }) {
   const [cliente] = useState(
     () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } }),
   );
@@ -14,8 +16,10 @@ export function Proveedores({ children }: { children: ReactNode }) {
     }
   }, []);
   return (
-    <QueryClientProvider client={cliente}>
-      <ProveedorToast>{children}</ProveedorToast>
-    </QueryClientProvider>
+    <ProveedorCiudad ciudad={ciudad}>
+      <QueryClientProvider client={cliente}>
+        <ProveedorToast>{children}</ProveedorToast>
+      </QueryClientProvider>
+    </ProveedorCiudad>
   );
 }

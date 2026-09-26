@@ -3,6 +3,8 @@
 import { ChevronRight, CloudRain, Hammer, type LucideIcon, MapPin } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
+import { fotoDeCiudad } from '@/lib/ciudad';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import { PlanoAnillos } from './PlanoAnillos';
 
 interface Lamina {
@@ -11,14 +13,17 @@ interface Lamina {
   texto: string;
   Icono: LucideIcon;
   velo: string;
-  foto?: string;
+  /** Lleva la fotografía propia de la ciudad, si el proyecto trae una (`fotoDeCiudad`). */
+  conFotoDeCiudad?: boolean;
 }
 
 /**
  * Las tres láminas de bienvenida (C-00). El prototipo las ilustraba con fotos de banco de
- * imágenes enlazadas a un servicio externo; acá las dos primeras usan el trazado de anillos y
- * radiales de la ciudad —que ya identifica a Santa Cruz y no depende de nadie— y la tercera, la
- * fotografía de la catedral que viaja con el proyecto.
+ * imágenes enlazadas a un servicio externo; acá las dos primeras usan una trama de anillos y
+ * radiales —el trazado de Santa Cruz, que como decoración sirve a cualquier ciudad y no depende de
+ * nadie— y la tercera, la fotografía propia de la ciudad si el proyecto trae una. Hoy solo existe
+ * la de la catedral de Santa Cruz: en otra instalación esa lámina vuelve a la trama, porque
+ * enseñar la catedral de otra ciudad sería mostrar Santa Cruz donde no corresponde.
  */
 const LAMINAS: Lamina[] = [
   {
@@ -43,21 +48,23 @@ const LAMINAS: Lamina[] = [
       'Un técnico revisa cada reporte antes de publicarlo. Cuando el municipio resuelve un punto, queda marcado como resuelto.',
     Icono: Hammer,
     velo: 'linear-gradient(180deg,rgba(15,45,67,.34) 0%,rgba(10,74,105,.78) 44%,rgba(27,107,56,.96) 100%)',
-    foto: '/santa-cruz-catedral.jpg',
+    conFotoDeCiudad: true,
   },
 ];
 
 export function Bienvenida() {
   const [i, setI] = useState(0);
+  const ciudad = useCiudad();
   const lamina = LAMINAS[i] as Lamina;
   const { Icono } = lamina;
+  const foto = lamina.conFotoDeCiudad ? fotoDeCiudad(ciudad) : null;
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col bg-agua-900">
-      {lamina.foto ? (
+      {foto ? (
         // biome-ignore lint/performance/noImgElement: fotografía estática que viaja con el proyecto
         <img
-          src={lamina.foto}
+          src={foto}
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
           style={{ objectPosition: '50% 28%' }}

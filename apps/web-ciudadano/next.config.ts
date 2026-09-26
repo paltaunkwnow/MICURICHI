@@ -1,10 +1,20 @@
 import type { NextConfig } from 'next';
 
-const API = process.env.API_CORE_URL ?? 'http://127.0.0.1:3001';
-const GEO = process.env.GEO_SERVICE_URL ?? 'http://127.0.0.1:3002';
-// Adónde lleva el botón «Panel técnico» que ven técnico y admin (src/lib/panel.ts). Se fija al
-// compilar, porque el navegador necesita el valor: cambiarlo exige volver a construir la app.
-const PANEL = process.env.PANEL_ADMIN_URL ?? 'http://localhost:3100';
+/**
+ * Este archivo se evalúa al COMPILAR y Next serializa el resultado en la salida: nada de lo que
+ * lea de `process.env` puede cambiar después sin volver a construir. Como Mi Curichi se instala una
+ * vez por ciudad con la misma imagen, aquí no queda nada que dependa del despliegue:
+ *
+ *  - El reenvío de `/api/*` y `/geo/*` (`API_CORE_URL`, `GEO_SERVICE_URL`) y `HSTS` los resuelve
+ *    `src/proxy.ts` en cada petición. Antes eran `rewrites` y `headers` de este archivo, y el
+ *    `routes-manifest.json` de la imagen traía `http://127.0.0.1:3001` escrito.
+ *  - La URL del panel ya no viaja en el JavaScript público (`env`): llega en `/auth/yo`, y solo a
+ *    los roles del panel (`src/lib/panel.ts`).
+ *  - La ciudad (centro, locale, zona horaria, nombre) llega de `GET /api/v1/configuracion`
+ *    (`src/lib/ciudad-servidor.ts`).
+ *
+ * `NODE_ENV` sí se lee: distingue `next dev` de la imagen, no un despliegue de otro.
+ */
 const desarrollo = process.env.NODE_ENV !== 'production';
 
 /**
@@ -21,12 +31,14 @@ const desarrollo = process.env.NODE_ENV !== 'production';
  *    y otras rutas de MapLibre sí lo crean desde un blob.
  *  - `data:`/`blob:` en img-src: miniaturas de las fotos antes de subirlas y el canvas del mapa.
  *
+ * api-core y geo-service no aparecen: el navegador les habla por `/api` y `/geo` en el propio
+ * origen (`'self'`) y el reenvío lo hace el servidor.
+ *
  * `script-src` lleva 'unsafe-inline' porque Next inyecta en la página el payload de hidratación
- * como <script> en línea. Quitarlo exige nonces por middleware, y el nonce obliga a renderizar
- * TODAS las páginas de forma dinámica: el mapa público dejaría de ser estático. Se asume ese
- * 'unsafe-inline' a sabiendas: esta app no renderiza HTML de terceros en ningún punto (React
- * escapa todo y no hay dangerouslySetInnerHTML), así que el vector que abre es estrecho, y el
- * resto de directivas sigue acotando a dónde podría salir un dato si algo se colara.
+ * como <script> en línea. Quitarlo exige nonces por petición. Se asume ese 'unsafe-inline' a
+ * sabiendas: esta app no renderiza HTML de terceros en ningún punto (React escapa todo y no hay
+ * dangerouslySetInnerHTML), así que el vector que abre es estrecho, y el resto de directivas sigue
+ * acotando a dónde podría salir un dato si algo se colara.
  * En desarrollo hace falta además 'unsafe-eval' para el refresco en caliente.
  */
 const csp = [
@@ -58,25 +70,17 @@ const cabeceras = [
   },
 ];
 
-// Solo detrás de HTTPS: anunciar HSTS sobre http deja el navegador sin poder volver atrás.
-if (process.env.HSTS === '1')
-  cabeceras.push({
-    key: 'Strict-Transport-Security',
-    value: 'max-age=31536000; includeSubDomains',
-  });
-
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // El manual del repositorio es el CLAUDE.md de la raíz: Next no debe generar los suyos.
   agentRules: false,
-  env: { PANEL_ADMIN_URL: PANEL },
-  // Las apps hablan con los servicios por rutas relativas; Next las reenvía (mismo origen → cookies y CORS simples).
-  async rewrites() {
-    return [
-      { source: '/api/:path*', destination: `${API}/api/:path*` },
-      { source: '/geo/:path*', destination: `${GEO}/geo/:path*` },
-    ];
-  },
+  /**
+   * Imagen de producción: `.next/standalone` trae un `server.js` mínimo con solo las dependencias
+   * que usa. En este monorepo la raíz del trazado es la del repositorio (Next la detecta por el
+   * lockfile), así que el servidor queda en `.next/standalone/apps/web-ciudadano/server.js`, y
+   * `public/` y `.next/static` se copian aparte (ver README).
+   */
+  output: 'standalone',
   async headers() {
     return [{ source: '/(.*)', headers: cabeceras }];
   },

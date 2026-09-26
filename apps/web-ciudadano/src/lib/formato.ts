@@ -7,6 +7,7 @@ import {
   type UnidadAdministrativa,
 } from 'contracts';
 import type { ReporteFeature } from './api';
+import type { Regional } from './ciudad';
 
 export const SEVERIDADES_ORDEN: Severidad[] = ['critica', 'alta', 'media', 'baja'];
 
@@ -78,12 +79,29 @@ export function distanciaDesde(
   return distanciaAproximadaM(usuario.lat, usuario.lon, lat, lon);
 }
 
-export function fechaCorta(iso: string) {
-  return new Intl.DateTimeFormat('es-BO', {
+/**
+ * «24 sept 2026», con el locale y la zona horaria de la ciudad (`useCiudad()`).
+ *
+ * La zona va explícita: sin ella el día dependía del reloj de quien formateaba, y el servidor (en
+ * un contenedor, UTC) y el teléfono podían escribir días distintos para el mismo reporte.
+ */
+export function fechaCorta(iso: string, regional: Regional) {
+  return new Intl.DateTimeFormat(regional.locale, {
     day: 'numeric',
     month: 'short',
     year: 'numeric',
+    timeZone: regional.zona_horaria,
   }).format(new Date(iso));
+}
+
+/** «14:30», en 24 h y en la zona horaria de la ciudad. */
+export function horaCorta(momento: Date, regional: Regional) {
+  return new Intl.DateTimeFormat(regional.locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: regional.zona_horaria,
+  }).format(momento);
 }
 
 /** Título del panel: "N puntos cerca de vos" (singular cuando corresponde). */
@@ -93,13 +111,13 @@ export function tituloPuntos(n: number | undefined) {
 }
 
 /**
- * Cifra exacta con separador de miles en castellano: `3488` → `3.488`.
+ * Cifra exacta con el separador de miles del locale de la ciudad: `3488` → `3.488` en `es-BO`.
  *
  * Es para los titulares, donde el número importa entero. Dentro del mapa manda `numeroCompacto`,
  * que resume en miles porque ahí lo que falta es sitio.
  */
-export function numeroConMiles(n: number): string {
-  return Number.isFinite(n) ? Math.round(n).toLocaleString('es-BO') : '';
+export function numeroConMiles(n: number, locale: string): string {
+  return Number.isFinite(n) ? Math.round(n).toLocaleString(locale) : '';
 }
 
 /** Chip flotante del mapa: "Distrito 07 · UV-123 · capa oficial vigente". */

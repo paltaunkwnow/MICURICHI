@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ChartColumn, Layers, type LucideIcon, MapPin, Search } from 'lucide-react';
 import Link from 'next/link';
 import { obtenerCapas, obtenerReportes } from '@/lib/api';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import { useEsEscritorio } from '@/lib/useEsEscritorio';
 import { Aviso } from './Aviso';
 import { MapaDiferido } from './MapaDiferido';
@@ -51,6 +52,7 @@ const PASOS: Array<{ n: number; titulo: string; texto: string; Icono: LucideIcon
  * número de distritos y de unidades vecinales, de las capas vigentes que sirve geo-service.
  */
 export function Portada() {
+  const ciudad = useCiudad();
   // En el celular esta portada está oculta por CSS pero React la monta igual. Sin esta condición
   // el mapa se inicializaba en un contenedor de tamaño cero y estas dos consultas salían para
   // nada, en el dispositivo donde menos sobra el ancho de banda.
@@ -82,7 +84,7 @@ export function Portada() {
         <PlanoAnillos opacidad={0.2} />
         <div className="relative z-10">
           <p className="text-[12.5px] font-bold tracking-[0.14em] text-white/80 uppercase">
-            Santa Cruz de la Sierra
+            {ciudad.nombre}
           </p>
           <h1 className="titular mt-3.5 text-[34px] leading-[1.05] text-white md:text-[44px]">
             Dónde se junta el agua cuando llueve fuerte
@@ -118,7 +120,8 @@ export function Portada() {
               ariaLabel="Vista general de los puntos publicados"
               reportes={reportes.data?.features ?? []}
               capas={capas.data ?? []}
-              zoom={12}
+              // Vista general: un nivel más lejos que el mapa principal de esta ciudad.
+              zoom={Math.max(0, ciudad.zoom_inicial - 1)}
               fijo
             />
           ) : null}

@@ -4,6 +4,7 @@ import { ETIQUETAS } from 'contracts';
 import { X } from 'lucide-react';
 import Link from 'next/link';
 import type { ReporteFeature } from '@/lib/api';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import {
   etiquetaCausa,
   etiquetaDistrito,
@@ -47,6 +48,7 @@ export function HojaDetalle({
   testId = 'hoja-detalle',
 }: Props) {
   const p = reporte.properties;
+  const ciudad = useCiudad();
   const [lon, lat] = reporte.geometry.coordinates;
   return (
     <section data-testid={testId} aria-label={`Detalle del reporte en ${tituloReporte(p)}`}>
@@ -111,7 +113,7 @@ export function HojaDetalle({
         </div>
         <div>
           <dt>Reportado</dt>
-          <dd>{fechaCorta(p.creado_en)}</dd>
+          <dd>{fechaCorta(p.creado_en, ciudad)}</dd>
         </div>
       </dl>
 
