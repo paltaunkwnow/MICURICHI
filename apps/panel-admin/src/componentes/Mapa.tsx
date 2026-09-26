@@ -1,6 +1,6 @@
 'use client';
 
-import type { CapaInfo, Severidad } from 'contracts';
+import type { CapaInfo, ReporteTecnicoFeature, Severidad } from 'contracts';
 import type { LngLatBoundsLike, Map as MapaGl } from 'maplibre-gl';
 // MapLibre 6 es ESM puro: no tiene export por defecto.
 import * as maplibregl from 'maplibre-gl';
@@ -8,15 +8,10 @@ import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef } from 'react';
-import type { ReporteTecnicoFeature } from '@/lib/api';
+import { useCiudad } from '@/lib/ciudad-contexto';
+import { limitesDeCapas, vistaInicialDelPanel } from '@/lib/encuadre';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
-
-/**
- * Santa Cruz de la Sierra, centro histórico. El panel abre acá y el técnico se mueve con los
- * filtros; el mapa público, en cambio, encuadra sobre el bbox de la capa vigente porque ahí la
- * primera vista es lo único que se ve.
- */
-export const CENTRO_INICIAL: [number, number] = [-63.18, -17.78];
+import { conectarTooltipRelleno } from '@/lib/tooltip-relleno';
 
 /**
  * Tope de pastillas HTML a la vez. La tabla pagina de a 50, así que en la práctica siempre se
@@ -82,6 +77,8 @@ export interface RellenoCapa {
   /** `codigo` del polígono → color. Los que no están van con `colorPorDefecto`. */
   colores: Record<string, string>;
   colorPorDefecto: string;
+  /** Opacidad del relleno; de ella depende el contraste entre los pasos de la escala. */
+  opacidad: number;
   /** `codigo` → texto del tooltip al pasar o tocar el polígono. */
   descripciones?: Record<string, string>;
 }
@@ -94,6 +91,16 @@ export interface PropsMapa {
   seleccionado?: string | null;
   /** Encuadra los reportes cada vez que cambian (tabla) o el punto único (detalle). */
   ajustarAPuntos?: boolean;
+  /**
+   * Encuadra una vez sobre el bbox de las capas en cuanto llegan. Con un zoom fijo el panel
+   * ejecutivo dejaba fuera los distritos 14 y 15.
+   */
+  encuadrarACapas?: boolean;
+  /**
+   * Vista inicial. Sin ellos, el centro de la ciudad del despliegue y su zoom inicial un nivel
+   * más lejos (`vistaInicialDelPanel`); el técnico se mueve con los filtros, y el panel
+   * ejecutivo encuadra sobre el bbox de la capa vigente (`encuadrarACapas`).
+   */
   centro?: [number, number];
   zoom?: number;
   className?: string;
@@ -120,22 +127,29 @@ export function Mapa({
   onSeleccionar,
   seleccionado = null,
   ajustarAPuntos = false,
-  centro = CENTRO_INICIAL,
-  zoom = 12,
+  encuadrarACapas = false,
+  centro,
+  zoom,
   className = '',
   ariaLabel = 'Mapa de reportes de inundación',
   relleno,
 }: PropsMapa) {
+  const vistaCiudad = vistaInicialDelPanel(useCiudad());
+  const centroInicial = centro ?? vistaCiudad.centro;
+  const zoomInicial = zoom ?? vistaCiudad.zoom;
   const contenedor = useRef<HTMLDivElement>(null);
   const mapa = useRef<MapaGl | null>(null);
   const listo = useRef(false);
   const pines = useRef(new Map<string, maplibregl.Marker>());
+  /** El encuadre sobre las capas se hace una sola vez: después manda la persona. */
+  const encuadrado = useRef(false);
 
   // Los datos y callbacks se leen por ref para que el mapa se inicialice una sola vez.
   const reportesRef = useRef(reportes);
   const capasRef = useRef(capas);
   const seleccionarRef = useRef(onSeleccionar);
   const ajustarRef = useRef(ajustarAPuntos);
+  const encuadrarRef = useRef(encuadrarACapas);
   const seleccionRef = useRef(seleccionado);
   const rellenoRef = useRef(relleno);
   const tooltip = useRef<maplibregl.Popup | null>(null);
@@ -143,6 +157,7 @@ export function Mapa({
   capasRef.current = capas;
   seleccionarRef.current = onSeleccionar;
   ajustarRef.current = ajustarAPuntos;
+  encuadrarRef.current = encuadrarACapas;
   seleccionRef.current = seleccionado;
   rellenoRef.current = relleno;
 
@@ -153,15 +168,15 @@ export function Mapa({
    */
   const sincronizarPines = useRef<() => void>(() => {});
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: el mapa se crea una sola vez; `centro` y `zoom` son solo la vista inicial
+  // biome-ignore lint/correctness/useExhaustiveDependencies: el mapa se crea una sola vez; centro y zoom son solo la vista inicial
   useEffect(() => {
     if (!contenedor.current || mapa.current) return;
     configurarWorkerDeMapLibre();
     const m = new maplibregl.Map({
       container: contenedor.current,
       style: ESTILO_BASE,
-      center: centro,
-      zoom,
+      center: centroInicial,
+      zoom: zoomInicial,
       attributionControl: { compact: true },
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
@@ -277,6 +292,7 @@ export function Mapa({
       });
       listo.current = true;
       aplicarCapas(m, capasRef.current);
+      encuadrarUnaVez(m, capasRef.current, encuadrarRef.current, encuadrado);
       aplicarRelleno(m, rellenoRef, tooltip.current);
       aplicarReportes(m, reportesRef.current, ajustarRef.current);
       sincronizarPines.current();
@@ -310,13 +326,16 @@ export function Mapa({
   useEffect(() => {
     if (mapa.current && listo.current) {
       aplicarCapas(mapa.current, capas);
+      encuadrarUnaVez(mapa.current, capas, encuadrarRef.current, encuadrado);
       aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
     }
   }, [capas]);
 
   // `relleno` se lee por ref dentro de `aplicarRelleno` (el tooltip necesita el texto vigente).
+  // Un tooltip abierto muestra el conteo de antes: se cierra en cada cambio (pestaña o datos).
   // biome-ignore lint/correctness/useExhaustiveDependencies: se lee por ref, ver arriba
   useEffect(() => {
+    tooltip.current?.remove();
     if (mapa.current && listo.current) aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
   }, [relleno]);
 
@@ -338,6 +357,19 @@ function aplicarReportes(m: MapaGl, reportes: ReporteTecnicoFeature[], ajustar: 
     for (const f of reportes) b.extend(f.geometry.coordinates);
     m.fitBounds(b as LngLatBoundsLike, { padding: 48, maxZoom: 16, duration: 400 });
   }
+}
+
+function encuadrarUnaVez(
+  m: MapaGl,
+  capas: CapaInfo[],
+  activo: boolean,
+  hecho: { current: boolean },
+) {
+  if (!activo || hecho.current) return;
+  const limites = limitesDeCapas(capas);
+  if (!limites) return;
+  m.fitBounds(limites, { padding: 24, duration: 0 });
+  hecho.current = true;
 }
 
 function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
@@ -442,30 +474,15 @@ function aplicarRelleno(
       id: idRelleno,
       type: 'fill',
       ...base,
-      paint: { 'fill-color': expresionRelleno(r), 'fill-opacity': 0.82 },
+      paint: { 'fill-color': expresionRelleno(r), 'fill-opacity': r.opacidad },
     } as maplibregl.LayerSpecification,
     m.getLayer(`${origen}-linea`) ? `${origen}-linea` : 'puntos-halo',
   );
   if (!tooltip) return;
-  const mostrar = (e: maplibregl.MapLayerMouseEvent) => {
-    const f = e.features?.[0];
-    const codigo = f?.properties?.codigo;
-    if (codigo === undefined || codigo === null) return;
-    const texto = rellenoRef.current?.descripciones?.[String(codigo)];
-    if (!texto) {
-      tooltip.remove();
-      return;
-    }
-    tooltip.setLngLat(e.lngLat).setText(texto).addTo(m);
-  };
-  m.on('mousemove', idRelleno, (e) => {
-    m.getCanvas().style.cursor = 'pointer';
-    mostrar(e);
-  });
-  // En pantallas táctiles no hay «pasar por encima»: el toque muestra el mismo tooltip.
-  m.on('click', idRelleno, mostrar);
-  m.on('mouseleave', idRelleno, () => {
-    m.getCanvas().style.cursor = '';
-    tooltip.remove();
-  });
+  conectarTooltipRelleno(
+    m,
+    idRelleno,
+    tooltip,
+    (codigo) => rellenoRef.current?.descripciones?.[codigo],
+  );
 }

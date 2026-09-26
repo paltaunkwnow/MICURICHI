@@ -1,7 +1,9 @@
+import { CONFIG_DOMINIO } from 'contracts';
 import { describe, expect, it } from 'vitest';
 import {
   avisosResolucion,
   coordenadas,
+  crearFormato,
   etiquetaCapa,
   etiquetaDistrito,
   etiquetaEstado,
@@ -10,8 +12,6 @@ import {
   etiquetaSeveridad,
   etiquetaSiNo,
   etiquetaUnidadVecinal,
-  fechaCorta,
-  fechaHora,
   idCorto,
   porcentaje,
   precisionGps,
@@ -43,11 +43,14 @@ describe('etiquetas del dominio', () => {
 });
 
 describe('fechas y números', () => {
-  it('formatea fechas en la zona horaria de Santa Cruz', () => {
+  const { fechaCorta, fechaHora } = crearFormato(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
+
+  it('formatea fechas en la zona horaria de la ciudad por defecto (Santa Cruz)', () => {
     // 03:30 UTC del 2 de marzo es 23:30 del 1 de marzo en America/La_Paz (UTC-4).
     expect(fechaCorta('2026-03-02T03:30:00Z')).toMatch(/01 mar\.? 2026/);
     expect(fechaHora('2026-03-02T03:30:00Z')).toMatch(/23:30/);
     expect(fechaCorta(null)).toBe('—');
+    expect(fechaHora(undefined)).toBe('—');
   });
 
   it('calcula porcentajes enteros y evita dividir por cero', () => {

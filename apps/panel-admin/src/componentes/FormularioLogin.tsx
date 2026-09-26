@@ -9,7 +9,7 @@ import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Aviso } from '@/componentes/Aviso';
 import { ErrorApi, iniciarSesion } from '@/lib/api';
-import { rutaInicial } from '@/lib/roles';
+import { destinoDesdeLogin, rutaInicial } from '@/lib/roles';
 import { CLAVE_YO, useUsuario } from '@/lib/sesion';
 
 // Mismas reglas que LoginSchema de contracts, con mensajes en español para la interfaz.
@@ -28,9 +28,11 @@ export function FormularioLogin() {
   const caducada = parametros?.get('caducada') === '1';
   const [mensajeError, setMensajeError] = useState<string | null>(null);
 
-  // Con sesión vigente no tiene sentido mostrar el formulario.
+  // Con sesión vigente de un rol del panel no tiene sentido mostrar el formulario. Una cuenta
+  // ciudadana sí lo ve: es su única forma de entrar con otra cuenta.
   useEffect(() => {
-    if (sesion.data) router.replace(rutaInicial(sesion.data.rol));
+    const destino = destinoDesdeLogin(sesion.data?.rol);
+    if (destino) router.replace(destino);
   }, [sesion.data, router]);
 
   const {

@@ -4,11 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { Mapa, type RellenoCapa } from '@/componentes/Mapa';
 import { obtenerCapasMapa } from '@/lib/api';
-import { COLOR_SIN_REPORTES } from '@/lib/ejecutivo';
+import { COLOR_SIN_REPORTES, OPACIDAD_COROPLETA } from '@/lib/ejecutivo';
 
 /**
  * Coropleta de distritos del panel ejecutivo. Solo la capa de distritos, sin puntos: quien mira
- * este mapa decide por zonas, no modera reportes uno por uno.
+ * este mapa decide por zonas, no modera reportes uno por uno. Encuadra sobre el bbox de la capa
+ * vigente para que se vean todos los distritos.
  */
 export function MapaDistritos({
   colores,
@@ -24,13 +25,18 @@ export function MapaDistritos({
     queryFn: ({ signal }) => obtenerCapasMapa(signal),
     staleTime: Number.POSITIVE_INFINITY,
   });
-  const soloDistritos = (capas.data ?? []).filter((c) => c.capa === 'distrito_municipal');
+  // Estable entre renders: el mapa vuelve a aplicar las capas cada vez que cambia esta referencia.
+  const soloDistritos = useMemo(
+    () => (capas.data ?? []).filter((c) => c.capa === 'distrito_municipal'),
+    [capas.data],
+  );
   // Estable entre renders: el mapa repinta la capa cada vez que cambia esta referencia.
   const relleno = useMemo<RellenoCapa>(
     () => ({
       capa: 'distrito_municipal',
       colores,
       colorPorDefecto: COLOR_SIN_REPORTES,
+      opacidad: OPACIDAD_COROPLETA,
       descripciones,
     }),
     [colores, descripciones],
@@ -40,7 +46,7 @@ export function MapaDistritos({
       <Mapa
         capas={soloDistritos}
         relleno={relleno}
-        zoom={11}
+        encuadrarACapas
         className="h-[380px] w-full lg:h-[460px]"
         ariaLabel={ariaLabel}
       />

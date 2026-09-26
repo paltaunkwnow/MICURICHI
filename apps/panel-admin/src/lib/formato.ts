@@ -1,5 +1,6 @@
 import {
   type CausaPresunta,
+  type Ciudad,
   COLORES_SEVERIDAD,
   type EstadoReporte,
   ETIQUETAS,
@@ -14,8 +15,47 @@ import {
   type UbicacionTipo,
 } from 'contracts';
 
-/** Zona horaria de Santa Cruz de la Sierra (UTC-4, sin horario de verano). */
-export const ZONA_HORARIA = 'America/La_Paz';
+/** Lo que el formato toma de la ciudad del despliegue: el locale de `Intl` y la zona horaria. */
+export type Regional = Pick<Ciudad, 'locale' | 'zona_horaria'>;
+
+/** Fechas y números con el locale y la zona horaria de la ciudad. */
+export interface Formato {
+  /** «01 mar 2026», o «—» si no hay fecha. */
+  fechaCorta(iso: string | null | undefined): string;
+  /** «01 mar 2026, 23:30», o «—» si no hay fecha. */
+  fechaHora(iso: string | null | undefined): string;
+  /** Con el separador de miles del locale: «61.234» en es-BO, «61,234» en es-MX. */
+  numero(n: number): string;
+}
+
+/**
+ * Formato de una ciudad. No hay formateadores sueltos con una ciudad por defecto: la zona y el
+ * locale llegan de api-core (`GET /api/v1/configuracion`), y un valor fijo acá mostraría la hora
+ * de otra ciudad sin que nada fallara. En los componentes, `useFormato()` (`ciudad-contexto.tsx`).
+ */
+export function crearFormato(regional: Regional): Formato {
+  const corta = new Intl.DateTimeFormat(regional.locale, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: regional.zona_horaria,
+  });
+  const conHora = new Intl.DateTimeFormat(regional.locale, {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: regional.zona_horaria,
+  });
+  const numeros = new Intl.NumberFormat(regional.locale);
+  return {
+    fechaCorta: (iso) => (iso ? corta.format(new Date(iso)) : '—'),
+    fechaHora: (iso) => (iso ? conHora.format(new Date(iso)) : '—'),
+    numero: (n) => numeros.format(n),
+  };
+}
 
 export const SEVERIDADES_ORDEN: Severidad[] = ['critica', 'alta', 'media', 'baja'];
 export const ESTADOS_ORDEN: EstadoReporte[] = [
@@ -66,33 +106,6 @@ export function etiquetaRol(r: Rol) {
 export function etiquetaSiNo(v: boolean | null | undefined) {
   if (v === null || v === undefined) return 'Sin dato';
   return v ? 'Sí' : 'No';
-}
-
-export function fechaCorta(iso: string | null | undefined) {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat('es-BO', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    timeZone: ZONA_HORARIA,
-  }).format(new Date(iso));
-}
-
-export function fechaHora(iso: string | null | undefined) {
-  if (!iso) return '—';
-  return new Intl.DateTimeFormat('es-BO', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: ZONA_HORARIA,
-  }).format(new Date(iso));
-}
-
-export function numero(n: number) {
-  return new Intl.NumberFormat('es-BO').format(n);
 }
 
 /** Porcentaje entero de `parte` sobre `total`; 0 si el total es 0. */

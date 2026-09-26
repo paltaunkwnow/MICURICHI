@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react';
 import { MapaDistritos } from '@/componentes/ejecutivo/MapaDistritos';
 import { PanelEjecutivo } from '@/componentes/ejecutivo/PanelEjecutivo';
 import { ErrorApi, obtenerResumenEjecutivo } from '@/lib/api';
-import { type PestanaEjecutiva, textoActualizado } from '@/lib/ejecutivo';
+import { crearOrigenConsultas, type PestanaEjecutiva } from '@/lib/ejecutivo';
 
 /** Cada cuánto se vuelve a pedir el resumen. El texto «hace N s» se refresca más seguido. */
 const INTERVALO_MS = 60_000;
@@ -22,13 +22,18 @@ export default function PaginaEjecutivo() {
   const [ventana, setVentana] = useState<VentanaResumen>('todo');
   const [pestana, setPestana] = useState<PestanaEjecutiva>('todas');
   const [ahora, setAhora] = useState(() => Date.now());
+  // Solo lo que pide la persona renueva la inactividad de la sesión; el refresco de cada 60 s y
+  // el de volver a la pestaña del navegador salen marcados como sondeo.
+  const [origen] = useState(crearOrigenConsultas);
 
   const consulta = useQuery({
     queryKey: ['ejecutivo', 'resumen', ventana],
-    queryFn: ({ signal }) => obtenerResumenEjecutivo(ventana, signal),
+    queryFn: ({ signal }) =>
+      obtenerResumenEjecutivo(ventana, signal, { sondeo: origen.esSondeo() }),
     refetchInterval: INTERVALO_MS,
     refetchOnWindowFocus: true,
-    // Al cambiar de período se sigue viendo el anterior hasta que llega el nuevo: sin parpadeo.
+    // Al cambiar de período se sigue viendo el anterior hasta que llega el nuevo, sin parpadeo,
+    // pero atenuado y rotulado «Cargando el período…» (`cargandoPeriodo`).
     placeholderData: keepPreviousData,
   });
 
@@ -45,15 +50,20 @@ export default function PaginaEjecutivo() {
     <PanelEjecutivo
       resumen={consulta.data}
       cargando={consulta.isPending}
+      cargandoPeriodo={consulta.isPlaceholderData}
       error={consulta.isError ? mensajeDeError(consulta.error) : null}
-      onReintentar={() => void consulta.refetch()}
+      onReintentar={() => {
+        origen.marcarAccion();
+        void consulta.refetch();
+      }}
       pestana={pestana}
       onCambiarPestana={setPestana}
       ventana={ventana}
-      onCambiarVentana={setVentana}
-      textoActualizado={
-        consulta.dataUpdatedAt ? textoActualizado(ahora - consulta.dataUpdatedAt) : ''
-      }
+      onCambiarVentana={(v) => {
+        origen.marcarAccion();
+        setVentana(v);
+      }}
+      ahora={ahora}
       actualizando={consulta.isFetching}
       mapa={(relleno, ariaLabel) => (
         <MapaDistritos

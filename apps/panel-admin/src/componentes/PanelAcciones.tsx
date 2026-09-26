@@ -1,18 +1,19 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { type Rol, SEVERIDADES, type Severidad, transicionPermitida } from 'contracts';
+import {
+  type ReporteTecnicoFeature,
+  type Rol,
+  SEVERIDADES,
+  type Severidad,
+  transicionPermitida,
+} from 'contracts';
 import { Check, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Aviso, type TipoAviso } from '@/componentes/Aviso';
-import {
-  cambiarEstado,
-  ErrorApi,
-  fusionarReporte,
-  type ReporteTecnicoFeature,
-  reclasificarSeveridad,
-} from '@/lib/api';
+import { cambiarEstado, ErrorApi, fusionarReporte, reclasificarSeveridad } from '@/lib/api';
 import { etiquetaSeveridad } from '@/lib/formato';
+import { cuerpoCambioEstado } from '@/lib/moderacion';
 
 type Accion = 'rechazar' | 'resolver' | 'fusionar' | 'reabrir';
 
@@ -34,7 +35,8 @@ const TEXTOS: Record<Accion, { titulo: string; ayuda: string; confirmar: string 
   },
   reabrir: {
     titulo: 'Reabrir el reporte',
-    ayuda: 'Vuelve a "Nuevo" para revisarlo otra vez (solo administradores).',
+    ayuda:
+      'Vuelve a "Nuevo" para revisarlo otra vez (solo administradores). Explicá por qué se reabre: el motivo es obligatorio y queda en la auditoría.',
     confirmar: 'Confirmar reapertura',
   },
 };
@@ -112,28 +114,33 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
   const confirmar = (ev: FormEvent) => {
     ev.preventDefault();
     if (!accion) return;
-    const texto = motivo.trim();
-    if (texto.length < 3) {
-      setErrorFormulario('Escribí un motivo de al menos 3 caracteres.');
-      return;
-    }
-    setErrorFormulario(null);
     if (accion === 'fusionar') {
+      const texto = motivo.trim();
+      if (texto.length < 3) {
+        setErrorFormulario('Escribí un motivo de al menos 3 caracteres.');
+        return;
+      }
       const canonico = canonicoId.trim();
       if (!RE_UUID.test(canonico)) {
         setErrorFormulario('El identificador del reporte canónico debe ser un UUID.');
         return;
       }
-      if (canonico === p.id) {
+      if (canonico.toLowerCase() === p.id.toLowerCase()) {
         setErrorFormulario('El reporte canónico tiene que ser otro reporte.');
         return;
       }
+      setErrorFormulario(null);
       fusionar.mutate({ canonico_id: canonico, motivo: texto });
       return;
     }
-    const destino =
-      accion === 'rechazar' ? 'rechazado' : accion === 'resolver' ? 'resuelto' : 'nuevo';
-    estado.mutate({ estado: destino, estado_motivo: texto });
+    // Rechazar, resolver y reabrir se validan con el esquema del contrato, el mismo de api-core.
+    const cambio = cuerpoCambioEstado(accion, motivo);
+    if (!cambio.ok) {
+      setErrorFormulario(cambio.error);
+      return;
+    }
+    setErrorFormulario(null);
+    estado.mutate(cambio.cuerpo);
   };
 
   return (
@@ -226,6 +233,9 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
       {accion && (
         <form
           onSubmit={confirmar}
+          // `confirmar` valida cada campo con mensajes propios (los mismos del contrato); sin
+          // noValidate, el globo nativo del navegador se adelantaba con el motivo vacío.
+          noValidate
           className="flex flex-col gap-3 rounded-[14px] border border-filete bg-fondo p-4"
           aria-labelledby="titulo-formulario-accion"
         >

@@ -1,16 +1,19 @@
-import type {
-  AgregadoUv,
-  CapaInfo,
-  CapaVersion,
-  Indicadores,
-  Login,
-  ReporteCambiarEstado,
-  ReporteFusionar,
-  ReporteReclasificar,
-  ReporteTecnico,
-  ResumenEjecutivo,
-  Usuario,
-  VentanaResumen,
+import {
+  type AgregadoUv,
+  type CapaInfo,
+  type CapaVersion,
+  type ExportacionGeoJson,
+  ExportacionGeoJsonSchema,
+  type Indicadores,
+  type Login,
+  type ReporteCambiarEstado,
+  type ReporteFusionar,
+  type ReporteReclasificar,
+  type ReporteTecnicoFeature,
+  type ReporteTecnicoFeatureCollection,
+  type ResumenEjecutivo,
+  type Usuario,
+  type VentanaResumen,
 } from 'contracts';
 
 /** Error devuelto por api-core o geo-service ({ codigo, mensaje, detalles }) con el status HTTP. */
@@ -26,23 +29,25 @@ export class ErrorApi extends Error {
   }
 }
 
-/** Feature tal como la ve el técnico: coordenada exacta y todas las propiedades de moderación. */
-export interface ReporteTecnicoFeature {
-  type: 'Feature';
-  id: string;
-  geometry: { type: 'Point'; coordinates: [number, number] };
-  properties: ReporteTecnico;
+/**
+ * La respuesta de `/exportar` no cumple `ExportacionGeoJsonSchema`. No se entrega el archivo: sin
+ * `total`, `exportados` y `truncado` no hay forma de saber si trae toda la selección.
+ */
+export class ErrorExportacionInvalida extends Error {
+  constructor() {
+    super(
+      'La exportación llegó con un formato inesperado y no se descargó. Avisá a quien opera el servicio.',
+    );
+    this.name = 'ErrorExportacionInvalida';
+  }
 }
 
-export interface ReporteTecnicoColeccion {
-  type: 'FeatureCollection';
-  features: ReporteTecnicoFeature[];
-  total: number;
-  /** false si hay más resultados de los contados; `total` es entonces el tope del conteo. */
-  total_exacto?: boolean;
-  pagina: number;
-  limite: number;
-}
+/**
+ * Cabecera con la que el panel marca sus consultas automáticas (el refresco del resumen
+ * ejecutivo cada 60 s). api-core no renueva con ellas la inactividad de la sesión: un panel
+ * abierto en una pantalla no la mantiene viva para siempre. Lo que pide la persona no la lleva.
+ */
+export const CABECERA_SONDEO = 'x-curichi-sondeo';
 
 /** Unidad administrativa tomada de las capas de geo-service (para poblar los selectores). */
 export interface UnidadGeo {
@@ -107,11 +112,15 @@ function avisarSesionCaducada(url: string): void {
   window.dispatchEvent(new Event(EVENTO_SESION_CADUCADA));
 }
 
-async function pedir<T>(
+/** Cabeceras propias de una petición: siempre un objeto plano, para poder mezclarlas. */
+type PeticionInit = Omit<RequestInit, 'headers'> & { headers?: Record<string, string> };
+
+/** Hace la petición y convierte cualquier respuesta no 2xx en `ErrorApi`. */
+async function pedirRespuesta(
   url: string,
-  init?: RequestInit,
+  init?: PeticionInit,
   plazoMs: number = PLAZOS_MS.normal,
-): Promise<T> {
+): Promise<Response> {
   const conCuerpo = init?.body !== undefined && init.body !== null;
   const r = await fetch(url, {
     ...init,
@@ -141,6 +150,15 @@ async function pedir<T>(
       cuerpo.detalles,
     );
   }
+  return r;
+}
+
+async function pedir<T>(
+  url: string,
+  init?: PeticionInit,
+  plazoMs: number = PLAZOS_MS.normal,
+): Promise<T> {
+  const r = await pedirRespuesta(url, init, plazoMs);
   if (r.status === 204) return undefined as T;
   return (await r.json()) as T;
 }
@@ -175,7 +193,9 @@ export function obtenerYo() {
  * no es de técnico: en ningún caso se cae en silencio a la vista pública.
  */
 export function obtenerReportes(params: ParametrosConsulta, signal?: AbortSignal) {
-  return pedir<ReporteTecnicoColeccion>(`/api/v1/tecnico/reportes?${aQuery(params)}`, { signal });
+  return pedir<ReporteTecnicoFeatureCollection>(`/api/v1/tecnico/reportes?${aQuery(params)}`, {
+    signal,
+  });
 }
 
 export function obtenerReporte(id: string, signal?: AbortSignal) {
@@ -205,16 +225,70 @@ export function fusionarReporte(id: string, cuerpo: ReporteFusionar) {
   });
 }
 
-/** Enlace de descarga con los filtros actuales; se usa en un <a download>. */
+/** Enlace de descarga con los filtros actuales; el CSV se baja con un <a download>. */
 export function urlExportar(formato: 'csv' | 'geojson', params: ParametrosConsulta) {
   return `/api/v1/exportar?${aQuery({ ...params, formato })}`;
 }
 
+/** `filename="…"` de Content-Disposition, o el nombre de respaldo. */
+export function nombreDeArchivo(contentDisposition: string | null, porDefecto: string): string {
+  const m = contentDisposition?.match(/filename="?([^";]+)"?/i);
+  return m?.[1]?.trim() || porDefecto;
+}
+
+export interface ExportacionDescargada {
+  /** El archivo tal como lo mandó api-core, para guardarlo sin reescribirlo. */
+  texto: string;
+  nombreArchivo: string;
+  resumen: Pick<ExportacionGeoJson, 'total' | 'exportados' | 'truncado'>;
+}
+
+/**
+ * Exportación GeoJSON validada con `ExportacionGeoJsonSchema` antes de entregarla. Va por
+ * `fetch` y no por un <a download> para poder leer `truncado`: si la selección no cupo en el
+ * tope de api-core, el panel lo avisa en vez de dejar que el recorte pase por el total.
+ */
+export async function exportarGeoJson(params: ParametrosConsulta): Promise<ExportacionDescargada> {
+  const r = await pedirRespuesta(
+    urlExportar('geojson', params),
+    { headers: { accept: 'application/geo+json, application/json' } },
+    PLAZOS_MS.exportacion,
+  );
+  const texto = await r.text();
+  let json: unknown;
+  try {
+    json = JSON.parse(texto);
+  } catch {
+    throw new ErrorExportacionInvalida();
+  }
+  const v = ExportacionGeoJsonSchema.safeParse(json);
+  if (!v.success) throw new ErrorExportacionInvalida();
+  const hoy = new Date().toISOString().slice(0, 10);
+  return {
+    texto,
+    nombreArchivo: nombreDeArchivo(
+      r.headers.get('content-disposition'),
+      `mi-curichi-reportes-${hoy}.geojson`,
+    ),
+    resumen: { total: v.data.total, exportados: v.data.exportados, truncado: v.data.truncado },
+  };
+}
+
 // --- Panel ejecutivo ------------------------------------------------------
 
-/** Resumen por distrito para secretarios, concejales y alcalde (roles ejecutivo, tecnico, admin). */
-export function obtenerResumenEjecutivo(ventana: VentanaResumen, signal?: AbortSignal) {
-  return pedir<ResumenEjecutivo>(`/api/v1/ejecutivo/resumen?${aQuery({ ventana })}`, { signal });
+/**
+ * Resumen por distrito para secretarios, concejales y alcalde (roles ejecutivo, tecnico, admin).
+ * `sondeo` marca el refresco automático (ver `CABECERA_SONDEO`).
+ */
+export function obtenerResumenEjecutivo(
+  ventana: VentanaResumen,
+  signal?: AbortSignal,
+  opciones: { sondeo?: boolean } = {},
+) {
+  return pedir<ResumenEjecutivo>(`/api/v1/ejecutivo/resumen?${aQuery({ ventana })}`, {
+    signal,
+    headers: opciones.sondeo ? { [CABECERA_SONDEO]: '1' } : undefined,
+  });
 }
 
 // --- Indicadores y capas -------------------------------------------------

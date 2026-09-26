@@ -1,10 +1,11 @@
 'use client';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Usuario } from 'contracts';
 import { usePathname, useRouter } from 'next/navigation';
 import { createContext, type ReactNode, useContext, useEffect, useState } from 'react';
-import { ErrorApi, EVENTO_SESION_CADUCADA, obtenerYo } from '@/lib/api';
+import { SinAccesoPanel } from '@/componentes/SinAccesoPanel';
+import { cerrarSesion, ErrorApi, EVENTO_SESION_CADUCADA, obtenerYo } from '@/lib/api';
 import { puedeEntrarAlPanel, puedeVerRuta, RUTA_EJECUTIVO } from '@/lib/roles';
 
 export const CLAVE_YO = ['yo'] as const;
@@ -16,6 +17,22 @@ export function useUsuario() {
     queryFn: obtenerYo,
     retry: false,
     staleTime: 5 * 60_000,
+  });
+}
+
+/**
+ * Cierra la sesión, tira la caché —puede tener reportes que la próxima cuenta no debería ver— y
+ * lleva al login. Pase lo que pase con la llamada: una sesión que ya no existe también termina ahí.
+ */
+export function useCerrarSesion() {
+  const router = useRouter();
+  const cliente = useQueryClient();
+  return useMutation({
+    mutationFn: cerrarSesion,
+    onSettled: () => {
+      cliente.clear();
+      router.replace('/login');
+    },
   });
 }
 
@@ -44,6 +61,7 @@ export function Protegido({ children }: { children: ReactNode }) {
   const router = useRouter();
   const cliente = useQueryClient();
   const { data, error, isPending } = useUsuario();
+  const salir = useCerrarSesion();
   const sinSesion = error instanceof ErrorApi && error.estado === 401;
   // El login de api-core acepta cualquier usuario activo, también uno con rol `ciudadano`.
   // La API le devolvería 403 en cada acción, pero sin esto entraba igual al panel y solo veía
@@ -110,14 +128,7 @@ export function Protegido({ children }: { children: ReactNode }) {
     );
   }
   if (sinPermiso) {
-    return (
-      <div className="p-8" role="alert">
-        <p className="error">Tu cuenta no tiene acceso al panel técnico.</p>
-        <p className="ayuda">
-          Pedí a un administrador que te asigne el rol de técnico o de ejecutivo.
-        </p>
-      </div>
-    );
+    return <SinAccesoPanel onCerrarSesion={() => salir.mutate()} cerrando={salir.isPending} />;
   }
   if (error || !data) {
     return (

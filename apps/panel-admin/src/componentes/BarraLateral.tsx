@@ -1,6 +1,5 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ChartColumn,
   Map as IconoMapa,
@@ -11,11 +10,12 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { cerrarSesion } from '@/lib/api';
+import { usePathname } from 'next/navigation';
+import { useCiudad } from '@/lib/ciudad-contexto';
 import { etiquetaRol } from '@/lib/formato';
+import { hayPlanoDeReferencia } from '@/lib/plano';
 import { enlacesPara } from '@/lib/roles';
-import { useUsuarioActual } from '@/lib/sesion';
+import { useCerrarSesion, useUsuarioActual } from '@/lib/sesion';
 
 const ICONOS: Record<string, LucideIcon> = {
   '/ejecutivo': Landmark,
@@ -28,14 +28,9 @@ const ICONOS: Record<string, LucideIcon> = {
 export function BarraLateral() {
   const usuario = useUsuarioActual();
   const ruta = usePathname();
-  const router = useRouter();
-  const cliente = useQueryClient();
-  const salir = useMutation({
-    mutationFn: cerrarSesion,
-    onSettled: () => {
-      cliente.clear();
-      router.replace('/login');
-    },
+  const salir = useCerrarSesion();
+  const enlaces = enlacesPara(usuario.rol, {
+    planoDeReferencia: hayPlanoDeReferencia(useCiudad()),
   });
 
   return (
@@ -52,7 +47,7 @@ export function BarraLateral() {
       </div>
 
       <nav className="nav-lateral flex flex-col gap-1" aria-label="Secciones del panel">
-        {enlacesPara(usuario.rol).map(({ href, texto }) => {
+        {enlaces.map(({ href, texto }) => {
           const Icono = ICONOS[href] ?? ListChecks;
           const activo = ruta === href || ruta.startsWith(`${href}/`);
           return (

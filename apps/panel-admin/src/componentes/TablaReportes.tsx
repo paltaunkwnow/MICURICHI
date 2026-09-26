@@ -1,16 +1,14 @@
 'use client';
 
-import { ETIQUETAS } from 'contracts';
+import { ETIQUETAS, type ReporteTecnicoFeature } from 'contracts';
 import Link from 'next/link';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
-import type { ReporteTecnicoFeature } from '@/lib/api';
+import { useFormato } from '@/lib/ciudad-contexto';
 import {
   etiquetaDistrito,
   etiquetaFrecuencia,
   etiquetaProfundidad,
   etiquetaUnidadVecinal,
-  fechaCorta,
-  numero,
 } from '@/lib/formato';
 
 interface Props {
@@ -26,6 +24,7 @@ interface Props {
  * pantalla tienen un control con nombre y destino, en vez de una fila «clicable» invisible.
  */
 export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) {
+  const { fechaCorta, numero } = useFormato();
   return (
     <div className="overflow-x-auto">
       <table className="tabla">

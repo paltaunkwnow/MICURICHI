@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { EnlaceInicio } from '@/componentes/EnlaceInicio';
 
 /** 404 del panel: sin esto Next devuelve su página por defecto, en inglés y fuera del kit. */
 export default function NoEncontrado() {
@@ -8,9 +8,7 @@ export default function NoEncontrado() {
       <p className="mt-2 text-tinta-600">
         Puede que el enlace esté mal escrito o que la pantalla se haya movido.
       </p>
-      <Link href="/reportes" className="btn btn-primario mt-6 no-underline">
-        Ir a la bandeja
-      </Link>
+      <EnlaceInicio className="btn btn-primario mt-6 no-underline" />
     </div>
   );
 }

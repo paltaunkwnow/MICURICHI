@@ -1,4 +1,5 @@
 import { type ReactNode, useId } from 'react';
+import { useFormato } from '@/lib/ciudad-contexto';
 import {
   type BarraApilada,
   type BarraSimple,
@@ -6,7 +7,6 @@ import {
   marcasEje,
   SEGMENTOS_TRABAJO,
 } from '@/lib/ejecutivo';
-import { numero } from '@/lib/formato';
 
 /**
  * Gráficas de barras del panel ejecutivo en SVG inline, sin librerías. El SVG es la imagen
@@ -30,6 +30,7 @@ function idSeguro(id: string) {
 }
 
 function Eje({ marcas, escalaY }: { marcas: number[]; escalaY: (v: number) => number }) {
+  const { numero } = useFormato();
   return (
     <g>
       {marcas.map((v) => (
@@ -102,7 +103,7 @@ function Marco({
   );
 }
 
-// --- Inundaciones por distrito ------------------------------------------------------------------
+// --- Inundaciones activas por distrito ----------------------------------------------------------
 
 export function GraficaInundaciones({
   barras,
@@ -115,14 +116,15 @@ export function GraficaInundaciones({
   rotuloSeveridad: string;
 }) {
   const uid = idSeguro(useId());
+  const { numero } = useFormato();
   const maximo = barras.reduce((m, b) => Math.max(m, b.valor), 0);
   const g = geometria(barras.length, maximo);
   const total = barras.reduce((s, b) => s + b.valor, 0);
   return (
     <>
       <Marco
-        titulo={`Inundaciones por distrito (${rotuloSeveridad})`}
-        descripcion={`Reportes por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}.`}
+        titulo={`Inundaciones activas por distrito (${rotuloSeveridad})`}
+        descripcion={`Inundaciones activas (en revisión o verificadas) por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}.`}
         testId="ejecutivo-grafica-inundaciones"
         uid={uid}
       >
@@ -131,7 +133,7 @@ export function GraficaInundaciones({
           const y = g.escalaY(b.valor);
           return (
             <g key={b.codigo} data-barra={b.codigo}>
-              <title>{`${b.nombre} (distrito ${b.etiqueta}): ${numero(b.valor)} reportes`}</title>
+              <title>{`${b.nombre} (distrito ${b.etiqueta}): ${numero(b.valor)} activas`}</title>
               <rect
                 x={g.xBarra(i)}
                 y={y}
@@ -164,11 +166,11 @@ export function GraficaInundaciones({
         })}
       </Marco>
       <table className="sr-only">
-        <caption>Inundaciones por distrito, {rotuloSeveridad}</caption>
+        <caption>Inundaciones activas por distrito, {rotuloSeveridad}</caption>
         <thead>
           <tr>
             <th scope="col">Distrito</th>
-            <th scope="col">Reportes</th>
+            <th scope="col">Activas</th>
           </tr>
         </thead>
         <tbody>
@@ -226,6 +228,7 @@ function rellenoTrabajo(uid: string, estado: EstadoTrabajo) {
 
 export function GraficaTrabajo({ barras }: { barras: BarraApilada[] }) {
   const uid = idSeguro(useId());
+  const { numero } = useFormato();
   const maximo = barras.reduce((m, b) => Math.max(m, b.total), 0);
   const g = geometria(barras.length, maximo);
   const sumas = SEGMENTOS_TRABAJO.map(({ estado, etiqueta }) => ({

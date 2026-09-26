@@ -1,21 +1,24 @@
 'use client';
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo, useState } from 'react';
-import { Aviso } from '@/componentes/Aviso';
+import { Aviso, type TipoAviso } from '@/componentes/Aviso';
 import { FiltrosDeReportes } from '@/componentes/FiltrosReportes';
 import { Mapa } from '@/componentes/Mapa';
 import { Paginacion } from '@/componentes/Paginacion';
 import { TablaReportes } from '@/componentes/TablaReportes';
 import {
+  exportarGeoJson,
   obtenerCapasMapa,
   obtenerDistritos,
   obtenerReportes,
   obtenerUnidadesVecinales,
   urlExportar,
 } from '@/lib/api';
+import { useFormato } from '@/lib/ciudad-contexto';
+import { avisoExportacion, mensajeErrorExportacion } from '@/lib/exportacion';
 import {
   type FiltrosReportes,
   hayFiltros,
@@ -25,7 +28,19 @@ import {
   parametrosExportacion,
   serializarFiltros,
 } from '@/lib/filtros';
-import { numero } from '@/lib/formato';
+
+/** Guarda en el equipo un archivo ya recibido, con el nombre que mandó el servidor. */
+function descargar(texto: string, nombre: string, tipo: string) {
+  const url = URL.createObjectURL(new Blob([texto], { type: tipo }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  // Revocarlo en el acto puede cortar la descarga en algunos navegadores.
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 export default function PaginaReportes() {
   // useSearchParams exige un límite de Suspense para el prerender.
@@ -46,6 +61,8 @@ function Reportes() {
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const formato = useFormato();
+  const { numero } = formato;
 
   const filtros = useMemo(() => leerFiltros(new URLSearchParams(sp.toString())), [sp]);
   const params = useMemo(() => parametrosConsulta(filtros), [filtros]);
@@ -106,38 +123,62 @@ function Reportes() {
   const [resaltado, setResaltado] = useState<string | null>(null);
   const abrir = useCallback((id: string) => router.push(`/reportes/${id}`), [router]);
 
+  const [avisoExportar, setAvisoExportar] = useState<{ tipo: TipoAviso; texto: string } | null>(
+    null,
+  );
+  const exportar = useMutation({
+    mutationFn: () => exportarGeoJson(paramsExportacion),
+    onMutate: () => setAvisoExportar(null),
+    onSuccess: (r) => {
+      descargar(r.texto, r.nombreArchivo, 'application/geo+json');
+      const aviso = avisoExportacion(r.resumen, formato);
+      setAvisoExportar(aviso ? { tipo: 'alerta', texto: aviso } : null);
+    },
+    onError: (e) => setAvisoExportar({ tipo: 'error', texto: mensajeErrorExportacion(e) }),
+  });
+
   return (
     <div className="flex flex-col gap-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl">Reportes</h1>
-          <p className="text-tinta-600">
-            {reportes.data
-              ? `${numero(total)} reportes con los filtros actuales`
-              : 'Tabla y mapa sincronizados con los filtros'}
-          </p>
+      {/* Cabecera y aviso de exportación van juntos: vacío, el aviso no suma un hueco más. */}
+      <div>
+        <header className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h1 className="text-3xl">Reportes</h1>
+            <p className="text-tinta-600">
+              {reportes.data
+                ? `${numero(total)} reportes con los filtros actuales`
+                : 'Tabla y mapa sincronizados con los filtros'}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn btn-secundario"
+              data-testid="exportar-geojson"
+              onClick={() => exportar.mutate()}
+              disabled={exportar.isPending}
+              aria-busy={exportar.isPending || undefined}
+            >
+              <Download size={18} aria-hidden="true" />
+              {exportar.isPending ? 'Exportando…' : 'Exportar GeoJSON'}
+            </button>
+            <a
+              href={urlExportar('csv', paramsExportacion)}
+              download
+              className="btn btn-secundario"
+              data-testid="exportar-csv"
+            >
+              <Download size={18} aria-hidden="true" />
+              Exportar CSV
+            </a>
+          </div>
+        </header>
+        <div className={avisoExportar ? 'mt-4' : undefined}>
+          <Aviso tipo={avisoExportar?.tipo ?? 'info'} testId="aviso-exportacion">
+            {avisoExportar?.texto}
+          </Aviso>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <a
-            href={urlExportar('geojson', paramsExportacion)}
-            download
-            className="btn btn-secundario"
-            data-testid="exportar-geojson"
-          >
-            <Download size={18} aria-hidden="true" />
-            Exportar GeoJSON
-          </a>
-          <a
-            href={urlExportar('csv', paramsExportacion)}
-            download
-            className="btn btn-secundario"
-            data-testid="exportar-csv"
-          >
-            <Download size={18} aria-hidden="true" />
-            Exportar CSV
-          </a>
-        </div>
-      </header>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,38%)]">
         <section className="flex min-w-0 flex-col gap-4" aria-label="Filtros y tabla de reportes">

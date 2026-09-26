@@ -1,6 +1,9 @@
 import { COLOR_SIN_REPORTES, type PasoEscala, textoRango } from '@/lib/ejecutivo';
 
-/** Rangos de la coropleta. El cero va siempre aparte: «sin reportes» no es «pocos». */
+/**
+ * Rangos de la coropleta. El cero va siempre aparte: «sin activas» no es «pocas». Son los mismos
+ * colores del mapa, y el primer rango tiene al menos 3:1 de contraste con el cero.
+ */
 export function LeyendaEscala({ escala, titulo }: { escala: PasoEscala[]; titulo: string }) {
   return (
     <div className="mt-3">
@@ -11,11 +14,11 @@ export function LeyendaEscala({ escala, titulo }: { escala: PasoEscala[]; titulo
       >
         <li className="flex items-center gap-2">
           <span
-            className="inline-block h-4 w-6 rounded border border-filete"
+            className="inline-block h-4 w-6 rounded border border-tinta-300"
             style={{ background: COLOR_SIN_REPORTES }}
             aria-hidden="true"
           />
-          Sin reportes
+          Sin inundaciones activas
         </li>
         {escala.map((p) => (
           <li key={p.desde} className="flex items-center gap-2">

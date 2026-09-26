@@ -1,5 +1,8 @@
 import { CircleQuestionMark, Download, TriangleAlert } from 'lucide-react';
 import type { Metadata } from 'next';
+import Link from 'next/link';
+import { obtenerCiudad } from '@/lib/ciudad-servidor';
+import { hayPlanoDeReferencia } from '@/lib/plano';
 
 export const metadata: Metadata = { title: 'Plano oficial de zonificación' };
 
@@ -87,7 +90,14 @@ const CAPAS: Array<[string, string, string]> = [
   ['PE', 'Planes especiales', 'Planes especiales de ordenamiento.'],
 ];
 
-export default function PaginaPlano() {
+/**
+ * Todo lo de esta página es contenido de la instalación de Santa Cruz de la Sierra (el plano de
+ * su municipio y la lectura de sus distritos), no del producto: en otra ciudad no se muestra
+ * (`hayPlanoDeReferencia`), y la barra lateral tampoco ofrece el enlace.
+ */
+export default async function PaginaPlano() {
+  const ciudad = await obtenerCiudad();
+  if (!hayPlanoDeReferencia(ciudad)) return <SinPlano ciudad={ciudad.nombre} />;
   return (
     <div className="flex flex-col gap-4">
       <header className="flex flex-wrap items-start gap-4">
@@ -214,6 +224,26 @@ export default function PaginaPlano() {
         El municipio advierte que la información del plano es de carácter referencial y no puede
         usarse para esgrimir derecho sobre el territorio. Todo trámite técnico debe pasar por la
         Secretaría Municipal de Planificación.
+      </div>
+    </div>
+  );
+}
+
+/** Otra ciudad: el plano que trae el panel sería el de otro municipio. */
+function SinPlano({ ciudad }: { ciudad: string }) {
+  return (
+    <div className="flex flex-col gap-4">
+      <h1 className="text-3xl">Plano oficial de zonificación</h1>
+      <div className="aviso aviso-info max-w-[76ch]" data-testid="plano-no-disponible">
+        <CircleQuestionMark size={17} aria-hidden="true" className="mt-0.5 shrink-0" />
+        <span>
+          Esta instalación ({ciudad}) no tiene un plano de referencia cargado. El distrito y la
+          unidad vecinal de cada reporte se resuelven contra la capa oficial vigente, que se ve en{' '}
+          <Link href="/capas" className="font-semibold underline">
+            Capas
+          </Link>
+          .
+        </span>
       </div>
     </div>
   );

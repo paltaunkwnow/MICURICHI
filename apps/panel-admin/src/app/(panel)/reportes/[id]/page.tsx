@@ -12,6 +12,7 @@ import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
 import { ErrorApi, obtenerCapasMapa, obtenerReporte } from '@/lib/api';
+import { useFormato } from '@/lib/ciudad-contexto';
 import {
   avisosResolucion,
   coordenadas,
@@ -24,9 +25,7 @@ import {
   etiquetaSumideroCercano,
   etiquetaSumideroEstado,
   etiquetaUbicacionTipo,
-  fechaHora,
   idCorto,
-  numero,
   precisionGps,
 } from '@/lib/formato';
 import { useUsuarioActual } from '@/lib/sesion';
@@ -52,6 +51,7 @@ function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
 export default function PaginaDetalleReporte() {
   const { id } = useParams<{ id: string }>();
   const usuario = useUsuarioActual();
+  const { fechaHora, numero } = useFormato();
   const reporte = useQuery({
     queryKey: ['reporte', id],
     queryFn: ({ signal }) => obtenerReporte(id, signal),

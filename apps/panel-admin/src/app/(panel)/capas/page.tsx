@@ -4,11 +4,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { activarCapa, obtenerVersionesCapas } from '@/lib/api';
-import { etiquetaCapa, fechaHora } from '@/lib/formato';
+import { useFormato } from '@/lib/ciudad-contexto';
+import { etiquetaCapa } from '@/lib/formato';
 import { useUsuarioActual } from '@/lib/sesion';
 
 export default function Capas() {
   const usuario = useUsuarioActual();
+  const { fechaHora, numero } = useFormato();
   const cliente = useQueryClient();
   const [mensaje, setMensaje] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +86,7 @@ export default function Capas() {
                 <td className="py-3 font-semibold">{etiquetaCapa(c.capa)}</td>
                 <td className="py-3">{c.version}</td>
                 <td className="max-w-xs py-3 text-[13.5px] text-tinta-600">{c.fuente ?? '—'}</td>
-                <td className="py-3 text-right">{c.n_features.toLocaleString('es-BO')}</td>
+                <td className="py-3 text-right">{numero(c.n_features)}</td>
                 <td className="py-3 text-[13.5px]">{c.crs_origen ?? '—'}</td>
                 <td className="py-3 text-[13.5px] text-tinta-600">{fechaHora(c.cargado_en)}</td>
                 <td className="py-3">

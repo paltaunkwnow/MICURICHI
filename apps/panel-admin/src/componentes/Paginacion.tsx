@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { numero } from '@/lib/formato';
+import { useFormato } from '@/lib/ciudad-contexto';
 
 export function Paginacion({
   pagina,
@@ -12,6 +12,7 @@ export function Paginacion({
   total: number;
   onCambiar: (pagina: number) => void;
 }) {
+  const { numero } = useFormato();
   const paginas = Math.max(1, Math.ceil(total / limite));
   const desde = total === 0 ? 0 : (pagina - 1) * limite + 1;
   const hasta = Math.min(total, pagina * limite);

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { obtenerCiudad } from '@/lib/ciudad-servidor';
 import { Proveedores } from './proveedores';
 import './globals.css';
 
@@ -18,7 +19,13 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+/**
+ * La ciudad del despliegue se lee en el servidor, al atender la petición, y viaja con el HTML:
+ * el mapa abre en su centro y las fechas salen en su zona horaria desde el primer render.
+ * `lang` sigue siendo «es»: el locale de la ciudad es para `Intl`; los textos son en español.
+ */
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const ciudad = await obtenerCiudad();
   return (
     <html lang="es">
       <body>
@@ -28,7 +35,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         >
           Ir al contenido
         </a>
-        <Proveedores>{children}</Proveedores>
+        <Proveedores ciudad={ciudad}>{children}</Proveedores>
       </body>
     </html>
   );

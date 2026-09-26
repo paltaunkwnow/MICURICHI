@@ -1,8 +1,8 @@
 'use client';
 
 import { RotateCcw } from 'lucide-react';
-import Link from 'next/link';
 import { useEffect } from 'react';
+import { EnlaceInicio } from '@/componentes/EnlaceInicio';
 
 /**
  * Red de seguridad del panel. Al técnico sí se le muestra el `digest`: es quien puede pasárselo
@@ -33,9 +33,7 @@ export default function ErrorPanel({
           <RotateCcw size={18} aria-hidden="true" />
           Volver a intentar
         </button>
-        <Link href="/reportes" className="btn no-underline">
-          Ir a la bandeja
-        </Link>
+        <EnlaceInicio className="btn no-underline" />
       </div>
     </div>
   );

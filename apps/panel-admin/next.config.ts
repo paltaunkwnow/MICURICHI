@@ -1,7 +1,6 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
-const API = process.env.API_CORE_URL ?? 'http://127.0.0.1:3001';
-const GEO = process.env.GEO_SERVICE_URL ?? 'http://127.0.0.1:3002';
 const desarrollo = process.env.NODE_ENV !== 'production';
 
 /**
@@ -9,6 +8,10 @@ const desarrollo = process.env.NODE_ENV !== 'production';
  * para el porqué de cada origen y del 'unsafe-inline' en script-src), con dos diferencias:
  *  - el panel no usa la ubicación del dispositivo, así que `geolocation=()`;
  *  - no es una PWA, así que no necesita `manifest-src`.
+ *
+ * Estas cabeceras no dependen de la instalación, así que pueden quedar fijadas al compilar. Lo
+ * que sí depende (adónde se reenvían `/api` y `/geo`, y HSTS) va en `src/proxy.ts`, que lo lee
+ * en cada petición: `rewrites()` y `headers()` se congelan en `next build`.
  */
 const csp = [
   "default-src 'self'",
@@ -37,24 +40,23 @@ const cabeceras = [
   },
 ];
 
-// Solo detrás de HTTPS: anunciar HSTS sobre http deja el navegador sin poder volver atrás.
-if (process.env.HSTS === '1')
-  cabeceras.push({
-    key: 'Strict-Transport-Security',
-    value: 'max-age=31536000; includeSubDomains',
-  });
-
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   // El manual del repositorio es el CLAUDE.md de la raíz: Next no debe generar los suyos.
   agentRules: false,
-  // El panel habla con los servicios por rutas relativas; Next las reenvía
-  // (mismo origen → la cookie de sesión viaja sola y no hace falta CORS).
-  async rewrites() {
-    return [
-      { source: '/api/:path*', destination: `${API}/api/:path*` },
-      { source: '/geo/:path*', destination: `${GEO}/geo/:path*` },
-    ];
+  // Imagen de producción: `.next/standalone` con un `server.js` mínimo y solo las dependencias
+  // que usa. Una misma imagen por ciudad; lo propio de cada instalación llega por entorno.
+  output: 'standalone',
+  // Raíz del monorepo: `contracts` y el almacén de pnpm viven fuera de esta carpeta y el
+  // trazado no los copiaría a la salida.
+  outputFileTracingRoot: path.join(__dirname, '..', '..'),
+  experimental: {
+    // Milisegundos sin actividad tras los que Next corta el reenvío de `src/proxy.ts` (por
+    // defecto 30 000). Igual a `PLAZOS_MS.exportacion` de `src/lib/api.ts`: el panel espera
+    // hasta ahí una exportación grande, que api-core puede tardar en empezar a mandar. El resto
+    // de las llamadas las corta antes el propio panel (20 s), y al cortar el navegador se corta
+    // también el reenvío.
+    proxyTimeout: 180_000,
   },
   async headers() {
     return [{ source: '/(.*)', headers: cabeceras }];

@@ -5,10 +5,19 @@ import { SEVERIDADES } from 'contracts';
 import { ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { obtenerIndicadores } from '@/lib/api';
 import { ESTADOS_ORDEN, etiquetaCapa, etiquetaEstado } from '@/lib/formato';
+import { kpisIndicadores } from '@/lib/indicadores';
 
-function Kpi({ valor, etiqueta }: { valor: number | string; etiqueta: string }) {
+function Kpi({
+  valor,
+  etiqueta,
+  testId,
+}: {
+  valor: number | string;
+  etiqueta: string;
+  testId: string;
+}) {
   return (
-    <div className="tarjeta px-4 py-3">
+    <div className="tarjeta px-4 py-3" data-testid={testId}>
       <p className="titular text-3xl leading-none">{valor}</p>
       <p className="mt-1 text-[13.5px] text-tinta-600">{etiqueta}</p>
     </div>
@@ -53,6 +62,10 @@ export default function Indicadores() {
           Conteos sobre los reportes cargados. Son datos de percepción ciudadana, no mediciones de
           campo.
         </p>
+        <p className="text-tinta-600">
+          El total, la severidad, los distritos y las unidades vecinales cuentan los reportes
+          vigentes (nuevos, validados y resueltos). Rechazados y duplicados se ven en «Por estado».
+        </p>
       </div>
 
       {consulta.isPending ? (
@@ -64,13 +77,9 @@ export default function Indicadores() {
       ) : d ? (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <Kpi valor={d.total} etiqueta="reportes en total" />
-            <Kpi valor={d.por_estado.validado ?? 0} etiqueta="validados" />
-            <Kpi valor={d.por_estado.nuevo ?? 0} etiqueta="esperando revisión" />
-            <Kpi
-              valor={d.puntos_criticos_recurrentes}
-              etiqueta="puntos críticos con 2 o más reportes"
-            />
+            {kpisIndicadores(d).map((k) => (
+              <Kpi key={k.testId} valor={k.valor} etiqueta={k.etiqueta} testId={k.testId} />
+            ))}
           </div>
 
           <section className="space-y-3">
@@ -87,6 +96,9 @@ export default function Indicadores() {
 
           <section className="space-y-3">
             <h2 className="titular text-2xl">Por estado</h2>
+            <p className="text-[15px] text-tinta-600">
+              Todos los reportes recibidos, también los rechazados y los duplicados.
+            </p>
             <div className="flex flex-wrap gap-3">
               {ESTADOS_ORDEN.map((e) => (
                 <div key={e} className="tarjeta px-4 py-3">

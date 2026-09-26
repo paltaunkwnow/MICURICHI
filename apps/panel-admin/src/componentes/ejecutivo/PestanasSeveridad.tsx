@@ -1,13 +1,13 @@
 'use client';
 
 import { type KeyboardEvent, useRef } from 'react';
+import { useFormato } from '@/lib/ciudad-contexto';
 import {
   colorPrincipal,
   type DefinicionPestana,
   PESTANAS,
   type PestanaEjecutiva,
 } from '@/lib/ejecutivo';
-import { numero } from '@/lib/formato';
 
 /** Cuántas de las cuatro barritas se llenan: la forma que acompaña al color (CLAUDE.md §14.4). */
 const BARRAS: Record<PestanaEjecutiva, number> = { critica: 4, media: 2, baja: 1, todas: 0 };
@@ -40,6 +40,7 @@ export function PestanasSeveridad({
   onCambiar: (p: PestanaEjecutiva) => void;
   idPanel: string;
 }) {
+  const { numero } = useFormato();
   const botones = useRef<Array<HTMLButtonElement | null>>([]);
 
   function alTeclear(e: KeyboardEvent<HTMLDivElement>) {
