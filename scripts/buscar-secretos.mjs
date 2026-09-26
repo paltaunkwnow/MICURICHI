@@ -32,8 +32,23 @@ const REGLAS = [
   {
     nombre: 'cadena de conexión con contraseña',
     re: /\b(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:[^\s:@/]+@/,
-    // La de ejemplo del repositorio usa la misma palabra como usuario y contraseña.
-    permitido: (t) => /:\/\/curichi:(curichi|cambiar_en_local)@/.test(t),
+    // Se permite solo si TODAS las contraseñas de la línea son de mentira: el valor de ejemplo
+    // del repositorio (`curichi`, `cambiar_en_local…`), un marcador de documentación (`<VAR>`,
+    // `…`, `***`), una interpolación de código (`${…}`) o un valor de una o dos letras de una
+    // prueba. Una contraseña real no es nada de eso, así que sigue saltando.
+    permitido: (t) => {
+      const contrasenas = [
+        ...t.matchAll(
+          /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:([^\s@/]+)@/g,
+        ),
+      ].map((m) => m[1]);
+      return (
+        contrasenas.length > 0 &&
+        contrasenas.every((c) =>
+          /^(curichi|cambiar_en_local\w*|<[^>]+>|…+|\.{3}|\*+|\$\{[^}]+\}|[a-z]{1,2})$/i.test(c),
+        )
+      );
+    },
   },
   {
     nombre: 'secreto asignado en línea',
