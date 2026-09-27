@@ -74,16 +74,16 @@ verificó (pruebas, E2E y lo que haya quedado afuera).
   bytes contra 352 417 del JPEG, igual de legible), porque a calidad ~90 pesaba 528 208.
 - **T2** (2026-09-27): Vitest en verde en contracts (151), db (167), api-core (330, y 8 omitidas
   que piden PostgreSQL real), web-ciudadano (314) y panel-admin (145).
-- **T3** (2026-09-27): pendiente de la E2E completa.
-- **T4** (2026-09-27): pendiente de la E2E completa.
-- **T5** (2026-09-27): pendiente de la E2E completa.
-- **T6** (2026-09-27): pendiente de la E2E completa.
-- **T7** (2026-09-27): pendiente de la E2E completa.
-- **T8** (2026-09-27): pendiente de la E2E completa. S39: las alertas `DiscoDeFotos*` comparan
+- **T3** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real.
+- **T4** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real.
+- **T5** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real.
+- **T6** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real.
+- **T7** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real.
+- **T8** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real. S39: las alertas `DiscoDeFotos*` comparan
   contra `curichi_fotos_disco_min_libre_bytes` en vez de un umbral escrito a mano (`promtool test
   rules` en verde, con un caso de umbral de 8 GiB y otro con la guarda apagada), y
   `docs/operaciones/produccion.md` abre con «Antes de producción».
-- **T9** (2026-09-27): pendiente de la E2E completa.
+- **T9** (2026-09-27): verificada con la suite E2E completa contra la pila real el 2026-09-27: 184 pasadas, 0 fallidas y 1 omitida a propósito (el POST directo del proyecto móvil). Vitest en verde: contracts 209, db 227, api-core 382 (2 omitidas que piden S3), geo-service 57, web-ciudadano 417 y panel-admin 209; las suites -pg de api-core, 9 de 9 contra PostgreSQL real. La E2E encontró un bug real en la app pública, ya corregido: la leyenda flotante del mapa tapaba los toques sobre los puntos que quedaban debajo.
 
 Para recordar al desplegar:
 
