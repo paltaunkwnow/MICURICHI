@@ -37,7 +37,7 @@ export function BarraLateral() {
     <aside className="side lg:sticky lg:top-0 lg:h-dvh lg:w-72">
       <div className="flex items-center gap-3">
         {/* biome-ignore lint/performance/noImgElement: logo estático de 200 px, sin optimización de Next */}
-        <img src="/logo.png" alt="" width={44} height={44} className="rounded-xl object-cover" />
+        <img src="/logo.webp" alt="" width={44} height={44} className="rounded-xl object-cover" />
         <div>
           <p className="titular text-lg leading-tight">Mi Curichi</p>
           <p className="text-sm text-white/75">

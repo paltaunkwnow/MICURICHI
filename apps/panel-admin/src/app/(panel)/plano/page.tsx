@@ -110,8 +110,8 @@ export default async function PaginaPlano() {
           </p>
         </div>
         <a
-          href="/plano-zonificacion.jpg"
-          download="plano-zonificacion-santa-cruz.jpg"
+          href="/plano-zonificacion.webp"
+          download="plano-zonificacion-santa-cruz.webp"
           className="btn btn-secundario btn-sm ml-auto"
         >
           <Download size={17} aria-hidden="true" />
@@ -136,7 +136,7 @@ export default async function PaginaPlano() {
       <div className="tarjeta max-h-[520px] overflow-auto bg-white p-0">
         {/* biome-ignore lint/performance/noImgElement: imagen de referencia de 1400 px que se recorre dentro del marco */}
         <img
-          src="/plano-zonificacion.jpg"
+          src="/plano-zonificacion.webp"
           alt="Plano de zonificación y distritos municipales de Santa Cruz de la Sierra"
           width={1400}
           className="block max-w-none"

@@ -1,7 +1,7 @@
 import type { Ciudad } from 'contracts';
 
 /**
- * El plano de `public/plano-zonificacion.jpg` y el texto de `/plano` son del Gobierno Autónomo
+ * El plano de `public/plano-zonificacion.webp` y el texto de `/plano` son del Gobierno Autónomo
  * Municipal de Santa Cruz de la Sierra: contenido de esa instalación, no del producto. La misma
  * imagen del panel se despliega en otras ciudades, y ahí ese plano sería el de otro municipio.
  */
