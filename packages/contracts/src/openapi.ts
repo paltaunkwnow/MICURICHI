@@ -73,6 +73,12 @@ const error = (descripcion: string) => ({
   content: json(ref('ErrorApi')),
 });
 
+/** Metros con coma decimal, como se escriben en los textos del contrato. */
+const metros = (m: number) => String(m).replace('.', ',');
+
+const RADIO_M = CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M;
+const TOLERANCIA_M = CONFIG_DOMINIO.REPORTE_RADIO_TOLERANCIA_M;
+
 function op(
   resumen: string,
   etiqueta: string,
@@ -127,7 +133,7 @@ export function construirOpenApi(): Record<string, unknown> {
     paths: {
       '/api/v1/reportes': {
         post: op(
-          'Crear un reporte. EXIGE SESIÓN (cualquier rol). El autor se toma de la sesión: el cuerpo no tiene ni puede tener un campo de autor. Además del rate limit por IP, cada cuenta solo puede crear un reporte cada 60 minutos.',
+          `Crear un reporte. EXIGE SESIÓN (cualquier rol). El autor se toma de la sesión: el cuerpo no tiene ni puede tener un campo de autor. El cuerpo lleva la posición del teléfono al enviar (dispositivo), y el punto tiene que estar a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos de ella. La posición del dispositivo no se guarda, no se registra en logs ni en auditoría y no entra en la huella de idempotencia: queda solo la distancia redondeada. ubicacion_metodo y precision_gps_m los deriva el servidor. Además del rate limit por IP, cada cuenta solo puede crear un reporte cada 60 minutos.`,
           'reportes',
           {
             security: seguridadSesion,
@@ -138,10 +144,16 @@ export function construirOpenApi(): Record<string, unknown> {
                 content: json(ref('ReporteFeature')),
               },
               '400': error(
-                `PAYLOAD_INVALIDO. Además del formato: evento_en con más de ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} min de adelanto o más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días de antigüedad, y respuestas del sumidero incoherentes (con sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero = true)`,
+                `PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera de sus rangos físicos (precision_m de 0 a 10 000, antiguedad_s ≥ 0), evento_en con más de ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} min de adelanto o más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días de antigüedad, y respuestas del sumidero incoherentes (con sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero = true)`,
               ),
               '401': error('SIN_SESION: hay que iniciar sesión para reportar'),
-              '422': error('FUERA_DE_COBERTURA: el punto no cae en el municipio'),
+              '422': error(
+                `PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m. ` +
+                  `POSICION_VENCIDA: dispositivo.antiguedad_s mayor a ${CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S} s. ` +
+                  `UBICACION_FUERA_DE_RADIO: el punto está a más de ${metros(RADIO_M + TOLERANCIA_M)} m de dispositivo (el radio de ${RADIO_M} m más ${metros(TOLERANCIA_M)} m de tolerancia por el redondeo de las coordenadas; la interfaz recorta el punto al radio sin tolerancia). ` +
+                  'Esos tres se comprueban en ese orden, después de validar el cuerpo y antes de resolver la ubicación, y no gastan cupo. ' +
+                  'FUERA_DE_COBERTURA: el punto no cae en el municipio',
+              ),
               '429': error(
                 'CUOTA_DE_REPORTES (un reporte por cuenta cada 60 min, con Retry-After) o rate limit por IP',
               ),

@@ -18,6 +18,26 @@ export const CONFIG_DOMINIO = {
   TOLERANCIA_HUECO_M: 20,
   /** CRS métrico para distancias y DBSCAN: WGS 84 / UTM 20S (Santa Cruz) <a confirmar>. */
   CRS_METRICO_EPSG: 32720,
+  /**
+   * Distancia máxima entre el punto reportado y la posición que informa el teléfono al enviar
+   * (§13, «Ubicación del dispositivo»). Es una comprobación de coherencia, no una prueba de
+   * presencia: el GPS se puede falsear.
+   */
+  REPORTE_RADIO_DISPOSITIVO_M: 60,
+  /**
+   * Metros que api-core suma al radio al comprobarlo: absorben el redondeo de las coordenadas que
+   * manda el cliente. La interfaz recorta el marcador al radio sin tolerancia.
+   */
+  REPORTE_RADIO_TOLERANCIA_M: 0.5,
+  /**
+   * Precisión que tiene que declarar el teléfono (`coords.accuracy`) para aceptar el reporte
+   * (decisión del usuario, configurable). Va aparte del esquema a propósito: si Zod la acotara,
+   * la respuesta sería 400 PAYLOAD_INVALIDO y no el 422 PRECISION_INSUFICIENTE que la interfaz
+   * necesita para explicar qué pasa.
+   */
+  PRECISION_DISPOSITIVO_MAX_M: 50,
+  /** Antigüedad máxima de la posición del teléfono al enviar <a confirmar con el municipio>. */
+  POSICION_ANTIGUEDAD_MAX_S: 600,
   FOTO_MAX_BYTES: 8 * 1024 * 1024,
   FOTOS_MAX_POR_REPORTE: 3,
   /**
@@ -106,4 +126,6 @@ export const NOTA_METODOLOGICA =
   'la profundidad se estima por referencia corporal y la ubicación tiene el error ' +
   'del GPS del celular o de la mano del usuario. No es un modelo hidráulico ni un estudio de drenaje. ' +
   'Cualquier decisión de inversión requiere estudio técnico formal. La ausencia de reportes en una zona ' +
-  'no significa ausencia de anegamiento.';
+  'no significa ausencia de anegamiento. ' +
+  `El radio de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m no prueba que el vecino estuviera en el lugar: ` +
+  'el GPS del teléfono se puede falsear.';

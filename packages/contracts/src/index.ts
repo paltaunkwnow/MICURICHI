@@ -1,5 +1,6 @@
 export * from './dominio/config.js';
 export * from './dominio/enums.js';
+export * from './dominio/geo.js';
 export * from './dominio/severidad.js';
 export * from './esquemas/admin.js';
 export * from './esquemas/auth.js';

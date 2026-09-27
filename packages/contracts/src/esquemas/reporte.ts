@@ -48,13 +48,44 @@ const EventoEnSchema = z.iso
     return t === null || t >= Date.now() - CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS * MS_POR_DIA;
   }, `La fecha del evento no puede tener más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días. Elegí una fecha más reciente.`);
 
+/**
+ * Posición del teléfono al tocar Enviar. Zod solo acota los rangos físicos: los topes de negocio
+ * (radio, precisión y antigüedad de `CONFIG_DOMINIO`) los aplica api-core con sus propios 422.
+ * No se guarda, no se registra en logs ni en auditoría y no entra en la huella de idempotencia.
+ */
+export const DispositivoSchema = z
+  .object({
+    lat: LatSchema,
+    lon: LonSchema,
+    precision_m: z
+      .number()
+      .min(0)
+      .max(10_000)
+      .meta({
+        description: `Precisión que declara el dispositivo (Geolocation coords.accuracy), en metros. Se aceptan ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos (422 PRECISION_INSUFICIENTE)`,
+      }),
+    antiguedad_s: z
+      .number()
+      .min(0)
+      .meta({
+        description: `Segundos entre la lectura de la posición y el envío; 0 si el reloj la da en el futuro. Se aceptan ${CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S} s o menos (422 POSICION_VENCIDA)`,
+      }),
+  })
+  .meta({
+    description: `Posición del dispositivo al enviar. El punto del reporte tiene que estar a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos (422 UBICACION_FUERA_DE_RADIO). No se guarda`,
+  });
+export type Dispositivo = z.infer<typeof DispositivoSchema>;
+
 /** Payload de creación de reporte (ciudadano). Validado en servidor por api-core. */
 export const ReporteCrearSchema = z
   .object({
     lat: LatSchema,
     lon: LonSchema,
-    ubicacion_metodo: z.enum(UBICACION_METODOS),
-    precision_gps_m: z.number().nonnegative().max(10_000).nullable().optional(),
+    /**
+     * Obligatorio desde 0.9.0. `ubicacion_metodo` y `precision_gps_m` ya no vienen del cliente:
+     * los deriva api-core de esta posición.
+     */
+    dispositivo: DispositivoSchema,
     ubicacion_tipo: z.enum(UBICACION_TIPOS),
     descripcion: z
       .string()
@@ -143,8 +174,17 @@ export type ReportePublico = z.infer<typeof ReportePublicoSchema>;
 
 /** Vista del técnico: todo lo público más campos de moderación y coordenada exacta. */
 export const ReporteTecnicoSchema = ReportePublicoSchema.extend({
-  ubicacion_metodo: z.enum(UBICACION_METODOS),
-  precision_gps_m: z.number().nullable(),
+  ubicacion_metodo: z.enum(UBICACION_METODOS).meta({
+    description:
+      'Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro del margen de error del dispositivo (a dispositivo.precision_m o menos de su posición al enviar, y con 2 m como margen mínimo), manual si quedó más lejos, siempre dentro del radio. El margen existe porque dos lecturas del GPS difieren varios metros aunque nadie mueva el punto',
+  }),
+  precision_gps_m: z.number().nullable().meta({
+    description: 'Precisión que declaró el dispositivo al enviar, en metros',
+  }),
+  distancia_dispositivo_m: z.number().int().min(0).max(1000).nullable().meta({
+    description:
+      'Distancia redondeada, en metros, entre el punto y la posición del dispositivo al enviar; null en los reportes anteriores a 0.9.0. La posición del dispositivo no se guarda',
+  }),
   ubicacion_tipo: z.enum(UBICACION_TIPOS),
   sumidero_cercano: z.enum(SUMIDERO_CERCANO).nullable(),
   sumidero_estado: z.enum(SUMIDERO_ESTADOS).nullable(),

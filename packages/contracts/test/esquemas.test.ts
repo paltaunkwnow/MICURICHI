@@ -18,11 +18,11 @@ const CUATRO_CAMPOS = ['manzana_id', 'direccion_aprox', 'duracion_estimada', 'af
 const valido = {
   lat: -17.78,
   lon: -63.18,
-  ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte.',
   profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
+  dispositivo: { lat: -17.78, lon: -63.18, precision_m: 10, antiguedad_s: 2 },
 };
 
 /** Payload de un cliente viejo (PWA en caché): el nuevo más los cuatro campos quitados. */
@@ -54,6 +54,7 @@ const tecnicoValido = {
   precision_degradada: false,
   ubicacion_metodo: 'manual',
   precision_gps_m: null,
+  distancia_dispositivo_m: null,
   ubicacion_tipo: 'via_publica',
   sumidero_cercano: null,
   sumidero_estado: null,

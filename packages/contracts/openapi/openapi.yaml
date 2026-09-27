@@ -53,17 +53,38 @@ components:
           minimum: -180
           maximum: 180
           description: Longitud WGS84 (EPSG:4326)
-        ubicacion_metodo:
-          type: string
-          enum:
-            - gps
-            - manual
-        precision_gps_m:
-          anyOf:
-            - type: number
+        dispositivo:
+          type: object
+          properties:
+            lat:
+              type: number
+              minimum: -90
+              maximum: 90
+              description: Latitud WGS84 (EPSG:4326)
+            lon:
+              type: number
+              minimum: -180
+              maximum: 180
+              description: Longitud WGS84 (EPSG:4326)
+            precision_m:
+              type: number
               minimum: 0
               maximum: 10000
-            - type: "null"
+              description: Precisión que declara el dispositivo (Geolocation coords.accuracy),
+                en metros. Se aceptan 50 m o menos (422 PRECISION_INSUFICIENTE)
+            antiguedad_s:
+              type: number
+              minimum: 0
+              description: Segundos entre la lectura de la posición y el envío; 0 si el reloj
+                la da en el futuro. Se aceptan 600 s o menos (422
+                POSICION_VENCIDA)
+          required:
+            - lat
+            - lon
+            - precision_m
+            - antiguedad_s
+          description: Posición del dispositivo al enviar. El punto del reporte tiene que
+            estar a 60 m o menos (422 UBICACION_FUERA_DE_RADIO). No se guarda
         ubicacion_tipo:
           type: string
           enum:
@@ -139,7 +160,7 @@ components:
       required:
         - lat
         - lon
-        - ubicacion_metodo
+        - dispositivo
         - ubicacion_tipo
         - descripcion
         - profundidad_estimada
@@ -704,10 +725,26 @@ components:
           enum:
             - gps
             - manual
+          description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+            del margen de error del dispositivo (a dispositivo.precision_m o
+            menos de su posición al enviar, y con 2 m como margen mínimo),
+            manual si quedó más lejos, siempre dentro del radio. El margen
+            existe porque dos lecturas del GPS difieren varios metros aunque
+            nadie mueva el punto"
         precision_gps_m:
+          description: Precisión que declaró el dispositivo al enviar, en metros
           type:
             - number
             - "null"
+        distancia_dispositivo_m:
+          anyOf:
+            - type: integer
+              minimum: 0
+              maximum: 1000
+            - type: "null"
+          description: Distancia redondeada, en metros, entre el punto y la posición del
+            dispositivo al enviar; null en los reportes anteriores a 0.9.0. La
+            posición del dispositivo no se guarda
         ubicacion_tipo:
           type: string
           enum:
@@ -809,6 +846,7 @@ components:
         - precision_degradada
         - ubicacion_metodo
         - precision_gps_m
+        - distancia_dispositivo_m
         - ubicacion_tipo
         - sumidero_cercano
         - sumidero_estado
@@ -979,10 +1017,26 @@ components:
               enum:
                 - gps
                 - manual
+              description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+                del margen de error del dispositivo (a dispositivo.precision_m o
+                menos de su posición al enviar, y con 2 m como margen mínimo),
+                manual si quedó más lejos, siempre dentro del radio. El margen
+                existe porque dos lecturas del GPS difieren varios metros aunque
+                nadie mueva el punto"
             precision_gps_m:
+              description: Precisión que declaró el dispositivo al enviar, en metros
               type:
                 - number
                 - "null"
+            distancia_dispositivo_m:
+              anyOf:
+                - type: integer
+                  minimum: 0
+                  maximum: 1000
+                - type: "null"
+              description: Distancia redondeada, en metros, entre el punto y la posición del
+                dispositivo al enviar; null en los reportes anteriores a 0.9.0.
+                La posición del dispositivo no se guarda
             ubicacion_tipo:
               type: string
               enum:
@@ -1084,6 +1138,7 @@ components:
             - precision_degradada
             - ubicacion_metodo
             - precision_gps_m
+            - distancia_dispositivo_m
             - ubicacion_tipo
             - sumidero_cercano
             - sumidero_estado
@@ -1267,10 +1322,27 @@ components:
                     enum:
                       - gps
                       - manual
+                    description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+                      del margen de error del dispositivo (a
+                      dispositivo.precision_m o menos de su posición al enviar,
+                      y con 2 m como margen mínimo), manual si quedó más lejos,
+                      siempre dentro del radio. El margen existe porque dos
+                      lecturas del GPS difieren varios metros aunque nadie mueva
+                      el punto"
                   precision_gps_m:
+                    description: Precisión que declaró el dispositivo al enviar, en metros
                     type:
                       - number
                       - "null"
+                  distancia_dispositivo_m:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 1000
+                      - type: "null"
+                    description: Distancia redondeada, en metros, entre el punto y la posición del
+                      dispositivo al enviar; null en los reportes anteriores a
+                      0.9.0. La posición del dispositivo no se guarda
                   ubicacion_tipo:
                     type: string
                     enum:
@@ -1372,6 +1444,7 @@ components:
                   - precision_degradada
                   - ubicacion_metodo
                   - precision_gps_m
+                  - distancia_dispositivo_m
                   - ubicacion_tipo
                   - sumidero_cercano
                   - sumidero_estado
@@ -1969,10 +2042,27 @@ components:
                     enum:
                       - gps
                       - manual
+                    description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+                      del margen de error del dispositivo (a
+                      dispositivo.precision_m o menos de su posición al enviar,
+                      y con 2 m como margen mínimo), manual si quedó más lejos,
+                      siempre dentro del radio. El margen existe porque dos
+                      lecturas del GPS difieren varios metros aunque nadie mueva
+                      el punto"
                   precision_gps_m:
+                    description: Precisión que declaró el dispositivo al enviar, en metros
                     type:
                       - number
                       - "null"
+                  distancia_dispositivo_m:
+                    anyOf:
+                      - type: integer
+                        minimum: 0
+                        maximum: 1000
+                      - type: "null"
+                    description: Distancia redondeada, en metros, entre el punto y la posición del
+                      dispositivo al enviar; null en los reportes anteriores a
+                      0.9.0. La posición del dispositivo no se guarda
                   ubicacion_tipo:
                     type: string
                     enum:
@@ -2074,6 +2164,7 @@ components:
                   - precision_degradada
                   - ubicacion_metodo
                   - precision_gps_m
+                  - distancia_dispositivo_m
                   - ubicacion_tipo
                   - sumidero_cercano
                   - sumidero_estado
@@ -2667,9 +2758,13 @@ paths:
   /api/v1/reportes:
     post:
       summary: "Crear un reporte. EXIGE SESIÓN (cualquier rol). El autor se toma de la
-        sesión: el cuerpo no tiene ni puede tener un campo de autor. Además del
-        rate limit por IP, cada cuenta solo puede crear un reporte cada 60
-        minutos."
+        sesión: el cuerpo no tiene ni puede tener un campo de autor. El cuerpo
+        lleva la posición del teléfono al enviar (dispositivo), y el punto tiene
+        que estar a 60 m o menos de ella. La posición del dispositivo no se
+        guarda, no se registra en logs ni en auditoría y no entra en la huella
+        de idempotencia: queda solo la distancia redondeada. ubicacion_metodo y
+        precision_gps_m los deriva el servidor. Además del rate limit por IP,
+        cada cuenta solo puede crear un reporte cada 60 minutos."
       tags:
         - reportes
       security: &a1
@@ -2688,10 +2783,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReporteFeature"
         "400":
-          description: "PAYLOAD_INVALIDO. Además del formato: evento_en con más de 10 min
-            de adelanto o más de 365 días de antigüedad, y respuestas del
-            sumidero incoherentes (con sumidero_cercano = no, sin
-            sumidero_estado ni agua_brota_sumidero = true)"
+          description: "PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera
+            de sus rangos físicos (precision_m de 0 a 10 000, antiguedad_s ≥ 0),
+            evento_en con más de 10 min de adelanto o más de 365 días de
+            antigüedad, y respuestas del sumidero incoherentes (con
+            sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero =
+            true)"
           content:
             application/json:
               schema:
@@ -2703,7 +2800,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "422":
-          description: "FUERA_DE_COBERTURA: el punto no cae en el municipio"
+          description: "PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a 50 m.
+            POSICION_VENCIDA: dispositivo.antiguedad_s mayor a 600 s.
+            UBICACION_FUERA_DE_RADIO: el punto está a más de 60,5 m de
+            dispositivo (el radio de 60 m más 0,5 m de tolerancia por el
+            redondeo de las coordenadas; la interfaz recorta el punto al radio
+            sin tolerancia). Esos tres se comprueban en ese orden, después de
+            validar el cuerpo y antes de resolver la ubicación, y no gastan
+            cupo. FUERA_DE_COBERTURA: el punto no cae en el municipio"
           content:
             application/json:
               schema:

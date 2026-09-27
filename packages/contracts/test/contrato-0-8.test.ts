@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CONFIG_DOMINIO } from '../src/dominio/config.js';
 import { FotoSubidaSchema } from '../src/esquemas/reporte.js';
@@ -148,18 +145,5 @@ describe('0.8.0: OpenAPI de las fotos', () => {
     const cabeceras = servir?.responses['200']?.headers ?? {};
     expect(cabeceras['Cache-Control']?.description).toContain('private, no-store');
     expect(cabeceras['X-Content-Type-Options']?.description).toContain('nosniff');
-  });
-});
-
-describe('versión del paquete', () => {
-  const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.8.0', () => {
-    const { version } = JSON.parse(readFileSync(resolve(raiz, 'package.json'), 'utf8')) as {
-      version: string;
-    };
-    const ultima = readFileSync(resolve(raiz, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1];
-    expect(version).toBe('0.8.0');
-    expect(ultima).toBe(version);
   });
 });

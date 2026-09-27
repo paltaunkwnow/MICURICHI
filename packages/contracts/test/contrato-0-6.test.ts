@@ -16,11 +16,11 @@ import { construirOpenApi } from '../src/openapi.js';
 const crear = {
   lat: -17.78,
   lon: -63.18,
-  ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte.',
   profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
+  dispositivo: { lat: -17.78, lon: -63.18, precision_m: 10, antiguedad_s: 2 },
 };
 
 /** Rutas (`a.b.0.c`) de los errores de un safeParse fallido; vacío si pasó. */
@@ -161,6 +161,7 @@ const tecnico = {
   precision_degradada: false,
   ubicacion_metodo: 'gps',
   precision_gps_m: 8,
+  distancia_dispositivo_m: 3,
   ubicacion_tipo: 'vivienda_o_predio',
   sumidero_cercano: 'si',
   sumidero_estado: 'tapado',

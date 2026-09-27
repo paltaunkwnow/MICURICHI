@@ -20,11 +20,11 @@ import { construirOpenApi } from '../src/openapi.js';
 const crear = {
   lat: -17.78,
   lon: -63.18,
-  ubicacion_metodo: 'manual',
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte.',
   profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
+  dispositivo: { lat: -17.78, lon: -63.18, precision_m: 10, antiguedad_s: 2 },
 };
 
 describe('0.5.0: tirante pasa a profundidad', () => {

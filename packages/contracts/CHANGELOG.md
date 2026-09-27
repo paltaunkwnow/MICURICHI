@@ -1,5 +1,124 @@
 # Changelog — contracts
 
+## 0.9.0 — 2026-09-26
+
+**Cambio con ruptura en `POST /api/v1/reportes`: la posición del dispositivo pasa a ser
+obligatoria.** El punto del reporte tiene que estar a 60 m o menos de donde está el teléfono al
+enviar, y api-core lo vuelve a comprobar. Es la versión de la tanda T2 del plan de producción
+(`docs/revision/2026-09-26-plan-produccion-vps.md`, paso S07).
+
+### Con ruptura: `ReporteCrearSchema`
+
+| 0.8.0 | 0.9.0 |
+|---|---|
+| — | `dispositivo` **obligatorio**: `{ lat, lon, precision_m, antiguedad_s }` (`DispositivoSchema`, `type Dispositivo`) |
+| `ubicacion_metodo` (`gps` \| `manual`), obligatorio | no existe: lo deriva api-core (`gps` si el punto quedó dentro del margen de error del dispositivo, a `max(2 m, dispositivo.precision_m)` o menos; `manual` si quedó más lejos, dentro del radio) |
+| `precision_gps_m`, opcional | no existe: api-core guarda `dispositivo.precision_m` |
+
+- `dispositivo.lat` / `dispositivo.lon`: los mismos rangos que `lat` / `lon` (EPSG:4326).
+- `dispositivo.precision_m`: número de 0 a 10 000 (`Geolocation.coords.accuracy`).
+- `dispositivo.antiguedad_s`: número ≥ 0, con decimales si hace falta. Si el reloj da la lectura
+  en el futuro, el cliente manda 0.
+- Zod solo acota esos **rangos físicos**. Con 80 m de precisión o 900 s de antigüedad el cuerpo
+  pasa el esquema: los topes de negocio son `422` de api-core (abajo). Si el tope estuviera en
+  Zod, la respuesta sería `400 PAYLOAD_INVALIDO` y la interfaz no podría explicar qué pasa.
+- Un cuerpo sin `dispositivo`, o con `null`, falla con el error en `dispositivo`. Un cliente
+  anterior (PWA en caché) recibe `400 PAYLOAD_INVALIDO` hasta que se actualiza.
+- Un cuerpo que todavía manda `ubicacion_metodo` o `precision_gps_m` no falla: Zod descarta esas
+  claves.
+
+### Con ruptura: `ReporteTecnicoSchema.distancia_dispositivo_m`
+
+Campo nuevo y **obligatorio** en la vista técnica (`GET /tecnico/reportes`, `GET
+/tecnico/reportes/{id}`, respuestas de moderación): entero de 0 a 1000 o `null`. Es la distancia
+redondeada entre el punto y la posición del dispositivo al enviar (migración 0013); `null` en los
+reportes anteriores. La vista pública no lo lleva. `ubicacion_metodo` y `precision_gps_m` siguen
+en la vista técnica, ahora con su descripción.
+
+### `422` nuevos de `POST /api/v1/reportes`
+
+`CODIGOS_UBICACION_DISPOSITIVO`, en el orden en que api-core los comprueba (después de Zod y
+antes de resolver la ubicación). Ninguno gasta cupo.
+
+| Código | Cuándo |
+|---|---|
+| `PRECISION_INSUFICIENTE` | `dispositivo.precision_m` > `PRECISION_DISPOSITIVO_MAX_M` (50 m) |
+| `POSICION_VENCIDA` | `dispositivo.antiguedad_s` > `POSICION_ANTIGUEDAD_MAX_S` (600 s) |
+| `UBICACION_FUERA_DE_RADIO` | el punto está a más de `REPORTE_RADIO_DISPOSITIVO_M` + `REPORTE_RADIO_TOLERANCIA_M` (60 m + 0,5 m) de `dispositivo` |
+
+`FUERA_DE_COBERTURA` sigue igual.
+
+### Distancias (`src/dominio/geo.ts`, nuevo)
+
+- `distanciaMetros(a, b)`: haversine sobre la esfera de radio medio `RADIO_TIERRA_M`
+  (6 371 008,8 m). A 60 m, en Santa Cruz, difiere del elipsoide WGS 84 en unos 0,3 m como mucho.
+- `dentroDelRadio(punto, centro, { radioM?, toleranciaM? })`: `true` si la distancia, medida al
+  milímetro, es ≤ `radioM` + `toleranciaM`. El radio por defecto es `REPORTE_RADIO_DISPOSITIVO_M`
+  y la tolerancia, 0. Acepta 59 y 60 m y rechaza 61 m. Medir al milímetro evita que un punto
+  puesto justo en el borde quede afuera por la coma flotante (60,00000000005 m).
+- Tipos `PuntoLatLon`, `OpcionesRadio` y `CodigoUbicacionDispositivo`.
+
+La misma cuenta sirve a la interfaz, que recorta el marcador al círculo, y a api-core, que la
+vuelve a comprobar. `distanciaAproximadaM` (equirectangular) no cambia.
+
+### Parámetros (`CONFIG_DOMINIO`, también en `dist/dominio.json`)
+
+| Constante | Valor | Qué es |
+|---|---|---|
+| `REPORTE_RADIO_DISPOSITIVO_M` | `60` | Nueva. Distancia máxima entre el punto y la posición del dispositivo |
+| `PRECISION_DISPOSITIVO_MAX_M` | `50` | Nueva. Precisión máxima que se acepta (decisión del usuario, configurable) |
+| `POSICION_ANTIGUEDAD_MAX_S` | `600` | Nueva. Antigüedad máxima de la posición `<a confirmar con el municipio>` |
+| `REPORTE_RADIO_TOLERANCIA_M` | `0.5` | Nueva. Metros que api-core suma al radio al comprobarlo, por el redondeo de las coordenadas. La interfaz recorta sin tolerancia |
+
+### Nota metodológica
+
+`NOTA_METODOLOGICA` suma la limitación de §9.5 «El radio de 60 m no prueba que el vecino
+estuviera en el lugar: el GPS del teléfono se puede falsear.», que así llega al campo
+`nota_metodologica` y al encabezado del CSV de toda exportación. Sigue en una sola línea.
+
+### OpenAPI
+
+- `POST /api/v1/reportes`: la descripción explica `dispositivo`, que su posición no se guarda, no
+  se registra ni entra en la huella de idempotencia, y que `ubicacion_metodo` y `precision_gps_m`
+  los deriva el servidor. `400` suma el caso del `dispositivo` ausente o fuera de rango; `422`
+  documenta los tres códigos nuevos y `FUERA_DE_COBERTURA`. El de `UBICACION_FUERA_DE_RADIO` dice
+  la distancia con la que rechaza api-core: más de 60,5 m (el radio más la tolerancia).
+- Componente `ReporteCrear`: `dispositivo` en `required`, sin `ubicacion_metodo` ni
+  `precision_gps_m`.
+- Componente `ReporteTecnico` (y los que lo incluyen): `distancia_dispositivo_m` en `required`, y
+  `ubicacion_metodo` describe la regla del margen de error (abajo).
+
+### Cómo se deriva `ubicacion_metodo`
+
+`gps` si la distancia entre el punto y `dispositivo` es de `max(2 m, dispositivo.precision_m)` o
+menos; `manual` si es mayor. El plan decía «`gps` con 2 m o menos», pero la revisión
+de la tanda T2 mostró que no sirve con un teléfono real: la interfaz envía la posición releída al
+tocar Enviar y el punto sigue donde lo dejó el GPS en el paso 1, así que dos lecturas precisas
+difieren varios metros aunque nadie haya movido el punto, y casi todo salía `manual` («Ajustado a
+mano» en el panel). Con el margen de error, `gps` es «el punto está donde el teléfono dice estar,
+dentro de lo que el propio teléfono declara que puede errar», y `manual`, que quedó más lejos que
+eso: lo movieron o la persona caminó entre el paso 1 y el envío. La precisión y la distancia se
+guardan igual y el panel las muestra.
+
+### Qué tienen que hacer los consumidores
+
+- `packages/db` (paso S08): migración 0013 con `reporte_inundacion.distancia_dispositivo_m
+  smallint NULL` y `CHECK` de 0 a 1000.
+- `api-core` (paso S09): después de Zod y antes del resolver, en este orden: precisión >
+  `PRECISION_DISPOSITIVO_MAX_M` → `422 PRECISION_INSUFICIENTE`; antigüedad >
+  `POSICION_ANTIGUEDAD_MAX_S` → `422 POSICION_VENCIDA`;
+  `!dentroDelRadio({ lat, lon }, dispositivo, { toleranciaM: REPORTE_RADIO_TOLERANCIA_M })` →
+  `422 UBICACION_FUERA_DE_RADIO`. Ninguno gasta cupo. Guardar `precision_gps_m` =
+  `dispositivo.precision_m` y `distancia_dispositivo_m` redondeada, y derivar `ubicacion_metodo`
+  con el margen de error.
+  Devolver `distancia_dispositivo_m` en la vista técnica. `dispositivo` fuera de la huella de
+  idempotencia, de la auditoría y de los logs (pino redacta `body.dispositivo`).
+- `web-ciudadano` (paso S10): mandar `dispositivo` y dejar de mandar `ubicacion_metodo` y
+  `precision_gps_m`. Recortar el marcador y validar coordenadas con `dentroDelRadio`, sin
+  tolerancia. Mostrar un texto propio para cada `422`.
+- `panel-admin` (paso S11): mostrar la precisión y `distancia_dispositivo_m` en el detalle.
+- `e2e` (paso S12): todo `POST /reportes` lleva `dispositivo` a 60 m o menos del punto.
+
 ## 0.8.0 — 2026-09-26
 
 **Dos cambios con ruptura: la respuesta de `POST /api/v1/fotos` y quién ve una foto sin reporte
