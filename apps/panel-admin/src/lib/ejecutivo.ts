@@ -5,17 +5,16 @@ import type {
   ResumenDistrito,
   ResumenEjecutivo,
   Severidad,
-  VentanaResumen,
 } from 'contracts';
 import type { Formato } from './formato';
 
 /**
- * Lógica pura del panel ejecutivo: agrupación de pestañas, escala de colores del mapa y datos de
- * las gráficas. Sin React ni red, para probarla sin navegador.
+ * Lógica pura del panel ejecutivo: agrupación de pestañas y datos de las gráficas. Sin React ni
+ * red, para probarla sin navegador.
  *
- * Desde contracts 0.6.0 las cifras de severidad, el mapa y «Inundaciones activas por distrito»
- * cuentan la inundación ACTIVA (en revisión + verificadas). Los resueltos solo aparecen en «Cómo
- * va el trabajo».
+ * Desde contracts 0.6.0 las cifras de severidad y «Inundaciones activas por distrito» cuentan la
+ * inundación ACTIVA (en revisión + verificadas). Los resueltos solo aparecen en «Cómo va el
+ * trabajo».
  */
 
 /**
@@ -77,41 +76,10 @@ export function conteosPorPestana(
   };
 }
 
-export const VENTANAS: ReadonlyArray<{ id: VentanaResumen; etiqueta: string }> = [
-  { id: '7d', etiqueta: 'Últimos 7 días' },
-  { id: '30d', etiqueta: 'Últimos 30 días' },
-  { id: 'todo', etiqueta: 'Histórico' },
-];
-
-// --- Escala de colores ------------------------------------------------------------------------
-
 /**
- * Rampas de cinco pasos, de claro a oscuro, con los tonos de la paleta de CLAUDE.md §14.4:
- * severidad (la de «Crítica» va del naranja de «alta» al rojo de «crítica», porque suma las dos)
- * y agua para «Todas», que no es una severidad.
- *
- * Empiezan en un tono medio a propósito. Antes el primer paso era el 100 de cada rol y quedaba a
- * 1,03–1,09:1 del gris de «sin activas»: un distrito con una inundación se veía igual que uno sin
- * ninguna. Ahora el primer paso tiene al menos 3:1 con ese gris (WCAG 1.4.11), también ya pintado
- * sobre el mapa con `OPACIDAD_COROPLETA`; lo comprueba `ejecutivo.test.ts`.
+ * Barras de «Inundaciones activas por distrito» y forma de las pestañas: el 500 de cada rol de la
+ * paleta de CLAUDE.md §14.4 (severidad, y agua para «Todas», que no es una severidad).
  */
-export const RAMPAS: Record<PestanaEjecutiva, readonly string[]> = {
-  critica: ['#D9531A', '#BD3913', '#A1230C', '#801907', '#5A1004'],
-  media: ['#A87408', '#8E6005', '#744D00', '#5A3B00', '#3F2800'],
-  baja: ['#258C49', '#1B763C', '#156233', '#0F4D27', '#0A371B'],
-  todas: ['#3C83AD', '#276F99', '#135C82', '#0B4868', '#06324A'],
-};
-
-/** Distrito sin inundaciones activas: gris neutro, a 3:1 o más del primer paso de cada rampa. */
-export const COLOR_SIN_REPORTES = '#F4F6F5';
-
-/**
- * Opacidad del relleno de la coropleta. Deja ver apenas las calles de la base; más transparente,
- * el contraste entre «sin activas» y el primer paso vuelve a caer por debajo de 3:1.
- */
-export const OPACIDAD_COROPLETA = 0.9;
-
-/** Barras de «Inundaciones activas por distrito» y forma de las pestañas: el 500 de cada rol. */
 const COLOR_PRINCIPAL: Record<PestanaEjecutiva, string> = {
   critica: '#E4601B',
   media: '#C98A0E',
@@ -121,41 +89,6 @@ const COLOR_PRINCIPAL: Record<PestanaEjecutiva, string> = {
 
 export function colorPrincipal(p: PestanaEjecutiva): string {
   return COLOR_PRINCIPAL[p];
-}
-
-export interface PasoEscala {
-  desde: number;
-  hasta: number;
-  color: string;
-}
-
-/**
- * Hasta cinco rangos enteros contiguos entre 1 y `maximo`. El cero va aparte («sin activas»)
- * para que un distrito sin datos nunca se confunda con uno de pocos. Con menos de cinco valores
- * posibles hay menos rangos, y se toman los pasos más oscuros: el máximo siempre es el más oscuro.
- */
-export function construirEscala(maximo: number, rampa: readonly string[]): PasoEscala[] {
-  if (maximo <= 0) return [];
-  const n = Math.min(rampa.length, maximo);
-  const pasos: PasoEscala[] = [];
-  for (let i = 0; i < n; i++) {
-    pasos.push({
-      desde: Math.floor((i * maximo) / n) + 1,
-      hasta: Math.floor(((i + 1) * maximo) / n),
-      color: rampa[rampa.length - n + i] as string,
-    });
-  }
-  return pasos;
-}
-
-export function colorParaConteo(conteo: number, escala: PasoEscala[]): string {
-  if (conteo <= 0) return COLOR_SIN_REPORTES;
-  for (const p of escala) if (conteo <= p.hasta) return p.color;
-  return escala.at(-1)?.color ?? COLOR_SIN_REPORTES;
-}
-
-export function textoRango(p: PasoEscala): string {
-  return p.desde === p.hasta ? String(p.desde) : `${p.desde}–${p.hasta}`;
 }
 
 // --- Distritos ----------------------------------------------------------------------------------
@@ -172,44 +105,16 @@ export function ordenarDistritos(distritos: readonly ResumenDistrito[]): Resumen
 }
 
 /**
- * Solo los distritos de la capa vigente van al mapa, a la escala y a las gráficas. Uno que solo
- * existe en una capa anterior no tiene polígono en el mapa, su código acortado puede repetir el
- * de uno vigente (salía una segunda barra «01») y sus conteos subían el máximo de la escala, que
- * dejaba a todos los demás distritos en los pasos más claros.
+ * Solo los distritos de la capa vigente tienen barra propia. El código acortado de uno que solo
+ * existe en una capa anterior puede repetir el de uno vigente (salía una segunda barra «01»):
+ * sus activas van a «Otros» y su detalle, a la tabla de Indicadores.
  */
 function distritosVigentes(resumen: ResumenEjecutivo): ResumenDistrito[] {
   return ordenarDistritos(resumen.por_distrito.filter((d) => d.en_capa_vigente));
 }
 
-export interface RellenoDistritos {
-  colores: Record<string, string>;
-  descripciones: Record<string, string>;
-  escala: PasoEscala[];
-}
-
 function textoActivas(n: number, f: FormatoNumeros): string {
   return `${f.numero(n)} ${n === 1 ? 'inundación activa' : 'inundaciones activas'}`;
-}
-
-/** Colores y textos del mapa, por `codigo` de distrito vigente, para la pestaña activa. */
-export function rellenoDistritos(
-  resumen: ResumenEjecutivo,
-  pestana: PestanaEjecutiva,
-  f: FormatoNumeros,
-): RellenoDistritos {
-  const conteos = distritosVigentes(resumen).map((d) => ({
-    d,
-    n: conteoPestana(d.activas.por_severidad, pestana),
-  }));
-  const maximo = conteos.reduce((m, x) => Math.max(m, x.n), 0);
-  const escala = construirEscala(maximo, RAMPAS[pestana]);
-  const colores: Record<string, string> = {};
-  const descripciones: Record<string, string> = {};
-  for (const { d, n } of conteos) {
-    colores[d.codigo] = colorParaConteo(n, escala);
-    descripciones[d.codigo] = `${d.nombre} · ${textoActivas(n, f)}`;
-  }
-  return { colores, descripciones, escala };
 }
 
 export interface FilaCapaAnterior {
@@ -217,21 +122,21 @@ export interface FilaCapaAnterior {
   /** Código completo: acortado podría confundirse con el de un distrito vigente. */
   codigo: string;
   nombre: string;
-  /** Activas de la pestaña elegida. */
+  /** Inundaciones activas, todas las severidades. */
   activas: number;
   por_estado: ConteoPorEstadoResumen;
 }
 
-/** Distritos que solo existen en una capa anterior: van aparte, con su código completo. */
-export function distritosCapaAnterior(
-  resumen: ResumenEjecutivo,
-  pestana: PestanaEjecutiva,
-): FilaCapaAnterior[] {
+/**
+ * Distritos que solo existen en una capa anterior, para la tabla de Indicadores: van aparte y con
+ * su código completo. En el panel ejecutivo sus activas cuentan dentro de «Otros».
+ */
+export function distritosCapaAnterior(resumen: ResumenEjecutivo): FilaCapaAnterior[] {
   return ordenarDistritos(resumen.por_distrito.filter((d) => !d.en_capa_vigente)).map((d) => ({
     distrito_id: d.distrito_id,
     codigo: d.codigo,
     nombre: d.nombre,
-    activas: conteoPestana(d.activas.por_severidad, pestana),
+    activas: d.activas.total,
     por_estado: d.por_estado,
   }));
 }
@@ -243,18 +148,41 @@ export interface BarraSimple {
   etiqueta: string;
   nombre: string;
   valor: number;
+  /** La barra «Otros»: no es un distrito. */
+  otros?: true;
 }
 
+/** `codigo` de la barra «Otros»: no choca con el de ningún distrito. */
+export const CODIGO_OTROS = 'otros';
+
+/**
+ * Una barra por distrito vigente y, al final, «Otros» con lo que no tiene barra propia: los
+ * distritos de una capa anterior y las activas sin distrito (api-core las suma al total sin darles
+ * fila). Así las barras suman siempre las activas de la pestaña y la gráfica cuadra con el número
+ * grande. «Otros» solo aparece si tiene algo.
+ */
 export function barrasInundaciones(
   resumen: ResumenEjecutivo,
   pestana: PestanaEjecutiva,
 ): BarraSimple[] {
-  return distritosVigentes(resumen).map((d) => ({
+  const barras: BarraSimple[] = distritosVigentes(resumen).map((d) => ({
     codigo: d.codigo,
     etiqueta: codigoCorto(d.codigo),
     nombre: d.nombre,
     valor: conteoPestana(d.activas.por_severidad, pestana),
   }));
+  const enDistritos = barras.reduce((s, b) => s + b.valor, 0);
+  const otros = conteoPestana(resumen.activas.por_severidad, pestana) - enDistritos;
+  if (otros > 0) {
+    barras.push({
+      codigo: CODIGO_OTROS,
+      etiqueta: 'Otros',
+      nombre: 'Distritos de una capa anterior o sin distrito',
+      valor: otros,
+      otros: true,
+    });
+  }
+  return barras;
 }
 
 export type EstadoTrabajo = keyof ConteoPorEstadoResumen;
@@ -323,63 +251,16 @@ export function marcasEje(maximo: number): number[] {
 
 // --- Textos ---------------------------------------------------------------------------------------
 
-/** «hace 40 s», «hace 3 min». */
-export function textoActualizado(msDesde: number): string {
-  const s = Math.max(0, Math.floor(msDesde / 1000));
-  if (s < 10) return 'actualizado hace unos segundos';
-  if (s < 60) return `actualizado hace ${Math.floor(s / 10) * 10} s`;
-  return `actualizado hace ${Math.floor(s / 60)} min`;
-}
-
-/**
- * Antigüedad de las cifras según `generado_en` del resumen. Antes se medía desde que llegaba la
- * respuesta, que dice cuándo habló el navegador con la API, no de cuándo son los datos.
- */
-export function textoActualizadoDesde(generadoEn: string, ahora: number): string {
-  const t = Date.parse(generadoEn);
-  return Number.isNaN(t) ? '' : textoActualizado(ahora - t);
-}
-
 /** «55 verificadas · 59 en revisión», bajo el número grande. */
 export function textoVerificadas(a: ConteoActivas, f: FormatoNumeros): string {
   return `${f.numero(a.verificadas)} ${a.verificadas === 1 ? 'verificada' : 'verificadas'} · ${f.numero(a.en_revision)} en revisión`;
 }
 
 /**
- * Texto de la región viva del panel. Depende solo de las cifras: una respuesta nueva con los
- * mismos números deja el mismo texto y el lector de pantalla no la repite; el reloj de
- * «actualizado hace…» ya no habla cada 10 s.
+ * Texto de la región viva del panel. Depende solo de las cifras: el refresco de cada 10 s con los
+ * mismos números deja el mismo texto y el lector de pantalla no lo repite.
  */
 export function textoAnuncio(r: ResumenEjecutivo, f: FormatoNumeros): string {
   const a = r.activas;
   return `${textoActivas(a.total, f)}: ${f.numero(a.verificadas)} ${a.verificadas === 1 ? 'verificada' : 'verificadas'} y ${f.numero(a.en_revision)} en revisión.`;
-}
-
-// --- Sondeo -------------------------------------------------------------------------------------
-
-export interface OrigenConsultas {
-  /** La persona hizo algo (abrir el panel, cambiar de período, reintentar). */
-  marcarAccion(): void;
-  /** Consume la marca: true si la consulta que sale ahora es un refresco automático. */
-  esSondeo(): boolean;
-}
-
-/**
- * Distingue el refresco automático del resumen de lo que pide la persona. Solo lo segundo tiene
- * que renovar la inactividad de la sesión en api-core: si no, un panel abierto en una pantalla
- * de la oficina mantenía la sesión viva para siempre.
- */
-export function crearOrigenConsultas(): OrigenConsultas {
-  // La primera consulta la pide la persona al abrir el panel.
-  let pendiente = true;
-  return {
-    marcarAccion() {
-      pendiente = true;
-    },
-    esSondeo() {
-      const sondeo = !pendiente;
-      pendiente = false;
-      return sondeo;
-    },
-  };
 }

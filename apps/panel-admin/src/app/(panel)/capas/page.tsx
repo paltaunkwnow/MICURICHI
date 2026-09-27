@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { activarCapa, obtenerVersionesCapas } from '@/lib/api';
 import { useFormato } from '@/lib/ciudad-contexto';
+import { invalidarTrasActivarCapa } from '@/lib/consultas';
 import { etiquetaCapa } from '@/lib/formato';
 import { useUsuarioActual } from '@/lib/sesion';
 
@@ -25,8 +26,7 @@ export default function Capas() {
     onSuccess: (c) => {
       setError(null);
       setMensaje(`Ahora rige la versión ${c.version} de ${etiquetaCapa(c.capa)}.`);
-      cliente.invalidateQueries({ queryKey: ['capas-versiones'] });
-      cliente.invalidateQueries({ queryKey: ['indicadores'] });
+      void invalidarTrasActivarCapa(cliente);
     },
     onError: (e) => {
       setMensaje(null);

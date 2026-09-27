@@ -9,15 +9,14 @@ import { FiltrosDeReportes } from '@/componentes/FiltrosReportes';
 import { Mapa } from '@/componentes/Mapa';
 import { Paginacion } from '@/componentes/Paginacion';
 import { TablaReportes } from '@/componentes/TablaReportes';
-import {
-  exportarGeoJson,
-  obtenerCapasMapa,
-  obtenerDistritos,
-  obtenerReportes,
-  obtenerUnidadesVecinales,
-  urlExportar,
-} from '@/lib/api';
+import { exportarGeoJson, urlExportar } from '@/lib/api';
 import { useFormato } from '@/lib/ciudad-contexto';
+import {
+  consultaCapasMapa,
+  consultaDistritos,
+  consultaReportes,
+  consultaUnidadesVecinales,
+} from '@/lib/consultas';
 import { avisoExportacion, mensajeErrorExportacion } from '@/lib/exportacion';
 import {
   type FiltrosReportes,
@@ -28,6 +27,7 @@ import {
   parametrosExportacion,
   serializarFiltros,
 } from '@/lib/filtros';
+import { AVISO_BANDEJA_PUBLICOS } from '@/lib/publicacion';
 
 /** Guarda en el equipo un archivo ya recibido, con el nombre que mandó el servidor. */
 function descargar(texto: string, nombre: string, tipo: string) {
@@ -80,43 +80,22 @@ function Reportes() {
     [filtros, navegar],
   );
 
-  const reportes = useQuery({
-    queryKey: ['reportes', params],
-    queryFn: ({ signal }) => obtenerReportes(params, signal),
-    placeholderData: keepPreviousData,
-  });
-  const distritos = useQuery({
-    queryKey: ['geo', 'distritos'],
-    queryFn: obtenerDistritos,
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-  const unidadesVecinales = useQuery({
-    queryKey: ['geo', 'unidades-vecinales'],
-    queryFn: obtenerUnidadesVecinales,
-    staleTime: Number.POSITIVE_INFINITY,
-  });
-  const capas = useQuery({
-    queryKey: ['geo', 'capas'],
-    queryFn: ({ signal }) => obtenerCapasMapa(signal),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
+  // Se refresca sola cada 10 s (`lib/consultas.ts`); al cambiar de filtro se sigue viendo la
+  // página anterior hasta que llega la nueva.
+  const reportes = useQuery({ ...consultaReportes(params), placeholderData: keepPreviousData });
+  const distritos = useQuery(consultaDistritos());
+  const unidadesVecinales = useQuery(consultaUnidadesVecinales());
+  const capas = useQuery(consultaCapasMapa());
 
   /**
    * Dos conteos que la bandeja necesita siempre, con filtros o sin ellos: cuántos esperan
    * revisión y cuántos de esos son críticos. Se piden con `limite=1` porque lo único que se usa
    * es el `total` que devuelve la API, no las filas.
    */
-  const nuevos = useQuery({
-    queryKey: ['reportes', 'conteo', 'nuevo'],
-    queryFn: ({ signal }) => obtenerReportes({ estado: 'nuevo', limite: '1' }, signal),
-    staleTime: 30_000,
-  });
-  const criticos = useQuery({
-    queryKey: ['reportes', 'conteo', 'nuevo-critica'],
-    queryFn: ({ signal }) =>
-      obtenerReportes({ estado: 'nuevo', severidad: 'critica', limite: '1' }, signal),
-    staleTime: 30_000,
-  });
+  const nuevos = useQuery(consultaReportes({ estado: 'nuevo', limite: '1' }));
+  const criticos = useQuery(
+    consultaReportes({ estado: 'nuevo', severidad: 'critica', limite: '1' }),
+  );
 
   const features = reportes.data?.features ?? [];
   const total = reportes.data?.total ?? 0;
@@ -178,6 +157,10 @@ function Reportes() {
             {avisoExportar?.texto}
           </Aviso>
         </div>
+        {/* Fijo y no en una región viva: no anuncia un cambio, describe cómo funciona. */}
+        <p className="aviso aviso-info mt-4" data-testid="aviso-nuevos-publicos">
+          {AVISO_BANDEJA_PUBLICOS}
+        </p>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,38%)]">
@@ -197,7 +180,9 @@ function Reportes() {
 
           <Aviso tipo="error">
             {reportes.error
-              ? `No se pudieron cargar los reportes: ${reportes.error.message}`
+              ? reportes.data
+                ? `No se pudo actualizar la tabla (${reportes.error.message}). Se muestran los últimos datos recibidos.`
+                : `No se pudieron cargar los reportes: ${reportes.error.message}`
               : null}
           </Aviso>
 
@@ -234,7 +219,8 @@ function Reportes() {
                 )}
               </div>
             ) : (
-              <div className={reportes.isFetching ? 'opacity-70 transition-opacity' : ''}>
+              // Se atenúa solo mientras llega otra página o filtro, no en cada refresco de 10 s.
+              <div className={reportes.isPlaceholderData ? 'opacity-70 transition-opacity' : ''}>
                 <TablaReportes
                   reportes={features}
                   seleccionado={resaltado}

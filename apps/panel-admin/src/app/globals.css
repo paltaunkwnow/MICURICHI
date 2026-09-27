@@ -1152,31 +1152,3 @@ a.fila:hover {
   font-size: 32px;
   line-height: 36px;
 }
-
-/* Tooltip de la coropleta: nombre del distrito y conteo. */
-.tooltip-mapa .maplibregl-popup-content {
-  padding: 8px 12px;
-  border-radius: var(--radius-campo);
-  background: var(--color-tinta-900);
-  color: #fff;
-  font-size: 15px;
-  font-weight: 600;
-  box-shadow: var(--sh);
-}
-/* Solo el lado del triángulo que apunta al polígono, según dónde lo ancle MapLibre. */
-.tooltip-mapa.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
-.tooltip-mapa.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
-.tooltip-mapa.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
-  border-top-color: var(--color-tinta-900);
-}
-.tooltip-mapa.maplibregl-popup-anchor-top .maplibregl-popup-tip,
-.tooltip-mapa.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
-.tooltip-mapa.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
-  border-bottom-color: var(--color-tinta-900);
-}
-.tooltip-mapa.maplibregl-popup-anchor-left .maplibregl-popup-tip {
-  border-right-color: var(--color-tinta-900);
-}
-.tooltip-mapa.maplibregl-popup-anchor-right .maplibregl-popup-tip {
-  border-left-color: var(--color-tinta-900);
-}

@@ -30,26 +30,42 @@ describe('etiquetas del dominio', () => {
     expect(etiquetaProfundidad('mas_70')).toContain('>70 cm');
   });
 
-  it('describe el método de ubicación respecto del GPS del teléfono', () => {
-    expect(etiquetaMetodo('gps', 1)).toBe('En la posición del GPS');
-    expect(etiquetaMetodo('manual', 12)).toBe('Ajustado a mano, a ≤ 60 m del GPS');
+  it('describe el método de ubicación respecto del teléfono, sin repetir la distancia', () => {
+    // «gps» es un punto dentro del margen de error del teléfono: max(2 m, precisión) de su
+    // posición al enviar. Puede estar a 25 m si el teléfono declaró ± 30 m.
+    expect(etiquetaMetodo('gps', 1)).toBe(
+      'En la posición del teléfono (dentro de su margen de error)',
+    );
+    expect(etiquetaMetodo('gps', 25)).toBe(
+      'En la posición del teléfono (dentro de su margen de error)',
+    );
+    // «manual»: la persona lo movió más allá de ese margen. Cuánto lo dice la fila «Distancia al
+    // dispositivo», justo debajo: repetirlo acá era leer lo mismo dos veces.
+    expect(etiquetaMetodo('manual', 12)).toBe('Movido a mano por la persona');
+    expect(etiquetaMetodo('manual', 60)).toBe('Movido a mano por la persona');
+    for (const d of [1, 12, 60]) {
+      expect(etiquetaMetodo('manual', d)).not.toMatch(/[0-9]/);
+      expect(etiquetaMetodo('gps', d)).not.toMatch(/[0-9]/);
+    }
   });
 
   it('no promete el radio de 60 m en los reportes anteriores a la ubicación obligatoria', () => {
     // Sin distancia guardada (reportes anteriores a contracts 0.9.0, o un api-core anterior que
     // todavía no manda el campo), «manual» era un clic en cualquier parte del mapa.
     expect(etiquetaMetodo('manual', null)).toBe(
-      'Selección manual en el mapa, sin control de distancia al GPS',
+      'Selección manual en el mapa, sin control de distancia al teléfono',
     );
     expect(etiquetaMetodo('manual', undefined)).toBe(
-      'Selección manual en el mapa, sin control de distancia al GPS',
+      'Selección manual en el mapa, sin control de distancia al teléfono',
     );
-    expect(etiquetaMetodo('gps', null)).toBe('En la posición del GPS');
+    // Antes de 0.9.0, «gps» era el botón del GPS del formulario, sin margen comprobado.
+    expect(etiquetaMetodo('gps', null)).toBe('En la posición del teléfono');
+    expect(etiquetaMetodo('gps', undefined)).toBe('En la posición del teléfono');
   });
 
   it('muestra la distancia al dispositivo en metros enteros', () => {
-    expect(distanciaDispositivo(12)).toBe('a 12 m del GPS');
-    expect(distanciaDispositivo(0)).toBe('a 0 m del GPS');
+    expect(distanciaDispositivo(12)).toBe('a 12 m del teléfono');
+    expect(distanciaDispositivo(0)).toBe('a 0 m del teléfono');
     expect(distanciaDispositivo(null)).toBe(
       'Sin dato: el reporte es anterior a la ubicación obligatoria',
     );

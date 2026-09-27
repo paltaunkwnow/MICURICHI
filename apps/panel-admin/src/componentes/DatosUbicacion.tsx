@@ -6,6 +6,7 @@ import {
   etiquetaUbicacionTipo,
   precisionGps,
 } from '@/lib/formato';
+import { visibilidadPublica } from '@/lib/publicacion';
 import { Dato } from './Dato';
 
 /** Lista de datos del bloque «Ubicación» del detalle técnico. */
@@ -36,12 +37,14 @@ export function DatosUbicacion({ reporte }: { reporte: ReporteTecnicoFeature }) 
         No se usa `precision_degradada`: ese campo describe la coordenada de ESTA respuesta, y la
         del técnico es siempre la exacta, así que acá valía "No" incluso para una vivienda cuyo
         punto público sí sale desplazado. Lo que el técnico necesita saber es qué ve el vecino, y
-        eso lo decide `ubicacion_tipo` (§13).
+        eso lo decide `ubicacion_tipo` (§13). Un rechazado o un duplicado no se ve en absoluto.
       */}
       <Dato etiqueta="En el mapa público se ve">
-        {p.ubicacion_tipo === 'vivienda_o_predio'
-          ? 'Desplazado hasta 30 m para no señalar la vivienda'
-          : 'En su sitio, redondeado a 5 decimales'}
+        {!visibilidadPublica(p.estado).publico
+          ? 'No se ve (retirado del mapa)'
+          : p.ubicacion_tipo === 'vivienda_o_predio'
+            ? 'Desplazado hasta 30 m para no señalar la vivienda'
+            : 'En su sitio, redondeado a 5 decimales'}
       </Dato>
     </dl>
   );

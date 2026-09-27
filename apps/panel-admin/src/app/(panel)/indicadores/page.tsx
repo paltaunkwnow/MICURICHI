@@ -2,8 +2,11 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { SEVERIDADES } from 'contracts';
+import { Aviso } from '@/componentes/Aviso';
+import { CapaAnterior } from '@/componentes/CapaAnterior';
 import { ChipSeveridad } from '@/componentes/ChipSeveridad';
-import { obtenerIndicadores } from '@/lib/api';
+import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
+import { distritosCapaAnterior } from '@/lib/ejecutivo';
 import { ESTADOS_ORDEN, etiquetaCapa, etiquetaEstado } from '@/lib/formato';
 import { kpisIndicadores } from '@/lib/indicadores';
 
@@ -37,10 +40,11 @@ function Barra({ n, total }: { n: number; total: number }) {
 }
 
 export default function Indicadores() {
-  const consulta = useQuery({
-    queryKey: ['indicadores'],
-    queryFn: ({ signal }) => obtenerIndicadores(signal),
-  });
+  // Las dos se refrescan solas cada 10 s. El resumen ejecutivo trae los distritos de una capa
+  // anterior, que `/indicadores` no distingue.
+  const consulta = useQuery(consultaIndicadores());
+  const resumen = useQuery(consultaResumenEjecutivo());
+  const capaAnterior = resumen.data ? distritosCapaAnterior(resumen.data) : [];
   const d = consulta.data;
   const maxDistrito = Math.max(1, ...(d?.por_distrito ?? []).map((x) => x.n));
   const maxUv = Math.max(1, ...(d?.por_unidad_vecinal ?? []).map((x) => x.n));
@@ -68,13 +72,19 @@ export default function Indicadores() {
         </p>
       </div>
 
+      <Aviso tipo="alerta" testId="indicadores-sin-actualizar">
+        {d && consulta.error
+          ? 'No se pudieron actualizar los indicadores. Se muestran los últimos datos recibidos.'
+          : null}
+      </Aviso>
+
       {consulta.isPending ? (
         <p aria-live="polite">Calculando indicadores…</p>
-      ) : consulta.isError ? (
+      ) : !d ? (
         <p className="error" aria-live="polite">
           No pudimos calcular los indicadores.
         </p>
-      ) : d ? (
+      ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {kpisIndicadores(d).map((k) => (
@@ -179,6 +189,8 @@ export default function Indicadores() {
             </table>
           </section>
 
+          {capaAnterior.length ? <CapaAnterior filas={capaAnterior} /> : null}
+
           <section className="space-y-2">
             <h2 className="titular text-2xl">Capas vigentes</h2>
             <ul className="flex flex-wrap gap-2">
@@ -190,7 +202,7 @@ export default function Indicadores() {
             </ul>
           </section>
         </>
-      ) : null}
+      )}
     </div>
   );
 }

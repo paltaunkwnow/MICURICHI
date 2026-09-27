@@ -23,6 +23,8 @@ const ALTO_UTIL = ALTO - M.arriba - M.abajo;
 const COLOR_EJE = '#3E5468';
 const COLOR_TEXTO = '#0F2D43';
 const COLOR_GUIA = '#D7DFDA';
+/** «Otros» no es un distrito: va en gris neutro (4,4:1 sobre blanco) en todas las pestañas. */
+const COLOR_OTROS = '#6B7B8A';
 
 /** Los ids de `useId` traen caracteres que no conviene meter en `url(#…)`. */
 function idSeguro(id: string) {
@@ -124,7 +126,7 @@ export function GraficaInundaciones({
     <>
       <Marco
         titulo={`Inundaciones activas por distrito (${rotuloSeveridad})`}
-        descripcion={`Inundaciones activas (en revisión o verificadas) por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}.`}
+        descripcion={`Inundaciones activas (en revisión o verificadas) por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}. «Otros» suma los distritos de una capa anterior y lo que no tiene distrito.`}
         testId="ejecutivo-grafica-inundaciones"
         uid={uid}
       >
@@ -133,14 +135,18 @@ export function GraficaInundaciones({
           const y = g.escalaY(b.valor);
           return (
             <g key={b.codigo} data-barra={b.codigo}>
-              <title>{`${b.nombre} (distrito ${b.etiqueta}): ${numero(b.valor)} activas`}</title>
+              <title>
+                {b.otros
+                  ? `Otros (${b.nombre.toLowerCase()}): ${numero(b.valor)} activas`
+                  : `${b.nombre} (distrito ${b.etiqueta}): ${numero(b.valor)} activas`}
+              </title>
               <rect
                 x={g.xBarra(i)}
                 y={y}
                 width={g.anchoBarra}
                 height={Math.max(0, g.escalaY(0) - y)}
                 rx={3}
-                fill={color}
+                fill={b.otros ? COLOR_OTROS : color}
               />
               <text
                 x={g.xCentro(i)}

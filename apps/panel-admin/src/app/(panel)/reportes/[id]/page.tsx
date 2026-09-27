@@ -13,8 +13,10 @@ import { DatosUbicacion } from '@/componentes/DatosUbicacion';
 import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
-import { ErrorApi, obtenerCapasMapa, obtenerReporte } from '@/lib/api';
+import { VisibilidadPublica } from '@/componentes/VisibilidadPublica';
+import { ErrorApi } from '@/lib/api';
 import { useFormato } from '@/lib/ciudad-contexto';
+import { consultaCapasMapa, consultaReporte } from '@/lib/consultas';
 import {
   avisosResolucion,
   etiquetaCausa,
@@ -41,15 +43,9 @@ export default function PaginaDetalleReporte() {
   const { id } = useParams<{ id: string }>();
   const usuario = useUsuarioActual();
   const { fechaHora, numero } = useFormato();
-  const reporte = useQuery({
-    queryKey: ['reporte', id],
-    queryFn: ({ signal }) => obtenerReporte(id, signal),
-  });
-  const capas = useQuery({
-    queryKey: ['geo', 'capas'],
-    queryFn: ({ signal }) => obtenerCapasMapa(signal),
-    staleTime: Number.POSITIVE_INFINITY,
-  });
+  // Se refresca solo cada 10 s: si otro técnico lo modera, el estado se ve sin recargar.
+  const reporte = useQuery(consultaReporte(id));
+  const capas = useQuery(consultaCapasMapa());
 
   if (reporte.isPending) {
     return (
@@ -58,7 +54,9 @@ export default function PaginaDetalleReporte() {
       </p>
     );
   }
-  if (reporte.error || !reporte.data) {
+  // Un refresco que falla no tapa el reporte ni el formulario de moderación a medio escribir:
+  // la pantalla de error es solo para cuando no hay nada que mostrar.
+  if (!reporte.data) {
     const noExiste = reporte.error instanceof ErrorApi && reporte.error.estado === 404;
     return (
       <div className="flex flex-col items-start gap-4">
@@ -92,6 +90,12 @@ export default function PaginaDetalleReporte() {
         </Link>
       </div>
 
+      <Aviso tipo="alerta" testId="detalle-sin-actualizar">
+        {reporte.error
+          ? `No se pudo actualizar el reporte (${reporte.error.message}). Se muestran los últimos datos recibidos.`
+          : null}
+      </Aviso>
+
       <header className="flex flex-wrap items-center gap-3">
         <h1 className="text-3xl">
           Reporte <span className="font-mono text-2xl">{idCorto(p.id)}</span>
@@ -100,6 +104,8 @@ export default function PaginaDetalleReporte() {
         <ChipEstado estado={p.estado} grande data-testid="estado-actual" />
         <p className="text-tinta-600">Creado el {fechaHora(p.creado_en)}</p>
       </header>
+
+      <VisibilidadPublica estado={p.estado} />
 
       {avisos.length > 0 && (
         <ul className="flex flex-wrap gap-2" aria-label="Avisos de resolución espacial">

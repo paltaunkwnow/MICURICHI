@@ -104,10 +104,10 @@ La interfaz reproduce el prototipo funcional que entregó el usuario
 |---|---|---|
 | `/reportes` | M-02 | Bandeja: filtros, tabla y mapa sincronizados, exportación, indicadores de carga |
 | `/reportes/:id` | M-03 | Ficha completa: lo declarado, de dónde salió el puntaje, moderación y auditoría |
-| `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal |
+| `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal, y la tabla «De una capa anterior» (distritos que ya no están en la capa vigente) |
 | `/capas` | A-02 | Versiones cargadas por el ETL y activación de la vigente |
 | `/plano` | A-06 | Plano oficial de zonificación como referencia, con su advertencia. Solo en la instalación de Santa Cruz de la Sierra (ver arriba) |
-| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin): inundaciones activas (en revisión + verificadas), pestañas Crítica (crítica + alta) / Media / Baja / Todas, coropleta por distrito encuadrada en la capa vigente y dos gráficas; los distritos de una capa anterior van aparte. Se refresca cada 60 s. El rol ejecutivo solo ve esta ruta |
+| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin), siempre sobre el histórico: la cifra de inundaciones activas con «N verificadas · M en revisión», pestañas Crítica (crítica + alta) / Media / Baja / Todas, «Inundaciones activas por distrito» (con «Otros» para una capa anterior o sin distrito, así las barras suman el total) y «Cómo va el trabajo». Sin mapa ni selector de período. El rol ejecutivo solo ve esta ruta |
 
 El texto de estado usa las palabras del técnico («Validado», «Duplicado»), no las del vecino: acá
 se trabaja con la máquina de estados de `CLAUDE.md` §7.3.
@@ -133,10 +133,28 @@ este usuario ya no debería ver— y lleva a `/login?caducada=1`, que lo explica
 Antes eso se descubría en mitad de una moderación: «Confirmar rechazo» devolvía un escueto
 `ERROR (401)` dentro del formulario, sin decir qué había pasado ni cómo volver a entrar.
 
-El refresco automático del panel ejecutivo sale con la cabecera `x-curichi-sondeo: 1`
-(`CABECERA_SONDEO` en `src/lib/api.ts`) y api-core no renueva la inactividad con él: una pantalla
-con el panel abierto no mantiene viva la sesión para siempre. Abrir el panel, cambiar de período o
-reintentar sí la renuevan.
+## Actualización sin recargar
+
+La bandeja (con sus conteos), el detalle, los indicadores y el panel ejecutivo se vuelven a pedir
+solos cada 10 s (`src/lib/consultas.ts`): `refetchInterval` de 10 s, `staleTime` 0 (api-core no
+guarda esas cifras en caché) y nada con la pestaña oculta (`refetchIntervalInBackground: false`);
+al volver a la pestaña se piden una vez. Los distritos y las unidades vecinales tienen `staleTime`
+infinito y se piden una sola vez; los distritos reusan la lista de capas del mapa, así que
+`/geo/v1/capas` sale una vez aunque la bandeja monte las dos consultas.
+
+Esos refrescos llevan `meta: { sondeo: true }` y salen con la cabecera `x-curichi-sondeo: 1`
+(`CABECERA_SONDEO` en `src/lib/api.ts`). api-core no renueva la inactividad con ella: una pantalla
+con el panel abierto no mantiene viva la sesión para siempre. La primera carga de cada consulta
+(abrir una pantalla, cambiar un filtro o de página) no la lleva y sí renueva la sesión; los
+refrescos la llevan aunque esa primera carga haya fallado. Si un refresco falla, se siguen viendo
+los últimos datos con un aviso, y el formulario de moderación abierto no se pierde.
+
+La lista de capas del mapa (`/geo/v1/capas`, liviana y `no-cache`) vence a los 60 s: al volver a la
+pestaña o abrir otra pantalla con mapa se pide de nuevo. Cada capa se sirve en una URL con la
+huella de su contenido; si un administrador activa otra versión con el mapa abierto, las teselas
+viejas responden `410 CAPA_CAMBIO`, el mapa vuelve a pedir la lista una sola vez por ráfaga y
+apunta sus fuentes a la URL nueva sin recargar (`src/lib/capas-mapa.ts`). Activar una versión en
+`/capas` invalida además toda la geometría (`['geo']`).
 
 ## Exportación
 

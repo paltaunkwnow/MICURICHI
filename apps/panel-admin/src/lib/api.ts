@@ -2,6 +2,7 @@ import {
   type AgregadoUv,
   type CapaInfo,
   type CapaVersion,
+  CODIGO_CAPA_CAMBIO,
   type ExportacionGeoJson,
   ExportacionGeoJsonSchema,
   type Indicadores,
@@ -12,6 +13,7 @@ import {
   type ReporteTecnicoFeature,
   type ReporteTecnicoFeatureCollection,
   type ResumenEjecutivo,
+  type TipoCapa,
   type Usuario,
   type VentanaResumen,
 } from 'contracts';
@@ -43,11 +45,22 @@ export class ErrorExportacionInvalida extends Error {
 }
 
 /**
- * Cabecera con la que el panel marca sus consultas automáticas (el refresco del resumen
- * ejecutivo cada 60 s). api-core no renueva con ellas la inactividad de la sesión: un panel
- * abierto en una pantalla no la mantiene viva para siempre. Lo que pide la persona no la lleva.
+ * Cabecera con la que el panel marca sus consultas automáticas: el refresco cada 10 s de la
+ * bandeja, el detalle, los indicadores y el panel ejecutivo (`lib/consultas.ts`). api-core no
+ * renueva con ellas la inactividad de la sesión: un panel abierto en una pantalla no la mantiene
+ * viva para siempre. Lo que pide la persona no la lleva.
  */
 export const CABECERA_SONDEO = 'x-curichi-sondeo';
+
+/** Opciones de las lecturas que el panel refresca solo. */
+export interface OpcionesLectura {
+  /** Refresco automático: sale con `CABECERA_SONDEO`. */
+  sondeo?: boolean;
+}
+
+function cabecerasLectura(o: OpcionesLectura): Record<string, string> | undefined {
+  return o.sondeo ? { [CABECERA_SONDEO]: '1' } : undefined;
+}
 
 /** Unidad administrativa tomada de las capas de geo-service (para poblar los selectores). */
 export interface UnidadGeo {
@@ -192,15 +205,21 @@ export function obtenerYo() {
  * comparten clave. Si estas llamadas devuelven 401, la sesión caducó; si devuelven 403, la cuenta
  * no es de técnico: en ningún caso se cae en silencio a la vista pública.
  */
-export function obtenerReportes(params: ParametrosConsulta, signal?: AbortSignal) {
+export function obtenerReportes(
+  params: ParametrosConsulta,
+  signal?: AbortSignal,
+  opciones: OpcionesLectura = {},
+) {
   return pedir<ReporteTecnicoFeatureCollection>(`/api/v1/tecnico/reportes?${aQuery(params)}`, {
     signal,
+    headers: cabecerasLectura(opciones),
   });
 }
 
-export function obtenerReporte(id: string, signal?: AbortSignal) {
+export function obtenerReporte(id: string, signal?: AbortSignal, opciones: OpcionesLectura = {}) {
   return pedir<ReporteTecnicoFeature>(`/api/v1/tecnico/reportes/${encodeURIComponent(id)}`, {
     signal,
+    headers: cabecerasLectura(opciones),
   });
 }
 
@@ -283,18 +302,21 @@ export async function exportarGeoJson(params: ParametrosConsulta): Promise<Expor
 export function obtenerResumenEjecutivo(
   ventana: VentanaResumen,
   signal?: AbortSignal,
-  opciones: { sondeo?: boolean } = {},
+  opciones: OpcionesLectura = {},
 ) {
   return pedir<ResumenEjecutivo>(`/api/v1/ejecutivo/resumen?${aQuery({ ventana })}`, {
     signal,
-    headers: opciones.sondeo ? { [CABECERA_SONDEO]: '1' } : undefined,
+    headers: cabecerasLectura(opciones),
   });
 }
 
 // --- Indicadores y capas -------------------------------------------------
 
-export function obtenerIndicadores(signal?: AbortSignal) {
-  return pedir<Indicadores>('/api/v1/indicadores', { signal });
+export function obtenerIndicadores(signal?: AbortSignal, opciones: OpcionesLectura = {}) {
+  return pedir<Indicadores>('/api/v1/indicadores', {
+    signal,
+    headers: cabecerasLectura(opciones),
+  });
 }
 
 export function obtenerVersionesCapas(signal?: AbortSignal) {
@@ -331,8 +353,52 @@ function aUnidades(fc: FeatureCollectionUnidades): UnidadGeo[] {
   return lista.sort((a, b) => a.codigo.localeCompare(b.codigo, 'es', { numeric: true }));
 }
 
-export async function obtenerDistritos(): Promise<UnidadGeo[]> {
-  return aUnidades(await pedir<FeatureCollectionUnidades>('/geo/v1/capas/distrito_municipal'));
+/**
+ * GeoJSON web de una capa por la `url` con huella de `/geo/v1/capas` (contracts 0.12.0), nunca
+ * por una ruta armada a mano: esa URL se cachea un año y cambia cuando cambia la capa. Si la capa
+ * se activó entre las dos peticiones, la URL vieja responde 410 CAPA_CAMBIO: se vuelve a pedir la
+ * lista una sola vez, para no entrar en bucle si geo-service no se estabiliza.
+ */
+async function obtenerCapaGeoJson<T>(
+  capa: TipoCapa,
+  signal?: AbortSignal,
+  capas?: CapaInfo[],
+): Promise<T> {
+  let lista = capas ?? (await obtenerCapasMapa(signal));
+  for (let intento = 0; ; intento++) {
+    const info = lista.find((c) => c.capa === capa);
+    if (!info) {
+      throw new ErrorApi(
+        'CAPA_NO_DISPONIBLE',
+        `La capa ${capa} no tiene una versión vigente.`,
+        404,
+      );
+    }
+    if (info.modo !== 'geojson') {
+      throw new ErrorApi(
+        'USAR_TESELAS',
+        `La capa ${capa} se sirve por teselas y no se puede leer como GeoJSON.`,
+        413,
+      );
+    }
+    try {
+      return await pedir<T>(info.url, { signal });
+    } catch (e) {
+      const cambio = e instanceof ErrorApi && e.estado === 410 && e.codigo === CODIGO_CAPA_CAMBIO;
+      if (!cambio || intento > 0) throw e;
+      lista = await obtenerCapasMapa(signal);
+    }
+  }
+}
+
+/** Distritos para los selectores. `capas` evita volver a pedir `/geo/v1/capas` si ya se tiene. */
+export async function obtenerDistritos(
+  signal?: AbortSignal,
+  capas?: CapaInfo[],
+): Promise<UnidadGeo[]> {
+  return aUnidades(
+    await obtenerCapaGeoJson<FeatureCollectionUnidades>('distrito_municipal', signal, capas),
+  );
 }
 
 /** Las UV se toman del agregado (liviano y siempre JSON); incluye todas las vigentes. */

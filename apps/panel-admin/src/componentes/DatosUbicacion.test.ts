@@ -17,6 +17,7 @@ function reporte(extra: Partial<ReporteTecnico> = {}): ReporteTecnicoFeature {
       distancia_dispositivo_m: 12,
       ubicacion_tipo: 'via_publica',
       version_capa: 'DM_UV_MZ_2025',
+      estado: 'validado',
       ...extra,
     },
   };
@@ -46,15 +47,17 @@ function render(r: ReporteTecnicoFeature) {
 describe('DatosUbicacion (detalle técnico)', () => {
   it('muestra el método, la precisión y la distancia al dispositivo', () => {
     const d = render(reporte());
-    expect(d['Método de ubicación']).toBe('Ajustado a mano, a ≤ 60 m del GPS');
+    expect(d['Método de ubicación']).toBe('Movido a mano por la persona');
     expect(d['Precisión del GPS']).toBe('± 8 m');
-    expect(d['Distancia al dispositivo']).toBe('a 12 m del GPS');
+    expect(d['Distancia al dispositivo']).toBe('a 12 m del teléfono');
   });
 
-  it('un punto en la posición del GPS lo dice así', () => {
+  it('un punto en la posición del teléfono lo dice así', () => {
     const d = render(reporte({ ubicacion_metodo: 'gps', distancia_dispositivo_m: 1 }));
-    expect(d['Método de ubicación']).toBe('En la posición del GPS');
-    expect(d['Distancia al dispositivo']).toBe('a 1 m del GPS');
+    expect(d['Método de ubicación']).toBe(
+      'En la posición del teléfono (dentro de su margen de error)',
+    );
+    expect(d['Distancia al dispositivo']).toBe('a 1 m del teléfono');
   });
 
   it('un reporte anterior a la ubicación obligatoria no promete el radio', () => {
@@ -62,7 +65,7 @@ describe('DatosUbicacion (detalle técnico)', () => {
       reporte({ ubicacion_metodo: 'manual', precision_gps_m: null, distancia_dispositivo_m: null }),
     );
     expect(d['Método de ubicación']).toBe(
-      'Selección manual en el mapa, sin control de distancia al GPS',
+      'Selección manual en el mapa, sin control de distancia al teléfono',
     );
     expect(d['Precisión del GPS']).toBe('Sin dato');
     expect(d['Distancia al dispositivo']).toBe(
@@ -85,5 +88,24 @@ describe('DatosUbicacion (detalle técnico)', () => {
     expect(d['Coordenadas (lat, lon)']).toBe('-17.780000, -63.180000');
     expect(d['Versión de capa']).toBe('DM_UV_MZ_2025');
     expect(d['En el mapa público se ve']).toBe('Desplazado hasta 30 m para no señalar la vivienda');
+  });
+
+  it('un reporte rechazado o duplicado no se ve en el mapa público, y lo dice', () => {
+    for (const estado of ['rechazado', 'duplicado'] as const) {
+      for (const ubicacion_tipo of ['via_publica', 'vivienda_o_predio'] as const) {
+        const d = render(reporte({ estado, ubicacion_tipo }));
+        expect(d['En el mapa público se ve'], `${estado} ${ubicacion_tipo}`).toBe(
+          'No se ve (retirado del mapa)',
+        );
+      }
+    }
+  });
+
+  it('nuevo, validado y resuelto sí se ven: en su sitio o desplazados', () => {
+    for (const estado of ['nuevo', 'validado', 'resuelto'] as const) {
+      expect(render(reporte({ estado }))['En el mapa público se ve'], estado).toBe(
+        'En su sitio, redondeado a 5 decimales',
+      );
+    }
   });
 });

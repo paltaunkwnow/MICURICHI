@@ -1,45 +1,18 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import {
-  type ReporteTecnicoFeature,
-  type Rol,
-  SEVERIDADES,
-  type Severidad,
-  transicionPermitida,
-} from 'contracts';
-import { Check, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
+import { type ReporteTecnicoFeature, type Rol, SEVERIDADES, type Severidad } from 'contracts';
+import { Check, EyeOff, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Aviso, type TipoAviso } from '@/componentes/Aviso';
 import { cambiarEstado, ErrorApi, fusionarReporte, reclasificarSeveridad } from '@/lib/api';
 import { etiquetaSeveridad } from '@/lib/formato';
-import { cuerpoCambioEstado } from '@/lib/moderacion';
-
-type Accion = 'rechazar' | 'resolver' | 'fusionar' | 'reabrir';
-
-const TEXTOS: Record<Accion, { titulo: string; ayuda: string; confirmar: string }> = {
-  rechazar: {
-    titulo: 'Rechazar el reporte',
-    ayuda: 'Explicá por qué no corresponde (queda en la auditoría).',
-    confirmar: 'Confirmar rechazo',
-  },
-  resolver: {
-    titulo: 'Marcar como resuelto',
-    ayuda: 'Indicá qué se hizo en el punto.',
-    confirmar: 'Confirmar resolución',
-  },
-  fusionar: {
-    titulo: 'Fusionar como duplicado',
-    ayuda: 'El reporte canónico debe existir y estar validado.',
-    confirmar: 'Confirmar fusión',
-  },
-  reabrir: {
-    titulo: 'Reabrir el reporte',
-    ayuda:
-      'Vuelve a "Nuevo" para revisarlo otra vez (solo administradores). Explicá por qué se reabre: el motivo es obligatorio y queda en la auditoría.',
-    confirmar: 'Confirmar reapertura',
-  },
-};
+import {
+  type AccionModeracion,
+  accionesModeracion,
+  cuerpoCambioEstado,
+  TEXTOS_ACCION,
+} from '@/lib/moderacion';
 
 const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -56,7 +29,7 @@ function describirError(e: unknown): string {
 export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature; rol: Rol }) {
   const p = reporte.properties;
   const cliente = useQueryClient();
-  const [accion, setAccion] = useState<Accion | null>(null);
+  const [accion, setAccion] = useState<AccionModeracion | null>(null);
   const [motivo, setMotivo] = useState('');
   const [canonicoId, setCanonicoId] = useState('');
   const [errorFormulario, setErrorFormulario] = useState<string | null>(null);
@@ -96,16 +69,10 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
 
   const ocupado = estado.isPending || fusionar.isPending;
 
-  const puede = {
-    validar: transicionPermitida(p.estado, 'validado', rol),
-    rechazar: transicionPermitida(p.estado, 'rechazado', rol),
-    resolver: transicionPermitida(p.estado, 'resuelto', rol),
-    fusionar: transicionPermitida(p.estado, 'duplicado', rol),
-    reabrir: transicionPermitida(p.estado, 'nuevo', rol),
-  };
+  const puede = accionesModeracion(p.estado, rol);
   const hayAcciones = Object.values(puede).some(Boolean);
 
-  const abrirFormulario = (a: Accion) => {
+  const abrirFormulario = (a: AccionModeracion) => {
     setAccion(a);
     setErrorFormulario(null);
     setMensaje(null);
@@ -189,6 +156,19 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
             Rechazar
           </button>
         )}
+        {puede.retirar && (
+          <button
+            type="button"
+            className="btn btn-secundario"
+            data-testid="boton-retirar"
+            disabled={ocupado}
+            aria-expanded={accion === 'retirar'}
+            onClick={() => abrirFormulario('retirar')}
+          >
+            <EyeOff size={18} aria-hidden="true" />
+            Retirar del mapa
+          </button>
+        )}
         {puede.resolver && (
           <button
             type="button"
@@ -240,9 +220,9 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
           aria-labelledby="titulo-formulario-accion"
         >
           <h3 id="titulo-formulario-accion" className="text-lg">
-            {TEXTOS[accion].titulo}
+            {TEXTOS_ACCION[accion].titulo}
           </h3>
-          <p className="ayuda">{TEXTOS[accion].ayuda}</p>
+          <p className="ayuda">{TEXTOS_ACCION[accion].ayuda}</p>
 
           {accion === 'fusionar' && (
             <div>
@@ -291,7 +271,7 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
               data-testid="confirmar-accion"
               disabled={ocupado}
             >
-              {ocupado ? 'Guardando…' : TEXTOS[accion].confirmar}
+              {ocupado ? 'Guardando…' : TEXTOS_ACCION[accion].confirmar}
             </button>
             <button
               type="button"

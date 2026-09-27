@@ -1,3 +1,4 @@
+import { getScriptNonceFromHeader } from 'next/dist/server/app-render/get-script-nonce-from-header';
 import {
   getRewrittenUrl,
   isRewrite,
@@ -20,6 +21,125 @@ function reescritas(res: Response): string[] | null {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+});
+
+/** Directivas de una CSP: nombre → fuentes. */
+function directivas(csp: string | null): Map<string, string[]> {
+  expect(csp).toBeTruthy();
+  return new Map(
+    (csp ?? '')
+      .split(';')
+      .map((d) => d.trim().split(/\s+/))
+      .filter((partes) => partes[0])
+      .map(([nombre, ...fuentes]) => [nombre as string, fuentes]),
+  );
+}
+
+const cspDe = (res: Response) => res.headers.get('content-security-policy');
+/** La CSP con la que Next renderiza la página: de ahí saca el nonce de sus <script>. */
+const cspQueVeNext = (res: Response) =>
+  res.headers.get('x-middleware-request-content-security-policy');
+
+describe('CSP con nonce por petición', () => {
+  it('script-src con nonce y strict-dynamic, sin unsafe-inline ni unsafe-eval en producción', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    for (const ruta of ['/', '/reportes', '/reportes/abc', '/ejecutivo', '/login']) {
+      const script = directivas(cspDe(proxy(peticion(ruta)))).get('script-src') ?? [];
+      expect(script).toContain("'strict-dynamic'");
+      expect(script.filter((f) => /^'nonce-.+'$/.test(f))).toHaveLength(1);
+      expect(script).not.toContain("'unsafe-inline'");
+      expect(script).not.toContain("'unsafe-eval'");
+    }
+  });
+
+  it('el nonce es distinto en cada petición y tiene al menos 128 bits', () => {
+    const nonces = Array.from({ length: 20 }, () => {
+      const nonce = getScriptNonceFromHeader(cspDe(proxy(peticion('/reportes'))) ?? '');
+      expect(nonce).toBeTruthy();
+      // Base64 de 16 bytes: 24 caracteres con el relleno.
+      expect(Buffer.from(nonce ?? '', 'base64').length).toBeGreaterThanOrEqual(16);
+      return nonce;
+    });
+    expect(new Set(nonces).size).toBe(nonces.length);
+  });
+
+  it('Next renderiza con la misma CSP que recibe el navegador, así sus <script> llevan ese nonce', () => {
+    const res = proxy(peticion('/ejecutivo'));
+    expect(reescritas(res)).toContain('content-security-policy');
+    expect(cspQueVeNext(res)).toBe(cspDe(res));
+    expect(getScriptNonceFromHeader(cspQueVeNext(res) ?? '')).toBeTruthy();
+  });
+
+  it('deja el mismo nonce en x-nonce, para un componente de servidor que lo necesite', () => {
+    const res = proxy(peticion('/ejecutivo'));
+    expect(reescritas(res)).toContain('x-nonce');
+    expect(res.headers.get('x-middleware-request-x-nonce')).toBe(
+      getScriptNonceFromHeader(cspDe(res) ?? ''),
+    );
+  });
+
+  it('no se queda con la CSP ni el nonce que mande el cliente', () => {
+    const elegido = 'QUVJT1VBRUlPVUFFSU9VQQ==';
+    const res = proxy(
+      peticion('/reportes', {
+        'content-security-policy': `script-src 'nonce-${elegido}'`,
+        'x-nonce': elegido,
+      }),
+    );
+    const nonce = getScriptNonceFromHeader(cspQueVeNext(res) ?? '');
+    expect(nonce).toBeTruthy();
+    expect(nonce).not.toBe(elegido);
+    expect(cspQueVeNext(res)).toBe(cspDe(res));
+    expect(res.headers.get('x-middleware-request-x-nonce')).toBe(nonce);
+  });
+
+  it("en desarrollo suma solo 'unsafe-eval' (React lo usa para las pilas de error)", () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    const csp = directivas(cspDe(proxy(peticion('/reportes'))));
+    const script = csp.get('script-src') ?? [];
+    expect(script).toContain("'unsafe-eval'");
+    expect(script).toContain("'strict-dynamic'");
+    expect(script).not.toContain("'unsafe-inline'");
+    expect(csp.has('upgrade-insecure-requests')).toBe(false);
+  });
+
+  it('conserva el resto de la política: mapa, worker, estilos y sin comodines', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const csp = directivas(cspDe(proxy(peticion('/reportes'))));
+    // El único origen externo son las teselas de OpenStreetMap.
+    const origenes = [...csp.values()].flat().filter((v) => /^(https?:|wss?:)/.test(v));
+    expect(new Set(origenes)).toEqual(new Set(['https://tile.openstreetmap.org']));
+    expect(csp.get('default-src')).toEqual(["'self'"]);
+    expect(csp.get('object-src')).toEqual(["'none'"]);
+    expect(csp.get('base-uri')).toEqual(["'self'"]);
+    expect(csp.get('frame-ancestors')).toEqual(["'none'"]);
+    expect(csp.get('form-action')).toEqual(["'self'"]);
+    expect(csp.get('img-src')).toEqual(
+      expect.arrayContaining(["'self'", 'data:', 'blob:', 'https://tile.openstreetmap.org']),
+    );
+    expect(csp.get('connect-src')).toEqual(["'self'", 'https://tile.openstreetmap.org']);
+    expect(csp.get('worker-src')).toEqual(["'self'", 'blob:']);
+    // Con un nonce en style-src el navegador ignoraría 'unsafe-inline', y los atributos style de
+    // React y de MapLibre quedarían bloqueados: los nonces no cubren atributos.
+    expect(csp.get('style-src')).toEqual(["'self'", "'unsafe-inline'"]);
+    expect(csp.has('upgrade-insecure-requests')).toBe(true);
+    for (const fuentes of csp.values()) expect(fuentes.join(' ')).not.toMatch(/\*/);
+  });
+
+  it('lo reenviado no lleva el nonce a los servicios y responde con una política cerrada', () => {
+    vi.stubEnv('PROXY_DE_CONFIANZA', '0');
+    const api = proxy(peticion('/api/v1/auth/yo', { cookie: 'curichi_sesion=abc' }));
+    expect(reescritas(api)).not.toContain('content-security-policy');
+    expect(reescritas(api)).not.toContain('x-nonce');
+    expect(cspDe(api)).toBe(
+      "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    );
+
+    vi.stubEnv('PROXY_DE_CONFIANZA', '1');
+    const geo = proxy(peticion('/geo/v1/capas'));
+    expect(reescritas(geo)).toBeNull();
+    expect(getScriptNonceFromHeader(cspDe(geo) ?? '')).toBeUndefined();
+  });
 });
 
 describe('reenvío a los servicios en tiempo de ejecución', () => {

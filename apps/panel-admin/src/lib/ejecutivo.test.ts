@@ -1,22 +1,15 @@
-import { CONFIG_DOMINIO, ResumenEjecutivoSchema } from 'contracts';
+import { CONFIG_DOMINIO, type ResumenEjecutivo, ResumenEjecutivoSchema } from 'contracts';
 import { describe, expect, it } from 'vitest';
 import {
   barrasInundaciones,
   barrasTrabajo,
-  COLOR_SIN_REPORTES,
+  CODIGO_OTROS,
   codigoCorto,
-  colorParaConteo,
-  construirEscala,
   conteoPestana,
   conteosPorPestana,
-  crearOrigenConsultas,
   distritosCapaAnterior,
   marcasEje,
-  OPACIDAD_COROPLETA,
-  RAMPAS,
-  rellenoDistritos,
-  textoActualizado,
-  textoActualizadoDesde,
+  PESTANAS,
   textoAnuncio,
   textoVerificadas,
 } from './ejecutivo';
@@ -25,37 +18,6 @@ import { crearFormato } from './formato';
 
 /** Formato de la ciudad por defecto (es-BO): el de la instalación actual. */
 const F = crearFormato(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
-
-// --- Contraste WCAG 2.x (solo para las pruebas) --------------------------------------------------
-
-function canales(hex: string): number[] {
-  return [1, 3, 5].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
-}
-
-function luminancia(hex: string): number {
-  const [r, g, b] = canales(hex).map((c) => {
-    const s = c / 255;
-    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  }) as [number, number, number];
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function contraste(a: string, b: string): number {
-  const [claro, oscuro] = [luminancia(a), luminancia(b)].sort((x, y) => y - x) as [number, number];
-  return (claro + 0.05) / (oscuro + 0.05);
-}
-
-/** Color que se ve en el mapa: el relleno con su opacidad sobre el fondo del estilo base. */
-function sobreFondo(color: string, fondo: string, alfa: number): string {
-  const f = canales(fondo);
-  return `#${canales(color)
-    .map((c, i) => Math.round(alfa * c + (1 - alfa) * (f[i] as number)))
-    .map((c) => c.toString(16).padStart(2, '0'))
-    .join('')}`;
-}
-
-/** Fondo del estilo base del mapa (`Mapa.tsx`, capa `fondo`), debajo de la coropleta. */
-const FONDO_MAPA = '#EEF2EF';
 
 describe('pestañas del panel ejecutivo', () => {
   const s = { critica: 3, alta: 4, media: 5, baja: 6 };
@@ -74,98 +36,90 @@ describe('pestañas del panel ejecutivo', () => {
   });
 });
 
-describe('escala de colores por conteo', () => {
-  const rampa = RAMPAS.todas;
+/** El resumen sin el distrito de la capa anterior, con los totales rehechos: todo cae en vigentes. */
+function soloVigentes(r: ResumenEjecutivo): ResumenEjecutivo {
+  const anterior = r.por_distrito.find((d) => !d.en_capa_vigente);
+  if (!anterior) return r;
+  const a = r.activas;
+  const b = anterior.activas;
+  return {
+    ...r,
+    por_distrito: r.por_distrito.filter((d) => d.en_capa_vigente),
+    activas: {
+      total: a.total - b.total,
+      verificadas: a.verificadas - b.verificadas,
+      en_revision: a.en_revision - b.en_revision,
+      por_severidad: {
+        critica: a.por_severidad.critica - b.por_severidad.critica,
+        alta: a.por_severidad.alta - b.por_severidad.alta,
+        media: a.por_severidad.media - b.por_severidad.media,
+        baja: a.por_severidad.baja - b.por_severidad.baja,
+      },
+    },
+  };
+}
 
-  it('cinco rangos enteros contiguos de 1 al máximo, del más claro al más oscuro', () => {
-    const e = construirEscala(12, rampa);
-    expect(e.map((p) => [p.desde, p.hasta])).toEqual([
-      [1, 2],
-      [3, 4],
-      [5, 7],
-      [8, 9],
-      [10, 12],
-    ]);
-    expect(e.map((p) => p.color)).toEqual([...rampa]);
+const suma = (barras: Array<{ valor: number }>) => barras.reduce((s, b) => s + b.valor, 0);
+
+describe('«Otros» en inundaciones activas por distrito', () => {
+  const r = resumenDeEjemplo();
+
+  it('los distritos de una capa anterior no tienen barra propia: van a «Otros», al final', () => {
+    const barras = barrasInundaciones(r, 'todas');
+    expect(barras).toHaveLength(17);
+    expect(barras.map((b) => b.codigo)).not.toContain('DM-01');
+    expect(new Set(barras.map((b) => b.etiqueta)).size).toBe(17);
+    expect(barras.at(-1)).toMatchObject({
+      codigo: CODIGO_OTROS,
+      etiqueta: 'Otros',
+      valor: 40,
+      otros: true,
+    });
+    expect(barrasInundaciones(r, 'critica').at(-1)?.valor).toBe(20);
   });
 
-  it('con pocos valores posibles hay menos rangos y el máximo sigue siendo el más oscuro', () => {
-    const e = construirEscala(3, rampa);
-    expect(e.map((p) => [p.desde, p.hasta])).toEqual([
-      [1, 1],
-      [2, 2],
-      [3, 3],
-    ]);
-    expect(e.at(-1)?.color).toBe(rampa.at(-1));
+  it.each(PESTANAS.map((p) => p.id))(
+    'pestaña %s: las barras más «Otros» suman las activas de la pestaña',
+    (pestana) => {
+      expect(suma(barrasInundaciones(r, pestana))).toBe(
+        conteoPestana(r.activas.por_severidad, pestana),
+      );
+    },
+  );
+
+  it('con «Todas», la suma es activas.total', () => {
+    expect(suma(barrasInundaciones(r, 'todas'))).toBe(r.activas.total);
   });
 
-  it('sin activas no hay rangos, y el cero va con el color neutro, nunca con el de un rango', () => {
-    expect(construirEscala(0, rampa)).toEqual([]);
-    const e = construirEscala(10, rampa);
-    expect(colorParaConteo(0, e)).toBe(COLOR_SIN_REPORTES);
-    expect(colorParaConteo(1, e)).toBe(rampa[0]);
-    expect(colorParaConteo(10, e)).toBe(rampa[4]);
+  it('las activas sin fila de distrito también caen en «Otros»', () => {
+    // api-core las suma a los totales pero no les da fila en `por_distrito`.
+    const sinFila = { ...r, por_distrito: r.por_distrito.filter((d) => d.en_capa_vigente) };
+    const barras = barrasInundaciones(sinFila, 'todas');
+    expect(barras.at(-1)).toMatchObject({ codigo: CODIGO_OTROS, valor: 40 });
+    expect(suma(barras)).toBe(r.activas.total);
   });
 
-  it('el primer paso de cada rampa se distingue de «sin activas» con contraste ≥ 3:1, en la leyenda y en el mapa', () => {
-    // Antes el primer paso tenía 1,03–1,09:1 con el gris de «sin reportes»: un distrito con una
-    // inundación activa se veía igual que uno sin ninguna (WCAG 1.4.11).
-    const sinActivasEnMapa = sobreFondo(COLOR_SIN_REPORTES, FONDO_MAPA, OPACIDAD_COROPLETA);
-    for (const [pestana, r] of Object.entries(RAMPAS)) {
-      const primero = r[0] as string;
-      expect(contraste(primero, COLOR_SIN_REPORTES), pestana).toBeGreaterThanOrEqual(3);
-      const primeroEnMapa = sobreFondo(primero, FONDO_MAPA, OPACIDAD_COROPLETA);
-      expect(
-        contraste(primeroEnMapa, sinActivasEnMapa),
-        `${pestana} en el mapa`,
-      ).toBeGreaterThanOrEqual(3);
+  it('si todo cae en distritos vigentes no hay barra «Otros»', () => {
+    const vigentes = soloVigentes(r);
+    for (const { id } of PESTANAS) {
+      const barras = barrasInundaciones(vigentes, id);
+      expect(barras).toHaveLength(16);
+      expect(barras.map((b) => b.codigo)).not.toContain(CODIGO_OTROS);
+      expect(suma(barras)).toBe(conteoPestana(vigentes.activas.por_severidad, id));
     }
   });
 
-  it('cada rampa oscurece paso a paso: el máximo siempre es el color más oscuro', () => {
-    for (const r of Object.values(RAMPAS)) {
-      const l = r.map(luminancia);
-      for (let i = 1; i < l.length; i++) expect(l[i]).toBeLessThan(l[i - 1] as number);
-    }
-  });
-
-  it('el relleno del mapa colorea cada distrito vigente por sus activas en la pestaña', () => {
-    const r = resumenDeEjemplo();
-    const critica = rellenoDistritos(r, 'critica', F);
-    // D01 tiene 1 crítica + 1 alta activas = 2; D16 no tiene ninguna → neutro.
-    expect(critica.descripciones.D01).toBe('Distrito 1 · 2 inundaciones activas');
-    expect(critica.colores.D16).toBe(COLOR_SIN_REPORTES);
-    expect(Object.keys(critica.colores)).toHaveLength(16);
-    // Cambiar de pestaña cambia la rampa.
-    const baja = rellenoDistritos(r, 'baja', F);
-    expect(RAMPAS.baja).toContain(baja.colores.D02);
+  it('«Cómo va el trabajo» sigue con una barra por distrito vigente', () => {
+    const trabajo = barrasTrabajo(r);
+    expect(trabajo).toHaveLength(16);
+    expect(trabajo.map((b) => b.codigo)).not.toContain('DM-01');
+    expect(new Set(trabajo.map((b) => b.etiqueta)).size).toBe(16);
   });
 });
 
-describe('distritos de una capa anterior', () => {
-  const r = resumenDeEjemplo();
-
-  it('no entran al mapa ni al máximo de la escala', () => {
-    const relleno = rellenoDistritos(r, 'todas', F);
-    expect(Object.keys(relleno.colores)).not.toContain('DM-01');
-    expect(relleno.descripciones).not.toHaveProperty('DM-01');
-    // El máximo es el de los vigentes (D07, 7 activas), no las 40 del distrito anterior, que
-    // dejaban a todos los demás en los pasos más claros.
-    expect(relleno.escala.at(-1)?.hasta).toBe(7);
-  });
-
-  it('no aparecen como barras: sin la segunda barra «01» en ninguna gráfica', () => {
-    const inundaciones = barrasInundaciones(r, 'todas');
-    const trabajo = barrasTrabajo(r);
-    for (const barras of [inundaciones, trabajo]) {
-      expect(barras).toHaveLength(16);
-      expect(barras.map((b) => b.codigo)).not.toContain('DM-01');
-      expect(new Set(barras.map((b) => b.etiqueta)).size).toBe(16);
-    }
-  });
-
-  it('van aparte con su código completo, sus activas de la pestaña y su trabajo', () => {
-    expect(distritosCapaAnterior(r, 'todas')).toEqual([
+describe('distritos de una capa anterior (tabla de Indicadores)', () => {
+  it('van aparte con su código completo, sus activas y su trabajo', () => {
+    expect(distritosCapaAnterior(resumenDeEjemplo())).toEqual([
       {
         distrito_id: 'distrito_municipal:DM-01',
         codigo: 'DM-01',
@@ -174,7 +128,6 @@ describe('distritos de una capa anterior', () => {
         por_estado: { nuevo: 15, validado: 25, resuelto: 5 },
       },
     ]);
-    expect(distritosCapaAnterior(r, 'critica')[0]?.activas).toBe(20);
   });
 });
 
@@ -214,20 +167,6 @@ describe('datos de las gráficas', () => {
     expect(marcasEje(3)).toEqual([0, 1, 2, 3]);
     expect(marcasEje(12)).toEqual([0, 5, 10, 15]);
     expect(marcasEje(230)).toEqual([0, 50, 100, 150, 200, 250]);
-  });
-
-  it('texto de actualización', () => {
-    expect(textoActualizado(3_000)).toBe('actualizado hace unos segundos');
-    expect(textoActualizado(42_000)).toBe('actualizado hace 40 s');
-    expect(textoActualizado(185_000)).toBe('actualizado hace 3 min');
-  });
-
-  it('«actualizado hace…» se mide desde `generado_en`, no desde que llegó la respuesta', () => {
-    const ahora = Date.parse('2026-09-25T10:03:05-04:00');
-    expect(textoActualizadoDesde('2026-09-25T10:00:00-04:00', ahora)).toBe(
-      'actualizado hace 3 min',
-    );
-    expect(textoActualizadoDesde('no es una fecha', ahora)).toBe('');
   });
 });
 
@@ -270,22 +209,5 @@ describe('cifras en texto', () => {
     expect(textoAnuncio({ ...r, activas: miles }, mx)).toBe(
       '2,468 inundaciones activas: 1,234 verificadas y 1,234 en revisión.',
     );
-  });
-});
-
-describe('origen de las consultas del resumen', () => {
-  it('la primera la pide la persona; los refrescos automáticos son sondeos', () => {
-    const o = crearOrigenConsultas();
-    expect(o.esSondeo()).toBe(false);
-    expect(o.esSondeo()).toBe(true);
-    expect(o.esSondeo()).toBe(true);
-  });
-
-  it('después de una acción de la persona (período, reintento) la siguiente consulta no es sondeo', () => {
-    const o = crearOrigenConsultas();
-    o.esSondeo();
-    o.marcarAccion();
-    expect(o.esSondeo()).toBe(false);
-    expect(o.esSondeo()).toBe(true);
   });
 });

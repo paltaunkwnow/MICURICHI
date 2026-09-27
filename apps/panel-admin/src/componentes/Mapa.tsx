@@ -1,5 +1,6 @@
 'use client';
 
+import { useQueryClient } from '@tanstack/react-query';
 import type { CapaInfo, ReporteTecnicoFeature, Severidad } from 'contracts';
 import type { LngLatBoundsLike, Map as MapaGl } from 'maplibre-gl';
 // MapLibre 6 es ESM puro: no tiene export por defecto.
@@ -8,10 +9,10 @@ import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef } from 'react';
+import { aplicarCapas, detectorDeCapaCambiada, recargarCapasMapa } from '@/lib/capas-mapa';
 import { useCiudad } from '@/lib/ciudad-contexto';
-import { limitesDeCapas, vistaInicialDelPanel } from '@/lib/encuadre';
+import { vistaInicialDelPanel } from '@/lib/encuadre';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
-import { conectarTooltipRelleno } from '@/lib/tooltip-relleno';
 
 /**
  * Tope de pastillas HTML a la vez. La tabla pagina de a 50, así que en la práctica siempre se
@@ -68,21 +69,6 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
   ],
 };
 
-/**
- * Coropleta: pinta los polígonos de una capa según su `codigo`. La usa el panel ejecutivo para
- * colorear los distritos por cantidad de reportes; el mapa técnico no la pasa y queda igual.
- */
-export interface RellenoCapa {
-  capa: 'distrito_municipal' | 'unidad_vecinal';
-  /** `codigo` del polígono → color. Los que no están van con `colorPorDefecto`. */
-  colores: Record<string, string>;
-  colorPorDefecto: string;
-  /** Opacidad del relleno; de ella depende el contraste entre los pasos de la escala. */
-  opacidad: number;
-  /** `codigo` → texto del tooltip al pasar o tocar el polígono. */
-  descripciones?: Record<string, string>;
-}
-
 export interface PropsMapa {
   reportes?: ReporteTecnicoFeature[];
   capas?: CapaInfo[];
@@ -92,20 +78,13 @@ export interface PropsMapa {
   /** Encuadra los reportes cada vez que cambian (tabla) o el punto único (detalle). */
   ajustarAPuntos?: boolean;
   /**
-   * Encuadra una vez sobre el bbox de las capas en cuanto llegan. Con un zoom fijo el panel
-   * ejecutivo dejaba fuera los distritos 14 y 15.
-   */
-  encuadrarACapas?: boolean;
-  /**
    * Vista inicial. Sin ellos, el centro de la ciudad del despliegue y su zoom inicial un nivel
-   * más lejos (`vistaInicialDelPanel`); el técnico se mueve con los filtros, y el panel
-   * ejecutivo encuadra sobre el bbox de la capa vigente (`encuadrarACapas`).
+   * más lejos (`vistaInicialDelPanel`); después mandan los filtros y los puntos.
    */
   centro?: [number, number];
   zoom?: number;
   className?: string;
   ariaLabel?: string;
-  relleno?: RellenoCapa;
 }
 
 function coloresPorSeveridad(): maplibregl.ExpressionSpecification {
@@ -127,13 +106,12 @@ export function Mapa({
   onSeleccionar,
   seleccionado = null,
   ajustarAPuntos = false,
-  encuadrarACapas = false,
   centro,
   zoom,
   className = '',
   ariaLabel = 'Mapa de reportes de inundación',
-  relleno,
 }: PropsMapa) {
+  const cliente = useQueryClient();
   const vistaCiudad = vistaInicialDelPanel(useCiudad());
   const centroInicial = centro ?? vistaCiudad.centro;
   const zoomInicial = zoom ?? vistaCiudad.zoom;
@@ -141,25 +119,20 @@ export function Mapa({
   const mapa = useRef<MapaGl | null>(null);
   const listo = useRef(false);
   const pines = useRef(new Map<string, maplibregl.Marker>());
-  /** El encuadre sobre las capas se hace una sola vez: después manda la persona. */
-  const encuadrado = useRef(false);
 
   // Los datos y callbacks se leen por ref para que el mapa se inicialice una sola vez.
   const reportesRef = useRef(reportes);
   const capasRef = useRef(capas);
   const seleccionarRef = useRef(onSeleccionar);
   const ajustarRef = useRef(ajustarAPuntos);
-  const encuadrarRef = useRef(encuadrarACapas);
   const seleccionRef = useRef(seleccionado);
-  const rellenoRef = useRef(relleno);
-  const tooltip = useRef<maplibregl.Popup | null>(null);
+  const clienteRef = useRef(cliente);
   reportesRef.current = reportes;
   capasRef.current = capas;
   seleccionarRef.current = onSeleccionar;
   ajustarRef.current = ajustarAPuntos;
-  encuadrarRef.current = encuadrarACapas;
   seleccionRef.current = seleccionado;
-  rellenoRef.current = relleno;
+  clienteRef.current = cliente;
 
   /**
    * Marcadores en pastilla, iguales a los del mapa público: punto de color y nombre de la
@@ -182,11 +155,15 @@ export function Mapa({
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
     // Los botones de MapLibre vienen en inglés y alguno sin nombre accesible (WCAG 4.1.2).
     etiquetarControlesDelMapa(m);
-    tooltip.current = new maplibregl.Popup({
-      closeButton: false,
-      closeOnClick: false,
-      className: 'tooltip-mapa',
-      offset: 12,
+    // Una tesela o capa con huella vieja responde 410 CAPA_CAMBIO: otra versión de la capa se
+    // activó con la pantalla abierta. Se vuelve a pedir la lista y el efecto de `capas` apunta
+    // las fuentes a la URL nueva (`capas-mapa.ts`).
+    const capaCambiada = detectorDeCapaCambiada();
+    m.on('error', (e) => {
+      if (capaCambiada(e.error, capasRef.current)) void recargarCapasMapa(clienteRef.current);
+      // Con un oyente de `error`, MapLibre deja de escribir los errores en la consola: se sigue
+      // haciendo para no esconder los demás.
+      else console.error(e.error);
     });
 
     const vivos = new Map<string, maplibregl.Marker>();
@@ -291,16 +268,12 @@ export function Mapa({
         m.getCanvas().style.cursor = '';
       });
       listo.current = true;
-      aplicarCapas(m, capasRef.current);
-      encuadrarUnaVez(m, capasRef.current, encuadrarRef.current, encuadrado);
-      aplicarRelleno(m, rellenoRef, tooltip.current);
+      aplicarCapas(m, capasRef.current, origenDeLaPagina());
       aplicarReportes(m, reportesRef.current, ajustarRef.current);
       sincronizarPines.current();
     });
     mapa.current = m;
     return () => {
-      tooltip.current?.remove();
-      tooltip.current = null;
       for (const marca of vivos.values()) marca.remove();
       vivos.clear();
       m.remove();
@@ -324,20 +297,8 @@ export function Mapa({
   }, [seleccionado]);
 
   useEffect(() => {
-    if (mapa.current && listo.current) {
-      aplicarCapas(mapa.current, capas);
-      encuadrarUnaVez(mapa.current, capas, encuadrarRef.current, encuadrado);
-      aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
-    }
+    if (mapa.current && listo.current) aplicarCapas(mapa.current, capas, origenDeLaPagina());
   }, [capas]);
-
-  // `relleno` se lee por ref dentro de `aplicarRelleno` (el tooltip necesita el texto vigente).
-  // Un tooltip abierto muestra el conteo de antes: se cierra en cada cambio (pestaña o datos).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: se lee por ref, ver arriba
-  useEffect(() => {
-    tooltip.current?.remove();
-    if (mapa.current && listo.current) aplicarRelleno(mapa.current, rellenoRef, tooltip.current);
-  }, [relleno]);
 
   return <section ref={contenedor} className={className} aria-label={ariaLabel} />;
 }
@@ -359,130 +320,6 @@ function aplicarReportes(m: MapaGl, reportes: ReporteTecnicoFeature[], ajustar: 
   }
 }
 
-function encuadrarUnaVez(
-  m: MapaGl,
-  capas: CapaInfo[],
-  activo: boolean,
-  hecho: { current: boolean },
-) {
-  if (!activo || hecho.current) return;
-  const limites = limitesDeCapas(capas);
-  if (!limites) return;
-  m.fitBounds(limites, { padding: 24, duration: 0 });
-  hecho.current = true;
-}
-
-function aplicarCapas(m: MapaGl, capas: CapaInfo[]) {
-  const estilos: Record<
-    string,
-    { color: string; ancho: number; minzoom: number; opacidad: number }
-  > = {
-    distrito_municipal: { color: '#0A4A69', ancho: 2.5, minzoom: 9, opacidad: 0.85 },
-    unidad_vecinal: { color: '#0D6189', ancho: 1.2, minzoom: 11, opacidad: 0.75 },
-  };
-  const origen = typeof window !== 'undefined' ? window.location.origin : '';
-  for (const c of capas) {
-    const id = `capa-${c.capa}`;
-    if (m.getSource(id)) continue;
-    // Solo se dibujan las capas con estilo. La de manzanas se sigue sirviendo y listando, pero
-    // el panel dejó de pintarla (corrida 2026-09-25-quitar-campos-del-reporte): no volver a
-    // darle un estilo por defecto, porque eso la haría pedir sus teselas otra vez.
-    const e = estilos[c.capa];
-    if (!e) continue;
-    if (c.modo === 'teselas') {
-      // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre puede pedir teselas de zooms
-      // en los que la capa no se pinta. Una capa que no se dibuja por debajo de cierto zoom
-      // tampoco tiene nada que servir por debajo de ese zoom.
-      m.addSource(id, {
-        type: 'vector',
-        tiles: [`${origen}${c.url}`],
-        minzoom: e.minzoom,
-        maxzoom: 16,
-      });
-    } else {
-      m.addSource(id, { type: 'geojson', data: `${origen}${c.url}` });
-    }
-    const base = c.modo === 'teselas' ? { source: id, 'source-layer': c.capa } : { source: id };
-    m.addLayer(
-      {
-        id: `${id}-linea`,
-        type: 'line',
-        ...base,
-        minzoom: e.minzoom,
-        paint: { 'line-color': e.color, 'line-width': e.ancho, 'line-opacity': e.opacidad },
-      } as maplibregl.LayerSpecification,
-      'puntos-halo',
-    );
-    m.addLayer(
-      {
-        id: `${id}-nombre`,
-        type: 'symbol',
-        ...base,
-        minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
-        layout: {
-          'text-field': ['get', 'nombre'],
-          'text-font': ['NotoSans-Bold'],
-          'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
-          'symbol-placement': 'point',
-        },
-        paint: {
-          'text-color': '#0F2D43',
-          'text-halo-color': 'rgba(255,255,255,.92)',
-          'text-halo-width': 2,
-        },
-      } as maplibregl.LayerSpecification,
-      'puntos-halo',
-    );
-  }
-}
-
-function expresionRelleno(r: RellenoCapa): maplibregl.ExpressionSpecification | string {
-  const pares = Object.entries(r.colores).flat();
-  if (!pares.length) return r.colorPorDefecto;
-  // `to-string`: según la capa, el código puede llegar como número en las teselas.
-  return [
-    'match',
-    ['to-string', ['get', 'codigo']],
-    ...pares,
-    r.colorPorDefecto,
-  ] as unknown as maplibregl.ExpressionSpecification;
-}
-
-/**
- * Crea o actualiza la capa de relleno. Si la capa de polígonos todavía no está cargada no hace
- * nada: `aplicarCapas` la agrega después y el efecto de `capas` vuelve a llamar acá.
- */
-function aplicarRelleno(
-  m: MapaGl,
-  rellenoRef: { current: RellenoCapa | undefined },
-  tooltip: maplibregl.Popup | null,
-) {
-  const r = rellenoRef.current;
-  if (!r) return;
-  const origen = `capa-${r.capa}`;
-  const fuente = m.getSource(origen);
-  if (!fuente) return;
-  const idRelleno = `${origen}-relleno`;
-  if (m.getLayer(idRelleno)) {
-    m.setPaintProperty(idRelleno, 'fill-color', expresionRelleno(r));
-    return;
-  }
-  const base =
-    fuente.type === 'vector' ? { source: origen, 'source-layer': r.capa } : { source: origen };
-  m.addLayer(
-    {
-      id: idRelleno,
-      type: 'fill',
-      ...base,
-      paint: { 'fill-color': expresionRelleno(r), 'fill-opacity': r.opacidad },
-    } as maplibregl.LayerSpecification,
-    m.getLayer(`${origen}-linea`) ? `${origen}-linea` : 'puntos-halo',
-  );
-  if (!tooltip) return;
-  conectarTooltipRelleno(
-    m,
-    idRelleno,
-    tooltip,
-    (codigo) => rellenoRef.current?.descripciones?.[codigo],
-  );
+function origenDeLaPagina(): string {
+  return typeof window !== 'undefined' ? window.location.origin : '';
 }

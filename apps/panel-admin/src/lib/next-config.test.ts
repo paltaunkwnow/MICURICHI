@@ -56,21 +56,25 @@ describe('next.config.ts no congela nada del despliegue', () => {
     expect((await cargarConfig({})).experimental?.proxyTimeout).toBe(PLAZOS_MS.exportacion);
   });
 
-  it('la CSP no abre orígenes nuevos: solo las teselas de OpenStreetMap', async () => {
-    const reglas = await reglasDeCabeceras(await cargarConfig(DE_DESPLIEGUE));
-    const csp = reglas
-      .flatMap((r) => r.headers)
-      .find((h) => h.key.toLowerCase() === 'content-security-policy')?.value;
-    expect(csp).toBeDefined();
-    const directivas = new Map(
-      (csp ?? '').split(';').map((d) => {
-        const [nombre = '', ...valores] = d.trim().split(/\s+/);
-        return [nombre, valores] as const;
-      }),
-    );
-    const origenes = [...directivas.values()].flat().filter((v) => /^(https?:|wss?:)/.test(v));
-    expect(new Set(origenes)).toEqual(new Set(['https://tile.openstreetmap.org']));
-    expect(directivas.get('connect-src')).toEqual(["'self'", 'https://tile.openstreetmap.org']);
-    expect(directivas.get('default-src')).toEqual(["'self'"]);
+  it('no fija ninguna CSP: la única es la de src/proxy.ts, con el nonce de cada petición', async () => {
+    // Una segunda política sin el nonce se aplicaría junto con la del proxy y bloquearía los
+    // <script> en línea de Next; una con 'unsafe-inline' dejaría el nonce sin efecto práctico.
+    const cabeceras = await cabecerasFijas(await cargarConfig({ NODE_ENV: 'production' }));
+    expect(cabeceras.has('content-security-policy')).toBe(false);
+    expect(cabeceras.has('content-security-policy-report-only')).toBe(false);
+  });
+
+  it('conserva el resto de las cabeceras de seguridad', async () => {
+    const cabeceras = await cabecerasFijas(await cargarConfig({}));
+    expect(cabeceras.get('x-content-type-options')).toBe('nosniff');
+    expect(cabeceras.get('x-frame-options')).toBe('DENY');
+    expect(cabeceras.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
+    expect(cabeceras.get('permissions-policy')).toContain('geolocation=()');
+    expect(cabeceras.get('permissions-policy')).toContain('camera=()');
   });
 });
+
+async function cabecerasFijas(config: NextConfig): Promise<Map<string, string>> {
+  const reglas = await reglasDeCabeceras(config);
+  return new Map(reglas.flatMap((r) => r.headers.map((h) => [h.key.toLowerCase(), h.value])));
+}

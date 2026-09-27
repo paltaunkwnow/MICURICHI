@@ -2,7 +2,6 @@ import {
   type CausaPresunta,
   type Ciudad,
   COLORES_SEVERIDAD,
-  CONFIG_DOMINIO,
   type EstadoReporte,
   ETIQUETAS,
   type Frecuencia,
@@ -106,22 +105,28 @@ export function etiquetaCapa(c: TipoCapa | string) {
 type DistanciaDispositivo = number | null | undefined;
 
 /**
- * Desde 0.9.0, «manual» es un ajuste dentro del radio del GPS. Antes era un clic en cualquier
- * parte del mapa: sin distancia guardada no se puede prometer el radio.
+ * Desde 0.9.0 el método lo deriva api-core: «gps» si el punto quedó a max(2 m, precisión
+ * declarada) o menos del teléfono al enviar, así que puede estar a varios metros; «manual» si la
+ * persona lo movió más allá, siempre dentro del radio. Cuántos metros lo dice la fila «Distancia
+ * al dispositivo» (`distanciaDispositivo`): no se repite acá. Antes de 0.9.0 «manual» era un clic
+ * en cualquier parte del mapa: sin distancia guardada no se promete nada.
  */
 export function etiquetaMetodo(m: UbicacionMetodo, distanciaM: DistanciaDispositivo) {
-  if (m === 'gps') return 'En la posición del GPS';
-  if (distanciaM === null || distanciaM === undefined) {
-    return 'Selección manual en el mapa, sin control de distancia al GPS';
+  const sinDistancia = distanciaM === null || distanciaM === undefined;
+  if (m === 'gps') {
+    return sinDistancia
+      ? 'En la posición del teléfono'
+      : 'En la posición del teléfono (dentro de su margen de error)';
   }
-  return `Ajustado a mano, a ≤ ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m del GPS`;
+  if (sinDistancia) return 'Selección manual en el mapa, sin control de distancia al teléfono';
+  return 'Movido a mano por la persona';
 }
 
 export function distanciaDispositivo(m: DistanciaDispositivo) {
   if (m === null || m === undefined) {
     return 'Sin dato: el reporte es anterior a la ubicación obligatoria';
   }
-  return `a ${Math.round(m)} m del GPS`;
+  return `a ${Math.round(m)} m del teléfono`;
 }
 export function etiquetaRol(r: Rol) {
   return ETIQUETAS.rol[r];
