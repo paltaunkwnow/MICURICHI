@@ -1,4 +1,4 @@
-import { CONFIG_DOMINIO, type ReporteCrearEntrada, ReporteCrearSchema } from 'contracts';
+import { CONFIG_DOMINIO, type Dispositivo, ReporteCrearSchema } from 'contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   armarEnvio,
@@ -12,15 +12,13 @@ import {
   pasoDelError,
   problemaFechaEvento,
   puedeAvanzar,
+  resolverFormulario,
   respuestasSumidero,
   type Ubicacion,
   ubicacionDelEnlace,
-  ubicacionDesdeGps,
+  type ValoresFormulario,
   valoresIniciales,
 } from './formulario-reporte';
-
-/** Centro de la ciudad configurada (otra instalación, no Santa Cruz). */
-const CENTRO_CIUDAD: [number, number] = [-66.157, -17.3895];
 
 /**
  * Las fechas del evento se piensan en la hora de quien reporta. Se fija la de Santa Cruz para que
@@ -34,10 +32,23 @@ afterAll(() => {
   process.env.TZ = TZ_ORIGINAL;
 });
 
-const PUNTO: Ubicacion = { lat: -17.78, lon: -63.18, metodo: 'manual', precisionM: null };
+const PUNTO: Ubicacion = { lat: -17.78, lon: -63.18 };
+/** La posición del teléfono, sobre el punto y con 10 m de precisión. */
+const ANCLA = { lat: -17.78, lon: -63.18, precisionM: 10 };
+const M_POR_GRADO = (6_371_008.8 * Math.PI) / 180;
+const alNorte = (metros: number) => ({ lat: PUNTO.lat + metros / M_POR_GRADO, lon: PUNTO.lon });
+
+/** Lo que manda el formulario de la posición del teléfono, ya congelado. */
+const DISPOSITIVO: Dispositivo = {
+  lat: -17.78,
+  lon: -63.18,
+  precision_m: 10,
+  antiguedad_s: 4,
+};
 
 function estado(parcial: Partial<EstadoParaAvanzar> = {}): EstadoParaAvanzar {
   return {
+    ancla: ANCLA,
     ubicacion: PUNTO,
     resuelto: { dentro_cobertura: true },
     resolviendo: false,
@@ -53,19 +64,10 @@ function estado(parcial: Partial<EstadoParaAvanzar> = {}): EstadoParaAvanzar {
 }
 
 describe('paso 1: el punto elegido', () => {
-  it('al volver al paso 1 (o al retomar un borrador) el mapa abre en el punto elegido', () => {
-    const elegido: Ubicacion = { lat: -17.7, lon: -63.1, metodo: 'gps', precisionM: 8 };
-    expect(centroDelPaso1(elegido, null, CENTRO_CIUDAD)).toEqual([-63.1, -17.7]);
-    // El enlace «Me pasa a mí» no puede pisar lo que la persona ya eligió.
-    expect(centroDelPaso1(elegido, { lat: -17.9, lon: -63.3 }, CENTRO_CIUDAD)).toEqual([
-      -63.1, -17.7,
-    ]);
-  });
-
-  it('sin punto elegido abre donde pide el enlace, y si no hay enlace en el centro de la ciudad', () => {
-    expect(centroDelPaso1(null, { lat: -17.9, lon: -63.3 }, CENTRO_CIUDAD)).toEqual([-63.3, -17.9]);
-    // El de la ciudad configurada, no un centro escrito en el código (antes, siempre Santa Cruz).
-    expect(centroDelPaso1(null, null, CENTRO_CIUDAD)).toEqual(CENTRO_CIUDAD);
+  it('el mapa abre en el punto elegido, y sin punto en la posición del teléfono', () => {
+    const elegido: Ubicacion = { lat: -17.7, lon: -63.1 };
+    expect(centroDelPaso1(elegido, ANCLA)).toEqual([-63.1, -17.7]);
+    expect(centroDelPaso1(null, ANCLA)).toEqual([ANCLA.lon, ANCLA.lat]);
   });
 
   it('el enlace «Me pasa a mí» solo cuenta con coordenadas válidas', () => {
@@ -77,28 +79,6 @@ describe('paso 1: el punto elegido', () => {
     expect(ubicacionDelEnlace('-95', '-63')).toBeNull();
   });
 
-  it('con el GPS, la ubicación llega como GPS y con su precisión', () => {
-    const r = ubicacionDesdeGps({ latitude: -17.78, longitude: -63.18, accuracy: 12 });
-    expect(r.aproximada).toBe(false);
-    expect(r.ubicacion).toEqual({ lat: -17.78, lon: -63.18, metodo: 'gps', precisionM: 12 });
-    // El borde que admite el contrato (`precision_gps_m` ≤ 10 000) sigue siendo GPS.
-    expect(
-      ubicacionDesdeGps({ latitude: 1, longitude: 2, accuracy: 10_000 }).ubicacion.metodo,
-    ).toBe('gps');
-  });
-
-  it('una ubicación de más de 10 km de precisión (por IP) no se hace pasar por GPS', () => {
-    const r = ubicacionDesdeGps({ latitude: -17.78, longitude: -63.18, accuracy: 25_000 });
-    expect(r.aproximada).toBe(true);
-    expect(r.ubicacion.metodo).toBe('manual');
-    expect(r.ubicacion.precisionM).toBeNull();
-  });
-
-  it('una precisión que no es un número no viaja', () => {
-    const r = ubicacionDesdeGps({ latitude: -17.78, longitude: -63.18, accuracy: Number.NaN });
-    expect(r.ubicacion).toEqual({ lat: -17.78, lon: -63.18, metodo: 'gps', precisionM: null });
-  });
-
   it('«Continuar» espera a que se resuelva la unidad vecinal del punto actual', () => {
     expect(puedeAvanzar(1, estado())).toBe(true);
     // Mientras se pregunta por el punto nuevo, la respuesta que haya es de otro punto.
@@ -106,6 +86,24 @@ describe('paso 1: el punto elegido', () => {
     expect(puedeAvanzar(1, estado({ resuelto: null }))).toBe(false);
     expect(puedeAvanzar(1, estado({ ubicacion: null }))).toBe(false);
     expect(puedeAvanzar(1, estado({ resuelto: { dentro_cobertura: false } }))).toBe(false);
+  });
+
+  it('sin la posición del teléfono, o con una imprecisa, no se continúa', () => {
+    expect(puedeAvanzar(1, estado({ ancla: null }))).toBe(false);
+    const max = CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M;
+    expect(puedeAvanzar(1, estado({ ancla: { ...ANCLA, precisionM: max + 1 } }))).toBe(false);
+    expect(puedeAvanzar(1, estado({ ancla: { ...ANCLA, precisionM: max } }))).toBe(true);
+  });
+
+  it('con el punto a más de 60 m de la posición del teléfono no se continúa', () => {
+    expect(puedeAvanzar(1, estado({ ubicacion: alNorte(59) }))).toBe(true);
+    expect(puedeAvanzar(1, estado({ ubicacion: alNorte(61) }))).toBe(false);
+  });
+
+  it('un error de la posición del teléfono lleva al paso 1', () => {
+    expect(pasoDelError(['dispositivo'])).toBe(1);
+    expect(pasoDelError(['dispositivo.precision_m', 'descripcion'])).toBe(1);
+    expect(camposSinLugar(['dispositivo.lat'])).toEqual([]);
   });
 });
 
@@ -261,7 +259,6 @@ describe('paso 3: sumidero y fotos', () => {
         ...valoresIniciales(),
         lat: 0,
         lon: 0,
-        ubicacion_metodo: 'gps',
         descripcion: 'Se junta el agua en la esquina',
         profundidad_estimada: 'rodilla',
         frecuencia: 'ocasional',
@@ -269,6 +266,7 @@ describe('paso 3: sumidero y fotos', () => {
       },
       PUNTO,
       [],
+      DISPOSITIVO,
     );
     expect(cuerpo.fotos).toEqual([]);
     expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
@@ -286,11 +284,10 @@ describe('paso 3: sumidero y fotos', () => {
 
 describe('el envío', () => {
   // Los campos ocultos del formulario traen otra ubicación: la que vale es la del estado.
-  const datos: ReporteCrearEntrada = {
+  const datos: ValoresFormulario = {
     ...valoresIniciales(),
     lat: 0,
     lon: 0,
-    ubicacion_metodo: 'gps',
     descripcion: 'Se junta el agua en la esquina',
     profundidad_estimada: 'rodilla',
     frecuencia: 'ocasional',
@@ -300,15 +297,29 @@ describe('el envío', () => {
   it('la ubicación viaja desde el estado, sin la marca de precargada', () => {
     const cuerpo = armarEnvio(
       datos,
-      { lat: -17.7, lon: -63.1, metodo: 'manual', precisionM: null, precargada: true },
+      { lat: -17.7, lon: -63.1, precargada: true },
       [{ objeto_key: 'a.jpg' }],
+      DISPOSITIVO,
     );
     expect(cuerpo.lat).toBe(-17.7);
     expect(cuerpo.lon).toBe(-63.1);
-    expect(cuerpo.ubicacion_metodo).toBe('manual');
-    expect(cuerpo.precision_gps_m).toBeNull();
     expect(cuerpo.fotos).toEqual(['a.jpg']);
     expect(Object.keys(cuerpo)).not.toContain('precargada');
+  });
+
+  it('lleva la posición del teléfono tal como quedó congelada, y pasa el contrato', () => {
+    const cuerpo = armarEnvio(datos, PUNTO, [], DISPOSITIVO);
+    expect(cuerpo.dispositivo).toBe(DISPOSITIVO);
+    expect(cuerpo.dispositivo.antiguedad_s).toBe(4);
+    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
+  });
+
+  it('ya no manda ubicacion_metodo ni precision_gps_m: los deriva el servidor', () => {
+    // Un borrador de antes de contracts 0.9.0 los puede traer en los valores.
+    const viejos = { ...datos, ubicacion_metodo: 'gps', precision_gps_m: 12 } as ValoresFormulario;
+    const cuerpo = armarEnvio(viejos, PUNTO, [], DISPOSITIVO);
+    expect(Object.keys(cuerpo)).not.toContain('ubicacion_metodo');
+    expect(Object.keys(cuerpo)).not.toContain('precision_gps_m');
   });
 
   it('el sumidero sale coherente aunque algo incoherente haya quedado en el formulario', () => {
@@ -316,8 +327,47 @@ describe('el envío', () => {
       { ...datos, sumidero_cercano: 'no', sumidero_estado: 'tapado', agua_brota_sumidero: true },
       PUNTO,
       [],
+      DISPOSITIVO,
     );
     expect(cuerpo.sumidero_estado).toBeNull();
     expect(cuerpo.agua_brota_sumidero).toBeNull();
+  });
+});
+
+describe('la validación del formulario', () => {
+  const opciones = { fields: {}, shouldUseNativeValidation: false } as Parameters<
+    typeof resolverFormulario
+  >[2];
+
+  it('valida todo el contrato menos la posición del teléfono, que se agrega al enviar', async () => {
+    const r = await resolverFormulario(
+      {
+        ...valoresIniciales(),
+        lat: -17.78,
+        lon: -63.18,
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+      } as ValoresFormulario,
+      undefined,
+      opciones,
+    );
+    expect(r.errors).toEqual({});
+    expect(Object.keys(r.values)).not.toContain('dispositivo');
+  });
+
+  it('los errores son los de las respuestas, nunca el de «dispositivo»', async () => {
+    const r = await resolverFormulario(
+      {
+        ...valoresIniciales(),
+        lat: -17.78,
+        lon: -63.18,
+        descripcion: 'corto',
+      } as ValoresFormulario,
+      undefined,
+      opciones,
+    );
+    expect(Object.keys(r.errors)).toContain('descripcion');
+    expect(Object.keys(r.errors)).not.toContain('dispositivo');
   });
 });

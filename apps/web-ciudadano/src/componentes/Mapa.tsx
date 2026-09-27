@@ -21,6 +21,14 @@ import {
   opcionesDelMarcadorDeSeleccion,
   type ResumenMapa,
 } from '@/lib/mapa-datos';
+import {
+  type Direccion,
+  moverDentroDelRadio,
+  PASO_BOTON_M,
+  PASO_FINO_M,
+  poligonoDelCirculo,
+  recortarAlCirculo,
+} from '@/lib/radio';
 
 /**
  * Base clara y desaturada, como en el prototipo: las teselas quedan casi en gris para que lo
@@ -91,11 +99,11 @@ export interface PropsMapa {
   seleccionUbicacion?: { lat: number; lon: number } | null;
   onUbicacion?: (lat: number, lon: number) => void;
   /**
-   * Modo del paso 1 del reporte: el marcador queda fijo en el centro de la pantalla y lo que se
-   * mueve es el mapa. Con el pulgar es más preciso que arrastrar un pin diminuto. `onUbicacion`
-   * solo avisa cuando el mapa lo mueve la persona (ver `esGestoDelUsuario`).
+   * Paso 1 del reporte: el círculo de `radioM` alrededor de la posición del teléfono. El marcador
+   * de `seleccionUbicacion` se arrastra, se mueve con las flechas (5 m; 1 m con Mayúsculas) o
+   * tocando el mapa, y nunca sale del círculo: lo que cae afuera se recorta al borde.
    */
-  seguirCentro?: boolean;
+  circulo?: { lat: number; lon: number; radioM: number } | null;
   /**
    * Dónde abre el mapa. Sin valor, el centro y el zoom de la ciudad de la instalación
    * (`GET /api/v1/configuracion`); en cuanto llegan las capas, `encuadrarACapas` pasa a encuadrar
@@ -248,7 +256,7 @@ export function Mapa({
   onMover,
   seleccionUbicacion,
   onUbicacion,
-  seguirCentro = false,
+  circulo = null,
   centro,
   zoom,
   className = '',
@@ -294,7 +302,7 @@ export function Mapa({
   const seleccionRef = useRef(seleccionado);
   const destacadoRef = useRef(destacado);
   const seleccionUbicacionRef = useRef(seleccionUbicacion);
-  const seguirCentroRef = useRef(seguirCentro);
+  const circuloRef = useRef(circulo);
   const onSeleccionarRef = useRef(onSeleccionar);
   const onMoverRef = useRef(onMover);
   const onUbicacionRef = useRef(onUbicacion);
@@ -307,10 +315,17 @@ export function Mapa({
   seleccionRef.current = seleccionado;
   destacadoRef.current = destacado;
   seleccionUbicacionRef.current = seleccionUbicacion;
-  seguirCentroRef.current = seguirCentro;
+  circuloRef.current = circulo;
   onSeleccionarRef.current = onSeleccionar;
   onMoverRef.current = onMover;
   onUbicacionRef.current = onUbicacion;
+
+  /** Avisa el punto elegido, recortado al círculo si lo hay. */
+  const avisarUbicacion = useRef((lat: number, lon: number) => {
+    const c = circuloRef.current;
+    const p = c ? recortarAlCirculo({ lat, lon }, c, c.radioM) : { lat, lon };
+    onUbicacionRef.current?.(p.lat, p.lon);
+  });
 
   /**
    * Los marcadores en pastilla son HTML, como en el prototipo, porque la pastilla lleva punto de
@@ -570,25 +585,17 @@ export function Mapa({
       }
       m.on('click', (e: MapMouseEvent) => {
         if (onUbicacionRef.current && seleccionUbicacionRef.current !== undefined)
-          onUbicacionRef.current(e.lngLat.lat, e.lngLat.lng);
+          avisarUbicacion.current(e.lngLat.lat, e.lngLat.lng);
         else if (!m.queryRenderedFeatures(e.point, { layers: ['puntos-ancla', 'clusters'] }).length)
           onSeleccionarRef.current?.(null);
       });
 
-      const avisar = (evento?: { originalEvent?: unknown }) => {
+      const avisar = () => {
         const b = m.getBounds();
         onMoverRef.current?.(
           `${b.getWest().toFixed(5)},${b.getSouth().toFixed(5)},${b.getEast().toFixed(5)},${b.getNorth().toFixed(5)}`,
           m.getZoom(),
         );
-        // El centro es el punto elegido SOLO si lo movió la persona. Antes también contaban el
-        // `load` (que al volver al paso 1 pisaba el punto con el centro por defecto, y al solo
-        // abrir /reportar dejaba un borrador «con contenido») y el `flyTo` del GPS (que pisaba la
-        // ubicación GPS con una manual sin precisión).
-        if (seguirCentroRef.current && esGestoDelUsuario(evento)) {
-          const c = m.getCenter();
-          onUbicacionRef.current?.(c.lat, c.lng);
-        }
       };
       m.on('moveend', avisar);
       // Tres disparadores porque los tres momentos cambian qué puntos están dibujados: el mapa se
@@ -610,6 +617,7 @@ export function Mapa({
       m.on('movestart', (e) => {
         if (esGestoDelUsuario(e)) movidoPorUsuario.current = true;
       });
+      dibujarCirculo(m, circuloRef.current);
       listo.current = true;
       avisar();
       encuadrar(m, capasRef.current);
@@ -667,8 +675,15 @@ export function Mapa({
     if (mapa.current && listo.current) sincronizarPines.current();
   }, [seleccionado, destacado]);
 
-  // Marcador de selección de ubicación. En modo `seguirCentro` no se usa: ahí el marcador lo dibuja
-  // la pantalla, clavado en el centro. El efecto depende de la CLAVE de las coordenadas y no del
+  // El círculo se vuelve a dibujar cuando cambia la posición del teléfono (la relectura al enviar
+  // puede moverla). Antes del `load` no hay estilo: lo dibuja el propio `load` con la ref.
+  const claveCirculo = circulo ? `${circulo.lat},${circulo.lon},${circulo.radioM}` : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: el círculo se lee por ref; la clave es la dependencia
+  useEffect(() => {
+    if (mapa.current && listo.current) dibujarCirculo(mapa.current, circuloRef.current);
+  }, [claveCirculo]);
+
+  // Marcador de selección de ubicación. El efecto depende de la CLAVE de las coordenadas y no del
   // objeto, y lee el punto y el callback por ref: con el objeto en línea como dependencia, el mapa
   // se volvía a animar en cada render aunque el punto fuera el mismo.
   const claveSeleccion = claveDeUbicacion(seleccionUbicacion);
@@ -676,29 +691,47 @@ export function Mapa({
   useEffect(() => {
     const m = mapa.current;
     const punto = seleccionUbicacionRef.current;
-    if (!m || seguirCentro) return;
+    if (!m) return;
     if (!punto) {
       marcador.current?.remove();
       marcador.current = null;
       return;
     }
     if (!marcador.current) {
-      const el = document.createElement('div');
-      el.style.cssText =
-        'width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#1B6B38;border:3px solid #fff;box-shadow:0 2px 8px rgba(15,45,67,.4)';
-      marcador.current = new maplibregl.Marker({
-        element: el,
+      const marca = new maplibregl.Marker({
+        element: elementoDelMarcador(fijo, (direccion, metros) => {
+          const c = circuloRef.current;
+          const actual = marcador.current?.getLngLat();
+          if (!c || !actual) return;
+          const p = moverDentroDelRadio({ lat: actual.lat, lon: actual.lng }, direccion, metros, c);
+          marcador.current?.setLngLat([p.lon, p.lat]);
+          avisarUbicacion.current(p.lat, p.lon);
+        }),
         ...opcionesDelMarcadorDeSeleccion(fijo),
       })
         .setLngLat([punto.lon, punto.lat])
         .addTo(m);
-      marcador.current.on('dragend', () => {
-        const p = marcador.current?.getLngLat();
-        if (p) onUbicacionRef.current?.(p.lat, p.lng);
+      // Mientras se arrastra, el marcador no pasa del borde del círculo: se queda pegado a él.
+      marca.on('drag', () => {
+        const c = circuloRef.current;
+        const p = marca.getLngLat();
+        if (!c) return;
+        const r = recortarAlCirculo({ lat: p.lat, lon: p.lng }, c, c.radioM);
+        if (r.lat !== p.lat || r.lon !== p.lng) marca.setLngLat([r.lon, r.lat]);
       });
+      marca.on('dragend', () => {
+        const p = marca.getLngLat();
+        avisarUbicacion.current(p.lat, p.lng);
+      });
+      marcador.current = marca;
     } else marcador.current.setLngLat([punto.lon, punto.lat]);
-    m.easeTo({ center: [punto.lon, punto.lat], zoom: Math.max(m.getZoom(), 16) });
-  }, [claveSeleccion, seguirCentro]);
+    // Con el círculo, el mapa no persigue al marcador en cada ajuste de 5 m: solo lo trae si quedó
+    // fuera de la vista. Sin círculo (la revisión del reporte), se centra como siempre.
+    if (circuloRef.current) {
+      if (!m.getBounds().contains([punto.lon, punto.lat]))
+        m.easeTo({ center: [punto.lon, punto.lat] });
+    } else m.easeTo({ center: [punto.lon, punto.lat], zoom: Math.max(m.getZoom(), 16) });
+  }, [claveSeleccion]);
 
   return (
     <section ref={contenedor} className={className} aria-label={ariaLabel}>
@@ -709,6 +742,109 @@ export function Mapa({
       ) : null}
     </section>
   );
+}
+
+/**
+ * El marcador del punto elegido. En el paso 1 es un botón de 48 × 48 px (CLAUDE.md §14.4) que se
+ * arrastra y que, con el foco, se mueve con las flechas: la alternativa de teclado al arrastre
+ * (§14.1). En la revisión (`fijo`) es solo el dibujo.
+ */
+function elementoDelMarcador(
+  fijo: boolean,
+  mover: (direccion: Direccion, metros: number) => void,
+): HTMLElement {
+  const pin = document.createElement('span');
+  pin.style.cssText =
+    'display:block;width:28px;height:28px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:#1B6B38;border:3px solid #fff;box-shadow:0 2px 8px rgba(15,45,67,.4)';
+  if (fijo) return pin;
+  const boton = document.createElement('button');
+  boton.type = 'button';
+  boton.className = 'marcador-punto';
+  boton.setAttribute(
+    'aria-label',
+    `Punto del reporte. Movelo con las flechas: ${PASO_BOTON_M} m por toque, ${PASO_FINO_M} m con Mayúsculas.`,
+  );
+  // El vértice del pin (6 px por debajo de su caja, por el giro) cae en el borde inferior.
+  boton.style.cssText =
+    'width:48px;height:48px;display:flex;align-items:flex-end;justify-content:center;padding:0 0 6px;background:none;border:0;cursor:grab';
+  boton.append(pin);
+  const FLECHAS: Record<string, Direccion> = {
+    ArrowUp: 'norte',
+    ArrowDown: 'sur',
+    ArrowLeft: 'oeste',
+    ArrowRight: 'este',
+  };
+  // El clic del marcador (al soltarlo después de arrastrar, o con Enter) no es un toque en el
+  // mapa: si llegara, movería el punto a donde está el dedo o a la esquina del mapa.
+  boton.addEventListener('click', (e) => e.stopPropagation());
+  boton.addEventListener('keydown', (e) => {
+    const direccion = FLECHAS[e.key];
+    if (!direccion) return;
+    // Sin esto la flecha también llega al mapa, que la usa para desplazarse.
+    e.preventDefault();
+    e.stopPropagation();
+    mover(direccion, e.shiftKey ? PASO_FINO_M : PASO_BOTON_M);
+  });
+  return boton;
+}
+
+const FUENTE_CIRCULO = 'circulo-dispositivo';
+
+/**
+ * El círculo de 60 m y un punto en la posición del teléfono («vos estás acá»). Sin círculo, se
+ * vacía el origen para no dejar dibujado uno viejo.
+ */
+function dibujarCirculo(m: MapaGl, c: { lat: number; lon: number; radioM: number } | null) {
+  const datos: GeoJSON.FeatureCollection = {
+    type: 'FeatureCollection',
+    features: c
+      ? [
+          {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Polygon', coordinates: [poligonoDelCirculo(c, c.radioM)] },
+          },
+          {
+            type: 'Feature',
+            properties: {},
+            geometry: { type: 'Point', coordinates: [c.lon, c.lat] },
+          },
+        ]
+      : [],
+  };
+  const fuente = m.getSource(FUENTE_CIRCULO) as maplibregl.GeoJSONSource | undefined;
+  if (fuente) {
+    fuente.setData(datos);
+    return;
+  }
+  if (!c) return;
+  m.addSource(FUENTE_CIRCULO, { type: 'geojson', data: datos });
+  m.addLayer({
+    id: `${FUENTE_CIRCULO}-relleno`,
+    type: 'fill',
+    source: FUENTE_CIRCULO,
+    filter: ['==', ['geometry-type'], 'Polygon'],
+    paint: { 'fill-color': '#28934D', 'fill-opacity': 0.12 },
+  });
+  m.addLayer({
+    id: `${FUENTE_CIRCULO}-borde`,
+    type: 'line',
+    source: FUENTE_CIRCULO,
+    filter: ['==', ['geometry-type'], 'Polygon'],
+    paint: { 'line-color': '#1B6B38', 'line-width': 2, 'line-dasharray': [2, 1.5] },
+  });
+  m.addLayer({
+    id: `${FUENTE_CIRCULO}-centro`,
+    type: 'circle',
+    source: FUENTE_CIRCULO,
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 7,
+      'circle-color': '#0D6189',
+      'circle-stroke-color': '#fff',
+      'circle-stroke-width': 2.5,
+    },
+  });
 }
 
 /**

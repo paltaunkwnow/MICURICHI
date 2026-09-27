@@ -1,4 +1,4 @@
-import { CONFIG_DOMINIO } from 'contracts';
+import { CODIGOS_UBICACION_DISPOSITIVO, CONFIG_DOMINIO } from 'contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from './api';
 import {
@@ -6,6 +6,7 @@ import {
   esCuotaAgotada,
   esPlazoAgotado,
   esSesionCaducada,
+  esUbicacionRechazada,
   mensajeDeEnvio,
   mensajeDeError,
   mensajeDeFoto,
@@ -44,6 +45,24 @@ describe('mensajes de error para el vecino', () => {
 
   it('el punto fuera del municipio se explica, no se recita', () => {
     expect(mensajeDeError(new ErrorApi('FUERA_DE_COBERTURA', 'x', 422))).toMatch(/fuera del muni/i);
+  });
+
+  it('cada 422 de la posición del teléfono tiene su propio texto', () => {
+    const texto = (codigo: string) => mensajeDeError(new ErrorApi(codigo, 'crudo', 422));
+    expect(texto('PRECISION_INSUFICIENTE')).toContain(
+      `${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m`,
+    );
+    expect(texto('PRECISION_INSUFICIENTE')).toMatch(/lugar abierto/);
+    expect(texto('POSICION_VENCIDA')).toMatch(/10 minutos/);
+    expect(texto('UBICACION_FUERA_DE_RADIO')).toContain(
+      `${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m`,
+    );
+    for (const codigo of CODIGOS_UBICACION_DISPOSITIVO) {
+      expect(texto(codigo)).not.toBe('crudo');
+      expect(esUbicacionRechazada(new ErrorApi(codigo, 'x', 422))).toBe(true);
+    }
+    expect(esUbicacionRechazada(new ErrorApi('FUERA_DE_COBERTURA', 'x', 422))).toBe(false);
+    expect(esUbicacionRechazada(new TypeError('x'))).toBe(false);
   });
 
   it('nunca deja escapar el texto crudo de la plataforma', () => {

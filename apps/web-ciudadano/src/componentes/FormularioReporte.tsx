@@ -1,6 +1,5 @@
 'use client';
 
-import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   BANDAS,
@@ -8,19 +7,36 @@ import {
   calcularSeveridad,
   ETIQUETAS,
   PROFUNDIDADES,
-  type ReporteCrearEntrada,
-  ReporteCrearSchema,
   type ResolverRespuesta,
   SUMIDERO_CERCANO,
   SUMIDERO_ESTADOS,
 } from 'contracts';
-import { Camera, Check, ChevronLeft, Copy, Navigation, ShieldCheck, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Camera,
+  Check,
+  ChevronLeft,
+  Copy,
+  type LucideIcon,
+  Navigation,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { type FieldErrors, useForm } from 'react-hook-form';
-import { crearReporte, nuevaClaveIdempotencia, resolverPunto, subirFoto } from '@/lib/api';
+import {
+  crearReporte,
+  ErrorApi,
+  nuevaClaveIdempotencia,
+  resolverPunto,
+  subirFoto,
+} from '@/lib/api';
 import {
   type Borrador,
   borradorTieneContenido,
@@ -29,12 +45,12 @@ import {
   leerBorrador,
   olvidarBorrador,
 } from '@/lib/borrador';
-import { centroDeCiudad } from '@/lib/ciudad';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import {
   detallesDeError,
   esCuotaAgotada,
   esSesionCaducada,
+  esUbicacionRechazada,
   mensajeDeEnvio,
   mensajeDeError,
   mensajeDeFoto,
@@ -60,23 +76,41 @@ import {
   pasoDelError,
   problemaFechaEvento,
   puedeAvanzar,
+  resolverFormulario,
   respuestasSumidero,
   type Sumidero,
   type Ubicacion,
   ubicacionDelEnlace,
-  ubicacionDesdeGps,
+  type ValoresFormulario,
   valoresIniciales,
 } from '@/lib/formulario-reporte';
 import { MiniaturasLocales, motivoDeRechazoDeFoto } from '@/lib/foto';
-import { leerCoordenadas } from '@/lib/geo';
 import { recordarReporte } from '@/lib/misReportes';
+import {
+  coordenadasEscritas,
+  type Direccion,
+  encuadreDelPaso1,
+  moverDentroDelRadio,
+  PASO_BOTON_M,
+  puntoInicial,
+  puntoYaElegido,
+  RADIO_M,
+  recortarAlCirculo,
+  textoDistancia,
+} from '@/lib/radio';
 import { refrescarSesion, useSesion } from '@/lib/sesion';
+import {
+  ControladorUbicacion,
+  DispositivoCongelado,
+  decidirEnvio,
+} from '@/lib/ubicacion-dispositivo';
 import { AccesoRequerido } from './AccesoRequerido';
 import { Aviso } from './Aviso';
 import { CamaraReporte } from './CamaraReporte';
 import { ChipSeveridad } from './ChipSeveridad';
 import { ErrorDeCarga } from './ErrorDeCarga';
 import { MapaDiferido } from './MapaDiferido';
+import { VistaPedirUbicacion } from './PedirUbicacion';
 import { useToast } from './Toast';
 
 const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
@@ -100,8 +134,15 @@ const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
 const ESPERA_RESOLVER_MS = 600;
 const MAX_FOTOS = CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE;
 const TEXTO_FOTOS_COMPLETAS = `Ya llegaste al máximo de ${MAX_FOTOS} fotos. Quitá una si querés cambiarla.`;
-const TEXTO_UBICACION_APROXIMADA =
-  'Tu ubicación es aproximada; mové el mapa hasta el punto exacto.';
+const MINUTOS_POSICION = Math.round(CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S / 60);
+
+/** Los botones «mover 5 m»: la alternativa al arrastre del marcador (CLAUDE.md §14.1). */
+const BOTONES_MOVER: Array<{ direccion: Direccion; Icono: LucideIcon; texto: string }> = [
+  { direccion: 'norte', Icono: ArrowUp, texto: 'al norte' },
+  { direccion: 'sur', Icono: ArrowDown, texto: 'al sur' },
+  { direccion: 'oeste', Icono: ArrowLeft, texto: 'al oeste' },
+  { direccion: 'este', Icono: ArrowRight, texto: 'al este' },
+];
 
 /** Opción en tarjeta con radio real escondido: el aspecto es del prototipo, el control es nativo. */
 function Opcion({
@@ -207,7 +248,7 @@ function BotonQuitar({ etiqueta, onClick }: { etiqueta: string; onClick: () => v
 }
 
 /** Texto del error de un campo cualquiera, incluso uno que el tipo del formulario no conoce. */
-function mensajeDe(errores: FieldErrors<ReporteCrearEntrada>, campo: string): string {
+function mensajeDe(errores: FieldErrors<ValoresFormulario>, campo: string): string {
   const e = (errores as Record<string, { message?: unknown } | undefined>)[campo];
   return typeof e?.message === 'string' ? e.message : '';
 }
@@ -216,7 +257,7 @@ export function FormularioReporte() {
   const parametros = useSearchParams();
   const toast = useToast();
   const cliente = useQueryClient();
-  /** Centro del mapa sin punto elegido, locale y zona de las horas: los de esta instalación. */
+  /** Locale y zona de las horas: los de esta instalación. */
   const ciudad = useCiudad();
   const {
     usuario,
@@ -233,13 +274,34 @@ export function FormularioReporte() {
    */
   const [sesionCaducada, setSesionCaducada] = useState(false);
   const [paso, setPaso] = useState(1);
+  /**
+   * Paso al que vuelve «Continuar» del paso 1 cuando se volvió a pedir la ubicación a mitad del
+   * camino (un borrador retomado, una posición vencida o movida al enviar): lo demás ya estaba
+   * contestado y no hay por qué recorrerlo de nuevo.
+   */
+  const [pasoPendiente, setPasoPendiente] = useState<number | null>(null);
+  /**
+   * La posición del teléfono (plan 2026-09-26, pedido E). Crear el controlador no pide nada: la
+   * ubicación se pide al tocar «Compartir mi ubicación».
+   */
+  const [ubicador] = useState(() => new ControladorUbicacion());
+  const estadoUbicacion = useSyncExternalStore(ubicador.suscribir, ubicador.leer, ubicador.leer);
+  const ancla = estadoUbicacion.fase === 'lista' ? estadoUbicacion.ancla : null;
+  /** El `dispositivo` del primer intento de envío: los reintentos lo repiten tal cual. */
+  const congelado = useRef(new DispositivoCongelado());
+  /** Releyendo la posición al tocar «Enviar reporte». */
+  const [releyendo, setReleyendo] = useState(false);
   const [ubicacion, setUbicacion] = useState<Ubicacion | null>(null);
   const [resuelto, setResuelto] = useState<ResolverRespuesta | null>(null);
   const [resolviendo, setResolviendo] = useState(false);
   const [errorUbicacion, setErrorUbicacion] = useState<string | null>(null);
-  /** Aviso que no es error: la ubicación del teléfono llegó con kilómetros de imprecisión. */
+  /**
+   * Aviso del paso 1 que no es un error del punto: por qué se vuelve a pedir la ubicación, o por
+   * qué el punto del enlace o del borrador se movió a la posición del teléfono.
+   */
   const [avisoUbicacion, setAvisoUbicacion] = useState<string | null>(null);
   const [mostrarCoordenadas, setMostrarCoordenadas] = useState(false);
+  const [errorCoordenadas, setErrorCoordenadas] = useState<string | null>(null);
   const [latTexto, setLatTexto] = useState('');
   const [lonTexto, setLonTexto] = useState('');
   const [fotos, setFotos] = useState<FotoDelBorrador[]>([]);
@@ -255,29 +317,23 @@ export function FormularioReporte() {
   const [miniaturas, setMiniaturas] = useState<Record<string, string>>({});
   /** Toda miniatura creada y todavía no liberada, para revocarlas al salir o al empezar de nuevo. */
   const vistas = useRef(new MiniaturasLocales());
-  /**
-   * El borrador ya se leyó. El mapa del paso 1 no se monta antes: se crea UNA vez con su centro, y
-   * si naciera en el centro por defecto mientras el borrador trae otro punto, el marcador clavado
-   * en el medio de la pantalla mostraría un lugar distinto del que se va a enviar.
-   */
-  const [borradorLeido, setBorradorLeido] = useState(false);
   /** Tras un rechazo: llevar la vista hasta el primer mensaje de error del paso. */
   const [mostrarError, setMostrarError] = useState(false);
   const mapa = useRef<MapaGl | null>(null);
   const ubicacionRef = useRef<Ubicacion | null>(null);
   ubicacionRef.current = ubicacion;
-  const pasoRef = useRef(paso);
-  pasoRef.current = paso;
 
   /**
-   * «Me pasa a mí»: el detalle de un punto abre este flujo ya ubicado ahí. Si el reporte nuevo
-   * cae dentro del radio de recurrencia, el sistema lo agrupa solo en el mismo punto crítico
-   * (CLAUDE.md §9.2) — no hace falta un endpoint aparte para «sumarse».
+   * «Me pasa a mí»: el detalle de un punto abre este flujo ya ubicado ahí, si ese punto queda a
+   * 60 m o menos de la posición del teléfono (`puntoInicial`). Si el reporte nuevo cae dentro del
+   * radio de recurrencia, el sistema lo agrupa solo en el mismo punto crítico (CLAUDE.md §9.2).
    */
   const enlace = ubicacionDelEnlace(parametros?.get('lat'), parametros?.get('lon'));
+  const enlaceRef = useRef(enlace);
+  enlaceRef.current = enlace;
 
-  const form = useForm<ReporteCrearEntrada>({
-    resolver: zodResolver(ReporteCrearSchema),
+  const form = useForm<ValoresFormulario>({
+    resolver: resolverFormulario,
     mode: 'onSubmit',
     defaultValues: valoresIniciales(),
   });
@@ -292,11 +348,44 @@ export function FormularioReporte() {
     return () => creadas.soltarTodas();
   }, []);
 
-  // El mapa del paso 1 se destruye al salir del paso: su referencia no puede quedar apuntando a un
-  // mapa muerto, que el GPS o las coordenadas intentarían mover.
+  // Salir del formulario, recargar o cerrar la pestaña apaga el GPS si seguía buscando.
   useEffect(() => {
-    if (paso !== 1) mapa.current = null;
-  }, [paso]);
+    const apagar = () => ubicador.detener();
+    window.addEventListener('pagehide', apagar);
+    return () => {
+      window.removeEventListener('pagehide', apagar);
+      apagar();
+    };
+  }, [ubicador]);
+
+  // El mapa del paso 1 se destruye al salir del paso o al perder la posición del teléfono: su
+  // referencia no puede quedar apuntando a un mapa muerto, que las coordenadas intentarían mover.
+  useEffect(() => {
+    if (paso !== 1 || !ancla) mapa.current = null;
+  }, [paso, ancla]);
+
+  /**
+   * Llegó la posición del teléfono con la precisión exigida (cada «Compartir mi ubicación», no la
+   * relectura al enviar): el punto arranca en lo que ya estaba elegido si sigue dentro del
+   * círculo, si no en el punto del enlace si queda cerca, y si no en la posición del teléfono.
+   * Con un paso pendiente (un 422 de la posición, una posición vencida, un borrador retomado) el
+   * punto ya se aceptó con «Continuar», aunque lo haya puesto la app: no se muda en silencio a la
+   * posición nueva, que llevaría a la revisión y enviaría otro lugar.
+   */
+  const vezAnclada = estadoUbicacion.fase === 'lista' ? estadoUbicacion.vez : null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega una posición nueva; lo demás se lee por ref o del render que la trajo
+  useEffect(() => {
+    const e = ubicador.leer();
+    if (vezAnclada === null || e.fase !== 'lista') return;
+    const actual = ubicacionRef.current;
+    const { punto, aviso } = puntoInicial({
+      ancla: e.ancla,
+      guardado: puntoYaElegido(actual, { aceptado: pasoPendiente !== null }),
+      enlace: enlaceRef.current,
+    });
+    if (!actual || punto.lat !== actual.lat || punto.lon !== actual.lon) fijarUbicacion(punto);
+    setAvisoUbicacion(aviso);
+  }, [vezAnclada]);
 
   /**
    * Una clave por formulario, estable entre reintentos: si el envío se corta y el vecino vuelve a
@@ -327,31 +416,33 @@ export function FormularioReporte() {
         // Se guardó mientras se resolvía: se vuelve a preguntar en vez de dejar «Continuar» trabado.
         fijarUbicacion(b.ubicacion);
       }
-      setPaso(b.paso);
+      // La posición del teléfono no se guarda con el borrador: se vuelve a pedir en el paso 1, y
+      // «Continuar» lleva de vuelta adonde había quedado.
+      if (b.paso > 1) setPasoPendiente(b.paso);
+      setPaso(1);
       setRetomado(true);
-    } else if (enlace) {
-      fijarUbicacion({ ...enlace, metodo: 'manual', precisionM: null, precargada: true });
     }
-    setBorradorLeido(true);
   }, [form]);
 
   // Guardar en cada cambio. Es `sessionStorage`, así que escribir es barato y síncrono; lo que
-  // no se puede es perder el último cambio por esperar a un momento mejor.
+  // no se puede es perder el último cambio por esperar a un momento mejor. La posición del
+  // teléfono no va: solo el punto del reporte.
   useEffect(() => {
     if (!restaurado.current || creado) return;
     guardarBorrador({
-      paso,
+      paso: pasoPendiente ?? paso,
       ubicacion,
       resuelto,
       fotos,
       valores: valores as Borrador['valores'],
       clave: claveEnvio.current as string,
     });
-  }, [paso, ubicacion, resuelto, fotos, valores, creado]);
+  }, [paso, pasoPendiente, ubicacion, resuelto, fotos, valores, creado]);
 
   const empezarDeCero = () => {
     olvidarBorrador();
     claveEnvio.current = nuevaClaveIdempotencia();
+    congelado.current.soltar();
     form.reset(valoresIniciales());
     setResolviendo(false);
     setFotos([]);
@@ -366,30 +457,63 @@ export function FormularioReporte() {
     setErrorEnvio(null);
     setErrorUbicacion(null);
     setAvisoUbicacion(null);
+    setErrorCoordenadas(null);
     setErrorFoto(null);
     setRetomado(false);
+    setPasoPendiente(null);
     setPaso(1);
-    // Como recién abierto: el punto de partida vuelve a ser el del enlace, o el centro de la ciudad.
-    if (enlace) fijarUbicacion({ ...enlace, metodo: 'manual', precisionM: null, precargada: true });
-    mapa.current?.jumpTo({ center: centroDelPaso1(null, enlace, centroDeCiudad(ciudad)) });
+    // Como recién abierto, pero sin volver a pedir la ubicación si ya se compartió: el punto
+    // vuelve al enlace (si queda cerca) o a la posición del teléfono.
+    if (ancla) {
+      const { punto, aviso } = puntoInicial({ ancla, guardado: null, enlace });
+      fijarUbicacion(punto);
+      setAvisoUbicacion(aviso);
+      mapa.current?.jumpTo({ center: [punto.lon, punto.lat] });
+    }
   };
 
   function fijarUbicacion(u: Ubicacion) {
     setUbicacion(u);
-    // Estos cuatro campos no tienen control visible, pero SÍ están en ReporteCrearSchema, que es
-    // el resolver del formulario. Si no se registran, `handleSubmit` falla la validación por
-    // lat/lon indefinidos y no llega a llamar al callback: el botón de enviar no hacía nada.
+    // lat y lon no tienen control visible, pero SÍ están en el contrato que valida el formulario.
+    // Si no se registran, `handleSubmit` falla la validación por lat/lon indefinidos y no llega a
+    // llamar al callback: el botón de enviar no hacía nada.
     form.setValue('lat', u.lat, { shouldValidate: false });
     form.setValue('lon', u.lon, { shouldValidate: false });
-    form.setValue('ubicacion_metodo', u.metodo, { shouldValidate: false });
-    form.setValue('precision_gps_m', u.precisionM, { shouldValidate: false });
-    form.clearErrors(['lat', 'lon', 'ubicacion_metodo', 'precision_gps_m']);
+    form.clearErrors(['lat', 'lon']);
     setErrorUbicacion(null);
     setAvisoUbicacion(null);
+    setErrorCoordenadas(null);
+    // Otro punto es otro envío: la posición congelada para reintentar el anterior ya no vale.
+    congelado.current.soltar();
     // La unidad vecinal a la vista es la del punto anterior: se borra y «Continuar» espera la
     // respuesta del punto nuevo, que pide el efecto de abajo.
     setResuelto(null);
     setResolviendo(true);
+  }
+
+  /** Un punto elegido en el mapa (arrastre, toque, flechas), recortado al círculo. */
+  function elegirPunto(lat: number, lon: number) {
+    if (!ancla) return;
+    const p = recortarAlCirculo({ lat, lon }, ancla);
+    fijarUbicacion({ lat: p.lat, lon: p.lon });
+  }
+
+  /** «Mover 5 m»: desde el punto actual, sin salir del círculo. */
+  function moverPunto(direccion: Direccion) {
+    if (!ancla) return;
+    const p = moverDentroDelRadio(ubicacion ?? ancla, direccion, PASO_BOTON_M, ancla);
+    fijarUbicacion({ lat: p.lat, lon: p.lon });
+  }
+
+  function confirmarCoordenadas() {
+    if (!ancla) return;
+    const r = coordenadasEscritas(latTexto, lonTexto, ancla);
+    if (r.tipo !== 'ok') {
+      setErrorCoordenadas(r.mensaje);
+      return;
+    }
+    mapa.current?.jumpTo({ center: [r.punto.lon, r.punto.lat] });
+    fijarUbicacion({ lat: r.punto.lat, lon: r.punto.lon });
   }
 
   /**
@@ -426,33 +550,6 @@ export function FormularioReporte() {
       control.abort();
     };
   }, [ubicacion]);
-
-  function usarMiUbicacion() {
-    if (!navigator.geolocation) {
-      setErrorUbicacion(
-        'Tu navegador no permite compartir la ubicación. Podés mover el mapa o escribir las coordenadas.',
-      );
-      return;
-    }
-    toast('Buscando tu ubicación…');
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        // Una respuesta tardía no mueve en silencio un punto que la persona ya dio por bueno.
-        if (pasoRef.current !== 1) return;
-        const { ubicacion: u, aproximada } = ubicacionDesdeGps(pos.coords);
-        // `flyTo` no trae `originalEvent`: el mapa no lo toma como un gesto y no pisa el método ni
-        // la precisión del GPS con los de una elección manual.
-        mapa.current?.flyTo({ center: [u.lon, u.lat], zoom: aproximada ? 14 : 17, duration: 700 });
-        fijarUbicacion(u);
-        if (aproximada) setAvisoUbicacion(TEXTO_UBICACION_APROXIMADA);
-      },
-      () =>
-        setErrorUbicacion(
-          'No pudimos obtener tu ubicación. Mové el mapa hasta el punto o escribí las coordenadas.',
-        ),
-      { enableHighAccuracy: true, timeout: 15_000 },
-    );
-  }
 
   const subir = useMutation({
     mutationFn: ({ foto }: { foto: File; vista: string }) => subirFoto(foto),
@@ -542,9 +639,11 @@ export function FormularioReporte() {
   }, [mostrarError]);
 
   const enviar = useMutation({
-    mutationFn: (payload: ReporteCrearEntrada) =>
+    mutationFn: (payload: Parameters<typeof crearReporte>[0]) =>
       crearReporte(payload, claveEnvio.current as string),
     onSuccess: (f) => {
+      congelado.current.soltar();
+      ubicador.detener();
       const p = f.properties;
       recordarReporte({
         id: p.id,
@@ -564,10 +663,22 @@ export function FormularioReporte() {
       void refrescarSesion(cliente);
     },
     onError: (e) => {
+      // Un «no» del servidor (4xx) es definitivo: el próximo intento vuelve a leer la posición.
+      // Con un fallo dudoso (red, plazo, 5xx) se conserva, para que el reintento sea el mismo.
+      if (e instanceof ErrorApi && e.estado >= 400 && e.estado < 500) congelado.current.soltar();
       // 401: la sesión venció entre que se abrió el formulario y se pulsó «Enviar». El borrador
       // sigue guardado, así que se ofrece volver a entrar en vez de tirar el trabajo.
       if (esSesionCaducada(e)) {
         setSesionCaducada(true);
+        return;
+      }
+      // 422 de la posición del teléfono (precisión, antigüedad o radio): se vuelve a pedir en el
+      // paso 1, con el texto de cada caso, y «Continuar» trae de vuelta a la revisión.
+      if (esUbicacionRechazada(e)) {
+        ubicador.reiniciar();
+        setAvisoUbicacion(mensajeDeError(e));
+        setPasoPendiente(PASOS);
+        setPaso(1);
         return;
       }
       // 429 de cuota: no es un fallo de red ni algo que se arregle reintentando, y el texto
@@ -581,7 +692,7 @@ export function FormularioReporte() {
       setErrorEnvio(mensajeDeEnvio(e));
       const detalles = detallesDeError(e);
       for (const d of detalles) {
-        form.setError(d.campo as keyof ReporteCrearEntrada, { message: d.mensaje });
+        form.setError(d.campo as keyof ValoresFormulario, { message: d.mensaje });
       }
       if (detalles.length) llevarAlError(detalles.map((d) => d.campo));
     },
@@ -637,6 +748,7 @@ export function FormularioReporte() {
       : null;
 
   const estadoAvance: EstadoParaAvanzar = {
+    ancla,
     ubicacion,
     resuelto,
     resolviendo,
@@ -645,27 +757,71 @@ export function FormularioReporte() {
     evento_en: valores.evento_en,
     descripcion: valores.descripcion,
     subiendoFoto: subir.isPending,
-    enviando: enviar.isPending,
+    enviando: enviar.isPending || releyendo,
     ahora,
   };
   const errores = form.formState.errors;
   const limitesFecha = limitesFechaEvento(ahora);
   const errorFecha = errores.evento_en?.message ?? problemaFechaEvento(valores.evento_en, ahora);
 
-  const irAdelante = () => setPaso((p) => Math.min(PASOS, p + 1));
+  const irAdelante = () => {
+    if (paso === 1 && pasoPendiente) {
+      setPaso(pasoPendiente);
+      setPasoPendiente(null);
+      return;
+    }
+    setPaso((p) => Math.min(PASOS, p + 1));
+  };
   const irAtras = () => setPaso((p) => Math.max(1, p - 1));
 
+  /** Vuelve al paso 1 a ajustar el punto o a compartir la ubicación, y después a la revisión. */
+  const volverAlPaso1 = () => {
+    setPasoPendiente(PASOS);
+    setPaso(1);
+  };
+
   const enviarFormulario = form.handleSubmit(
-    (datos) => {
+    async (datos) => {
       // Defensa: con una foto subiendo el botón está deshabilitado, pero Enter también envía.
-      if (subir.isPending) return;
+      if (subir.isPending || enviar.isPending || releyendo) return;
       if (!ubicacion) {
         setErrorUbicacion(MENSAJE_FALTA_UBICACION);
         setPaso(1);
         return;
       }
       setErrorEnvio(null);
-      enviar.mutate(armarEnvio(datos, ubicacion, fotos));
+      // Un reintento repite el `dispositivo` del primer intento. Si no hay, se relee la posición:
+      // el teléfono pudo moverse desde el paso 1.
+      let dispositivo = congelado.current.actual();
+      if (!dispositivo) {
+        const antes = ubicador.leer();
+        setReleyendo(true);
+        const relectura = await ubicador.releer();
+        setReleyendo(false);
+        const decision = decidirEnvio({
+          punto: ubicacion,
+          relectura,
+          anterior: antes.fase === 'lista' ? antes.ancla : null,
+          ahora: Date.now(),
+        });
+        if (decision.tipo === 'vencida') {
+          ubicador.reiniciar();
+          setAvisoUbicacion(
+            `Tu ubicación tiene más de ${MINUTOS_POSICION} minutos y no pudimos volver a leerla. Compartila de nuevo para enviar el reporte.`,
+          );
+          volverAlPaso1();
+          return;
+        }
+        if (decision.tipo === 'movido') {
+          setErrorUbicacion(
+            `Te moviste ${decision.movidoM} m: ajustá el punto para que quede a ${RADIO_M} m o menos de donde estás.`,
+          );
+          volverAlPaso1();
+          return;
+        }
+        dispositivo = congelado.current.tomar(decision.lectura, Date.now());
+      }
+      enviar.mutate(armarEnvio(datos, ubicacion, fotos, dispositivo));
     },
     (rechazados) => {
       // Cada error se muestra en su campo y se lleva a la persona al paso donde está. Antes todo
@@ -728,7 +884,10 @@ export function FormularioReporte() {
         <div className="px-5 pb-3">
           <Aviso tono="info" data-testid="borrador-retomado">
             <b className="mb-1 block text-[14.5px]">Retomamos lo que habías empezado</b>
-            Seguimos desde donde lo dejaste. Nada de esto se envió todavía.
+            {ancla
+              ? 'Seguimos desde donde lo dejaste.'
+              : 'Para seguir desde donde lo dejaste, volvé a compartir tu ubicación: no la guardamos.'}{' '}
+            Nada de esto se envió todavía.
             <button
               type="button"
               className="btn btn-fantasma btn-sm mt-2.5"
@@ -747,157 +906,188 @@ export function FormularioReporte() {
             <p className="pno">Paso 1 de {PASOS}</p>
             <p className="preg">¿Dónde se junta el agua?</p>
           </div>
-          <div className="relative mx-5 min-h-[260px] flex-1 overflow-hidden rounded-[20px]">
-            {borradorLeido ? (
-              <MapaDiferido
-                className="map"
-                ariaLabel="Mapa para elegir la ubicación del reporte"
-                centro={centroDelPaso1(ubicacion, enlace, centroDeCiudad(ciudad))}
-                zoom={17}
-                seguirCentro
-                onUbicacion={(lat, lon) =>
-                  fijarUbicacion({ lat, lon, metodo: 'manual', precisionM: null })
-                }
-                alListo={(m) => {
-                  mapa.current = m;
-                  // Si el punto cambió mientras el mapa cargaba (llegó el GPS, se confirmaron
-                  // coordenadas), se lo lleva ahí. `jumpTo` no es un gesto: no elige nada.
-                  const u = ubicacionRef.current;
-                  if (u) m.jumpTo({ center: [u.lon, u.lat] });
-                }}
-              />
-            ) : null}
-            {/* El marcador queda clavado en el centro y lo que se mueve es el mapa: con el
-                pulgar es más preciso que arrastrar un pin diminuto. */}
-            <div className="flot pointer-events-none top-1/2 left-1/2 -translate-x-1/2 -translate-y-full">
-              <svg width="38" height="48" viewBox="0 0 38 48" fill="none" aria-hidden="true">
-                <title>Marcador del punto</title>
-                <path
-                  d="M19 47s15-14.2 15-25A15 15 0 1 0 4 22c0 10.8 15 25 15 25Z"
-                  fill="#1B6B38"
-                  stroke="#fff"
-                  strokeWidth="3"
+          {!ancla ? (
+            // Sin la posición del teléfono no hay mapa: primero se comparte la ubicación, y solo
+            // al tocar el botón (plan 2026-09-26, pedido F).
+            <VistaPedirUbicacion
+              estado={estadoUbicacion}
+              alCompartir={() => ubicador.compartir()}
+              aviso={avisoUbicacion}
+            />
+          ) : (
+            <>
+              <div className="relative mx-5 min-h-[260px] flex-1 overflow-hidden rounded-[20px]">
+                <MapaDiferido
+                  className="map"
+                  ariaLabel="Mapa para elegir la ubicación del reporte"
+                  centro={centroDelPaso1(ubicacion, ancla)}
+                  zoom={17}
+                  circulo={{ lat: ancla.lat, lon: ancla.lon, radioM: RADIO_M }}
+                  seleccionUbicacion={ubicacion ? { lat: ubicacion.lat, lon: ubicacion.lon } : null}
+                  onUbicacion={elegirPunto}
+                  alListo={(m) => {
+                    mapa.current = m;
+                    // El círculo entero a la vista (y el punto, si quedó afuera), sea cual sea el
+                    // tamaño de la pantalla.
+                    m.fitBounds(encuadreDelPaso1(ancla, ubicacionRef.current), {
+                      // Arriba, lugar para el dibujo del marcador, que sale hacia arriba del punto.
+                      padding: { top: 56, bottom: 24, left: 24, right: 24 },
+                      duration: 0,
+                    });
+                  }}
                 />
-                <circle cx="19" cy="21" r="5.5" fill="#fff" />
-              </svg>
-            </div>
-            <div className="flot right-3 bottom-3 grid gap-2">
-              <button
-                type="button"
-                className="bico bico-sm bico-verde"
-                onClick={usarMiUbicacion}
-                aria-label="Usar mi ubicación"
-              >
-                <Navigation size={17} aria-hidden="true" />
-              </button>
-            </div>
-          </div>
-
-          <div className="px-5 pt-3">
-            <button
-              type="button"
-              data-testid="opcion-coordenadas"
-              className="btn btn-fantasma btn-sm btn-bloque"
-              onClick={() => setMostrarCoordenadas((v) => !v)}
-              aria-expanded={mostrarCoordenadas}
-            >
-              Ingresar coordenadas
-            </button>
-            {mostrarCoordenadas ? (
-              <div className="tarjeta mt-2.5 space-y-3 p-4">
-                <p className="ayuda">
-                  Alternativa sin mapa: escribí la latitud y la longitud en grados decimales
-                  (EPSG:4326).
-                </p>
-                <div className="flex flex-wrap gap-3">
-                  <div className="flex-1">
-                    <label htmlFor="lat" className="lbl">
-                      Latitud
-                    </label>
-                    <input
-                      id="lat"
-                      inputMode="decimal"
-                      className="campo"
-                      value={latTexto}
-                      onChange={(e) => setLatTexto(e.target.value)}
-                      placeholder={String(ciudad.centro.lat)}
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label htmlFor="lon" className="lbl">
-                      Longitud
-                    </label>
-                    <input
-                      id="lon"
-                      inputMode="decimal"
-                      className="campo"
-                      value={lonTexto}
-                      onChange={(e) => setLonTexto(e.target.value)}
-                      placeholder={String(ciudad.centro.lon)}
-                    />
-                  </div>
+                <div className="flot right-3 bottom-3 grid gap-2">
+                  <button
+                    type="button"
+                    className="bico bico-sm bico-verde"
+                    data-testid="boton-punto-en-mi-ubicacion"
+                    onClick={() => {
+                      mapa.current?.easeTo({ center: [ancla.lon, ancla.lat] });
+                      fijarUbicacion({ lat: ancla.lat, lon: ancla.lon });
+                    }}
+                    aria-label="Poner el punto en mi ubicación"
+                  >
+                    <Navigation size={17} aria-hidden="true" />
+                  </button>
                 </div>
+              </div>
+
+              <div className="px-5 pt-3">
+                <p className="lbl" id="titulo-mover-punto">
+                  Mover el punto {PASO_BOTON_M} m
+                </p>
+                <fieldset className="grid grid-cols-4 gap-2" aria-labelledby="titulo-mover-punto">
+                  {BOTONES_MOVER.map(({ direccion, Icono, texto }) => (
+                    <button
+                      key={direccion}
+                      type="button"
+                      className="btn btn-fantasma btn-sm min-h-12"
+                      data-testid={`mover-${direccion}`}
+                      aria-label={`Mover el punto ${PASO_BOTON_M} m ${texto}`}
+                      onClick={() => moverPunto(direccion)}
+                    >
+                      <Icono size={18} aria-hidden="true" />
+                    </button>
+                  ))}
+                </fieldset>
+                <p className="ayuda mt-2" data-testid="ayuda-circulo">
+                  El círculo marca {RADIO_M} m alrededor de tu ubicación (precisión de{' '}
+                  {Math.round(ancla.precisionM)} m) y el punto no puede salir de él. También podés
+                  arrastrar el marcador, tocar el mapa o, con el marcador elegido, usar las flechas
+                  del teclado.
+                </p>
+              </div>
+
+              <div className="px-5 pt-3">
                 <button
                   type="button"
-                  data-testid="boton-confirmar-ubicacion"
-                  className="btn btn-tinta btn-sm"
-                  onClick={() => {
-                    const c = leerCoordenadas(latTexto, lonTexto);
-                    if (!c) {
-                      setErrorUbicacion(
-                        'Revisá las coordenadas: la latitud va entre -90 y 90, y la longitud entre -180 y 180.',
-                      );
-                      return;
-                    }
-                    mapa.current?.jumpTo({ center: [c.lon, c.lat], zoom: 17 });
-                    fijarUbicacion({ lat: c.lat, lon: c.lon, metodo: 'manual', precisionM: null });
-                  }}
+                  data-testid="opcion-coordenadas"
+                  className="btn btn-fantasma btn-sm btn-bloque"
+                  onClick={() => setMostrarCoordenadas((v) => !v)}
+                  aria-expanded={mostrarCoordenadas}
                 >
-                  Confirmar ubicación
+                  Ingresar coordenadas
+                </button>
+                {mostrarCoordenadas ? (
+                  <div className="tarjeta mt-2.5 space-y-3 p-4">
+                    <p className="ayuda">
+                      Alternativa sin arrastrar: escribí la latitud y la longitud en grados
+                      decimales (EPSG:4326). Tienen que quedar a {RADIO_M} m o menos de donde estás.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <div className="flex-1">
+                        <label htmlFor="lat" className="lbl">
+                          Latitud
+                        </label>
+                        <input
+                          id="lat"
+                          inputMode="decimal"
+                          className="campo"
+                          value={latTexto}
+                          onChange={(e) => setLatTexto(e.target.value)}
+                          placeholder={ancla.lat.toFixed(6)}
+                          aria-describedby={errorCoordenadas ? 'error-coordenadas' : undefined}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label htmlFor="lon" className="lbl">
+                          Longitud
+                        </label>
+                        <input
+                          id="lon"
+                          inputMode="decimal"
+                          className="campo"
+                          value={lonTexto}
+                          onChange={(e) => setLonTexto(e.target.value)}
+                          placeholder={ancla.lon.toFixed(6)}
+                          aria-describedby={errorCoordenadas ? 'error-coordenadas' : undefined}
+                        />
+                      </div>
+                    </div>
+                    {errorCoordenadas ? (
+                      <p
+                        id="error-coordenadas"
+                        className="error"
+                        role="alert"
+                        data-testid="error-coordenadas"
+                      >
+                        {errorCoordenadas}
+                      </p>
+                    ) : null}
+                    <button
+                      type="button"
+                      data-testid="boton-confirmar-ubicacion"
+                      className="btn btn-tinta btn-sm"
+                      onClick={confirmarCoordenadas}
+                    >
+                      Confirmar ubicación
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="pie" aria-live="polite">
+                {avisoUbicacion ? (
+                  <Aviso tono="alerta" className="mb-3" data-testid="aviso-ubicacion">
+                    {avisoUbicacion}
+                  </Aviso>
+                ) : null}
+                {errorUbicacion ? (
+                  <Aviso tono="err" className="mb-3" data-testid="error-ubicacion">
+                    {errorUbicacion}
+                  </Aviso>
+                ) : resuelto?.dentro_cobertura && ubicacion ? (
+                  <Aviso tono="ok" className="mb-3" data-testid="ubicacion-resuelta">
+                    <b>
+                      {etiquetaUnidadVecinal(resuelto.unidad_vecinal?.codigo)} ·{' '}
+                      {etiquetaDistrito(resuelto.distrito?.codigo)}
+                    </b>
+                    <br />
+                    {resuelto.asignado_por_proximidad
+                      ? `Asignada por proximidad, a ${Math.round(resuelto.distancia_m ?? 0)} m. `
+                      : ''}
+                    <span data-testid="distancia-al-punto">{textoDistancia(ubicacion, ancla)}</span>{' '}
+                    Arrastrá el marcador para ajustar el punto exacto.
+                  </Aviso>
+                ) : (
+                  <Aviso tono="info" className="mb-3" data-testid="ubicacion-pendiente">
+                    {resolviendo
+                      ? 'Buscando la unidad vecinal…'
+                      : 'Arrastrá el marcador hasta el punto exacto.'}
+                  </Aviso>
+                )}
+                <button
+                  type="button"
+                  data-testid="boton-siguiente"
+                  className="btn btn-bloque"
+                  disabled={!puedeAvanzar(1, estadoAvance)}
+                  onClick={irAdelante}
+                >
+                  Continuar
                 </button>
               </div>
-            ) : null}
-          </div>
-
-          <div className="pie" aria-live="polite">
-            {avisoUbicacion ? (
-              <Aviso tono="alerta" className="mb-3" data-testid="aviso-ubicacion-aproximada">
-                {avisoUbicacion}
-              </Aviso>
-            ) : null}
-            {errorUbicacion ? (
-              <Aviso tono="err" className="mb-3" data-testid="error-ubicacion">
-                {errorUbicacion}
-              </Aviso>
-            ) : resuelto?.dentro_cobertura ? (
-              <Aviso tono="ok" className="mb-3" data-testid="ubicacion-resuelta">
-                <b>
-                  {etiquetaUnidadVecinal(resuelto.unidad_vecinal?.codigo)} ·{' '}
-                  {etiquetaDistrito(resuelto.distrito?.codigo)}
-                </b>
-                <br />
-                {resuelto.asignado_por_proximidad
-                  ? `Asignada por proximidad, a ${Math.round(resuelto.distancia_m ?? 0)} m. `
-                  : ''}
-                Mové el mapa para ajustar el punto exacto.
-              </Aviso>
-            ) : (
-              <Aviso tono="info" className="mb-3" data-testid="ubicacion-pendiente">
-                {resolviendo
-                  ? 'Buscando la unidad vecinal…'
-                  : 'Mové el mapa hasta el punto exacto.'}
-              </Aviso>
-            )}
-            <button
-              type="button"
-              data-testid="boton-siguiente"
-              className="btn btn-bloque"
-              disabled={!puedeAvanzar(1, estadoAvance)}
-              onClick={irAdelante}
-            >
-              Continuar
-            </button>
-          </div>
+            </>
+          )}
         </>
       ) : null}
 
@@ -1273,7 +1463,7 @@ export function FormularioReporte() {
                     </span>
                   </>
                 }
-                alEditar={() => setPaso(1)}
+                alEditar={volverAlPaso1}
               />
               <FilaRevision
                 etiqueta={ETIQUETAS.campos.profundidad}
@@ -1363,15 +1553,18 @@ export function FormularioReporte() {
               className="btn btn-bloque"
               disabled={!puedeAvanzar(4, estadoAvance)}
             >
-              {enviar.isPending
-                ? 'Enviando…'
-                : subir.isPending
-                  ? 'Subiendo foto…'
-                  : 'Enviar reporte'}
+              {releyendo
+                ? 'Confirmando tu ubicación…'
+                : enviar.isPending
+                  ? 'Enviando…'
+                  : subir.isPending
+                    ? 'Subiendo foto…'
+                    : 'Enviar reporte'}
             </button>
             <p className="ayuda mt-2 text-center">
-              En el mapa nunca aparece quién reportó. Tu reporte pasa por revisión municipal antes
-              de publicarse.
+              Al enviar volvemos a leer tu ubicación para comprobar que el punto siga a {RADIO_M} m
+              o menos de vos; no la guardamos. En el mapa nunca aparece quién reportó. Tu reporte
+              pasa por revisión municipal antes de publicarse.
             </p>
           </div>
         </>

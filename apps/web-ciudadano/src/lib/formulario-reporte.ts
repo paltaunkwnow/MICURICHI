@@ -1,5 +1,18 @@
-import { CONFIG_DOMINIO, type ReporteCrearEntrada } from 'contracts';
+import { zodResolver } from '@hookform/resolvers/zod';
+import {
+  CONFIG_DOMINIO,
+  type Dispositivo,
+  dentroDelRadio,
+  type PuntoLatLon,
+  type ReporteCrear,
+  type ReporteCrearEntrada,
+  ReporteCrearSchema,
+} from 'contracts';
+import type { FieldValues, Resolver } from 'react-hook-form';
 import { leerCoordenadas } from './geo';
+import type { Ubicacion } from './radio';
+
+export type { Ubicacion };
 
 /**
  * Reglas del asistente de reporte que no necesitan React: qué habilita cada paso, cómo se
@@ -10,18 +23,44 @@ import { leerCoordenadas } from './geo';
 /** Pasos del asistente de reporte: ubicación, agua, fotos y descripción, revisión. */
 export const PASOS_REPORTE = 4;
 
-/** Dónde quedó el punto del reporte y cómo se eligió. */
-export interface Ubicacion {
-  lat: number;
-  lon: number;
-  metodo: 'gps' | 'manual';
-  precisionM: number | null;
-  /**
-   * La puso el enlace «Me pasa a mí» (el detalle de otro punto), no la persona. Sirve de punto de
-   * partida, pero no cuenta como algo empezado: abrir el enlace y salir no deja borrador.
-   */
-  precargada?: boolean;
+/**
+ * Lo que contesta la persona. `dispositivo` no está: no es una respuesta sino la posición del
+ * teléfono, que se lee al enviar y se agrega en `armarEnvio`. Así tampoco llega al borrador.
+ */
+export type ValoresFormulario = Omit<ReporteCrearEntrada, 'dispositivo'>;
+
+/** Posición del teléfono con la precisión que declaró; el paso 1 se ancla a ella. */
+export interface Ancla extends PuntoLatLon {
+  precisionM: number;
 }
+
+/**
+ * Relleno para validar con `ReporteCrearSchema` sin la posición del teléfono. Zod no deja `omit`
+ * en un esquema con refinamientos (el del sumidero), así que se valida con esto y se descarta: el
+ * `dispositivo` que viaja lo pone siempre `armarEnvio`.
+ */
+const DISPOSITIVO_DE_RELLENO: Dispositivo = { lat: 0, lon: 0, precision_m: 0, antiguedad_s: 0 };
+const validarContrato = zodResolver(ReporteCrearSchema);
+
+/** El resolver de react-hook-form: el contrato entero menos `dispositivo`. */
+export const resolverFormulario: Resolver<ValoresFormulario> = async (
+  valores,
+  contexto,
+  opciones,
+) => {
+  const r = await validarContrato(
+    { ...valores, dispositivo: DISPOSITIVO_DE_RELLENO },
+    contexto,
+    opciones as unknown as Parameters<typeof validarContrato>[2],
+  );
+  const { dispositivo: _relleno, ...errores } = r.errors as Record<string, unknown>;
+  if (Object.keys(errores).length > 0)
+    return { values: {}, errors: errores as typeof r.errors } as Awaited<
+      ReturnType<Resolver<ValoresFormulario>>
+    >;
+  const { dispositivo: _descartado, ...valoresValidos } = r.values as ReporteCrear;
+  return { values: valoresValidos as FieldValues as ValoresFormulario, errors: {} };
+};
 
 /** Las tres respuestas del sumidero, con `null` como «sin contestar». */
 export interface Sumidero {
@@ -36,7 +75,7 @@ export interface Sumidero {
  * react-hook-form le escribía `false` al montar la casilla: todos los reportes decían que el agua
  * no brotaba aunque nadie lo hubiera dicho.
  */
-export function valoresIniciales(): Partial<ReporteCrearEntrada> {
+export function valoresIniciales(): Partial<ValoresFormulario> {
   return {
     ubicacion_tipo: 'via_publica',
     causa_presunta: 'desconocida',
@@ -62,44 +101,13 @@ export function ubicacionDelEnlace(
 }
 
 /**
- * Dónde abre el mapa del paso 1. El mapa se vuelve a crear cada vez que se entra al paso (al
- * volver desde el 2, al retomar un borrador), y abría siempre en el centro por defecto: con el
- * marcador clavado en el centro de la pantalla, eso era ENSEÑAR otro punto que el elegido.
- *
- * Sin punto ni enlace, el centro de la ciudad configurada (`centroDeCiudad(useCiudad())`).
+ * Dónde abre el mapa del paso 1: en el punto elegido y, sin punto, en la posición del teléfono.
+ * El mapa se vuelve a crear cada vez que se entra al paso (al volver desde el 2, al retomar un
+ * borrador): si abriera en otro lado, el marcador mostraría un lugar distinto del que se envía.
  */
-export function centroDelPaso1(
-  ubicacion: Ubicacion | null,
-  enlace: { lat: number; lon: number } | null,
-  centroCiudad: [number, number],
-): [number, number] {
-  if (ubicacion) return [ubicacion.lon, ubicacion.lat];
-  if (enlace) return [enlace.lon, enlace.lat];
-  return centroCiudad;
-}
-
-/**
- * Por encima de esto la «ubicación» no viene de un GPS sino de la red o de la IP, que la dan con
- * kilómetros de error. Es también el máximo que admite `precision_gps_m` en el contrato.
- */
-export const PRECISION_GPS_MAX_M = 10_000;
-
-/**
- * Lo que devolvió `navigator.geolocation`, como ubicación del reporte. Una posición de más de
- * 10 km de precisión no se presenta como GPS: se toma como punto de partida manual, sin
- * precisión, y la pantalla le pide a la persona que ajuste el mapa.
- */
-export function ubicacionDesdeGps(coords: {
-  latitude: number;
-  longitude: number;
-  accuracy?: number | null;
-}): { ubicacion: Ubicacion; aproximada: boolean } {
-  const { latitude: lat, longitude: lon, accuracy } = coords;
-  const precision =
-    typeof accuracy === 'number' && Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
-  if (precision !== null && precision > PRECISION_GPS_MAX_M)
-    return { ubicacion: { lat, lon, metodo: 'manual', precisionM: null }, aproximada: true };
-  return { ubicacion: { lat, lon, metodo: 'gps', precisionM: precision }, aproximada: false };
+export function centroDelPaso1(ubicacion: Ubicacion | null, ancla: PuntoLatLon): [number, number] {
+  const c = ubicacion ?? ancla;
+  return [c.lon, c.lat];
 }
 
 // ------------------------------------------------------------------ paso 2: la fecha
@@ -217,6 +225,8 @@ export function mosaicoDeFotos(e: { subidas: number; subiendo: boolean }): {
 // ------------------------------------------------------------------ avanzar y enviar
 
 export interface EstadoParaAvanzar {
+  /** Posición del teléfono a la que se ancla el paso 1; `null` mientras no se compartió. */
+  ancla: Ancla | null;
   ubicacion: Ubicacion | null;
   resuelto: { dentro_cobertura: boolean } | null;
   resolviendo: boolean;
@@ -233,8 +243,17 @@ export interface EstadoParaAvanzar {
 export function puedeAvanzar(paso: number, e: EstadoParaAvanzar): boolean {
   switch (paso) {
     case 1:
-      // La unidad vecinal que se muestra tiene que ser la del punto actual, no la del anterior.
-      return !!e.ubicacion && !e.resolviendo && !!e.resuelto?.dentro_cobertura;
+      // Sin la posición del teléfono, con una imprecisa o con el punto fuera del círculo, el
+      // servidor lo rechazaría (422). La unidad vecinal que se muestra tiene que ser la del punto
+      // actual, no la del anterior.
+      return (
+        !!e.ancla &&
+        e.ancla.precisionM <= CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M &&
+        !!e.ubicacion &&
+        dentroDelRadio(e.ubicacion, e.ancla) &&
+        !e.resolviendo &&
+        !!e.resuelto?.dentro_cobertura
+      );
     case 2:
       return (
         !!e.profundidad_estimada && !!e.frecuencia && !problemaFechaEvento(e.evento_en, e.ahora)
@@ -256,8 +275,7 @@ export function puedeAvanzar(paso: number, e: EstadoParaAvanzar): boolean {
 const PASO_DEL_CAMPO: Record<string, number> = {
   lat: 1,
   lon: 1,
-  ubicacion_metodo: 1,
-  precision_gps_m: 1,
+  dispositivo: 1,
   profundidad_estimada: 2,
   frecuencia: 2,
   evento_en: 2,
@@ -295,27 +313,35 @@ export function camposSinLugar(campos: readonly string[]): string[] {
   return campos.filter((c) => PASO_DEL_CAMPO[campoRaiz(c)] === undefined);
 }
 
-/** Texto para cualquier error de lat, lon, método o precisión: no tienen control a la vista. */
+/** Texto para cualquier error de lat, lon o de la posición del teléfono: no tienen control a la vista. */
 export const MENSAJE_FALTA_UBICACION =
-  'Falta la ubicación del punto: movelo en el mapa, usá tu ubicación o escribí las coordenadas.';
+  'Falta la ubicación del punto: compartí tu ubicación y ajustá el punto dentro del círculo.';
+
+/** Lo que el contrato ya no recibe (0.9.0): el servidor los deriva de `dispositivo`. */
+const CAMPOS_DERIVADOS = ['ubicacion_metodo', 'precision_gps_m'] as const;
 
 /**
  * El cuerpo de `POST /api/v1/reportes`. La ubicación sale del estado y no de los campos ocultos
  * del formulario, y el sumidero se vuelve a poner en regla por si algo incoherente llegó hasta
  * acá (un borrador de otra versión, por ejemplo): el servidor lo rechazaría entero.
+ *
+ * `dispositivo` va tal como lo congeló el primer intento (`DispositivoCongelado`): un reintento
+ * repite la misma antigüedad en vez de leer otra.
  */
 export function armarEnvio(
-  datos: ReporteCrearEntrada,
+  datos: ValoresFormulario,
   ubicacion: Ubicacion,
   fotos: ReadonlyArray<{ objeto_key: string }>,
+  dispositivo: Dispositivo,
 ): ReporteCrearEntrada {
-  return {
+  const cuerpo: ReporteCrearEntrada = {
     ...datos,
     ...respuestasSumidero(datos.sumidero_cercano ?? null, datos),
     lat: ubicacion.lat,
     lon: ubicacion.lon,
-    ubicacion_metodo: ubicacion.metodo,
-    precision_gps_m: ubicacion.precisionM,
+    dispositivo,
     fotos: fotos.map((f) => f.objeto_key),
   };
+  for (const campo of CAMPOS_DERIVADOS) delete (cuerpo as Record<string, unknown>)[campo];
+  return cuerpo;
 }

@@ -79,16 +79,17 @@ corresponde a una pantalla suya:
 |---|---|---|
 | `/` | C-01 en móvil, W-01 en escritorio | Mapa público. Buscador, filtros de severidad, capas, lista lateral en escritorio |
 | `/reporte/:id` | C-02 / W-02 | Detalle de un punto con enlace propio |
-| `/reportar` | C-07 a C-12 | Asistente de cuatro pasos y confirmación con código de seguimiento |
+| `/reportar` | C-07 a C-12 | Asistente de cuatro pasos, anclado a la posición del teléfono, y confirmación con código de seguimiento |
 | `/mis-reportes` | C-16 | Reportes enviados desde este dispositivo |
 | `/mis-reportes/:id` | C-17 | Línea de tiempo del reporte propio |
 | `/como-funciona` | C-06 | Tres pestañas: los pasos, los colores, qué no es |
 | `/inicio` | C-00 en móvil, W-00 en escritorio | Portada: láminas de bienvenida o página de inicio |
 
-Dos pantallas del prototipo **no** están: las de cuenta de ciudadano (C-13, C-14) y el perfil con
-puntos y logros (C-15, C-19). No hay backend para eso —el reporte es anónimo a propósito
-(`CLAUDE.md` §16.4) y la gamificación está fuera del alcance de la Misión 1 (§3.2)—, así que
-inventarlo habría sido una pantalla bonita sin nada detrás. Lo que sí existe es el seguimiento:
+El perfil con puntos y logros del prototipo (C-15, C-19) **no** está: los perfiles de ciudadano y la
+gamificación están fuera del alcance de la Misión 1 (`CLAUDE.md` §3.2), así que inventarlo habría
+sido una pantalla bonita sin nada detrás. La cuenta ciudadana existe solo para reportar (§16.4):
+alta en `/crear-cuenta`, entrada en `/ingresar` y el estado de la sesión en `/cuenta`; ver el mapa
+no la necesita. Lo que sí existe es el seguimiento:
 el navegador recuerda los identificadores que devolvió la API y «Mis reportes» consulta su estado
 real (`src/lib/misReportes.ts`).
 
@@ -137,9 +138,57 @@ las de más de 23 h, antes de que venza su vale de 24 h. Vive en la sesión de l
 nada guardado en un teléfono prestado. Abrir `/reportar` (o llegar desde «Me pasa a mí») sin
 tocar nada no deja borrador que retomar.
 
+El borrador guarda el punto del reporte, **nunca la posición del teléfono**: un borrador retomado
+vuelve al paso 1 a pedir la ubicación, y «Continuar» lleva de vuelta al paso donde había quedado.
+
 Las reglas del asistente que no necesitan React (qué habilita cada paso, la fecha del evento en la
-hora local, el GPS aproximado, la coherencia del sumidero, el paso al que lleva cada error) viven
-en `src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`.
+hora local, la coherencia del sumidero, el paso al que lleva cada error, el cuerpo del envío)
+viven en `src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`.
+
+## Paso 1: anclado a la posición del teléfono
+
+Para reportar hay que compartir la ubicación (plan 2026-09-26, pedidos E y F; contracts 0.9.0).
+
+- **Nada al cargar.** Ni el mapa ni el formulario piden o leen la ubicación al abrirse. Se pide al
+  tocar «Compartir mi ubicación» dentro del reporte. `navigator.geolocation` y
+  `navigator.permissions` aparecen en un único archivo, `src/lib/ubicacion-dispositivo.ts`, y
+  `ubicacion-pagina.test.ts` comprueba sobre todo el código fuente que ningún efecto los usa.
+- **Precisión.** `watchPosition` (`enableHighAccuracy`, `maximumAge: 0`) muestra «Precisión
+  actual: N m» hasta llegar a 50 m o menos (`PRECISION_DISPOSITIVO_MAX_M`). Si en 30 s no llega:
+  «Salí a un lugar abierto» con «Reintentar».
+- **Permiso negado.** Un bloqueo con instrucciones. Se escucha el `change` del permiso: si la
+  persona lo habilita en los ajustes del sitio, la búsqueda sigue sola.
+- **El círculo de 60 m.** El mapa arranca en la posición del teléfono con el círculo
+  (`REPORTE_RADIO_DISPOSITIVO_M`) y el marcador recortado a él. El punto se mueve arrastrando el
+  marcador, tocando el mapa, con las flechas (el marcador es un botón: 5 m por toque, 1 m con
+  Mayúsculas), con los botones «mover 5 m» o escribiendo coordenadas, que se rechazan si quedan a
+  más de 60 m («Ese punto está a 80 m de vos…»). La cuenta es la de `contracts`
+  (`distanciaMetros`, `dentroDelRadio` sin tolerancia), la misma con la que api-core lo vuelve a
+  comprobar (api-core suma `REPORTE_RADIO_TOLERANCIA_M`, 0,5 m, por el redondeo). La geometría
+  está en `src/lib/radio.ts`.
+- **«Me pasa a mí».** El punto del enlace se usa solo si queda a 60 m o menos del teléfono; si no,
+  el punto va a la posición del teléfono y se dice por qué.
+- **El punto aceptado no se muda.** Si hay que volver a compartir la ubicación con el resto ya
+  contestado (un 422 de la posición, una posición vencida o un borrador retomado), el punto que
+  la persona aceptó con «Continuar» sigue donde estaba, aunque lo haya puesto el GPS, mientras
+  quede a 60 m o menos de la posición nueva; si no, pasa a la posición del teléfono y se dice por
+  qué (`puntoYaElegido` y `puntoInicial`). Así no se envía otro lugar en silencio, y un reintento
+  tras recargar la página conserva la huella de idempotencia.
+- **Al enviar se relee la posición** (`getCurrentPosition`, sin caché). Si la nueva deja el punto
+  fuera del círculo, se vuelve al paso 1 con «Te moviste N m: ajustá el punto». Si la lectura
+  falla, se usa la última mientras tenga 10 min o menos (`POSICION_ANTIGUEDAD_MAX_S`); si no hay
+  ninguna, hay que volver a compartirla.
+- **Lo que viaja** es `dispositivo: { lat, lon, precision_m, antiguedad_s }`. `antiguedad_s` nunca
+  es negativa (0 si el reloj da la lectura en el futuro) y queda **congelada** para los reintentos
+  tras un fallo dudoso (red, plazo, 5xx): el reintento es la misma petición. Un 4xx la suelta.
+  `ubicacion_metodo` y `precision_gps_m` ya no se mandan: los deriva el servidor.
+- **Los 422** `PRECISION_INSUFICIENTE`, `POSICION_VENCIDA` y `UBICACION_FUERA_DE_RADIO` tienen
+  cada uno su texto (`src/lib/errores.ts`) y llevan al paso 1 a compartir la ubicación de nuevo.
+- **«Ir a mi ubicación» del mapa** consulta el permiso al tocarlo: si ya se dio dentro de un
+  reporte, centra el mapa; si no, muestra «Tu ubicación se pide solo al reportar un punto» junto a
+  «Reportar un punto», sin disparar ningún aviso del navegador.
+- Es una comprobación de coherencia, no una prueba de presencia: la posición la informa el
+  teléfono y se puede falsear (CLAUDE.md §9.5 y §13).
 
 ## La foto sale de la cámara, dentro de la página
 
@@ -180,7 +229,8 @@ aparece otra referencia a un `.jpg` o `.png` propio en `src/` o `public/`.
 `Referrer-Policy`: son fijas, no dependen del despliegue. Avisos para quien las toque:
 
 - `Permissions-Policy` deja `geolocation` y `camera` al propio origen (`(self)`): sin
-  `camera=(self)`, `getUserMedia` falla con `NotAllowedError` aunque la persona diga que sí.
+  `camera=(self)`, `getUserMedia` falla con `NotAllowedError` aunque la persona diga que sí. Las
+  dos se piden solo dentro del reporte, nunca al cargar.
   Micrófono, pagos y USB quedan cerrados.
 - El mapa base de MapLibre 6 pide las teselas raster con `fetch`, **no** con `<img>`: hace falta
   `connect-src`, con `img-src` solo el mapa queda en negro.

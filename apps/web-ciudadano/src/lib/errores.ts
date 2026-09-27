@@ -1,5 +1,28 @@
-import { CONFIG_DOMINIO } from 'contracts';
+import {
+  CODIGOS_UBICACION_DISPOSITIVO,
+  CONFIG_DOMINIO,
+  type CodigoUbicacionDispositivo,
+} from 'contracts';
 import { ErrorApi } from './api';
+
+const MINUTOS_POSICION = Math.round(CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S / 60);
+
+/**
+ * Los 422 de la posición del teléfono (contracts 0.9.0). Cada uno dice qué hacer, porque lo que
+ * hay que hacer es distinto: salir afuera, volver a compartir o acercar el punto.
+ */
+const MENSAJES_UBICACION: Record<CodigoUbicacionDispositivo, string> = {
+  PRECISION_INSUFICIENTE: `Tu teléfono no te ubicó con la precisión necesaria (${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos). Salí a un lugar abierto y volvé a compartir tu ubicación.`,
+  POSICION_VENCIDA: `Tu ubicación era de hace más de ${MINUTOS_POSICION} minutos. Volvé a compartirla para enviar el reporte.`,
+  UBICACION_FUERA_DE_RADIO: `El punto quedó a más de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m de donde estás. Volvé a compartir tu ubicación y ajustá el punto.`,
+};
+
+/** El servidor rechazó la posición del teléfono: hay que volver al paso 1 a compartirla de nuevo. */
+export function esUbicacionRechazada(e: unknown): boolean {
+  return (
+    e instanceof ErrorApi && (CODIGOS_UBICACION_DISPOSITIVO as readonly string[]).includes(e.codigo)
+  );
+}
 
 export interface DetalleCampo {
   campo: string;
@@ -51,6 +74,7 @@ export function mensajeDeError(e: unknown): string {
     if (e.codigo === 'FUERA_DE_COBERTURA') {
       return 'Ese punto queda fuera del municipio. Revisá la ubicación e intentá de nuevo.';
     }
+    if (esUbicacionRechazada(e)) return MENSAJES_UBICACION[e.codigo as CodigoUbicacionDispositivo];
     if (e.estado === 429) {
       return e.message || 'Demasiadas solicitudes. Esperá un momento y volvé a intentar.';
     }

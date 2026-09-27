@@ -35,7 +35,7 @@ function instalar(almacen: unknown) {
 
 const BASE: BorradorNuevo = {
   paso: 3,
-  ubicacion: { lat: -17.78, lon: -63.18, metodo: 'manual', precisionM: null },
+  ubicacion: { lat: -17.78, lon: -63.18 },
   resuelto: { dentro_cobertura: true },
   fotos: [{ objeto_key: 'a.jpg', url: '/api/v1/fotos/a.jpg', subida_en: Date.now() }],
   valores: { descripcion: 'Se junta el agua en la esquina', profundidad_estimada: 'rodilla' },
@@ -229,19 +229,13 @@ describe('borrador del formulario de reporte', () => {
       guardado_en: Date.now(),
       creado_en: Date.now(),
       paso: 1,
-      ubicacion: { lat: -17.78, lon: -63.18, metodo: 'manual', precisionM: null, precargada: true },
+      ubicacion: { lat: -17.78, lon: -63.18, precargada: true },
       resuelto: { dentro_cobertura: true },
       fotos: [],
       // Como lo guarda el formulario de verdad: `fijarUbicacion` copia el punto del enlace a los
-      // valores. Sin estos cuatro la prueba pasaba y la página mostraba «Retomamos lo que habías
+      // valores. Sin estos dos la prueba pasaba y la página mostraba «Retomamos lo que habías
       // empezado» a quien solo había abierto el enlace.
-      valores: {
-        ...valoresIniciales(),
-        lat: -17.78,
-        lon: -63.18,
-        ubicacion_metodo: 'manual',
-        precision_gps_m: null,
-      },
+      valores: { ...valoresIniciales(), lat: -17.78, lon: -63.18 },
       clave: BASE.clave,
     };
     expect(borradorTieneContenido(recienAbierto)).toBe(false);
@@ -249,10 +243,62 @@ describe('borrador del formulario de reporte', () => {
     expect(
       borradorTieneContenido({
         ...recienAbierto,
-        ubicacion: { lat: -17.7, lon: -63.1, metodo: 'manual', precisionM: null },
+        ubicacion: { lat: -17.7, lon: -63.1 },
         valores: { ...recienAbierto.valores, lat: -17.7, lon: -63.1 },
       }),
     ).toBe(true);
+  });
+
+  it('nunca guarda la posición del teléfono (CLAUDE.md §0, regla 8)', () => {
+    const almacen = almacenFalso();
+    instalar(almacen);
+    guardarBorrador({
+      ...BASE,
+      valores: {
+        ...BASE.valores,
+        dispositivo: { lat: -17.7801, lon: -63.1802, precision_m: 9, antiguedad_s: 3 },
+      } as BorradorNuevo['valores'],
+    });
+    const crudo = almacen._datos.get(CLAVE) ?? '';
+    expect(crudo).not.toContain('dispositivo');
+    expect(crudo).not.toContain('precision_m');
+    expect(crudo).not.toContain('-17.7801');
+  });
+
+  it('un borrador de antes de contracts 0.9.0 pierde el método y la precisión viejos', () => {
+    const almacen = almacenFalso();
+    instalar(almacen);
+    almacen.setItem(
+      CLAVE,
+      JSON.stringify({
+        ...BASE,
+        guardado_en: Date.now(),
+        creado_en: Date.now(),
+        formato: 2,
+        ubicacion: { lat: -17.78, lon: -63.18, metodo: 'gps', precisionM: 12 },
+        valores: { ...BASE.valores, ubicacion_metodo: 'gps', precision_gps_m: 12 },
+      }),
+    );
+    const b = leerBorrador();
+    expect(b?.ubicacion).toEqual({ lat: -17.78, lon: -63.18 });
+    expect(Object.keys(b?.valores ?? {})).not.toContain('ubicacion_metodo');
+    expect(Object.keys(b?.valores ?? {})).not.toContain('precision_gps_m');
+  });
+
+  it('una ubicación guardada que no son dos números no se restaura', () => {
+    const almacen = almacenFalso();
+    instalar(almacen);
+    almacen.setItem(
+      CLAVE,
+      JSON.stringify({
+        ...BASE,
+        guardado_en: Date.now(),
+        creado_en: Date.now(),
+        formato: 2,
+        ubicacion: { lat: 'x', lon: -63.18 },
+      }),
+    );
+    expect(leerBorrador()?.ubicacion).toBeNull();
   });
 
   it('la caducidad no se desliza: seguir guardando no renueva el plazo', () => {

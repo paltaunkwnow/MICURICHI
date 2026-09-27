@@ -1,5 +1,9 @@
-import type { ReporteCrearEntrada } from 'contracts';
-import { fechaEventoVigente, PASOS_REPORTE, type Ubicacion } from './formulario-reporte';
+import {
+  fechaEventoVigente,
+  PASOS_REPORTE,
+  type Ubicacion,
+  type ValoresFormulario,
+} from './formulario-reporte';
 
 export { PASOS_REPORTE };
 
@@ -20,6 +24,9 @@ export { PASOS_REPORTE };
  * No guarda las fotos, solo sus `objeto_key`: los bytes ya están en el servidor y el vale dura
  * 24 h (`HORAS_VALIDEZ_FOTO` en api-core). Por eso cada foto recuerda cuándo se subió y el
  * borrador caduca antes que ellas.
+ *
+ * Tampoco guarda la posición del teléfono (CLAUDE.md §0, regla 8): solo el punto del reporte. Por
+ * eso un borrador retomado vuelve a pedir la ubicación antes de seguir.
  */
 
 const CLAVE = 'curichi.borrador-reporte.v1';
@@ -46,8 +53,16 @@ const PASO_VIEJO_A_NUEVO: Record<number, number> = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 
 /**
  * Respuestas que el formulario ya no pregunta. Un borrador viejo las trae; si se restauraran,
  * viajarían en el envío y el formulario cargaría con valores que no se ven en ninguna pantalla.
+ * `ubicacion_metodo` y `precision_gps_m` los deriva el servidor desde contracts 0.9.0, y
+ * `dispositivo` no se guarda nunca: si apareciera, se descarta.
  */
-const CAMPOS_QUITADOS = ['duracion_estimada', 'afectacion'] as const;
+const CAMPOS_QUITADOS = [
+  'duracion_estimada',
+  'afectacion',
+  'ubicacion_metodo',
+  'precision_gps_m',
+  'dispositivo',
+] as const;
 
 /**
  * Traducción de respuestas guardadas con nombres o valores de contracts < 0.5.0. Se traducen en
@@ -71,9 +86,14 @@ const SUMIDERO_ESTADO_VIEJO_A_NUEVO: Record<string, 'tapado' | 'no_tapado'> = {
   danado: 'tapado',
 };
 
-export function traducirValoresViejos(entrada: Record<string, unknown>): Record<string, unknown> {
+function sinCamposQuitados(entrada: object): Record<string, unknown> {
   const valores: Record<string, unknown> = { ...entrada };
   for (const c of CAMPOS_QUITADOS) delete valores[c];
+  return valores;
+}
+
+export function traducirValoresViejos(entrada: Record<string, unknown>): Record<string, unknown> {
+  const valores = sinCamposQuitados(entrada);
   if ('tirante_estimado' in valores) {
     if (valores.profundidad_estimada === undefined) {
       valores.profundidad_estimada = valores.tirante_estimado;
@@ -117,7 +137,7 @@ export interface Borrador {
   /** Lo que respondió `POST /geo/v1/resolver` para esa ubicación, para no repetir la llamada. */
   resuelto: unknown;
   fotos: FotoDelBorrador[];
-  valores: Partial<ReporteCrearEntrada>;
+  valores: Partial<ValoresFormulario>;
   /**
    * La clave de idempotencia se guarda con el resto: si la página se recarga justo después de
    * enviar, el reintento tiene que llevar la MISMA clave o el servidor crearía un segundo reporte.
@@ -147,6 +167,15 @@ function creadoEnGuardado(s: Storage, clave: string): number | null {
   }
 }
 
+/** Solo el punto: una ubicación de otra versión traía el método y la precisión del GPS. */
+function ubicacionGuardada(u: unknown): Ubicacion | null {
+  if (typeof u !== 'object' || u === null) return null;
+  const { lat, lon, precargada } = u as Record<string, unknown>;
+  if (typeof lat !== 'number' || typeof lon !== 'number') return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  return precargada === true ? { lat, lon, precargada } : { lat, lon };
+}
+
 export function guardarBorrador(b: BorradorNuevo): void {
   const s = almacen();
   if (!s) return;
@@ -156,6 +185,8 @@ export function guardarBorrador(b: BorradorNuevo): void {
       CLAVE,
       JSON.stringify({
         ...b,
+        ubicacion: ubicacionGuardada(b.ubicacion),
+        valores: sinCamposQuitados(b.valores),
         guardado_en: ahora,
         // Se conserva mientras sea el mismo formulario: guardar (o restaurar) no renueva el plazo.
         creado_en: creadoEnGuardado(s, b.clave) ?? ahora,
@@ -205,7 +236,7 @@ export function leerBorrador(): Borrador | null {
       guardado_en: d.guardado_en,
       creado_en: creadoEn,
       paso: pasoRestaurado(d.paso, (b as { formato?: unknown }).formato === FORMATO),
-      ubicacion: d.ubicacion ?? null,
+      ubicacion: ubicacionGuardada(d.ubicacion),
       resuelto: d.resuelto ?? null,
       fotos: fotosVigentes(d.fotos, ahora),
       valores: valores as Borrador['valores'],
@@ -236,9 +267,9 @@ export function olvidarBorrador(): void {
 
 /**
  * Valores que no cuentan como respuesta de la persona: los que ya traen un valor inicial y los
- * cuatro que el formulario copia de la ubicación (`fijarUbicacion`). Esos cuatro se juzgan por
- * `b.ubicacion`, que sabe si el punto lo eligió la persona o lo trajo el enlace; mirados como
- * valores sueltos, el punto del enlace contaba como algo empezado.
+ * dos que el formulario copia de la ubicación (`fijarUbicacion`). Esos dos se juzgan por
+ * `b.ubicacion`, que sabe si el punto lo eligió la persona o lo puso la app; mirados como valores
+ * sueltos, el punto del enlace contaba como algo empezado.
  */
 const VALORES_QUE_NO_CUENTAN = new Set([
   'ubicacion_tipo',
@@ -247,14 +278,12 @@ const VALORES_QUE_NO_CUENTAN = new Set([
   'sitio_web',
   'lat',
   'lon',
-  'ubicacion_metodo',
-  'precision_gps_m',
 ]);
 
 /**
  * ¿Hay algo que valga la pena restaurar, o el borrador está prácticamente vacío? Solo cuenta lo
- * que hizo la persona: el punto que trajo el enlace «Me pasa a mí» no, y los valores iniciales
- * (todos `null` o vacíos) tampoco.
+ * que hizo la persona: el punto que puso la app (la posición del teléfono o el enlace «Me pasa a
+ * mí») no, y los valores iniciales (todos `null` o vacíos) tampoco.
  */
 export function borradorTieneContenido(b: Borrador): boolean {
   return (

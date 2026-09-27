@@ -1013,6 +1013,14 @@ a.fila:hover {
   outline: 3px solid var(--color-verde-500);
   outline-offset: -3px;
 }
+/* Marcador del paso 1 del reporte: se arrastra y, con el foco, se mueve con las flechas. */
+.marcador-punto {
+  border-radius: 14px;
+  touch-action: none;
+}
+.marcador-punto:active {
+  cursor: grabbing;
+}
 
 /* ============================ escritorio: panel + mapa ============================ */
 

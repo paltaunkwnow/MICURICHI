@@ -24,8 +24,7 @@ const PASOS: Array<{ Icono: LucideIcon; agua: boolean; titulo: string; texto: st
     Icono: MapPin,
     agua: false,
     titulo: '1 · Marcás el punto',
-    texto:
-      'Señalás dónde se junta el agua y contás hasta dónde llega. Menos de dos minutos, y no hace falta medir nada.',
+    texto: `Compartís tu ubicación y marcás dónde se junta el agua, a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos de donde estás, y contás hasta dónde llega. Menos de dos minutos, y no hace falta medir nada.`,
   },
   {
     Icono: Search,
@@ -174,6 +173,13 @@ export function ComoFunciona() {
               <li className="fila">
                 Si el punto está sobre una vivienda o predio, el mapa público lo desplaza hasta{' '}
                 {CONFIG_DOMINIO.JITTER_PUBLICO_M} metros.
+              </li>
+              <li className="fila">
+                Tu ubicación se pide solo al reportar, para comprobar que el punto quede a{' '}
+                {CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} metros o menos de donde estás. La
+                posición de tu teléfono no la guardamos aparte: del reporte queda el punto que
+                marcaste, que arranca donde estás, y a cuántos metros de vos estaba. Los técnicos
+                ven ese punto exacto.
               </li>
               <li className="fila">
                 A las fotos les quitamos los metadatos, incluida la ubicación que graba la cámara.

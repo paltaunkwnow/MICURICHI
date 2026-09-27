@@ -1,6 +1,7 @@
 'use client';
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { CONFIG_DOMINIO } from 'contracts';
 import { ChevronLeft, Minus, Navigation, Plus, Search } from 'lucide-react';
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
@@ -31,6 +32,7 @@ import {
 } from '@/lib/mapa-datos';
 import { useUbicacionUsuario } from '@/lib/useUbicacionUsuario';
 import { Aviso } from './Aviso';
+import { AvisoUbicacionAlReportar } from './AvisoUbicacionAlReportar';
 import { BarraInferior } from './BarraInferior';
 import { ErrorDeCarga } from './ErrorDeCarga';
 import { HojaDetalle } from './HojaDetalle';
@@ -72,7 +74,9 @@ export function VistaMapa() {
   const [capaVisible, setCapaVisible] = useState<CapaVisible>('auto');
   const [texto, setTexto] = useState('');
   const [busqueda, setBusqueda] = useState('');
-  const { ubicacion, pedir: pedirUbicacion } = useUbicacionUsuario();
+  const { ubicacion, centrarSiHayPermiso } = useUbicacionUsuario();
+  /** «Ir a mi ubicación» sin permiso: se explica que la ubicación se pide al reportar. */
+  const [avisoPermiso, setAvisoPermiso] = useState(false);
   const mapa = useRef<MapaGl | null>(null);
   const toast = useToast();
   const ciudad = useCiudad();
@@ -289,28 +293,25 @@ export function VistaMapa() {
   };
 
   /**
-   * El mapa se mueve a la ubicación del vecino SOLO cuando él lo pide. La posición se consulta
-   * igual al cargar (si el permiso ya estaba dado) porque sirve para el «a N m de vos» de cada
-   * tarjeta, pero moverse solo sacaría al vecino de la zona que estaba mirando —y si el navegador
-   * devuelve una posición aproximada por IP, lo manda a otra ciudad.
+   * El mapa se mueve a la ubicación del vecino SOLO cuando él lo pide, y ni siquiera entonces se
+   * pide el permiso (plan 2026-09-26, pedido F): la ubicación se pide dentro de un reporte. Si ya
+   * la dio ahí, el botón centra el mapa; si no, explica que se pide al reportar, sin disparar el
+   * aviso del navegador. Al cargar no se consulta nada.
    */
-  const pedida = useRef(false);
-  const irAMiUbicacion = () => {
+  const irAMiUbicacion = async () => {
+    const volar = (u: { lat: number; lon: number }) =>
+      mapa.current?.flyTo({ center: [u.lon, u.lat], zoom: 16, duration: 700 });
     if (ubicacion) {
-      mapa.current?.flyTo({ center: [ubicacion.lon, ubicacion.lat], zoom: 16, duration: 700 });
+      volar(ubicacion);
       return;
     }
-    pedida.current = true;
-    pedirUbicacion();
-    toast('Buscando tu ubicación…');
+    const r = await centrarSiHayPermiso();
+    if (r.tipo === 'lista') {
+      setAvisoPermiso(false);
+      volar(r.ubicacion);
+    } else if (r.tipo === 'sin-permiso') setAvisoPermiso(true);
+    else toast('No pudimos obtener tu ubicación. Probá de nuevo en un momento.');
   };
-
-  useEffect(() => {
-    if (ubicacion && pedida.current && mapa.current) {
-      pedida.current = false;
-      mapa.current.flyTo({ center: [ubicacion.lon, ubicacion.lat], zoom: 16, duration: 700 });
-    }
-  }, [ubicacion]);
 
   /**
    * Al elegir un reporte que está fuera de pantalla —desde la lista, o desde «ver los N reportes
@@ -649,7 +650,7 @@ export function VistaMapa() {
               type="button"
               className="bico bico-sm bico-verde md:h-[46px] md:w-[46px]"
               aria-label="Centrar el mapa en mi ubicación"
-              onClick={irAMiUbicacion}
+              onClick={() => void irAMiUbicacion()}
             >
               <Navigation size={17} aria-hidden="true" />
             </button>
@@ -669,8 +670,19 @@ export function VistaMapa() {
             </div>
           ) : null}
 
+          {/* «Ir a mi ubicación» sin permiso: al lado de «Reportar un punto», que es donde se
+              pide. En escritorio, a la izquierda de los botones del mapa. */}
+          {avisoPermiso && seleccionado === null ? (
+            <div className="flot inset-x-3 bottom-[76px] md:inset-x-auto md:right-[76px] md:bottom-4 md:w-[340px]">
+              <AvisoUbicacionAlReportar alCerrar={() => setAvisoPermiso(false)} />
+            </div>
+          ) : null}
+
           {/* Estado vacío o fallo en móvil: sin lista lateral, el aviso va sobre el mapa. */}
-          {!reportes.isPending && (fallo || features.length === 0) && seleccionado === null ? (
+          {!avisoPermiso &&
+          !reportes.isPending &&
+          (fallo || features.length === 0) &&
+          seleccionado === null ? (
             <div className="flot inset-x-3 bottom-[76px] md:hidden">
               {fallo ? (
                 avisoDeFallo
@@ -724,9 +736,15 @@ function VacioLista({
           Limpiar filtros
         </button>
       ) : (
-        <Link href="/reportar" className="btn btn-sm mt-3 no-underline">
-          Reportar el primero acá
-        </Link>
+        <>
+          <Link href="/reportar" className="btn btn-sm mt-3 no-underline">
+            Reportar el primero acá
+          </Link>
+          <p className="ayuda mt-2">
+            Para reportar hace falta estar en el lugar, con un teléfono que te ubique con{' '}
+            {CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m de precisión o menos.
+          </p>
+        </>
       )}
     </div>
   );

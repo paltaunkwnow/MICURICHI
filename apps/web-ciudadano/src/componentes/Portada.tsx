@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { CONFIG_DOMINIO } from 'contracts';
 import { ChartColumn, Layers, type LucideIcon, MapPin, Search } from 'lucide-react';
 import Link from 'next/link';
 import { obtenerCapas, obtenerReportes } from '@/lib/api';
@@ -15,7 +16,7 @@ const PASOS: Array<{ n: number; titulo: string; texto: string; Icono: LucideIcon
     {
       n: 1,
       titulo: 'Marcás el punto',
-      texto: 'Señalás dónde se junta el agua y contás hasta dónde llega. No hace falta medir nada.',
+      texto: `Compartís tu ubicación, marcás a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos dónde se junta el agua y contás hasta dónde llega.`,
       Icono: MapPin,
       agua: false,
     },

@@ -7,33 +7,12 @@
  * CUALQUIER pantalla (ningún input de archivo, nadie más pide la cámara) y para lo que corre al
  * montar (los efectos, que `renderToStaticMarkup` no ejecuta).
  */
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { CamaraReporte, VistaCamara } from '@/componentes/CamaraReporte';
 import { type EstadoCamara, MENSAJES_CAMARA } from './camara';
-
-const SRC = resolve(import.meta.dirname, '..');
-
-function archivosDeLaApp(): { ruta: string; texto: string }[] {
-  const salida: { ruta: string; texto: string }[] = [];
-  const recorrer = (dir: string) => {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const ruta = join(dir, e.name);
-      if (e.isDirectory()) recorrer(ruta);
-      else if (/\.(ts|tsx)$/.test(e.name) && !/\.test\.tsx?$/.test(e.name)) {
-        salida.push({
-          ruta: relative(SRC, ruta).replaceAll('\\', '/'),
-          texto: readFileSync(ruta, 'utf8'),
-        });
-      }
-    }
-  };
-  recorrer(SRC);
-  return salida;
-}
+import { archivosDeLaApp, cuerposDeEfectos, leerFuente } from './fuente-para-pruebas';
 
 const nada = () => {};
 
@@ -93,7 +72,7 @@ describe('la cámara se pide solo al tocar «Sacar foto»', () => {
       .filter(({ texto }) => /\.abrir\(/.test(texto))
       .map(({ ruta }) => ruta);
     expect(abren).toEqual(['componentes/CamaraReporte.tsx']);
-    const fuente = readFileSync(join(SRC, 'componentes/CamaraReporte.tsx'), 'utf8');
+    const fuente = leerFuente('componentes/CamaraReporte.tsx');
     // La única llamada está en el manejador del botón, no en un efecto.
     expect(fuente.match(/\.abrir\(/g)).toHaveLength(1);
     expect(fuente).toMatch(/alSacarFoto=\{\(\)\s*=>\s*void\s+controlador\.abrir\(\)\}/);
@@ -107,7 +86,7 @@ describe('la cámara se pide solo al tocar «Sacar foto»', () => {
    */
   it('ningún efecto de la cámara ni del formulario abre la cámara al montar', () => {
     for (const archivo of ['componentes/CamaraReporte.tsx', 'componentes/FormularioReporte.tsx']) {
-      const efectos = cuerposDeEfectos(readFileSync(join(SRC, archivo), 'utf8'));
+      const efectos = cuerposDeEfectos(leerFuente(archivo));
       expect(efectos.length, `${archivo} tiene efectos`).toBeGreaterThan(0);
       expect(
         efectos.filter((e) => PIDE_CAMARA.test(e)),
@@ -143,41 +122,6 @@ describe('la cámara se pide solo al tocar «Sacar foto»', () => {
 
 /** Lo que dentro de un efecto pediría la cámara. */
 const PIDE_CAMARA = /\.abrir\(|getUserMedia|mediaDevices/;
-
-/**
- * Texto de cada llamada a `useEffect`, `useLayoutEffect` o `useInsertionEffect`: desde su `(`
- * hasta el `)` que la cierra, saltando cadenas y comentarios para que un paréntesis escrito ahí no
- * corte la cuenta.
- */
-function cuerposDeEfectos(fuente: string): string[] {
-  const cuerpos: string[] = [];
-  for (const m of fuente.matchAll(/\buse(?:Layout|Insertion)?Effect\s*\(/g)) {
-    const inicio = (m.index ?? 0) + m[0].length;
-    let profundidad = 1;
-    let i = inicio;
-    while (i < fuente.length && profundidad > 0) {
-      const c = fuente[i];
-      const sig = fuente[i + 1];
-      if (c === '/' && sig === '/') {
-        i = fuente.indexOf('\n', i);
-        if (i === -1) break;
-      } else if (c === '/' && sig === '*') {
-        i = fuente.indexOf('*/', i + 2) + 1;
-        if (i === 0) break;
-      } else if (c === "'" || c === '"' || c === '`') {
-        i += 1;
-        while (i < fuente.length && fuente[i] !== c) i += fuente[i] === '\\' ? 2 : 1;
-      } else if (c === '(') {
-        profundidad += 1;
-      } else if (c === ')') {
-        profundidad -= 1;
-      }
-      i += 1;
-    }
-    cuerpos.push(fuente.slice(inicio, i - 1));
-  }
-  return cuerpos;
-}
 
 describe('marcado del diálogo de la cámara', () => {
   it('en reposo solo está el botón «Sacar foto», usable', () => {
