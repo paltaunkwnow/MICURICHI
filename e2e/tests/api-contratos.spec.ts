@@ -5,12 +5,14 @@ import {
   cuentaNuevaConSesion,
   esperarPila,
   GEO,
+  leerWebp,
   loginCiudadano,
   loginTecnico,
   PNG_1X1,
   PUNTO_CENTRO,
   PUNTO_FUERA,
   reporteValido,
+  TROZOS_DE_METADATOS,
   tesela,
 } from './ayudas';
 
@@ -281,17 +283,46 @@ test.describe('contratos de la API (sin navegador)', () => {
     }
   });
 
-  test('las fotos se guardan sin metadatos EXIF', async ({ request }) => {
-    await loginCiudadano(request);
+  test('las fotos se guardan en WebP sin metadatos y, sin reporte, solo las ve quien las subió', async ({
+    request,
+    playwright,
+  }) => {
+    // Cuenta nueva: la del seed tiene cupo de fotos y la suite puede correr varias veces seguidas.
+    await cuentaNuevaConSesion(request, 'foto-');
     const r = await request.post(`${API}/api/v1/fotos`, {
       multipart: { archivo: { name: 'charco.png', mimeType: 'image/png', buffer: PNG_1X1 } },
     });
-    expect(r.status()).toBe(201);
+    expect(r.status(), await r.text()).toBe(201);
     const foto = await r.json();
     expect(foto.exif_sanitizado).toBe(true);
-    expect(foto.mime).toBe('image/jpeg');
-    const servida = await request.get(`${API}${new URL(foto.url, API).pathname}`);
+    // Entra un PNG y sale WebP (contracts 0.8.0).
+    expect(foto.mime).toBe('image/webp');
+    expect(foto.objeto_key).toMatch(/^[a-f0-9-]{36}\.webp$/);
+
+    const ruta = new URL(foto.url, API).pathname;
+    const servida = await request.get(`${API}${ruta}`);
     expect(servida.status()).toBe(200);
+    expect(servida.headers()['content-type']).toBe('image/webp');
+    expect(servida.headers()['x-content-type-options']).toBe('nosniff');
+    expect(servida.headers()['cache-control']).toBe('private, no-store');
+    const webp = leerWebp(await servida.body());
+    expect({ ancho: webp.ancho, alto: webp.alto }).toEqual({ ancho: foto.ancho, alto: foto.alto });
+    expect(webp.trozos.filter((t) => TROZOS_DE_METADATOS.includes(t))).toEqual([]);
+
+    // Todavía sin reporte, nadie más la ve: ni sin sesión ni un técnico.
+    const anonimo = await playwright.request.newContext();
+    const tecnico = await playwright.request.newContext();
+    try {
+      expect((await anonimo.get(`${API}${ruta}`)).status(), 'sin sesión').toBe(404);
+      await loginTecnico(tecnico);
+      expect((await tecnico.get(`${API}${ruta}`)).status(), 'un técnico').toBe(404);
+    } finally {
+      await anonimo.dispose();
+      await tecnico.dispose();
+    }
+    // Solo .webp y las .jpg anteriores: otra extensión no existe, aunque el nombre sea el mismo.
+    const otra = await request.get(`${API}${ruta.replace(/\.webp$/, '.png')}`);
+    expect(otra.status()).toBe(404);
   });
 
   test('rechaza archivos que no son imágenes aunque la extensión mienta', async ({ request }) => {

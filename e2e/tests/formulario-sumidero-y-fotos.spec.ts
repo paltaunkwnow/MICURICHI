@@ -4,26 +4,32 @@ import {
   continuar,
   crearCuentaYEntrarPorUi,
   cuentaNuevaEnElNavegador,
+  dialogoCamara,
   elegirPuntoPorCoordenadas,
   enviarYLeerCuerpo,
   esperarPila,
   llegarAFotos,
   llegarARevision,
   numeroDePaso,
-  PNG_1X1,
   PUNTO_CENTRO,
   retenerPeticiones,
+  sacarFotoConLaCamara,
+  vigilarCamara,
 } from './ayudas';
 
 /**
  * Formulario de reporte (contracts 0.5.0 y 0.6.0): el sumidero se pregunta con dos respuestas
  * cerradas —¿hay uno cerca? Sí / No; ¿está tapado? Tapado / No tapado— sin opción «No sé» (no
- * contestar ya es «no sé»), y en el paso de fotos el vecino puede sumar otro detalle sacándolo con
- * la cámara.
+ * contestar ya es «no sé»), y en el paso de fotos la foto sale de la cámara dentro de la página,
+ * sin galería ni selector de archivos (plan 2026-09-26, pedido D).
  *
  * Las primeras pruebas no enumeran los pasos: avanzan contestando lo que pida cada uno hasta
  * llegar a la pregunta buscada, para describir lo que ve el vecino y no el orden de los pasos.
  */
+
+// Todas las pruebas de este archivo recorren el formulario de reporte: el permiso de cámara es
+// suyo. La cámara es la falsa de Chromium (ver playwright.config.ts).
+test.use({ permissions: ['camera'] });
 
 const SUMIDERO_CERCANO = '¿Hay sumidero cercano?';
 const SUMIDERO_TAPADO = '¿Está tapado?';
@@ -121,7 +127,7 @@ async function elegir(control: Locator, respuesta: string) {
   }
 }
 
-test.describe('formulario: sumidero con respuestas cerradas y foto de otro detalle', () => {
+test.describe('formulario: sumidero con respuestas cerradas y cámara dentro de la página', () => {
   test.beforeAll(async ({ request }) => {
     await esperarPila(request);
   });
@@ -155,29 +161,44 @@ test.describe('formulario: sumidero con respuestas cerradas y foto de otro detal
     await expect(tapado.first()).not.toContainText(/No s[eé]/i);
   });
 
-  test('en el paso de fotos, «¿Querés añadir otro detalle?» abre la cámara', async ({ page }) => {
-    const boton = page.getByTestId('boton-otro-detalle');
+  test('en el paso de fotos, «Sacar foto» abre la cámara dentro de la página y no un selector de archivos', async ({
+    page,
+  }) => {
+    const camara = await vigilarCamara(page);
+    const boton = page.getByTestId('boton-sacar-foto');
     await avanzarHasta(page, async () => (await boton.count()) > 0, 'el paso de fotos');
 
-    await expect(boton).toBeVisible();
-    await expect(boton).toHaveText(/¿Querés añadir otro detalle\?/);
-
-    const camara = page.locator('#contenido form input[type="file"][capture]');
-    const antes = await camara.count();
-    // Si el botón abre el selector de archivos, se intercepta aquí para que no quede un diálogo
-    // nativo abierto, y se anota si lo abrió un input de cámara.
-    let abrioCamara = false;
-    page.on('filechooser', async (fc) => {
-      abrioCamara = await fc.element().evaluate((e) => (e as Element).hasAttribute('capture'));
+    let abrioSelector = false;
+    page.on('filechooser', () => {
+      abrioSelector = true;
     });
+    await expect(boton).toBeVisible();
+    await expect(boton).toHaveText('Sacar foto');
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
+    // Llegar al paso no pide la cámara: se pide al tocar el botón (pedido F).
+    expect((await camara()).pedidos).toEqual([]);
 
     await boton.click();
-    await expect
-      .poll(async () => (await camara.count()) > antes || abrioCamara, {
-        message: 'el botón añade (o abre) un input de archivo con `capture`',
-      })
-      .toBe(true);
-    await expect(camara.first()).toBeAttached();
+    const dialogo = dialogoCamara(page);
+    await expect(dialogo).toBeVisible();
+    await expect(dialogo.getByLabel('Vista en vivo de la cámara')).toBeVisible();
+    await expect(dialogo.getByTestId('boton-disparo')).toBeEnabled({ timeout: 20_000 });
+    const { pedidos, encendidas } = await camara();
+    expect(pedidos).toHaveLength(1);
+    // La trasera y en alta: sin ancho ni alto, Chrome entrega 640 × 480. Sin audio.
+    expect(pedidos[0]).toMatchObject({
+      audio: false,
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 } },
+    });
+    expect(encendidas).toBeGreaterThan(0);
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
+
+    // Cerrar sin sacar nada apaga la cámara y devuelve el foco a «Sacar foto».
+    await dialogo.getByRole('button', { name: 'Cerrar la cámara' }).click();
+    await expect(dialogo).toBeHidden();
+    await expect(boton).toBeFocused();
+    await expect.poll(async () => (await camara()).encendidas).toBe(0);
+    expect(abrioSelector, 'nada abrió un selector de archivos').toBe(false);
   });
 
   test('con «No» en el sumidero cercano no se pregunta si el agua brota ni si está tapado', async ({
@@ -208,7 +229,7 @@ test.describe('formulario: sumidero con respuestas cerradas y foto de otro detal
   });
 });
 
-test.describe('formulario: lo que se envía del sumidero y cómo se suben las fotos', () => {
+test.describe('formulario: lo que se envía del sumidero y cómo se sacan y suben las fotos', () => {
   test.beforeAll(async ({ request }) => {
     await esperarPila(request);
   });
@@ -243,19 +264,19 @@ test.describe('formulario: lo que se envía del sumidero y cómo se suben las fo
     await expect(siguiente).toBeEnabled();
 
     const subida = await retenerPeticiones(page, '**/api/v1/fotos');
-    await page
-      .locator('#fotos')
-      .setInputFiles({ name: 'charco.png', mimeType: 'image/png', buffer: PNG_1X1 });
+    await sacarFotoConLaCamara(page);
     await subida.llegada;
 
     // Seguir con la foto a medio subir creaba el reporte sin ella y la dejaba huérfana.
     await expect(page.getByTestId('foto-subiendo-mosaico')).toBeVisible();
     await expect(siguiente).toBeDisabled();
     await expect(siguiente).toHaveText('Subiendo foto…');
-    await expect(page.getByTestId('boton-otro-detalle')).toBeDisabled();
+    // Mientras sube, la cámara no se vuelve a abrir (`aria-disabled`, para que el foco pueda
+    // volver al botón).
+    await expect(page.getByTestId('boton-sacar-foto')).toBeDisabled();
 
     subida.liberar();
-    await expect(page.getByRole('img', { name: 'Foto que subiste' })).toHaveCount(1);
+    await expect(page.getByRole('img', { name: 'Foto que sacaste' })).toHaveCount(1);
     await expect(page.getByTestId('foto-subiendo-mosaico')).toHaveCount(0);
     await expect(siguiente).toHaveText('Continuar');
     await continuar(page);
@@ -264,50 +285,47 @@ test.describe('formulario: lo que se envía del sumidero y cómo se suben las fo
     await expect(page.getByTestId('boton-enviar')).toBeEnabled();
   });
 
-  test('cancelar la cámara no deja un espacio vacío, y con dos fotos la tercera entra', async ({
+  test('cerrar la cámara sin sacar nada no ocupa un lugar, y con dos fotos la tercera entra', async ({
     page,
   }) => {
+    const camara = await vigilarCamara(page);
     await cuentaNuevaEnElNavegador(page, 'camara-');
     await abrirFormulario(page);
     await elegirPuntoPorCoordenadas(page);
     await llegarAFotos(page);
 
-    const miniaturas = page.getByRole('img', { name: 'Foto que subiste' });
+    const miniaturas = page.getByRole('img', { name: 'Foto que sacaste' });
+    const sacar = page.getByTestId('boton-sacar-foto');
     for (const i of [1, 2]) {
-      await page
-        .locator('#fotos')
-        .setInputFiles({ name: `charco-${i}.png`, mimeType: 'image/png', buffer: PNG_1X1 });
+      await sacarFotoConLaCamara(page);
       await expect(miniaturas).toHaveCount(i);
     }
 
-    const espacio = page.getByTestId('espacio-camara');
-    const agregar = page.getByRole('button', { name: 'Agregar', exact: true });
-    const otroDetalle = page.getByTestId('boton-otro-detalle');
+    // Se abre la cámara y la persona la cierra con Escape sin sacar nada: la cámara se apaga y no
+    // queda un lugar a medio ocupar.
+    await sacar.click();
+    const dialogo = dialogoCamara(page);
+    await expect(dialogo.getByTestId('boton-disparo')).toBeEnabled({ timeout: 20_000 });
+    await page.keyboard.press('Escape');
+    await expect(dialogo).toBeHidden();
+    await expect(sacar).toBeFocused();
+    await expect.poll(async () => (await camara()).encendidas).toBe(0);
+    await expect(miniaturas).toHaveCount(2);
+    await expect(page.getByTestId('foto-subiendo-mosaico')).toHaveCount(0);
+    await expect(sacar).toBeEnabled();
 
-    // Se abre la cámara y la persona la cierra sin sacar nada. El selector se intercepta para que
-    // no quede un diálogo nativo abierto, y se le manda al input el `cancel` que manda el navegador.
-    let selector = page.waitForEvent('filechooser');
-    await otroDetalle.click();
-    let camara = await selector;
-    expect(await camara.element().evaluate((e) => (e as Element).hasAttribute('capture'))).toBe(
-      true,
-    );
-    await expect(espacio).toBeVisible();
-    await expect(agregar).toHaveCount(0);
-    await camara.element().dispatchEvent('cancel');
-    // Antes el espacio vacío quedaba para siempre y ocupaba el tercer lugar.
-    await expect(espacio).toHaveCount(0);
-    await expect(agregar).toBeVisible();
-    await expect(otroDetalle).toBeEnabled();
-
-    // La tercera foto entra, esta vez sí por la cámara.
-    selector = page.waitForEvent('filechooser');
-    await otroDetalle.click();
-    camara = await selector;
-    await camara.setFiles({ name: 'detalle.png', mimeType: 'image/png', buffer: PNG_1X1 });
+    // La tercera entra, y con ella se completan.
+    await sacarFotoConLaCamara(page);
     await expect(miniaturas).toHaveCount(3);
-    await expect(espacio).toHaveCount(0);
-    await expect(otroDetalle).toBeDisabled();
+    await expect(sacar).toBeDisabled();
     await expect(page.getByText(/Ya llegaste al máximo de \d+ fotos/)).toBeVisible();
+
+    // Completas, tocar «Sacar foto» no pide la cámara. `getUserMedia` se llamaría dentro del
+    // mismo clic, así que al volver el clic ya estaría anotado.
+    const pedidos = (await camara()).pedidos.length;
+    await sacar.click({ force: true });
+    await expect(dialogo).toBeHidden();
+    expect((await camara()).pedidos).toHaveLength(pedidos);
+    await expect(page.locator('input[type="file"]')).toHaveCount(0);
   });
 });

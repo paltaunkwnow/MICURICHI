@@ -25,6 +25,21 @@ export default defineConfig({
     trace: 'retain-on-failure',
     locale: 'es-BO',
     timezoneId: 'America/La_Paz',
+    /**
+     * La foto sale de la cámara dentro de la página (`getUserMedia`), sin input de archivo al que
+     * pasarle una imagen. Chromium trae una cámara falsa que entrega cuadros sintéticos de verdad
+     * (1920 × 1080 si se piden), así que el disparo, la captura y la subida son los reales.
+     *
+     * El permiso lo da SOLO el contexto: cada prueba que saca fotos declara
+     * `test.use({ permissions: ['camera'] })` y las demás no tienen cámara (`getUserMedia` da
+     * `NotAllowedError`, como a quien la niega). Por eso no se usa `--use-fake-ui-for-media-stream`,
+     * que acepta cualquier pedido y le daba cámara a todas. Y por eso el Chromium completo en modo
+     * sin ventana (`channel: 'chromium'`): el `chromium-headless-shell` que se usa por defecto
+     * responde `NotSupportedError` a todo pedido sin ese argumento, aun con el permiso dado.
+     * `playwright install chromium` baja los dos.
+     */
+    channel: 'chromium',
+    launchOptions: { args: ['--use-fake-device-for-media-stream'] },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
@@ -32,8 +47,9 @@ export default defineConfig({
       name: 'movil',
       use: { ...devices['Pixel 7'] },
       // El mapa es lo que más cambia entre tamaños: en móvil el detalle sube como hoja sobre el
-      // mapa y no hay lista lateral donde caerse. Los dos archivos del mapa corren también acá.
-      testMatch: /(mapa-publico|mapa-seleccion)\.spec\.ts/,
+      // mapa y no hay lista lateral donde caerse. Los dos archivos del mapa corren también acá, y
+      // la cámara, que en el teléfono es donde se usa.
+      testMatch: /(mapa-publico|mapa-seleccion|camara-foto)\.spec\.ts/,
     },
   ],
   webServer: {

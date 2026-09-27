@@ -143,11 +143,48 @@ export function tesela(lat: number, lon: number, z: number) {
   return { x, y, z };
 }
 
-/** PNG 1×1 válido, para probar la subida de fotos sin depender de archivos del repo. */
+/** PNG 1×1 válido, para probar la subida de fotos por API sin depender de archivos del repo. */
 export const PNG_1X1 = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
   'base64',
 );
+
+/** Trozos RIFF que llevan metadatos: ninguna foto servida puede tenerlos. */
+export const TROZOS_DE_METADATOS = ['EXIF', 'XMP ', 'ICCP'];
+
+/**
+ * Medidas y trozos de un WebP leídos de los bytes, y no de lo que diga el servidor. Falla si no es
+ * un contenedor RIFF…WEBP.
+ */
+export function leerWebp(datos: Buffer): { ancho: number; alto: number; trozos: string[] } {
+  expect(datos.subarray(0, 4).toString('latin1'), 'la foto tiene que ser un RIFF').toBe('RIFF');
+  expect(datos.subarray(8, 12).toString('latin1'), 'la foto tiene que ser un WEBP').toBe('WEBP');
+  const trozos: string[] = [];
+  let ancho = 0;
+  let alto = 0;
+  for (let i = 12; i + 8 <= datos.length; ) {
+    const tipo = datos.subarray(i, i + 4).toString('latin1');
+    const largo = datos.readUInt32LE(i + 4);
+    const d = datos.subarray(i + 8, i + 8 + largo);
+    trozos.push(tipo);
+    if (tipo === 'VP8X') {
+      // Lienzo extendido: ancho y alto menos uno, en 24 bits.
+      ancho = d.readUIntLE(4, 3) + 1;
+      alto = d.readUIntLE(7, 3) + 1;
+    } else if (tipo === 'VP8 ' && !ancho) {
+      // Con pérdida: 3 bytes de cabecera de cuadro y 3 del código de inicio, luego 14 bits por lado.
+      ancho = d.readUInt16LE(6) & 0x3fff;
+      alto = d.readUInt16LE(8) & 0x3fff;
+    } else if (tipo === 'VP8L' && !ancho) {
+      const bits = d.readUInt32LE(1);
+      ancho = (bits & 0x3fff) + 1;
+      alto = ((bits >>> 14) & 0x3fff) + 1;
+    }
+    // Cada trozo se rellena hasta un largo par.
+    i += 8 + largo + (largo % 2);
+  }
+  return { ancho, alto, trozos };
+}
 
 /**
  * Crea una cuenta y entra con ella **por la interfaz**, como haría un vecino.
@@ -339,6 +376,80 @@ export async function llegarARevision(page: Page, marca: string) {
     .locator('textarea[name="descripcion"]')
     .fill(`Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`);
   await continuar(page);
+}
+
+// ------------------------------------------------------------------ cámara
+
+/**
+ * Lo que registró `vigilarCamara`: las restricciones de cada `getUserMedia`, en orden, y cuántas
+ * pistas siguen encendidas.
+ */
+export interface CamaraVigilada {
+  pedidos: MediaStreamConstraints[];
+  encendidas: number;
+}
+
+interface RegistroCamara {
+  pedidos: MediaStreamConstraints[];
+  pistas: MediaStreamTrack[];
+}
+
+/**
+ * Envuelve `getUserMedia` para saber cuándo se pidió la cámara, con qué restricciones y si quedó
+ * prendida. Registrar ANTES de navegar: se instala al empezar cada documento. Devuelve la función
+ * que lee el registro.
+ *
+ * La cámara es la falsa de Chromium (`--use-fake-device-for-media-stream`, en la configuración):
+ * entrega un cuadro sintético de verdad, así que el disparo, la captura y la subida son los reales.
+ */
+export async function vigilarCamara(page: Page): Promise<() => Promise<CamaraVigilada>> {
+  await page.addInitScript(() => {
+    const dispositivos = navigator.mediaDevices;
+    if (!dispositivos?.getUserMedia) return;
+    const original = dispositivos.getUserMedia.bind(dispositivos);
+    const registro: RegistroCamara = { pedidos: [], pistas: [] };
+    Object.defineProperty(window, '__camaraE2E', { value: registro });
+    dispositivos.getUserMedia = async (restricciones) => {
+      registro.pedidos.push(JSON.parse(JSON.stringify(restricciones ?? {})));
+      const flujo = await original(restricciones);
+      registro.pistas.push(...flujo.getTracks());
+      return flujo;
+    };
+  });
+  return () =>
+    page.evaluate(() => {
+      const registro = (window as unknown as { __camaraE2E?: RegistroCamara }).__camaraE2E;
+      return {
+        pedidos: registro?.pedidos ?? [],
+        encendidas: registro?.pistas.filter((p) => p.readyState === 'live').length ?? 0,
+      };
+    });
+}
+
+/** El diálogo de la cámara, que se llama como el botón que lo abre. */
+export function dialogoCamara(page: Page) {
+  return page.getByRole('dialog', { name: 'Sacar foto' });
+}
+
+/**
+ * «Sacar foto» → disparo → «Usar esta foto», como lo hace el vecino. Devuelve el tamaño del cuadro
+ * del video al disparar. No espera la subida: quien necesite la respuesta de `POST /fotos` la
+ * espera (o la retiene) por su cuenta.
+ */
+export async function sacarFotoConLaCamara(page: Page): Promise<{ ancho: number; alto: number }> {
+  await page.getByTestId('boton-sacar-foto').click();
+  const camara = dialogoCamara(page);
+  await expect(camara).toBeVisible();
+  // El disparo se habilita con el primer cuadro del video: antes, la foto saldría negra.
+  const disparo = camara.getByTestId('boton-disparo');
+  await expect(disparo).toBeEnabled({ timeout: 20_000 });
+  const cuadro = await camara
+    .locator('video')
+    .evaluate((v: HTMLVideoElement) => ({ ancho: v.videoWidth, alto: v.videoHeight }));
+  await disparo.click();
+  await camara.getByTestId('boton-usar-foto').click();
+  await expect(camara).toBeHidden();
+  return cuadro;
 }
 
 /** Pulsa «Enviar reporte» y devuelve el cuerpo que salió hacia `POST /api/v1/reportes`. */

@@ -10,12 +10,9 @@ import {
   llegarAFotos,
   numeroDePaso,
   PANEL,
-  PNG_1X1,
   pasoActual,
+  sacarFotoConLaCamara,
 } from './ayudas';
-
-/** Una foto cualquiera para el input de la galería. */
-const FOTO = { name: 'charco.png', mimeType: 'image/png', buffer: PNG_1X1 };
 
 /** Respuesta de error de api-core, con la forma `{ codigo, mensaje }` de todas sus rutas. */
 function errorApi(status: number, codigo: string, mensaje: string, extra: object = {}) {
@@ -129,6 +126,10 @@ test.describe('la interfaz no inventa cuando la API falla', () => {
 });
 
 test.describe('el formulario no pierde lo escrito', () => {
+  // Pruebas del formulario de reporte: las fotos salen de la cámara dentro de la página (la falsa
+  // de Chromium, ver playwright.config.ts), y el permiso es solo de ellas.
+  test.use({ permissions: ['camera'] });
+
   test('CA-X1: al recargar, retoma el borrador en el paso donde iba', async ({ page }) => {
     // Reportar exige cuenta desde la Fase 5, así que el formulario ni se monta sin sesión. Una
     // cuenta nueva por caso: cada una solo puede enviar un reporte por hora y compartir la del
@@ -172,11 +173,11 @@ test.describe('el formulario no pierde lo escrito', () => {
     page,
   }) => {
     const texto = await formularioEnFotos(page, 'foto-401-');
-    // api-core responde 401 a la subida: la sesión venció mientras se elegía la foto.
+    // api-core responde 401 a la subida: la sesión venció mientras se sacaba la foto.
     await page.route('**/api/v1/fotos', (ruta) =>
       ruta.fulfill(errorApi(401, 'SIN_SESION', 'Iniciá sesión para subir una foto.')),
     );
-    await page.locator('#fotos').setInputFiles(FOTO);
+    await sacarFotoConLaCamara(page);
 
     await expect(page.getByRole('heading', { name: 'Se cerró tu sesión' })).toBeVisible();
     await expect(
@@ -196,8 +197,8 @@ test.describe('el formulario no pierde lo escrito', () => {
     page,
   }) => {
     const texto = await formularioEnFotos(page, 'foto-429-');
-    const miniaturas = page.getByRole('img', { name: 'Foto que subiste' });
-    await page.locator('#fotos').setInputFiles(FOTO);
+    const miniaturas = page.getByRole('img', { name: 'Foto que sacaste' });
+    await sacarFotoConLaCamara(page);
     await expect(miniaturas).toHaveCount(1);
 
     // El texto es inventado a propósito: tiene que verse el del servidor, no uno genérico.
@@ -210,7 +211,7 @@ test.describe('el formulario no pierde lo escrito', () => {
         }),
       ),
     );
-    await page.locator('#fotos').setInputFiles({ ...FOTO, name: 'otra.png' });
+    await sacarFotoConLaCamara(page);
 
     await expect(page.getByTestId('error-foto')).toContainText(mensaje);
     // Nada de lo ya cargado se pierde, y se puede seguir sin esa foto.
