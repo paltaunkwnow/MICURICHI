@@ -99,6 +99,30 @@ export const reporteValido = {
   causa_presunta: 'sumidero_tapado',
 };
 
+/**
+ * Ids de los trozos de un WebP, recorriendo el contenedor RIFF a mano. Es independiente de sharp
+ * a propósito: `sharp.metadata()` informa lo que libvips entiende, y un trozo EXIF, XMP o ICCP que
+ * viaje en el archivo sin que libvips lo reconozca pasaría esa comprobación.
+ */
+export function trozosRiff(b: Buffer): string[] {
+  if (
+    b.length < 12 ||
+    b.toString('ascii', 0, 4) !== 'RIFF' ||
+    b.toString('ascii', 8, 12) !== 'WEBP'
+  )
+    throw new Error('no es un RIFF…WEBP');
+  if (b.readUInt32LE(4) !== b.length - 8) throw new Error('el tamaño del RIFF no coincide');
+  const trozos: string[] = [];
+  let o = 12;
+  while (o + 8 <= b.length) {
+    const n = b.readUInt32LE(o + 4);
+    trozos.push(b.toString('ascii', o, o + 4));
+    o += 8 + n + (n % 2);
+  }
+  if (o !== b.length) throw new Error('el último trozo del RIFF está cortado');
+  return trozos;
+}
+
 export function multipart(campo: string, nombre: string, mime: string, datos: Buffer) {
   const boundary = `----curichi${Date.now()}`;
   const cabecera = Buffer.from(

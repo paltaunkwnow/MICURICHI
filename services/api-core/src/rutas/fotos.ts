@@ -1,6 +1,6 @@
-/** Fotos: validación por magic bytes, reprocesado con sharp (sin metadatos EXIF), almacenamiento y servido. */
+/** Fotos: validación por magic bytes, reprocesado con sharp a WebP sin metadatos, almacenamiento y servido. */
 import { randomUUID } from 'node:crypto';
-import { CONFIG_DOMINIO } from 'contracts';
+import { CONFIG_DOMINIO, type Rol } from 'contracts';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import sharp from 'sharp';
 import type { Dependencias } from '../app.js';
@@ -75,7 +75,7 @@ export function detectarMime(buf: Buffer): string | null {
  * Tope de píxeles de ENTRADA. sharp permite por defecto 268 megapíxeles, y decodificar tantos
  * cuesta del orden de 1 GB de memoria: un PNG de pocos kilobytes puede declarar 16000 × 16000 y
  * tumbar el servicio (bomba de descompresión). 60 MP cubre de sobra cualquier cámara de teléfono
- * —las de 50 MP rondan los 8160 × 6120— y la foto se reescala a 1600 px de ancho igualmente.
+ * —las de 50 MP rondan los 8160 × 6120— y la foto se reescala a 1600 px por lado igualmente.
  */
 export const MAX_PIXELES_ENTRADA = 60_000_000;
 
@@ -111,7 +111,43 @@ export function mensajePublicoDeImagen(e: unknown): string {
   return 'No pudimos leer esa imagen. Puede estar dañada o a medio descargar: probá con otra foto.';
 }
 
-/** Reprocesa la imagen: orienta según EXIF, limita el ancho, re-codifica a JPEG y DESCARTA todos los metadatos. */
+const MIME_SALIDA = CONFIG_DOMINIO.FOTO_FORMATO_SALIDA;
+
+/**
+ * Qué se sirve según la extensión de la clave: .webp para las fotos nuevas y .jpg para las
+ * anteriores al contrato 0.8.0, que no se reconvierten. El Content-Type sale de aquí y no del
+ * almacén: la clave ya pasó por la expresión regular y es lo único que controla el servidor.
+ */
+const MIME_POR_EXTENSION: Record<string, string> = { webp: MIME_SALIDA, jpg: 'image/jpeg' };
+const CLAVE_FOTO = /^[a-f0-9-]{36}\.(webp|jpg)$/;
+
+/** Trozos de un WebP que llevan metadatos. Ninguno puede quedar en lo que se guarda. */
+const TROZOS_DE_METADATOS = new Set(['EXIF', 'XMP ', 'ICCP']);
+
+/**
+ * Comprueba el WebP de salida recorriendo su contenedor RIFF. Es la segunda mirada, después de
+ * `sharp.metadata()`: esa informa lo que libvips reconoce, y esta ve todos los trozos que viajan
+ * en el archivo, lo reconozca libvips o no. También exige un solo cuadro (sin ANIM ni ANMF).
+ */
+export function comprobarWebpLimpio(datos: Buffer): void {
+  if (detectarMime(datos) !== 'image/webp' || datos.readUInt32LE(4) !== datos.length - 8)
+    throw new Error('la salida no es un WebP bien formado');
+  let o = 12;
+  while (o + 8 <= datos.length) {
+    const id = datos.toString('ascii', o, o + 4);
+    if (TROZOS_DE_METADATOS.has(id)) throw new Error(`el WebP de salida conserva el trozo ${id}`);
+    if (id === 'ANIM' || id === 'ANMF') throw new Error('el WebP de salida quedó animado');
+    const n = datos.readUInt32LE(o + 4);
+    o += 8 + n + (n % 2);
+  }
+  if (o !== datos.length) throw new Error('el WebP de salida está cortado');
+}
+
+/**
+ * Reprocesa la imagen: orienta según EXIF, la deja en 1600 px por lado como máximo, la vuelve a
+ * codificar en WebP y DESCARTA todos los metadatos. De una entrada animada toma solo el primer
+ * cuadro: una foto de un charco no se mueve, y un WebP o PNG animado solo multiplica el trabajo.
+ */
 export async function sanitizarImagen(
   entrada: Buffer,
 ): Promise<{ datos: Buffer; ancho: number; alto: number }> {
@@ -124,7 +160,12 @@ export async function sanitizarImagen(
     throw new ImagenDemasiadoGrande(
       `Esa imagen tiene ${Math.round(pixeles / 1e6)} megapíxeles y el máximo es ${MAX_PIXELES_ENTRADA / 1e6}. Probá con una foto normal de la cámara.`,
     );
-  const datos = await sharp(entrada, { failOn: 'error', limitInputPixels: MAX_PIXELES_ENTRADA })
+  const datos = await sharp(entrada, {
+    failOn: 'error',
+    limitInputPixels: MAX_PIXELES_ENTRADA,
+    pages: 1,
+    page: 0,
+  })
     // Plazo duro del procesado. El tope de píxeles acota la memoria, pero no el TIEMPO: una
     // imagen válida y perfectamente normal de tamaño puede estar construida para que el
     // decodificador tarde muchísimo, y sin plazo eso deja una petición y un hilo de libvips
@@ -132,12 +173,18 @@ export async function sanitizarImagen(
     // foto de teléfono de 50 MP.
     .timeout({ seconds: SEGUNDOS_MAX_PROCESADO })
     .rotate()
-    .resize({ width: CONFIG_DOMINIO.FOTO_ANCHO_MAX_PX, withoutEnlargement: true })
-    .jpeg({ quality: 82, mozjpeg: true })
+    .resize({
+      width: CONFIG_DOMINIO.FOTO_ANCHO_MAX_PX,
+      height: CONFIG_DOMINIO.FOTO_ALTO_MAX_PX,
+      fit: 'inside',
+      withoutEnlargement: true,
+    })
+    .webp({ quality: CONFIG_DOMINIO.FOTO_CALIDAD_WEBP })
     .toBuffer(); // sin .withMetadata(): sharp elimina EXIF, ICC, XMP e IPTC
   const meta = await sharp(datos).metadata();
-  if (meta.exif || meta.xmp || meta.iptc)
+  if (meta.format !== 'webp' || meta.exif || meta.xmp || meta.iptc || meta.icc)
     throw new Error('la imagen conserva metadatos tras el reprocesado');
+  comprobarWebpLimpio(datos);
   return { datos, ancho: meta.width ?? 0, alto: meta.height ?? 0 };
 }
 
@@ -181,6 +228,27 @@ export async function esperaCuotaDeFotos(
     reintentarEnS: Math.max(1, fila.reintentar_en_s),
     disponibleEn: new Date(fila.disponible_en),
   };
+}
+
+interface VisibilidadFoto extends Record<string, unknown> {
+  sin_reporte: boolean;
+  subido_por: string | null;
+  publicada: boolean;
+}
+
+/**
+ * Quién ve una foto. Una foto sin reporte es solo de quien la subió: nadie más, técnicos
+ * incluidos, porque todavía no hay nada que moderar y servirla a cualquiera la volvía un
+ * alojamiento público de imágenes. La de un reporte publicado, cualquiera; la de uno sin
+ * publicar, técnico y admin, que son quienes moderan.
+ */
+export function puedeVerFoto(
+  foto: VisibilidadFoto,
+  usuarioId: string | undefined,
+  rol: Rol | undefined,
+): boolean {
+  if (foto.sin_reporte) return usuarioId !== undefined && foto.subido_por === usuarioId;
+  return foto.publicada || esTecnico(rol);
 }
 
 export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
@@ -272,7 +340,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
           .send({ codigo: 'IMAGEN_INVALIDA', mensaje: mensajePublicoDeImagen(e) });
       }
       registrarProcesadoDeFoto(app.metricas, segundosProcesado());
-      const key = `${randomUUID()}.jpg`;
+      const key = `${randomUUID()}.webp`;
       const cliente = await dep.pool.connect();
       try {
         await cliente.query('BEGIN');
@@ -287,7 +355,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         }
         await cliente.query(
           'INSERT INTO reporte_foto (objeto_key, mime, bytes, ancho, alto, exif_sanitizado, subido_por) VALUES ($1, $2, $3, $4, $5, true, $6)',
-          [key, 'image/jpeg', procesada.datos.length, procesada.ancho, procesada.alto, autor.id],
+          [key, MIME_SALIDA, procesada.datos.length, procesada.ancho, procesada.alto, autor.id],
         );
         await cliente.query('COMMIT');
       } catch (e) {
@@ -303,7 +371,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
       // (objeto primero) un corte entre los dos pasos dejaba un objeto sin fila, que ninguna
       // limpieza encuentra; una fila sin objeto la retira el mantenimiento a las 24 h.
       try {
-        await dep.almacen.guardar(key, procesada.datos, 'image/jpeg');
+        await dep.almacen.guardar(key, procesada.datos, MIME_SALIDA);
       } catch (e) {
         await dep.pool
           .query('DELETE FROM reporte_foto WHERE objeto_key = $1', [key])
@@ -318,7 +386,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         ancho: procesada.ancho,
         alto: procesada.alto,
         bytes: procesada.datos.length,
-        mime: 'image/jpeg',
+        mime: MIME_SALIDA,
         exif_sanitizado: true,
       });
     },
@@ -331,15 +399,15 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
     { config: { rateLimit: { max: dep.cfg.rateLimitLecturasPorMinuto, timeWindow: 60_000 } } },
     async (req, res) => {
       const { key } = req.params as { key: string };
-      if (!/^[a-f0-9-]{36}\.jpg$/.test(key))
-        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Foto no encontrada.' });
-      // Moderación previa (§13): la foto de un reporte que aún no se publicó —o que se rechazó—
-      // no se sirve al público aunque alguien tenga su clave. Se permiten las que todavía no
-      // tienen reporte porque el formulario muestra la miniatura antes de enviar, y esas las
-      // borra el mantenimiento a las 24 h. El técnico las ve todas: es quien modera.
-      const tecnico = esTecnico(req.usuario?.rol);
-      const fila = await dep.pool.query<{ sin_reporte: boolean; publicada: boolean }>(
+      // Sin Cache-Control propio: el 404 se lleva el `private, no-store` por defecto (cache.ts),
+      // así ninguna caché compartida lo guarda y tapa la foto para quien sí puede verla.
+      const noEncontrada = () =>
+        res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Foto no encontrada.' });
+      const extension = CLAVE_FOTO.exec(key)?.[1];
+      if (!extension) return noEncontrada();
+      const fila = await dep.pool.query<VisibilidadFoto>(
         `SELECT f.reporte_id IS NULL AS sin_reporte,
+                f.subido_por,
                 coalesce(r.estado IN ('validado', 'resuelto'), false) AS publicada
          FROM reporte_foto f
          LEFT JOIN reporte_inundacion r ON r.id = f.reporte_id
@@ -347,15 +415,13 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         [key],
       );
       const meta = fila.rows[0];
-      if (!meta || (!meta.sin_reporte && !meta.publicada && !tecnico))
-        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Foto no encontrada.' });
+      if (!meta || !puedeVerFoto(meta, req.usuario?.id, req.usuario?.rol)) return noEncontrada();
       const obj = await dep.almacen.leer(key);
-      if (!obj)
-        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Foto no encontrada.' });
-      res.header('Content-Type', obj.mime);
+      if (!obj) return noEncontrada();
+      res.header('Content-Type', MIME_POR_EXTENSION[extension]);
       // Solo la foto de un reporte PUBLICADO va a cachés compartidas. La que aún no tiene reporte
       // o la de uno sin publicar, no: la primera visita de un técnico la dejaría servible para
-      // cualquiera, y una sin reporte puede acabar pegada a uno que se rechaza. Y la publicada,
+      // cualquiera, y la que todavía no tiene reporte es solo de quien la subió. Y la publicada,
       // una hora y sin `immutable`: su visibilidad sigue la del reporte, que puede dejar de
       // publicarse (fusionado como duplicado), y con `max-age=86400, immutable` una caché la
       // seguía sirviendo un día entero.

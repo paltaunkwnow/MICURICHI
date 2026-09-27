@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ejecutorPg } from 'db';
 import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
@@ -18,12 +19,16 @@ import {
   reporteValido,
   resolverDePrueba,
   sesion,
+  trozosRiff,
 } from './ayudas.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
 let app: FastifyInstance;
 let cookieVecina: string;
+let cookieVecino: string;
+let cookieTecnico: string;
+let cookieAdmin: string;
 let ex: ReturnType<typeof ejecutorPg>;
 const almacen = new AlmacenMemoria();
 const metricas = new Metricas();
@@ -57,6 +62,9 @@ beforeAll(async () => {
     metricas,
   });
   cookieVecina = await iniciarSesion(app, CUENTAS.vecina);
+  cookieVecino = await iniciarSesion(app, CUENTAS.vecino);
+  cookieTecnico = await iniciarSesion(app, CUENTAS.tecnico);
+  cookieAdmin = await iniciarSesion(app, CUENTAS.admin);
   // La primera operación de sharp del proceso inicializa libvips; con la suite en paralelo eso
   // solo ya pasaba de los 5 s del primer `it`, que fallaba por tiempo y no por lo que prueba.
   await jpegConGps();
@@ -89,7 +97,7 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
     expect(meta.exif).toBeDefined();
     expect(meta.exif!.length).toBeGreaterThan(50);
   });
-  it('sube, reprocesa y el objeto guardado NO conserva EXIF; se redimensiona a 1600 px', async () => {
+  it('sube un JPEG con GPS y guarda un RIFF…WEBP sin EXIF, XMP ni ICCP, de 1600 px por lado', async () => {
     const { payload, headers } = multipart(
       'archivo',
       'charco.jpg',
@@ -106,18 +114,36 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
     expect(r.statusCode).toBe(201);
     const foto = r.json();
     expect(foto.exif_sanitizado).toBe(true);
-    expect(foto.ancho).toBe(1600);
+    expect(foto.mime).toBe('image/webp');
+    expect(foto.objeto_key).toMatch(/^[a-f0-9-]{36}\.webp$/);
+    expect(foto.url).toMatch(/\/api\/v1\/fotos\/[a-f0-9-]{36}\.webp$/);
+    expect([foto.ancho, foto.alto]).toEqual([1600, 1067]);
+    const fila = await pool.query(
+      'SELECT mime, ancho, alto, bytes FROM reporte_foto WHERE objeto_key = $1',
+      [foto.objeto_key],
+    );
+    expect(fila.rows[0]).toMatchObject({ mime: 'image/webp', ancho: 1600, alto: 1067 });
     const guardado = await almacen.leer(foto.objeto_key);
     expect(guardado).not.toBeNull();
+    expect(guardado!.mime).toBe('image/webp');
+    expect(fila.rows[0].bytes).toBe(guardado!.datos.length);
+    // Recorriendo el RIFF, no solo con sharp.metadata(): ningún trozo de metadatos.
+    const trozos = trozosRiff(guardado!.datos);
+    for (const t of ['EXIF', 'XMP ', 'ICCP']) expect(trozos).not.toContain(t);
     const meta = await sharp(guardado!.datos).metadata();
+    expect(meta.format).toBe('webp');
     expect(meta.exif).toBeUndefined();
-    expect(meta.xmp).toBeUndefined();
     expect(meta.width).toBe(1600);
-    // se sirve con cabeceras de caché y nosniff
-    const get = await app.inject({ method: 'GET', url: `/api/v1/fotos/${foto.objeto_key}` });
+    // Su dueña la ve (todavía no tiene reporte), como WebP y con nosniff.
+    const get = await app.inject({
+      method: 'GET',
+      url: `/api/v1/fotos/${foto.objeto_key}`,
+      cookies: sesion(cookieVecina),
+    });
     expect(get.statusCode).toBe(200);
-    expect(get.headers['content-type']).toBe('image/jpeg');
+    expect(get.headers['content-type']).toBe('image/webp');
     expect(get.headers['x-content-type-options']).toBe('nosniff');
+    expect(get.rawPayload.equals(guardado!.datos)).toBe(true);
     // y se asocia al reporte al crearlo
     const rep = await crear({
       ...reporteValido,
@@ -125,6 +151,37 @@ describe('fotos: EXIF eliminado, límites y tipos', () => {
     });
     expect(rep.statusCode).toBe(201);
     expect(rep.json().properties.fotos[0]).toContain(foto.objeto_key);
+  });
+  it('un PNG y un WebP de entrada también se guardan en WebP', async () => {
+    const entradas = [
+      [
+        'f.png',
+        'image/png',
+        await sharp({ create: { width: 40, height: 30, channels: 3, background: '#0D6189' } })
+          .png()
+          .toBuffer(),
+      ],
+      [
+        'f.webp',
+        'image/webp',
+        await sharp({ create: { width: 40, height: 30, channels: 3, background: '#0F2D43' } })
+          .webp()
+          .toBuffer(),
+      ],
+    ] as const;
+    for (const [nombre, mime, datos] of entradas) {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/v1/fotos',
+        cookies: sesion(cookieVecino),
+        ...multipart('archivo', nombre, mime, datos),
+      });
+      expect(r.statusCode, `${nombre}: ${r.body.slice(0, 200)}`).toBe(201);
+      expect(r.json().mime).toBe('image/webp');
+      expect(r.json().objeto_key).toMatch(/\.webp$/);
+      const guardado = await almacen.leer(r.json().objeto_key);
+      expect(trozosRiff(guardado!.datos)[0]).toMatch(/^VP8/);
+    }
   });
   it('rechaza tipos no permitidos por magic bytes aunque la extensión diga .jpg', async () => {
     const { payload, headers } = multipart(
@@ -318,7 +375,58 @@ describe('moderación previa de las fotos (§13)', () => {
     expect(r.headers['cache-control']).toBe('public, max-age=3600');
   });
 
-  it('la foto recién subida y aún sin reporte se sirve: el formulario muestra la miniatura', async () => {
+  /**
+   * Las fotos anteriores al contrato 0.8.0 se guardaron en JPEG y no se reconvierten: se siguen
+   * sirviendo como image/jpeg. Cualquier otra extensión da 404 aunque la fila y el objeto existan.
+   */
+  it('una .jpg anterior se sirve como image/jpeg y otra extensión da 404', async () => {
+    const creado = await crear();
+    expect(creado.statusCode).toBe(201);
+    const reporteId = creado.json().id as string;
+    await pool.query(
+      "UPDATE reporte_inundacion SET estado = 'validado'::estado_reporte WHERE id = $1",
+      [reporteId],
+    );
+    const jpeg = await sharp({ create: { width: 30, height: 20, channels: 3, background: '#789' } })
+      .jpeg()
+      .toBuffer();
+    const png = await sharp({ create: { width: 30, height: 20, channels: 3, background: '#789' } })
+      .png()
+      .toBuffer();
+    const anterior = `${randomUUID()}.jpg`;
+    const otra = `${randomUUID()}.png`;
+    for (const [key, mime, datos] of [
+      [anterior, 'image/jpeg', jpeg],
+      [otra, 'image/png', png],
+    ] as const) {
+      await pool.query(
+        `INSERT INTO reporte_foto (reporte_id, objeto_key, mime, bytes, ancho, alto, exif_sanitizado)
+         VALUES ($1, $2, $3, $4, 30, 20, true)`,
+        [reporteId, key, mime, datos.length],
+      );
+      await almacen.guardar(key, datos, mime);
+    }
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${anterior}` });
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['content-type']).toBe('image/jpeg');
+    expect(r.headers['x-content-type-options']).toBe('nosniff');
+    expect(r.headers['cache-control']).toBe('public, max-age=3600');
+    const o = await app.inject({ method: 'GET', url: `/api/v1/fotos/${otra}` });
+    expect(o.statusCode).toBe(404);
+    expect(o.json().codigo).toBe('NO_EXISTE');
+  });
+});
+
+/**
+ * Una foto que todavía no está pegada a ningún reporte es de quien la subió y de nadie más
+ * (plan de producción, T1). Antes se servía a cualquiera durante 24 h: sin moderación previa eso
+ * la convertía en un alojamiento público de imágenes. Los técnicos tampoco la ven: no hay nada
+ * que moderar hasta que exista el reporte.
+ */
+describe('foto sin reporte: solo la ve quien la subió', () => {
+  let key: string;
+
+  beforeAll(async () => {
     const jpeg = await sharp({ create: { width: 20, height: 20, channels: 3, background: '#456' } })
       .jpeg()
       .toBuffer();
@@ -328,10 +436,60 @@ describe('moderación previa de las fotos (§13)', () => {
       cookies: sesion(cookieVecina),
       ...multipart('archivo', 'f.jpg', 'image/jpeg', jpeg),
     });
-    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${sub.json().objeto_key}` });
+    expect(sub.statusCode).toBe(201);
+    key = sub.json().objeto_key;
+  });
+
+  it('200 para su dueña, con private, no-store', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/v1/fotos/${key}`,
+      cookies: sesion(cookieVecina),
+    });
     expect(r.statusCode).toBe(200);
-    // …pero ninguna caché la guarda: todavía no está publicada, y si el reporte al que se adjunte
-    // no llega a validarse, no puede quedar servible desde una caché compartida.
+    expect(r.headers['content-type']).toBe('image/webp');
     expect(r.headers['cache-control']).toBe('private, no-store');
+  });
+
+  it('404 sin sesión', async () => {
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
+    expect(r.statusCode).toBe(404);
+    expect(r.json().codigo).toBe('NO_EXISTE');
+    // Un 404 también se puede guardar en una caché compartida: no debe tapar la foto después.
+    expect(r.headers['cache-control']).toBe('private, no-store');
+  });
+
+  it('404 para otra cuenta ciudadana', async () => {
+    const r = await app.inject({
+      method: 'GET',
+      url: `/api/v1/fotos/${key}`,
+      cookies: sesion(cookieVecino),
+    });
+    expect(r.statusCode).toBe(404);
+  });
+
+  it('404 para un técnico y para un admin', async () => {
+    for (const cookie of [cookieTecnico, cookieAdmin]) {
+      const r = await app.inject({
+        method: 'GET',
+        url: `/api/v1/fotos/${key}`,
+        cookies: sesion(cookie),
+      });
+      expect(r.statusCode).toBe(404);
+    }
+  });
+
+  it('una foto sin reporte y sin subido_por (anterior a la 0012) no la ve nadie', async () => {
+    const huerfana = `${randomUUID()}.jpg`;
+    await pool.query(
+      `INSERT INTO reporte_foto (objeto_key, mime, bytes, ancho, alto, exif_sanitizado)
+       VALUES ($1, 'image/jpeg', 1, 1, 1, true)`,
+      [huerfana],
+    );
+    await almacen.guardar(huerfana, Buffer.from([0xff, 0xd8, 0xff]), 'image/jpeg');
+    for (const cookies of [undefined, sesion(cookieVecina), sesion(cookieTecnico)]) {
+      const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${huerfana}`, cookies });
+      expect(r.statusCode).toBe(404);
+    }
   });
 });
