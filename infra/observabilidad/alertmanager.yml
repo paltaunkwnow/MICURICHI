@@ -29,6 +29,11 @@ inhibit_rules:
   - source_matchers: ['alertname="AppSinReplicas"']
     target_matchers: ['alertname="ProxyNoResponde"']
     equal: [instalacion, app]
+  # Con el disco de fotos bajo el umbral, api-core sale degradado (`fotos: poco_espacio`): es la
+  # misma causa y ya avisa la crítica.
+  - source_matchers: ['alertname="DiscoDeFotosBajoElUmbral"']
+    target_matchers: ['alertname="Degradado"']
+    equal: [instalacion, servicio]
 
 receivers:
   - name: principal

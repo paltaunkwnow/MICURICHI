@@ -1,4 +1,5 @@
-# Pruebas de las alertas de la entrada (apps y proxy) con `promtool test rules`. Parte 5.
+# Pruebas de las alertas con `promtool test rules`: la entrada (apps y proxy), el disco de fotos y
+# la bandeja sin verificar. Parte 5.
 #
 #   docker run --rm --network none -v "$PWD/infra/observabilidad:/etc/prometheus:ro" \
 #     --entrypoint /bin/promtool quay.io/prometheus/prometheus:v3.15.0@sha256:… \
@@ -90,3 +91,98 @@ tests:
         exp_samples:
           - labels: 'ALERTS{alertname="CertificadoPorVencer", alertstate="firing", app="web-ciudadano", gravedad="alta", instance="mapa.ejemplo.org", job="proxy", servicio="proxy", sitio="publica", tls="acme"}'
             value: 1
+
+  # Disco de fotos. Dos réplicas de api-core leen el mismo volumen: una sola alerta por servicio.
+  # El umbral es el que api-core publica en curichi_fotos_disco_min_libre_bytes (aquí el valor por
+  # defecto de FOTOS_MIN_LIBRE_BYTES, 2 GiB). 5 GiB libres hasta el minuto 4, 3 GiB (menos del
+  # doble del umbral) del 5 al 45 y 1 GiB (bajo el umbral: api-core ya responde 507) del 46 en
+  # adelante.
+  - interval: 1m
+    input_series:
+      - series: 'curichi_fotos_disco_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '5368709120x4 3221225472x40 1073741824x20'
+      - series: 'curichi_fotos_disco_libre_bytes{job="api-core", instance="172.18.0.9:3001"}'
+        values: '5368709120x4 3221225472x40 1073741824x20'
+      - series: 'curichi_fotos_disco_min_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '2147483648x64'
+      - series: 'curichi_fotos_disco_min_libre_bytes{job="api-core", instance="172.18.0.9:3001"}'
+        values: '2147483648x64'
+    promql_expr_test:
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 4m
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 20m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiscoDeFotosPorLlenarse", alertstate="pending", gravedad="alta", job="api-core", servicio="api-core"}'
+            value: 1
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 40m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiscoDeFotosPorLlenarse", alertstate="firing", gravedad="alta", job="api-core", servicio="api-core"}'
+            value: 1
+      # Bajo el umbral avisa la crítica y la de «por llenarse» se resuelve: no se avisan las dos.
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 55m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiscoDeFotosBajoElUmbral", alertstate="firing", gravedad="critica", job="api-core", servicio="api-core"}'
+            value: 1
+
+  # Otro FOTOS_MIN_LIBRE_BYTES (8 GiB): las alertas siguen al umbral que publica api-core, sin
+  # tocar alertas.yml. 20 GiB libres hasta el minuto 4, 12 GiB (menos de 16) del 5 al 45 y 6 GiB
+  # del 46 en adelante. Con 2 GiB escritos a mano no avisaría ninguna.
+  - interval: 1m
+    input_series:
+      - series: 'curichi_fotos_disco_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '21474836480x4 12884901888x40 6442450944x20'
+      - series: 'curichi_fotos_disco_min_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '8589934592x64'
+    promql_expr_test:
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 4m
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 40m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiscoDeFotosPorLlenarse", alertstate="firing", gravedad="alta", job="api-core", servicio="api-core"}'
+            value: 1
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 55m
+        exp_samples:
+          - labels: 'ALERTS{alertname="DiscoDeFotosBajoElUmbral", alertstate="firing", gravedad="critica", job="api-core", servicio="api-core"}'
+            value: 1
+
+  # FOTOS_MIN_LIBRE_BYTES=0 apaga la guarda en api-core, y con ella estas alertas: 1 GiB libre no
+  # avisa.
+  - interval: 1m
+    input_series:
+      - series: 'curichi_fotos_disco_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '1073741824x60'
+      - series: 'curichi_fotos_disco_min_libre_bytes{job="api-core", instance="172.18.0.5:3001"}'
+        values: '0x60'
+    promql_expr_test:
+      - expr: ALERTS{alertname=~"DiscoDeFotos.*"}
+        eval_time: 50m
+
+  # Bandeja sin verificar: el reporte más antiguo sin verificar cumple 23 h en el minuto 0 y
+  # envejece 60 s por minuto; pasa las 24 h en el minuto 61 y en el 121 un técnico lo revisa (0).
+  # Con dos réplicas que leen la misma base, una sola alerta.
+  - interval: 1m
+    input_series:
+      - series: 'curichi_reportes_sin_verificar_antiguedad_segundos{job="api-core", instance="172.18.0.5:3001"}'
+        values: '82800+60x120 0x10'
+      - series: 'curichi_reportes_sin_verificar_antiguedad_segundos{job="api-core", instance="172.18.0.9:3001"}'
+        values: '82800+60x120 0x10'
+    promql_expr_test:
+      - expr: ALERTS{alertname="BandejaSinVerificarAtrasada"}
+        eval_time: 60m
+      - expr: ALERTS{alertname="BandejaSinVerificarAtrasada"}
+        eval_time: 65m
+        exp_samples:
+          - labels: 'ALERTS{alertname="BandejaSinVerificarAtrasada", alertstate="pending", gravedad="alta", job="api-core", servicio="api-core"}'
+            value: 1
+      - expr: ALERTS{alertname="BandejaSinVerificarAtrasada"}
+        eval_time: 80m
+        exp_samples:
+          - labels: 'ALERTS{alertname="BandejaSinVerificarAtrasada", alertstate="firing", gravedad="alta", job="api-core", servicio="api-core"}'
+            value: 1
+      - expr: ALERTS{alertname="BandejaSinVerificarAtrasada"}
+        eval_time: 125m

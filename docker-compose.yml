@@ -8,8 +8,9 @@
 #
 #   servicios       migraciones (job) → api-core y geo-service → web-ciudadano y panel-admin → proxy
 #                   (Caddy: TLS y reparto; lo ÚNICO que publica puertos hacia fuera, 80 y 443)
-#   minio           MinIO + su inicialización: S3 LOCAL para las fotos. En producción va un S3
-#                   gestionado (docs/operaciones/produccion.md, «Fotos en producción»)
+#   minio           MinIO + su inicialización: S3 LOCAL para las fotos, solo desarrollo. En la VPS
+#                   las fotos van al disco (volumen `fotos-data`), con guarda de espacio; un S3
+#                   gestionado es la alternativa (docs/operaciones/produccion.md, «Fotos en producción»)
 #   respaldos       respaldo diario cifrado a un S3 externo (docs/operaciones/respaldo-y-restauracion.md)
 #   observabilidad  Prometheus, Alertmanager y blackbox (docs/operaciones/observabilidad.md)
 #
@@ -134,8 +135,8 @@ services:
 
   # --- S3 local para las fotos (perfil `minio`) ---------------------------------------------------
   #
-  # SOLO DESARROLLO. En producción las fotos van a un S3 gestionado (o a un servicio S3 que alguien
-  # mantenga con parches); el porqué está en docs/operaciones/produccion.md.
+  # SOLO DESARROLLO. En la VPS las fotos van al disco (`fotos-data`); si algún día salen de ahí, a
+  # un S3 gestionado, nunca a este MinIO. El porqué está en docs/operaciones/produccion.md.
   #
   # POR QUÉ ESTA IMAGEN. MinIO archivó su edición comunitaria (abril de 2026) y dejó de publicar
   # imágenes: `minio/minio` ya no está en Docker Hub y, desde el 24-09-2026, `quay.io/minio/minio`
@@ -225,6 +226,9 @@ services:
   # si una migración falla, el despliegue se detiene con los contenedores viejos en marcha en vez de
   # dejar servicios nuevos sobre un esquema viejo. Seguro con varias réplicas y en paralelo (advisory
   # lock). Un fallo con SQLSTATE 55P03 es tráfico (lock_timeout), no un error del SQL: reintentar.
+  # La 0015 aborta si quedan reportes en «nuevo» (se enviaron con la promesa de revisión previa):
+  # moderarlos antes o, a sabiendas, `docker compose --profile servicios run --rm migraciones node
+  # node_modules/db/dist/cli/migrar.js --publicar-nuevos-existentes` (produccion.md, «Migración 0015»).
   migraciones:
     <<: [*comun, *servicio-node]
     profiles: ["servicios"]
@@ -330,7 +334,20 @@ services:
       - EXPONER_DOCS
       - SESION_DIAS
       - SESION_IDLE_HORAS
-      - REPORTE_MINUTOS_ENTRE_ENVIOS
+      # Cupo por cuenta y por día calendario en ZONA_HORARIA, contado en la base (vale igual con N
+      # réplicas), y tope diario de altas por IP. Sin definir valen los del contrato (3, 12 y 10).
+      - REPORTES_POR_DIA_POR_CUENTA
+      - FOTOS_POR_DIA_POR_CUENTA
+      - ALTAS_POR_DIA_POR_IP
+      # SOLO PARA PRUEBAS (0 a 3600 s): la demora de publicación de un reporte. En producción NO se
+      # definen y valen las del contrato, 60 s el 1.º del día y 240 s los siguientes (ADR 0006).
+      # Las pone la pila de E2E para no esperar minutos por reporte.
+      - REPORTE_DEMORA_PRIMERO_S
+      - REPORTE_DEMORA_SIGUIENTES_S
+      # Guarda de disco de las fotos (solo sin S3): por debajo de este espacio libre, POST /fotos da
+      # 507 SIN_ESPACIO y /ready sale degradado. El disco es el mismo que el de PostgreSQL. api-core
+      # publica el umbral en /metrics y las alertas DiscoDeFotos* lo leen de ahí.
+      - FOTOS_MIN_LIBRE_BYTES=${FOTOS_MIN_LIBRE_BYTES:-2147483648}
       # Límites ajustables sin reconstruir la imagen.
       - RATE_LIMIT_REPORTES_POR_HORA=${RATE_LIMIT_REPORTES_POR_HORA:-10}
       - RATE_LIMIT_LECTURAS_POR_MINUTO=${RATE_LIMIT_LECTURAS_POR_MINUTO:-240}
@@ -347,8 +364,9 @@ services:
       - CIERRE_PLAZO_MS
       - MANTENIMIENTO_ESPERA_MS
       # Almacén de fotos. Sin `S3_ENDPOINT_DOCKER`, api-core usa `STORAGE_DIR` (el volumen de
-      # abajo, que comparten las réplicas de ESTA máquina). Con `S3_ENDPOINT_DOCKER=http://minio:9000`
-      # (local) o la URL del S3 gestionado (producción), las fotos van a S3.
+      # abajo, que comparten las réplicas de ESTA máquina): es el modo oficial en la VPS (ADR 0006),
+      # con la guarda FOTOS_MIN_LIBRE_BYTES. Con `S3_ENDPOINT_DOCKER=http://minio:9000` (local) o la
+      # URL de un S3 gestionado, las fotos van a S3.
       - STORAGE_DIR=/datos/fotos
       - S3_ENDPOINT=${S3_ENDPOINT_DOCKER:-}
       - S3_BUCKET=${S3_BUCKET:-fotos}
@@ -409,7 +427,10 @@ services:
       - TRUST_PROXY=${TRUST_PROXY_DOCKER:-1}
       - GEO_RATE_LIMIT_POR_MINUTO=${GEO_RATE_LIMIT_POR_MINUTO:-600}
       - GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO=${GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO:-120}
-      - GEO_CACHE_AGREGADOS_MS=${GEO_CACHE_AGREGADOS_MS:-30000}
+      # Cifras por UV y puntos críticos: vida de la caché y edad máxima de lo que se sirve. Sin
+      # definir, valen las de geo-service (el plan fija 100 s y 120 s: cifras con 2 min como máximo).
+      - GEO_CACHE_AGREGADOS_MS
+      - GEO_CACHE_AGREGADOS_EDAD_MAX_MS
       - UMBRAL_TESELAS_BYTES
       - TOLERANCIA_SIMPLIFICACION
       - CIERRE_PLAZO_MS

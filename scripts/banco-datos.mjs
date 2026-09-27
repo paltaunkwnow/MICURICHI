@@ -135,12 +135,19 @@ async function generar(cuantos) {
         ),
         numerados AS (
           SELECT p.*, row_number() OVER () AS i FROM puntos p
+        ),
+        fechados AS (
+          -- 525 600 minutos = un año. El salto de 7919 (primo, coprimo con el año en minutos)
+          -- reparte las fechas de forma determinista y sin relación con el orden espacial.
+          SELECT n.*,
+                 now() - ((CASE WHEN $3::bool THEN n.i ELSE (n.i * 7919) % 525600 END) || ' minutes')::interval AS creado
+            FROM numerados n
         )
         INSERT INTO reporte_inundacion (
           geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
           ubicacion_metodo, ubicacion_tipo, descripcion,
           profundidad_estimada, frecuencia, causa_presunta,
-          severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en)
+          severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
         SELECT
           ST_SetSRID(pt, 4326),
           -- 1 de cada 5 es de vivienda; de esos, 1 de cada 10 queda sin punto publicable para
@@ -162,10 +169,9 @@ async function generar(cuantos) {
           -- Tres de cada cuatro publicables: es la proporción que hace que el índice parcial
           -- del listado público tenga una selectividad parecida a la de un sistema en marcha.
           CASE WHEN i % 4 = 0 THEN 'nuevo' ELSE (ARRAY['validado','resuelto'])[1 + (i % 2)] END::estado_reporte,
-          -- 525 600 minutos = un año. El salto de 7919 (primo, coprimo con el año en minutos)
-          -- reparte las fechas de forma determinista y sin relación con el orden espacial.
-          now() - ((CASE WHEN $3::bool THEN i ELSE (i * 7919) % 525600 END) || ' minutes')::interval
-        FROM numerados`,
+          -- Sin DEFAULT desde la 0016: se publica al crearse, como los anteriores a la 0015.
+          creado, creado
+        FROM fechados`,
         [lote, MARCA, CORRELACIONADO],
       );
       hechos += lote;

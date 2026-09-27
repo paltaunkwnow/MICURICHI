@@ -68,9 +68,10 @@ groups:
         annotations:
           resumen: "api-core degradado ({{ $labels.instance }})"
           descripcion: >-
-            /ready responde con "degradado": true: geo-service o el almacén de fotos no responden.
-            El mapa sigue, pero no se pueden crear reportes o no se pueden subir ni ver fotos.
-            `curl -s http://…/ready` dice cuál de los dos es (campos geo y fotos).
+            /ready responde con "degradado": true: geo-service o el almacén de fotos no responden, o
+            el disco de fotos quedó sin espacio. El mapa sigue, pero no se pueden crear reportes o no
+            se pueden subir fotos. `curl -s http://…/ready` dice cuál es (campos geo y fotos; con
+            "fotos":"poco_espacio" avisa además DiscoDeFotosBajoElUmbral).
 
   # La entrada: las apps réplica por réplica (job `apps`) y cada sitio entero a través del proxy,
   # como un navegador (job `proxy`). Las apps no tienen ruta de salud propia: se mira `/`.
@@ -217,7 +218,7 @@ groups:
           servicio: api-core
         annotations:
           resumen: "{{ $value | humanize }} subidas de fotos rechazadas por cuota en 1 h"
-          descripcion: "Alguien sube fotos en masa, o el tope de fotos por hora y cuenta se quedó corto."
+          descripcion: "Alguien sube fotos en masa, o el tope de fotos por cuenta y por día se quedó corto."
 
       - alert: ReportesSinCrecer
         expr: >-
@@ -242,6 +243,67 @@ groups:
         annotations:
           resumen: "El recálculo de puntos críticos falló en la última hora"
           descripcion: "La moderación siguió adelante; el recálculo queda para el mantenimiento. Mirar los logs de api-core."
+
+  # En la VPS las fotos van al disco, que comparten con PostgreSQL (ADR 0006). api-core solo expone
+  # el espacio del volumen de fotos en modo disco: con S3_ENDPOINT la métrica no existe y estas
+  # alertas no se evalúan. Las réplicas de una máquina leen el mismo volumen: una alerta por servicio.
+  #
+  # El umbral no se escribe aquí: api-core publica su FOTOS_MIN_LIBRE_BYTES en
+  # curichi_fotos_disco_min_libre_bytes y la alerta compara contra eso. Si dos réplicas difieren
+  # (a mitad de un despliegue), manda el umbral más alto. Con 0 la guarda está apagada y estas
+  # alertas no avisan.
+  - name: mi-curichi-disco
+    rules:
+      - alert: DiscoDeFotosBajoElUmbral
+        expr: >-
+          min by (job) (curichi_fotos_disco_libre_bytes)
+          < max by (job) (curichi_fotos_disco_min_libre_bytes)
+        for: 5m
+        labels:
+          gravedad: critica
+          servicio: api-core
+        annotations:
+          resumen: "Quedan {{ $value | humanize1024 }}B libres en el disco de fotos"
+          descripcion: >-
+            El disco de fotos quedó bajo FOTOS_MIN_LIBRE_BYTES: api-core rechaza las fotos con 507
+            SIN_ESPACIO (los reportes sin foto siguen entrando) y /ready sale degradado. Ese disco es
+            también el de PostgreSQL: si se llena, cae la base. `df -h` y `docker system df` en la
+            VPS; liberar espacio (logs, imágenes viejas con `docker image prune`) o agrandar el disco.
+
+      - alert: DiscoDeFotosPorLlenarse
+        expr: >-
+          min by (job) (curichi_fotos_disco_libre_bytes)
+          < 2 * max by (job) (curichi_fotos_disco_min_libre_bytes)
+          and min by (job) (curichi_fotos_disco_libre_bytes)
+          >= max by (job) (curichi_fotos_disco_min_libre_bytes)
+        for: 30m
+        labels:
+          gravedad: alta
+          servicio: api-core
+        annotations:
+          resumen: "Quedan {{ $value | humanize1024 }}B libres en el disco de fotos"
+          descripcion: >-
+            Queda menos del doble de FOTOS_MIN_LIBRE_BYTES. Todavía se aceptan fotos, pero conviene
+            agrandar el disco o liberar espacio antes de que api-core empiece a rechazarlas con 507.
+
+  # Sin moderación previa (ADR 0006), un reporte publicado queda a la vista con «NO SE HA
+  # VERIFICADO» hasta que un técnico lo revisa. El plazo máximo lo fija el municipio: 24 h
+  # (86400 s) es provisional <a confirmar con el municipio>. Cambiarlo es cambiar el número de
+  # abajo y los tiempos de alertas.test.yml.
+  - name: mi-curichi-moderacion
+    rules:
+      - alert: BandejaSinVerificarAtrasada
+        expr: max by (job) (curichi_reportes_sin_verificar_antiguedad_segundos) > 86400
+        for: 10m
+        labels:
+          gravedad: alta
+          servicio: api-core
+        annotations:
+          resumen: "Hay un reporte sin verificar desde hace {{ $value | humanizeDuration }}"
+          descripcion: >-
+            El reporte sin verificar más antiguo pasó el plazo de revisión acordado con el municipio.
+            Está publicado con «NO SE HA VERIFICADO» y nadie lo revisó: validarlo, rechazarlo o
+            fusionarlo desde la bandeja del panel técnico.
 
   - name: mi-curichi-vigilancia
     rules:

@@ -15,6 +15,9 @@ inhibit_rules:
   - source_matchers: ['alertname="AppSinReplicas"']
     target_matchers: ['alertname="ProxyNoResponde"']
     equal: [instalacion, app]
+  - source_matchers: ['alertname="DiscoDeFotosBajoElUmbral"']
+    target_matchers: ['alertname="Degradado"']
+    equal: [instalacion, servicio]
 
 receivers:
   - name: principal

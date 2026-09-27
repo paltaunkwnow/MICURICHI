@@ -493,7 +493,8 @@ jobs:
 
       # La configuración se genera con el envoltorio REAL (`arrancar-prometheus.sh comprobar`), en
       # los tres modos del proxy, y `promtool check config` revisa también las reglas. Después, las
-      # pruebas unitarias de las alertas de la entrada (alertas.test.yml).
+      # pruebas unitarias de las alertas (alertas.test.yml): la entrada, el disco de fotos y la
+      # bandeja sin verificar.
       - name: Reglas y configuración de Prometheus y Alertmanager
         env:
           PROMETHEUS_IMAGEN: quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
