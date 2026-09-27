@@ -4,7 +4,7 @@ Fastify + PostGIS. Único punto de escritura de reportes. Contratos en `packages
 
 | Ruta | Rol | Qué hace |
 |---|---|---|
-| `POST /api/v1/reportes` | sesión (1 por cuenta cada 60 min, 10/h por IP, honeypot) | Resuelve UV en geo-service, calcula severidad (§9.1), crea en `nuevo`. Solo adjunta fotos subidas por la misma cuenta, sin reporte y de menos de 24 h (si no, 400 `FOTOS_INVALIDAS`) |
+| `POST /api/v1/reportes` | sesión (1 por cuenta cada 60 min, 10/h por IP, honeypot) | Comprueba la posición del teléfono (`dispositivo`, ver abajo), resuelve UV en geo-service, calcula severidad (§9.1), crea en `nuevo`. Solo adjunta fotos subidas por la misma cuenta, sin reporte y de menos de 24 h (si no, 400 `FOTOS_INVALIDAS`) |
 | `GET /api/v1/reportes`, `GET /api/v1/reportes/:id` | público / técnico | Público: solo `validado`/`resuelto`, coordenadas redondeadas y con jitter si es vivienda. Técnico: todo, exacto |
 | `PATCH /api/v1/reportes/:id/estado` | técnico, admin | Máquina de estados §7.3 con auditoría y recálculo de puntos críticos |
 | `PATCH /api/v1/reportes/:id/severidad` | técnico, admin | Reclasificación manual con motivo (la calculada se conserva) |
@@ -28,6 +28,25 @@ sesión y ve `/api/v1/ejecutivo/resumen`; recibe 403 `SIN_PERMISO` en `/api/v1/t
 consulta automática cada 60 s) valida la sesión pero no renueva `ultimo_uso_en`: si no, un panel
 abierto mantenía viva la sesión para siempre y la caducidad por inactividad (`SESION_IDLE_HORAS`,
 12 h) no llegaba nunca.
+
+**Posición del teléfono (contracts 0.9.0).** `POST /api/v1/reportes` exige `dispositivo`
+(`{ lat, lon, precision_m, antiguedad_s }`). Después de Zod y antes de resolver la UV se revisa, en
+este orden (`src/ubicacion-dispositivo.ts`):
+
+- precisión mayor a `PRECISION_DISPOSITIVO_MAX_M` (50 m): 422 `PRECISION_INSUFICIENTE`;
+- antigüedad mayor a `POSICION_ANTIGUEDAD_MAX_S` (600 s): 422 `POSICION_VENCIDA`;
+- punto a más de `REPORTE_RADIO_DISPOSITIVO_M` (60 m) + `REPORTE_RADIO_TOLERANCIA_M` (0,5 m, por
+  el redondeo de las coordenadas) del teléfono: 422 `UBICACION_FUERA_DE_RADIO`.
+
+Ninguno gasta cupo y los tres suman a `curichi_reportes_fuera_de_radio_total{codigo}`. Se guardan
+solo `precision_gps_m` (la precisión declarada), `distancia_dispositivo_m` (redondeada al metro y
+nunca mayor que el radio) y `ubicacion_metodo`, que deriva el servidor: `gps` si el punto quedó
+dentro del margen de error del teléfono (a `max(2 m, precision_m)` o menos), `manual` si quedó más
+lejos. El margen hace falta porque el punto que puso el GPS en el paso 1 y la posición releída al
+enviar difieren unos metros aunque nadie lo mueva. La posición del teléfono no queda en la fila,
+ni en la auditoría, ni en la huella de idempotencia (un reintento que relee el GPS devuelve el mismo reporte), ni en el log: el
+logger oculta cualquier clave `dispositivo` (`RUTAS_OCULTAS_DEL_LOG` en `src/registro.ts`). La
+exportación CSV suma la columna `distancia_dispositivo_m`.
 
 **Errores.** Los 4xx que genera Fastify antes de la ruta (JSON mal formado, cuerpo demasiado
 grande, tipo de contenido sin parser) salen con código propio y el mismo estado:

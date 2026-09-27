@@ -27,6 +27,8 @@ export interface FilaReporte {
   resolucion_flags: Record<string, unknown>;
   ubicacion_metodo: 'gps' | 'manual';
   precision_gps_m: string | null;
+  /** Metros entre el punto y el teléfono al enviar (0013); null en los reportes anteriores. */
+  distancia_dispositivo_m: number | null;
   ubicacion_tipo: 'via_publica' | 'vivienda_o_predio' | 'otro';
   descripcion: string;
   profundidad_estimada: ReportePublico['profundidad_estimada'];
@@ -55,7 +57,7 @@ export const SELECT_REPORTE = `
          r.creado_en, r.actualizado_en, r.evento_en, r.autor_id,
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
-         r.ubicacion_metodo, r.precision_gps_m, r.ubicacion_tipo, r.descripcion,
+         r.ubicacion_metodo, r.precision_gps_m, r.distancia_dispositivo_m, r.ubicacion_tipo, r.descripcion,
          r.profundidad_estimada, r.frecuencia, r.causa_presunta,
          r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,
@@ -158,6 +160,7 @@ export function vistaTecnica(
       ...base.props,
       ubicacion_metodo: f.ubicacion_metodo,
       precision_gps_m: f.precision_gps_m === null ? null : Number(f.precision_gps_m),
+      distancia_dispositivo_m: f.distancia_dispositivo_m,
       ubicacion_tipo: f.ubicacion_tipo,
       sumidero_cercano: f.sumidero_cercano,
       sumidero_estado: f.sumidero_estado,

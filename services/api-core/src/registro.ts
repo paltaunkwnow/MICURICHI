@@ -51,9 +51,24 @@ export function serializadores(salIp: string) {
   };
 }
 
+/**
+ * La posición del teléfono que llega en `POST /reportes` (contracts 0.9.0) no se registra nunca
+ * (§0 regla 8): sirve para comprobar el radio de 60 m y se descarta. Hoy ningún log escribe el
+ * cuerpo de la petición; esto cubre el día en que alguien lo agregue para diagnosticar.
+ */
+export const RUTAS_OCULTAS_DEL_LOG = [
+  'dispositivo',
+  '*.dispositivo',
+  'req.body.dispositivo',
+  'request.body.dispositivo',
+];
+
 /** Opciones de logger para Fastify, con el formato legible fuera de producción. */
 export function opcionesLogger(o: OpcionesRegistro) {
-  const base = { serializers: serializadores(o.salIp) };
+  const base = {
+    serializers: serializadores(o.salIp),
+    redact: { paths: RUTAS_OCULTAS_DEL_LOG, censor: '[oculto]' },
+  };
   if (o.produccion) return base;
   return {
     ...base,

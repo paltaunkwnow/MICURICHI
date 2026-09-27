@@ -43,7 +43,7 @@ const MANZANA = { id: 'manzana:A-1', codigo: 'A-1' };
 const PAYLOAD_NUEVO = {
   lat: -17.79,
   lon: -63.195,
-  ubicacion_metodo: 'manual',
+  dispositivo: { lat: -17.79, lon: -63.195, precision_m: 8, antiguedad_s: 3 },
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte y tarda horas en irse.',
   profundidad_estimada: 'rodilla',
@@ -238,6 +238,7 @@ describe('CA-A4: vistas pública y técnica sin los cuatro campos', () => {
       ...PAYLOAD_CON_LOS_CUATRO,
       lat: LAT,
       lon: LON,
+      dispositivo: { ...PAYLOAD_NUEVO.dispositivo, lat: LAT, lon: LON },
       ubicacion_tipo: 'vivienda_o_predio',
     });
     expect(v.statusCode, v.body.slice(0, 400)).toBe(201);

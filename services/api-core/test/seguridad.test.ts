@@ -159,6 +159,7 @@ function fila(parcial: Partial<FilaReporte> = {}): FilaReporte {
     resolucion_flags: {},
     ubicacion_metodo: 'manual',
     precision_gps_m: null,
+    distancia_dispositivo_m: null,
     ubicacion_tipo: 'vivienda_o_predio',
     descripcion: 'Se junta agua hasta la rodilla en la puerta de casa cada lluvia.',
     profundidad_estimada: 'rodilla',

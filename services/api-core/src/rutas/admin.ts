@@ -206,6 +206,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       'lat',
       'lon',
       'precision_gps_m',
+      'distancia_dispositivo_m',
       'ubicacion_metodo',
       'ubicacion_tipo',
       'distrito_id',

@@ -11,6 +11,7 @@ import {
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
+  reporteEn,
   reporteValido,
   resolverDePrueba,
   sesion,
@@ -255,17 +256,12 @@ describe('validación, cobertura, privacidad y exportación', () => {
     expect(bot.statusCode).toBe(400);
   });
   it('rechaza puntos fuera de cobertura con 422', async () => {
-    const r = await crear({ ...reporteValido, lat: -17.5, lon: -63.0 });
+    const r = await crear(reporteEn(-17.5, -63.0));
     expect(r.statusCode).toBe(422);
     expect(r.json().codigo).toBe('FUERA_DE_COBERTURA');
   });
   it('degrada la precisión en público cuando la ubicación es una vivienda, pero no para el técnico', async () => {
-    const c = await crear({
-      ...reporteValido,
-      ubicacion_tipo: 'vivienda_o_predio',
-      lat: -17.791,
-      lon: -63.196,
-    });
+    const c = await crear(reporteEn(-17.791, -63.196, { ubicacion_tipo: 'vivienda_o_predio' }));
     const idCasa = c.json().id;
     await app.inject({
       method: 'PATCH',

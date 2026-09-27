@@ -17,6 +17,7 @@ import {
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
+  reporteEn,
   reporteValido,
   resolverDePrueba,
   sesion,
@@ -205,7 +206,7 @@ describe('idempotencia de la creación de reportes', () => {
 
   it('un envío rechazado no deja la clave ocupada', async () => {
     // Fuera de cobertura: el reporte no se crea, así que la clave debe quedar libre.
-    const fuera = await crear('envio-ffffffff-6666', { lat: -10, lon: -60 });
+    const fuera = await crear('envio-ffffffff-6666', reporteEn(-10, -60));
     expect(fuera.statusCode).toBe(422);
     const dentro = await crear('envio-ffffffff-6666');
     expect(dentro.statusCode).toBe(201);

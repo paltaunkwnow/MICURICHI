@@ -187,7 +187,7 @@ describe('geo-service caído: crear un reporte es 503, no 500', () => {
   const reporte = {
     lat: -17.7833,
     lon: -63.1815,
-    ubicacion_metodo: 'manual',
+    dispositivo: { lat: -17.7833, lon: -63.1815, precision_m: 8, antiguedad_s: 3 },
     ubicacion_tipo: 'via_publica',
     descripcion: 'Se junta agua en la esquina cada vez que llueve fuerte.',
     profundidad_estimada: 'rodilla',

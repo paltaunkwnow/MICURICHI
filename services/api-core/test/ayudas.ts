@@ -1,4 +1,4 @@
-import type { ResolverRespuesta } from 'contracts';
+import { RADIO_TIERRA_M, type ResolverRespuesta } from 'contracts';
 import type { Ejecutor } from 'db';
 import { hashPassword } from 'db';
 import type { FastifyInstance } from 'fastify';
@@ -88,16 +88,44 @@ export async function liberarCuota(ex: Ejecutor, email: string = CUENTAS.vecina)
   await ex.consultar('UPDATE usuario SET ultimo_reporte_en = NULL WHERE email = $1', [email]);
 }
 
+/**
+ * Payload de contracts 0.9.0: el teléfono está en el mismo punto que reporta, con una precisión y
+ * una antigüedad que pasan los topes. `ubicacion_metodo` y `precision_gps_m` ya no los manda el
+ * cliente: los deriva api-core de `dispositivo`.
+ */
 export const reporteValido = {
   lat: -17.79,
   lon: -63.195,
-  ubicacion_metodo: 'manual',
+  dispositivo: { lat: -17.79, lon: -63.195, precision_m: 8, antiguedad_s: 3 },
   ubicacion_tipo: 'via_publica',
   descripcion: 'Se junta agua hasta la rodilla cada vez que llueve fuerte y tarda horas en irse.',
   profundidad_estimada: 'rodilla',
   frecuencia: 'cada_lluvia_fuerte',
   causa_presunta: 'sumidero_tapado',
 };
+
+/**
+ * `reporteValido` en otro punto, con el teléfono parado en ese mismo punto. Sin mover también
+ * `dispositivo`, el punto quedaría lejos del teléfono y el envío se cortaría con
+ * UBICACION_FUERA_DE_RADIO antes de llegar a lo que la prueba quiere ejercitar.
+ */
+export function reporteEn(lat: number, lon: number, extra: Record<string, unknown> = {}) {
+  return {
+    ...reporteValido,
+    lat,
+    lon,
+    dispositivo: { ...reporteValido.dispositivo, lat, lon },
+    ...extra,
+  };
+}
+
+/** Metros por grado de latitud en la esfera de `distanciaMetros` (contracts). */
+const METROS_POR_GRADO = (RADIO_TIERRA_M * Math.PI) / 180;
+
+/** El punto a `metros` al norte de `p` (al sur si es negativo), sobre el mismo meridiano. */
+export function alNorte(p: { lat: number; lon: number }, metros: number) {
+  return { lat: p.lat + metros / METROS_POR_GRADO, lon: p.lon };
+}
 
 /**
  * Ids de los trozos de un WebP, recorriendo el contenedor RIFF a mano. Es independiente de sharp

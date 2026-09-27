@@ -29,7 +29,7 @@ import {
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
-  reporteValido,
+  reporteEn,
   resolverDePrueba,
   sesion,
 } from './ayudas.js';
@@ -53,7 +53,7 @@ async function crearVivienda() {
   return app.inject({
     method: 'POST',
     url: '/api/v1/reportes',
-    payload: { ...reporteValido, lat: LAT, lon: LON, ubicacion_tipo: 'vivienda_o_predio' },
+    payload: reporteEn(LAT, LON, { ubicacion_tipo: 'vivienda_o_predio' }),
     cookies: sesion(cookieVecina),
   });
 }

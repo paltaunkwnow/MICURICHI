@@ -25,6 +25,7 @@ import {
   iniciarSesion,
   liberarCuota,
   PASSWORD_PRUEBA,
+  reporteEn,
   reporteValido,
   resolverDePrueba,
   sesion,
@@ -669,12 +670,10 @@ describe('tener cuenta de ciudadano no acerca a la vista técnica (A-01)', () =>
 
   it('ni siquiera los reportes propios salen con coordenada exacta en la ruta pública', async () => {
     await liberarCuota(ex);
-    const creado = await enviar(cookieVecina, {
-      ...reporteValido,
-      ubicacion_tipo: 'vivienda_o_predio',
-      lat: -17.7912345,
-      lon: -63.1934567,
-    });
+    const creado = await enviar(
+      cookieVecina,
+      reporteEn(-17.7912345, -63.1934567, { ubicacion_tipo: 'vivienda_o_predio' }),
+    );
     expect(creado.statusCode).toBe(201);
     const id = creado.json().id as string;
     await app.inject({

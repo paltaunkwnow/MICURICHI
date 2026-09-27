@@ -20,6 +20,7 @@ import {
   reclamarClave,
 } from '../idempotencia.js';
 import { ipHashDiario } from '../privacidad.js';
+import { revisarDispositivo } from '../ubicacion-dispositivo.js';
 import { aFeature, vistaPublica, vistaTecnica } from '../vistas.js';
 
 const IdParam = z.object({ id: z.uuid() });
@@ -77,7 +78,27 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
           detalles: p.error.issues.map((i) => ({ campo: i.path.join('.'), mensaje: i.message })),
         });
       }
-      const d = p.data;
+      const { dispositivo, ...d } = p.data;
+      /*
+       * La posición del teléfono (contracts 0.9.0). Va antes de resolver: no tiene sentido
+       * preguntarle a geo-service por un punto que se va a rechazar. Y fuera de la transacción,
+       * así un rechazo no gasta cupo. Desde acá `dispositivo` no se usa más: no llega a la fila,
+       * ni a la auditoría, ni a la huella de idempotencia, ni al log (§0 regla 8).
+       */
+      const ubicacion = revisarDispositivo(d, dispositivo);
+      if (!ubicacion.ok) {
+        app.metricas.contar('curichi_reportes_fuera_de_radio_total', { codigo: ubicacion.codigo });
+        // Solo el código y las cifras que se devuelven: ninguna coordenada.
+        req.log.info(
+          { codigo: ubicacion.codigo, detalles: ubicacion.detalles },
+          'reporte rechazado por la ubicación del dispositivo',
+        );
+        return res.status(422).send({
+          codigo: ubicacion.codigo,
+          mensaje: ubicacion.mensaje,
+          detalles: ubicacion.detalles,
+        });
+      }
       const geo = await dep.resolver.resolver(d.lat, d.lon, req.requestId);
       if (!geo.dentro_cobertura || !geo.unidad_vecinal || !geo.distrito) {
         return res.status(422).send({
@@ -97,6 +118,8 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
           codigo: 'CLAVE_IDEMPOTENCIA_INVALIDA',
           mensaje: 'La cabecera Idempotency-Key no tiene un formato aceptable.',
         });
+      // Sin `dispositivo`: un reintento del mismo envío relee el GPS (otra antigüedad, otra
+      // lectura) y tiene que devolver el mismo reporte, no un 409 por «otro contenido».
       const huella = huellaDePayload(d);
 
       const sev = calcularSeveridad(d);
@@ -183,9 +206,10 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         const ins = await cliente.query<{ id: string }>(
           `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
            ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
-           sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id)
+           sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id,
+           distancia_dispositivo_m)
          VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($23, $24), 4326), $3, $4, $5, $6, $7, $8::jsonb,
-           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25) RETURNING id`,
+           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25, $26) RETURNING id`,
           [
             d.lon,
             d.lat,
@@ -203,8 +227,9 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
               distancia_m: geo.distancia_m,
               distrito_discrepante: geo.distrito_discrepante,
             }),
-            d.ubicacion_metodo,
-            d.precision_gps_m ?? null,
+            // Los deriva el servidor desde 0.9.0; el cliente ya no los manda.
+            ubicacion.metodo,
+            ubicacion.precisionM,
             d.ubicacion_tipo,
             d.descripcion,
             d.profundidad_estimada,
@@ -220,6 +245,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             publico.lon,
             publico.lat,
             idNuevo,
+            ubicacion.distanciaM,
           ],
         );
         const id = ins.rows[0]!.id;

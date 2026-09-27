@@ -33,6 +33,7 @@ import {
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
+  reporteEn,
   reporteValido,
   resolverDePrueba,
   sesion,
@@ -88,12 +89,7 @@ afterAll(async () => {
 
 /** Crea un reporte de vivienda y lo valida (solo lo validado se publica). */
 async function crearViviendaValidada(lat = LAT, lon = LON): Promise<string> {
-  const creado = await crear({
-    ...reporteValido,
-    lat,
-    lon,
-    ubicacion_tipo: 'vivienda_o_predio',
-  });
+  const creado = await crear(reporteEn(lat, lon, { ubicacion_tipo: 'vivienda_o_predio' }));
   expect(creado.statusCode).toBe(201);
   const id = creado.json().id as string;
   const val = await app.inject({
@@ -146,7 +142,7 @@ describe('la vista pública degrada la ubicación de una vivienda', () => {
  */
 describe('CA-A6: ni la vista pública ni la técnica traen manzana_id', () => {
   async function crearValidado(ubicacion_tipo: 'vivienda_o_predio' | 'via_publica') {
-    const r = await crear({ ...reporteValido, lat: LAT, lon: LON, ubicacion_tipo });
+    const r = await crear(reporteEn(LAT, LON, { ubicacion_tipo }));
     expect(r.statusCode).toBe(201);
     const id = r.json().id as string;
     const val = await app.inject({

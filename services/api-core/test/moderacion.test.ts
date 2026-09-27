@@ -18,7 +18,7 @@ import {
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
-  reporteValido,
+  reporteEn,
   resolverDePrueba,
   sesion,
 } from './ayudas.js';
@@ -93,7 +93,7 @@ async function crear(sitio = sitioNuevo()): Promise<string> {
   const r = await app.inject({
     method: 'POST',
     url: '/api/v1/reportes',
-    payload: { ...reporteValido, ...sitio },
+    payload: reporteEn(sitio.lat, sitio.lon),
     cookies: sesion(cookieVecina),
   });
   expect(r.statusCode, r.body.slice(0, 300)).toBe(201);
