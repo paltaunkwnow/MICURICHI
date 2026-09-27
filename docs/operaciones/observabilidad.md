@@ -8,7 +8,7 @@ está pasando**.
 | Ruta | Qué dice | Para qué |
 |---|---|---|
 | `GET /health` | El proceso está vivo y acepta HTTP | *Liveness*: si falla, reiniciar el contenedor |
-| `GET /ready` | Además, la base responde y (en api-core) geo-service también | *Readiness*: si falla, sacarlo del balanceador, no reiniciarlo |
+| `GET /ready` | Además, la base responde. En api-core mira también geo-service y el almacén de fotos: con S3, que responda; en disco, que se pueda escribir (escribe y borra un archivo temporal) y que quede más que `FOTOS_MIN_LIBRE_BYTES` libre. Sin base da 503; lo demás da 200 con `degradado: true` | *Readiness*: si falla, sacarlo del balanceador, no reiniciarlo |
 
 `/ready` **no** devuelve el detalle del fallo: el mensaje de `pg` incluye host, usuario y base de
 datos. El detalle va al log. Está limitado a 60 peticiones por minuto para que no sirva de
@@ -52,11 +52,23 @@ también `metrics_path` en `infra/observabilidad/prometheus.yml`.
 | `curichi_http_duracion_segundos` | histograma | `ruta`, `metodo` | Latencia por percentiles, que es lo que nota la gente |
 | `curichi_rate_limit_total` | contador | `ruta` | Si sube, o hay abuso o el límite quedó corto |
 | `curichi_errores_5xx_total` | contador | `ruta` | Lo que despierta a alguien de madrugada |
-| `curichi_reportes_creados_total` | contador | `severidad`, `anonimo` | Señal de producto: si cae a cero, algo se rompió aunque no haya errores |
+| `curichi_reportes_creados_total` | contador | `severidad`, `rol` | Señal de producto: si cae a cero, algo se rompió aunque no haya errores. `rol` separa lo que reporta el vecindario de lo que carga un técnico |
 | `curichi_moderacion_total` | contador | `desde`, `hacia` | Cuánto modera el municipio y hacia dónde |
+| `curichi_reportes_fuera_de_radio_total` | contador | `codigo` | Reportes rechazados con 422 por la ubicación del dispositivo (fuera de los 60 m, precisión insuficiente o posición vencida). Si sube mucho, el radio o la precisión exigida dejan afuera a gente real |
+| `curichi_cuota_reportes_rechazos_total`, `curichi_cuota_fotos_rechazos_total` | contador | — | Rechazos `429` por el cupo diario de cada cuenta (3 reportes y 12 fotos por día). El de fotos es el de `CuotaDeFotosRechazando` |
+| `curichi_reportes_sin_verificar_antiguedad_segundos` | medidor | — | Antigüedad del reporte publicado sin verificar más viejo. Sin moderación previa, es lo que dice si la bandeja se atrasa (`BandejaSinVerificarAtrasada`) |
+| `curichi_fotos_subidas_total` | contador | `resultado` (`aceptada`, `rechazada_tipo`, `rechazada_tamano`, `rechazada_cuota`, `rechazada_espacio`, `error`) | Cada intento de `POST /fotos` y por qué se cae. `rechazada_espacio` es el `507 SIN_ESPACIO` de la guarda de disco; un pico de `error` es el almacén o la base |
+| `curichi_fotos_procesado_segundos` | histograma | — | Lo que tarda sharp en pasar cada foto a WebP, sin el multipart ni la base: la parte que puede saturar la CPU |
+| `curichi_fotos_disco_libre_bytes`, `curichi_fotos_disco_total_bytes` | medidor | — | Espacio del disco de fotos, solo con el almacén en disco (el de la VPS). Ese disco es también el de PostgreSQL (`DiscoDeFotos*`) |
+| `curichi_fotos_disco_min_libre_bytes` | medidor | — | El umbral configurado (`FOTOS_MIN_LIBRE_BYTES`; 0 si la guarda está apagada). Las alertas `DiscoDeFotos*` comparan contra este valor, así que cambiar la variable no obliga a tocar `alertas.yml` |
 
 `ruta` es la **plantilla** (`/api/v1/reportes/:id`), no la URL concreta: con la URL, cada id
 crearía su propia serie temporal y la métrica sería inservible.
+
+`/indicadores` y `/ejecutivo/resumen` no tienen caché en api-core (el panel los pide cada 10 s):
+las peticiones simultáneas se juntan en una sola consulta, y no hay métricas de caché ni cabecera
+`X-Cache` en api-core. `X-Cache` (`hit`, `miss` o `stale`) queda solo en las cifras públicas de
+geo-service (agregados por UV y puntos críticos), con sus `curichi_geo_cache_*`.
 
 ### Lo que NO se mide (a propósito)
 
@@ -82,7 +94,7 @@ Compose (ver §6). Cada una lleva `gravedad`, `servicio` e `instalacion` (la ciu
 | `ServicioCaido` | Una réplica no entrega `/metrics` durante 2 min | Crítica | `docker compose ps` y `logs` del servicio. Si todas las demás métricas están bien, revisar que `METRICAS_TOKEN` sea el mismo en Prometheus y en el servicio |
 | `ServicioSinReplicas` | Ninguna réplica de api-core (o de geo-service) sana durante 2 min | Crítica | Lo mismo; sin geo-service no se ubica ningún reporte |
 | `NoListo` | `/ready` no da 200 durante 2 min | Crítica | En api-core solo pasa sin base: `docker compose logs postgis`, conexiones, disco |
-| `Degradado` | `/ready` da 200 con `"degradado": true` durante 5 min | Alta | `/ready` dice si es `geo` (geo-service) o `fotos` (almacén). El mapa sigue; crear reportes o subir fotos, no |
+| `Degradado` | `/ready` da 200 con `"degradado": true` durante 5 min | Alta | `/ready` dice si es `geo` (geo-service) o `fotos` (almacén caído, o `poco_espacio` en el disco). El mapa sigue; crear reportes o subir fotos, no |
 | `TasaDeErrores5xx` | Más del 1 % de 5xx durante 5 min (con un mínimo de tráfico) | Crítica | Logs por `reqId`; los 503 por base saturada también cuentan |
 | `LatenciaAlta` | p95 > 1 s durante 10 min (sin la exportación) | Alta | Mirar primero `curichi_db_pool_esperando` (§«Qué mirar primero») |
 | `PoolDeConexionesSaturado` | Peticiones esperando conexión en cada lectura de 5 min | Alta | Falta CPU en la base o sobra concurrencia. Subir el pool NO sirve sin CPU (produccion.md) |
@@ -91,6 +103,9 @@ Compose (ver §6). Cada una lleva `gravedad`, `servicio` e `instalacion` (la ciu
 | `CuotaDeFotosRechazando` | Más de 20 subidas de fotos rechazadas por cuota en 1 h | Media | Subidas en masa, o un tope por cuenta corto |
 | `ReportesSinCrecer` | Ningún reporte nuevo en 24 h, con api-core en marcha, durante 6 h | Media | En temporada de lluvias: probar el formulario a mano. Fuera de temporada, silenciarla |
 | `PuntosCriticosFallando` | El recálculo de puntos críticos falló | Media | Logs de api-core; el mantenimiento lo reintenta |
+| `DiscoDeFotosPorLlenarse` | Queda menos del doble de `FOTOS_MIN_LIBRE_BYTES` libre en el disco de fotos, durante 30 min | Alta | Agrandar el disco o liberar espacio (`df -h`, `docker system df`, `docker image prune`) antes de que empiecen los 507 |
+| `DiscoDeFotosBajoElUmbral` | Queda menos de `FOTOS_MIN_LIBRE_BYTES` libre, durante 5 min: las fotos ya dan `507 SIN_ESPACIO` | Crítica | Lo mismo, ya: ese disco es también el de PostgreSQL. Inhibe el `Degradado` de api-core, que es la misma causa |
+| `BandejaSinVerificarAtrasada` | El reporte sin verificar más antiguo pasó el plazo de revisión (24 h, provisional `<a confirmar con el municipio>`), durante 10 min | Alta | Moderar la bandeja del panel técnico: el reporte está a la vista con «NO SE HA VERIFICADO» |
 | `AppCaida` | Una réplica de web-ciudadano o panel-admin no da 200 en `/` durante 2 min | Crítica | `docker compose ps` y `logs` de esa app. Si quedan réplicas sanas, el proxy ya reparte entre ellas |
 | `AppSinReplicas` | Ninguna réplica de una de las dos apps da 200 en `/` durante 2 min | Crítica | Lo mismo. Inhibe el `ProxyNoResponde` de ese sitio, que es consecuencia |
 | `ProxyNoResponde` | Un sitio no da 200 entrando por el proxy como un navegador (TLS con su nombre) durante 2 min | Crítica | `docker compose ps proxy` y `logs proxy`. Con `PROXY_TLS=acme` salta también si el certificado no valida o venció |
@@ -99,12 +114,20 @@ Compose (ver §6). Cada una lleva `gravedad`, `servicio` e `instalacion` (la ciu
 | `AlertasSinSalir` | Alertmanager no consigue entregar avisos durante 15 min | Alta | `ALERTAS_WEBHOOK_URL` y `docker compose logs alertmanager` |
 | `PrometheusSinAlertmanager` | Prometheus no encuentra a Alertmanager | Alta | Las reglas se evalúan pero nadie se entera |
 
+> `DiscoDeFotos*` no tienen el umbral escrito: comparan el espacio libre con
+> `curichi_fotos_disco_min_libre_bytes`, que api-core publica desde `FOTOS_MIN_LIBRE_BYTES`. Si dos
+> réplicas difieren (a mitad de un despliegue), manda el umbral más alto, y con 0 (guarda apagada)
+> no avisan. El plazo de `BandejaSinVerificarAtrasada` (86 400 s) sí está escrito en
+> `alertas.yml`, porque es un acuerdo con el municipio y no una variable de api-core: si cambia, se
+> cambia ahí y en `alertas.test.yml`, y se corre `promtool test rules`.
+
 > `ReportesSinCrecer` existe por experiencia propia de este repositorio: el formulario público
 > estuvo completamente inutilizable y ningún indicador técnico lo delataba, porque el fallo era una
 > validación de cliente que ni siquiera llegaba a hacer la petición.
 
 La «cola de fotos» no tiene métrica propia: api-core no expone cuántas imágenes esperan a
-procesarse. Se cubre con `Degradado` (almacén caído) y `CuotaDeFotosRechazando`; una métrica de
+procesarse. Se cubre con `Degradado` (almacén caído), `DiscoDeFotos*` (espacio) y
+`CuotaDeFotosRechazando`; una métrica de
 cola del procesado de imágenes queda pendiente para la Parte 3.
 
 ## 6. Monitoreo con el perfil `observabilidad`

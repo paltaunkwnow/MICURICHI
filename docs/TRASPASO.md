@@ -1,4 +1,4 @@
-# Traspaso — estado exacto al 2026-09-26
+# Traspaso — estado exacto al 2026-09-27
 
 Este documento dice **dónde quedó el trabajo**, **qué funciona verificado**, **qué falta** y **cómo retomarlo**. Léelo junto con `CLAUDE.md`, que es el manual operativo y no cambia con el traspaso.
 
@@ -51,14 +51,14 @@ columna «Reglas de `CLAUDE.md`» dice dónde el manual va por delante del códi
 |---|---|---|---|---|
 | T0 | S00 | Reglas escritas: `CLAUDE.md`, ADR 0006 y este traspaso reflejan lo aprobado antes de tocar código. | Todas | **Hecha** (2026-09-26) |
 | T1 | S01–S06 | Fotos solo desde la cámara dentro de la página, guardadas en WebP con 1600 px por lado como máximo. Las imágenes de las dos webs pasan a WebP. Una foto sin reporte solo la ve quien la subió. Contrato 0.8.0. | §4.3, §7.2 (`reporte_foto`), §7.5 (`POST /fotos`; de `GET /fotos/:key`, solo el formato y «sin reporte, solo su dueño»), §13 (EXIF; de Fotos, «sin reporte, solo su dueño» y «solo cámara»; de Archivos, la salida en WebP), §14.4 | **Hecha** (2026-09-26) |
-| T2 | S07–S12 | Reportar exige compartir la ubicación y el punto queda a 60 m o menos del teléfono, con precisión de 50 m o menos. La web no pide ni lee nada al cargar. Contrato 0.9.0, migración 0013. | §0 regla 8, §3.1, §4.3, §7.1 (`distancia_dispositivo_m`, `ubicacion_metodo`), §7.5 (`POST /reportes`), §9.5 (radio de 60 m en `nota_metodologica`), §13 (Ubicación del dispositivo, Permisos), §14.1 | Pendiente |
-| T3 | S13–S17 | Cupo de 3 reportes y 12 fotos por día, contado en la base. Sin espera de 60 min, idempotencia por cuenta y tope diario de altas por IP. Contrato 0.10.0, migración 0014. | §7.2 (`cuota_reporte_diaria`, `idempotencia`), §7.5 (`/auth/yo`, `/auth/registro`), §13 (Rate limiting) | Pendiente |
-| T4 | S18–S24 | Publicación sin moderación, con 1 o 4 min de demora y «NO SE HA VERIFICADO». Sin «solo vos». El autor ve lo suyo (`GET /mis-reportes`). El admin puede retirar un verificado. Contrato 0.11.0, migración 0015. | §1, §7.1 (`publicar_en`), §7.3, §7.5 (también `GET /fotos/:key`: `public, no-cache` con `ETag` y las fotos del autor), §7.6 (agregados), §9.2, §9.5, §13 (Publicación sin moderación previa; de Fotos, la caché y el autor) | Pendiente |
-| T5 | S25–S28 | Técnicos y ejecutivo al día cada 10 s, sin caché. Pantalla ejecutiva limpia. | §1 (Ejecutivo), §4.4, §7.5 (`/indicadores`, `/ejecutivo/resumen`) | Pendiente |
-| T6 | S29–S33 | La página pública no hace tráfico automático. Capas y teselas con huella, cacheadas 1 año. Cifras con 2 min como máximo. Contrato 0.12.0. | §4.3, §4.6, §7.6, §14.2, §14.5 | Pendiente |
-| T7 | S34–S36 | Guarda de disco y alertas de disco y de bandeja sin revisar. Contrato 0.13.0. | §7.5 (`507`, `/ready`), §8.2, §13 (Archivos) | Pendiente |
-| T8 | S37–S39 | Limpieza en un despliegue posterior: se quita lo deprecado (contrato 0.14.0), se aplica la migración 0016 de contracción y se escribe la lista «Antes de producción». | §7.2 (`usuario.ultimo_reporte_en`) | Pendiente |
-| T9 | S40–S41 | CSP con nonce en las dos apps. Separable y postergable. | §13 (Cabeceras) | Pendiente |
+| T2 | S07–S12 | Reportar exige compartir la ubicación y el punto queda a 60 m o menos del teléfono, con precisión de 50 m o menos. La web no pide ni lee nada al cargar. Contrato 0.9.0, migración 0013. | §0 regla 8, §3.1, §4.3, §7.1 (`distancia_dispositivo_m`, `ubicacion_metodo`), §7.5 (`POST /reportes`), §9.5 (radio de 60 m en `nota_metodologica`), §13 (Ubicación del dispositivo, Permisos), §14.1 | **Hecha** (2026-09-27) |
+| T3 | S13–S17 | Cupo de 3 reportes y 12 fotos por día, contado en la base. Sin espera de 60 min, idempotencia por cuenta y tope diario de altas por IP. Contrato 0.10.0, migración 0014. | §7.2 (`cuota_reporte_diaria`, `idempotencia`), §7.5 (`/auth/yo`, `/auth/registro`), §13 (Rate limiting) | **Hecha** (2026-09-27) |
+| T4 | S18–S24 | Publicación sin moderación, con 1 o 4 min de demora y «NO SE HA VERIFICADO». Sin «solo vos». El autor ve lo suyo (`GET /mis-reportes`). El admin puede retirar un verificado. Contrato 0.11.0, migración 0015. | §1, §7.1 (`publicar_en`), §7.3, §7.5 (también `GET /fotos/:key`: `public, no-cache` con `ETag` y las fotos del autor), §7.6 (agregados), §9.2, §9.5, §13 (Publicación sin moderación previa; de Fotos, la caché y el autor) | **Hecha** (2026-09-27) |
+| T5 | S25–S28 | Técnicos y ejecutivo al día cada 10 s, sin caché. Pantalla ejecutiva limpia. | §1 (Ejecutivo), §4.4, §7.5 (`/indicadores`, `/ejecutivo/resumen`) | **Hecha** (2026-09-27) |
+| T6 | S29–S33 | La página pública no hace tráfico automático. Capas y teselas con huella, cacheadas 1 año. Cifras con 2 min como máximo. Contrato 0.12.0. | §4.3, §4.6, §7.6, §14.2, §14.5 | **Hecha** (2026-09-27) |
+| T7 | S34–S36 | Guarda de disco y alertas de disco y de bandeja sin revisar. Contrato 0.13.0. | §7.5 (`507`, `/ready`), §8.2, §13 (Archivos) | **Hecha** (2026-09-27) |
+| T8 | S37–S39 | Limpieza en un despliegue posterior: se quita lo deprecado (contrato 0.14.0) y se vuelven obligatorios `SesionActual.reportes_restantes_hoy`, `SesionActual.demora_proximo_s` y `ReportePublico.verificado` (contrato 0.15.0), se aplica la migración 0016 de contracción y se escribe la lista «Antes de producción». | §7.2 (`usuario.ultimo_reporte_en`) | **Hecha** (2026-09-27) |
+| T9 | S40–S41 | CSP con nonce en las dos apps. Separable y postergable. | §13 (Cabeceras) | **Hecha** (2026-09-27) |
 
 Al cerrar una tanda se cambia su estado a **Hecha (fecha)** y se anota debajo, en una línea, cómo se
 verificó (pruebas, E2E y lo que haya quedado afuera).
@@ -72,15 +72,28 @@ verificó (pruebas, E2E y lo que haya quedado afuera).
   (`channel: 'chromium'`) y sin `--use-fake-ui-for-media-stream`, para que la cámara la dé solo el
   permiso del contexto (`e2e/README.md`); el plano de zonificación va en WebP de calidad 75 (311 876
   bytes contra 352 417 del JPEG, igual de legible), porque a calidad ~90 pesaba 528 208.
+- **T2** (2026-09-27): Vitest en verde en contracts (151), db (167), api-core (330, y 8 omitidas
+  que piden PostgreSQL real), web-ciudadano (314) y panel-admin (145).
+- **T3** (2026-09-27): pendiente de la E2E completa.
+- **T4** (2026-09-27): pendiente de la E2E completa.
+- **T5** (2026-09-27): pendiente de la E2E completa.
+- **T6** (2026-09-27): pendiente de la E2E completa.
+- **T7** (2026-09-27): pendiente de la E2E completa.
+- **T8** (2026-09-27): pendiente de la E2E completa. S39: las alertas `DiscoDeFotos*` comparan
+  contra `curichi_fotos_disco_min_libre_bytes` en vez de un umbral escrito a mano (`promtool test
+  rules` en verde, con un caso de umbral de 8 GiB y otro con la guarda apagada), y
+  `docs/operaciones/produccion.md` abre con «Antes de producción».
+- **T9** (2026-09-27): pendiente de la E2E completa.
 
 Para recordar al desplegar:
 
 - **Bloquea el despliegue de T4:** moderar la bandeja antes de migrar. La migración 0015 aborta si
   quedan reportes en `nuevo`, salvo que se use `--publicar-nuevos-existentes` a sabiendas.
 - La migración 0016 de contracción va recién en un release posterior al de T3 y T4.
-- Lo que bloquea la apertura (HTTPS real, mapa base de producción, respaldos fuera de la VPS,
-  secretos, número de emergencias y plazo de revisión de la bandeja acordado con el municipio) está
-  en la sección «Recordatorios antes de producción» del plan.
+- Lo que bloquea la apertura (número de emergencias, mapa base propio, respaldo de la base y de las
+  fotos fuera de la VPS con las claves fuera de la máquina, dominio y certificados, secretos,
+  primer admin real, plazos de recuperación y plazo de revisión de la bandeja acordados con el
+  municipio) está, en orden, en [«Antes de producción»](operaciones/produccion.md#antes-de-producción).
 
 ---
 

@@ -70,7 +70,7 @@ El modelo completo —qué se protege, de quién y con qué— está en
 | **Identidad de quien reporta** | Nunca sale en la vista pública: ni correo, ni nombre, ni identificador de cuenta |
 | **Autenticación** | Argon2id, cookie `HttpOnly` + `SameSite=Lax` + `Secure` en producción, doble caducidad, rotación de sesión al entrar, freno de fuerza bruta antes de verificar la contraseña |
 | **Autorización** | Rol exigido por ruta. El autor de un reporte sale **siempre** de la sesión; el cuerpo no tiene campo de autor |
-| **Abuso** | Cuenta obligatoria para escribir, un reporte por cuenta cada 60 min (atómico en PostgreSQL), límites por IP para reportes, lecturas, login y altas de cuenta, idempotencia |
+| **Abuso** | Cuenta obligatoria para escribir, 3 reportes y 12 fotos por cuenta y por día (atómico en PostgreSQL), el punto a 60 m o menos de la posición que informa el teléfono, límites por IP para reportes, lecturas, login y altas de cuenta (con tope diario), idempotencia por cuenta |
 | **Base de datos** | Tres roles con privilegios mínimos; el rol de la API no puede escribir la columna `rol` de `usuario`, así que el alta pública no puede fabricar un administrador |
 | **Fotos** | Tipo por *magic bytes*, límite de megapíxeles leído en la cabecera, cargadores de libvips que no se usan bloqueados, plazo por imagen, EXIF eliminado y verificado |
 | **Contenedores** | Solo lectura, sin capabilities, `no-new-privileges`, tope de procesos, base fijada por digest |

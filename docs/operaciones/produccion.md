@@ -4,6 +4,75 @@ Lo que hay que tener resuelto **antes** de abrir el sistema al público. Lo marc
 `PENDIENTE` depende de infraestructura que todavía no existe; no se ha inventado configuración
 para ello.
 
+## Antes de producción
+
+La lista corta, en orden. Sale de los «Recordatorios antes de producción» del
+[plan de la VPS](../revision/2026-09-26-plan-produccion-vps.md); el detalle de cada punto está en
+la sección que se enlaza.
+
+### Bloquean la apertura
+
+Mientras falte cualquiera de estos, el sistema **no** se abre al público.
+
+- [ ] **Número de emergencias.** Hoy el 911 está escrito en el código de la app pública
+      (`ComoFunciona.tsx` y `Portada.tsx`, «Si hay riesgo para la vida, llamá al 911»):
+      confirmarlo con el municipio o hacerlo configurable por ciudad (backlog de `CLAUDE.md` §15).
+- [ ] **Mapa base propio** (Protomaps autohospedado, OpenFreeMap u otro proveedor) en lugar de
+      `tile.openstreetmap.org`, con la CSP de las dos apps ajustada. Ver «El mapa base».
+- [ ] **Respaldo de la base y de las fotos fuera de la VPS**: perfil `respaldos` en marcha contra un
+      bucket de otra cuenta, con `RESPALDO_URL_LATIDO` en un vigilante externo; las fotos del disco
+      (`fotos-data`), que el respaldo de la base **no** incluye, copiadas fuera de la máquina; la
+      clave de cifrado (`RESPALDO_CLAVE_CIFRADO`) y las credenciales del bucket guardadas también
+      **fuera** del servidor; y una restauración de prueba hecha de verdad y cronometrada. Ver
+      «Respaldo y recuperación».
+- [ ] **Dominio y certificados**: `DOMINIO_PUBLICO` y `DOMINIO_PANEL` (distintos) con su DNS,
+      `PROXY_TLS=acme` y `ACME_EMAIL`, y 80 y 443 abiertos. Sin HTTPS el navegador no da cámara ni
+      ubicación, y nadie puede reportar. Los certificados reales todavía no se probaron contra un
+      dominio público. Ver «Primer despliegue» y «HTTP y red».
+- [ ] **Secretos generados**, ninguno de ejemplo: `POSTGRES_PASSWORD`, `API_DB_PASSWORD` y
+      `GEO_DB_PASSWORD` (antes de crear el volumen), `IP_HASH_SAL`, `JITTER_SAL`,
+      `GEO_TOKEN_INTERNO` y `METRICAS_TOKEN` (32 caracteres o más), la credencial del respaldo y
+      `ALERTAS_WEBHOOK_URL`. Con `COOKIE_SEGURA=1`, `TRUST_PROXY=1` (los fija el Compose) y
+      `EXPONER_DOCS=0`, y **sin** `REPORTE_DEMORA_*`, que son solo para pruebas. Ver «Secretos y
+      configuración».
+- [ ] **Primer admin real** creado con el CLI de cuentas (paso 5 de «Primer despliegue») y
+      comprobado entrando al panel; las cuentas de desarrollo (`admin@curichi.local`,
+      `tecnico@curichi.local`, `ejecutivo@curichi.local`, `vecina@curichi.local`) **no** existen en
+      la base. Los seeds ya se niegan a correr con `NODE_ENV=production`.
+- [ ] **Plazos de recuperación acordados con el municipio**: RPO y RTO. Con un respaldo diario, el
+      RPO es de hasta 24 h; bajarlo exige archivado continuo de WAL, que no está montado.
+- [ ] **Plazo de revisión de la bandeja acordado con el municipio**, y quién atiende la alerta
+      `BandejaSinVerificarAtrasada` (hoy 24 h, provisional). Sin moderación previa, un reporte
+      falso se ve con «NO SE HA VERIFICADO» hasta que alguien lo retira.
+
+### Bloquean un despliegue concreto
+
+- [ ] **Antes de desplegar T4 (migración 0015), moderar la bandeja.** La 0015 aborta si quedan
+      reportes en `nuevo`, salvo que se migre con `--publicar-nuevos-existentes` a sabiendas. Ver
+      «Migración 0015». En una base nueva no hay nada que moderar.
+- [ ] **La migración 0016 de contracción va en un release posterior** al de T3 y T4, nunca en el
+      mismo: el api-core anterior sigue insertando sin `publicar_en` mientras corre el job.
+
+### Lo demás, antes de abrir o en la primera semana
+
+- [ ] Cargar y **activar** la versión de capas del municipio desde el panel (Capas → Activar). No
+      hay que borrar nada a mano en los navegadores: ver «Cachés HTTP».
+- [ ] Probar cámara y ubicación en teléfonos reales: iPhone con Safari, Android con Chrome y los
+      navegadores internos de WhatsApp, Facebook e Instagram. Anotar la resolución real de la foto.
+- [ ] Validar con el municipio los parámetros (`CLAUDE.md` §16.7): radio de 60 m, precisión de
+      50 m, 10 min de antigüedad de la posición, demoras de 1 y 4 min, 3 reportes y 12 fotos por
+      día, 10 altas por IP y por día, WebP de calidad 80, matriz de severidad, radio de recurrencia
+      de 25 m, jitter de 30 m y rate limit de 10 reportes por hora e IP.
+- [ ] Disco de la VPS: tamaño, `FOTOS_MIN_LIBRE_BYTES` según ese tamaño, alertas `DiscoDeFotos*`
+      y el peso real de las fotos (`SELECT count(*), avg(bytes) FROM reporte_foto;`). Ver «Fotos en
+      producción».
+- [ ] Retención acordada con el municipio de `ip_hash`, de los datos personales y de las fotos de
+      reportes rechazados (`CLAUDE.md` §16.11). Ver «Datos personales».
+- [ ] `ALERTAS_WEBHOOK_URL` con una alerta de prueba recibida de verdad, un vigilante **externo**
+      contra los dos dominios y el envío de logs a un almacén con retención. Ver «Observabilidad».
+- [ ] La suite completa contra el PostgreSQL de producción antes de abrir, y `pnpm privilegios` en
+      verde. Ver «Base de datos».
+
 ## Topología
 
 Todo en una máquina por ciudad, con el `docker-compose.yml` del repositorio y las imágenes del CI:
@@ -95,8 +164,10 @@ En el servidor de la ciudad, con Docker Engine y el plugin Compose:
 2. **`.env`** a partir de `.env.example`: bloque «Ciudad», secretos generados (`POSTGRES_PASSWORD`,
    `API_DB_PASSWORD`, `GEO_DB_PASSWORD`, `IP_HASH_SAL`, `JITTER_SAL`, `GEO_TOKEN_INTERNO`,
    `METRICAS_TOKEN`), bloque «Proxy de entrada y dominios» con `PROXY_TLS=acme` y los puertos
-   vacíos, fotos en S3 gestionado (`S3_ENDPOINT_DOCKER` y su credencial) y las cinco `IMAGEN_*`.
-   Las contraseñas de los roles tienen que estar **antes** de crear el volumen de PostgreSQL.
+   vacíos, fotos en el disco de la VPS (`S3_ENDPOINT_DOCKER` vacío y `FOTOS_MIN_LIBRE_BYTES` según
+   el tamaño del disco; ver «Fotos en producción») y las cinco `IMAGEN_*`. Las demoras de
+   publicación (`REPORTE_DEMORA_*`) **no** se definen: son solo para pruebas. Las contraseñas de
+   los roles tienen que estar **antes** de crear el volumen de PostgreSQL.
 3. Imágenes y base:
 
    ```bash
@@ -109,9 +180,21 @@ En el servidor de la ciudad, con Docker Engine y el plugin Compose:
    `data/raw/` (README, «Datos geográficos»), contra esta base por un túnel SSH al 5432; o copiar
    `data/processed/` al servidor, junto al `docker-compose.yml` (geo-service lo monta en solo
    lectura).
-5. **Primer usuario admin.** `PENDIENTE`: no hay todavía un comando para crearlo (los seeds se
-   niegan a correr en producción, y con razón). Hace falta uno en `packages/db` que pida correo y
-   contraseña y guarde el hash con el mismo algoritmo que api-core; hasta entonces, no se abre.
+5. **Primer usuario admin**, con el CLI de cuentas de `packages/db` que viaja en la imagen de
+   api-core (los seeds se niegan a correr en producción, y con razón). Va con el rol **dueño** de
+   la base, no con el del contenedor, y la contraseña se lee de `CUENTA_PASSWORD` o de la entrada
+   estándar, nunca de un argumento:
+
+   ```bash
+   read -rs CUENTA_PASSWORD && export CUENTA_PASSWORD      # la de la cuenta nueva, sin eco
+   export DATABASE_URL='postgresql://curichi:…@postgis:5432/curichi'   # rol dueño
+   docker compose exec -e DATABASE_URL -e CUENTA_PASSWORD api-core \
+     node node_modules/db/dist/cli/cuentas.js crear --email admin@municipio.gob.bo \
+     --nombre "Admin municipal" --rol admin
+   ```
+
+   `desactivar` y `reactivar` funcionan igual; todo queda en `auditoria`. Detalle en
+   `packages/db/README.md`.
 6. Todo lo demás:
 
    ```bash
@@ -318,6 +401,38 @@ docker compose --profile servicios run --rm migraciones                 # migrar
 docker compose --profile servicios logs migraciones                     # qué aplicó
 ```
 
+### Migración 0015: publicación sin moderación previa
+
+La 0015 (despliegue de T4, ADR 0006) agrega `publicar_en` y hace públicos los reportes en `nuevo`
+con «NO SE HA VERIFICADO». Los `nuevo` que ya existen se enviaron con el texto «un técnico lo
+revisa antes de publicarlo»: por eso, **si queda alguno, la migración aborta sin cambiar nada** y
+el log dice cuántos son. Es el comportamiento buscado, no un fallo.
+
+- [ ] **Antes de desplegar T4, moderar la bandeja**: validar, rechazar o fusionar todo lo que esté
+      en `nuevo`. Después, el despliegue normal migra solo.
+- [ ] Solo si publicarlos tal como están es una decisión tomada a sabiendas (por ejemplo, una base
+      con datos de prueba), migrar con la bandera, que vale solo para esa ejecución:
+
+      ```bash
+      docker compose --profile servicios run --rm migraciones \
+        node node_modules/db/dist/cli/migrar.js --publicar-nuevos-existentes
+      ```
+
+      En desarrollo, `pnpm db:migrate -- --publicar-nuevos-existentes`. La bandera hace
+      `SET LOCAL curichi.publicar_nuevos_existentes = 'si'` dentro de la transacción de la 0015 y
+      nada más; no queda guardada en ningún lado.
+
+**Bloqueo.** La 0015 va entera en una transacción con `ACCESS EXCLUSIVE` sobre
+`reporte_inundacion`: mientras corre, lecturas y escrituras de reportes esperan (rellena
+`publicar_en` en cada fila, comprueba el `NOT NULL` y el `CHECK` y reconstruye los dos índices
+públicos). Con decenas de miles de reportes son segundos; con muchos más hay que medirlo antes en
+una copia `<a medir>`. Conviene migrar en un horario de poco tráfico y, después, un
+`VACUUM (ANALYZE) reporte_inundacion`.
+
+La 0016 (contracción: quita `usuario.ultimo_reporte_en` y el `DEFAULT` de `publicar_en`) va en un
+release **posterior** al de T3 y T4, nunca en el mismo: el api-core anterior sigue atendiendo
+mientras corre el job de migraciones y todavía inserta sin nombrar `publicar_en`.
+
 ### TLS con la base
 
 Con el driver de los servicios (`pg` 8.23), `sslmode=require` **ya no significa** «cifrar sin
@@ -413,6 +528,41 @@ en la primera prueba en vez de quedar abierta sin que nadie lo decida.
 - [ ] Al poner el `Domain` de la cookie, **no usar el dominio padre** (`.ejemplo.bo`): eso la
       repartiría a todos los subdominios, incluida la app pública.
 
+## Cachés HTTP
+
+La tabla del plan de la VPS (2026-09-26). Regla de fondo: **`immutable` solo sobre una URL que
+cambia cuando cambia el contenido**; todo lo que puede cambiar bajo la misma URL (una capa que se
+activa, un reporte que se retira) revalida con `no-cache`, que deja guardar pero obliga a preguntar
+antes de reutilizar. La columna «Desde» dice en qué tanda llega cada fila; el avance está en
+`docs/TRASPASO.md`.
+
+| Recurso | `Cache-Control` | Detalle | Desde |
+|---|---|---|---|
+| Capa y teselas **con huella**: `/geo/v1/capas/{capa}/v/{huella}` y `/geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt` | `public, max-age=31536000, immutable` | La huella es el sha del GeoJSON que sirve geo-service: otra capa, otra URL. Con una huella vieja, `410 CAPA_CAMBIO` con `no-store` | T6 |
+| Alias **sin huella** (`/geo/v1/capas/{capa}`, `/geo/v1/teselas/{capa}/{z}/{x}/{y}.mvt`), `/geo/v1/capas` y `/geo/v1/capas/vigentes` | `public, no-cache` | `ETag` y `304`. Nunca `immutable`: la URL es la misma antes y después de activar una capa | T6 |
+| `/geo/v1/agregados/unidades-vecinales` y `/geo/v1/puntos-criticos` | `public, no-cache` | En memoria de geo-service: vida de 100 s (`GEO_CACHE_AGREGADOS_MS`) y edad máxima de 120 s (`GEO_CACHE_AGREGADOS_EDAD_MAX_MS`). Cifras públicas con 2 min de antigüedad como máximo | T6 |
+| `GET /api/v1/reportes` y `/reportes/:id` | `public, no-cache` | Cambian al moderar y al vencer `publicar_en` | Antes del plan |
+| Foto de un reporte publicado (`nuevo` ya visible, `validado`, `resuelto`) | `public, no-cache` | `ETag`; la visibilidad se comprueba **antes** de responder `304`. Sin moderación previa, retirar es el único control: con `max-age=3600` una caché compartida seguiría sirviendo una hora la foto retirada | T4 |
+| Foto del autor en espera, rechazada o duplicada; foto todavía sin reporte, para quien la subió | `private, no-store` | Solo la ve su dueño | T1 y T4 |
+| Cualquier otra foto | `404` con `no-store` | Técnicos incluidos, mientras el reporte espera su `publicar_en` | T4 |
+| Vistas técnicas, exportación, `/auth/*`, `/mis-reportes`, `/ejecutivo/resumen` e `/indicadores` | `private, no-store` y `Vary: Cookie` | Es el valor por defecto de api-core. Ejecutivo e indicadores, además, **sin caché en el servidor**: el panel los pide cada 10 s | T5 (sin caché en el servidor) |
+| `GET /api/v1/configuracion` | `public, max-age=300` | La ciudad solo cambia al redesplegar | Antes del plan |
+
+En los navegadores:
+
+- **Página pública**: no hace tráfico automático (sin sondeo, sin recargar al volver el foco);
+  reportes, cifras y detalle se piden al cargar o al recargar. El service worker (v6) guarda capas y
+  teselas con huella y sirve primero de su caché; al activarse borra las huellas viejas y, ante un
+  `410`, vuelve a pedir `/geo/v1/capas`. El worker de MapLibre y los glifos llevan `?v=` y se
+  sirven `immutable` (T6).
+- **Panel técnico y ejecutivo**: sondeo cada 10 s con `x-curichi-sondeo: 1` (no renueva la
+  inactividad), sin pedir con la pestaña oculta; la geometría de las capas no se vuelve a pedir (T5).
+
+**Al activar una capa nueva**: `/geo/v1/capas` (con `no-cache`) devuelve las URL con la huella
+nueva en la siguiente carga de la página, y una página ya abierta que pida una tesela con la huella
+vieja recibe `410` y vuelve a leer las URL. Con varias réplicas de geo-service, las que no
+recibieron la invalidación se enteran en 10 s o menos.
+
 ## Datos personales (§13)
 
 - [x] `ip_hash` con sal y rotación diaria; borrado a los 30 días por el trabajo de mantenimiento.
@@ -441,8 +591,10 @@ Ver [respaldo-y-restauracion.md](respaldo-y-restauracion.md). Antes de abrir:
 - [ ] Una restauración de prueba hecha de verdad y cronometrada (el simulacro mensual).
 - [ ] `PENDIENTE` RPO y RTO acordados con el municipio. Con un respaldo diario, el RPO es de hasta
       24 h; bajarlo exige archivado continuo de WAL, que no está montado.
-- [ ] Fotos: versionado (o replicación) activado en el bucket de fotos del S3 gestionado. El
-      respaldo de la base no las incluye.
+- [ ] `PENDIENTE` (Parte 5) **Fotos fuera de la VPS.** Con las fotos en el disco (modo oficial), el
+      respaldo de la base **no las incluye**: hoy no hay copia de `fotos-data` fuera de la máquina,
+      y perder el disco es perder todas las fotos. Bloquea la apertura junto con el respaldo de la
+      base. Si se usa un S3 gestionado, en cambio: versionado (o replicación) en su bucket.
 
 ## Observabilidad
 
@@ -464,9 +616,18 @@ Ver [observabilidad.md](observabilidad.md).
       «Probar que las alertas llegan»).
 - [ ] `PENDIENTE` Envío de logs a un almacén con retención (hoy, rotación local de 30 MB por
       contenedor).
-- [ ] `PENDIENTE` (Parte 3) `/ready` no comprueba que el almacén en DISCO se pueda escribir: con el
-      volumen de fotos de solo lectura o de otro dueño, dice `"fotos":"ok"` y la primera subida
-      falla. Con S3 sí lo comprueba.
+- [ ] Disco de fotos vigilado: con el almacén en disco, `/ready` sale degradado con
+      `"fotos":"poco_espacio"` por debajo de `FOTOS_MIN_LIBRE_BYTES`, y Prometheus avisa con
+      `DiscoDeFotosPorLlenarse` (menos del doble del umbral) y `DiscoDeFotosBajoElUmbral` (ya se
+      rechazan fotos con 507). Las reglas comparan contra `curichi_fotos_disco_min_libre_bytes`,
+      que api-core publica desde `FOTOS_MIN_LIBRE_BYTES`: cambiar la variable no obliga a tocarlas
+      (observabilidad.md §5).
+- [ ] `BandejaSinVerificarAtrasada` con el plazo de revisión acordado con el municipio: hoy es
+      24 h, provisional `<a confirmar con el municipio>`. **Bloquea la apertura** acordar el plazo
+      y quién atiende la alerta.
+- [x] `/ready` comprueba que el almacén en disco se pueda escribir: escribe y borra un archivo
+      temporal, así que con el volumen de fotos de solo lectura o de otro dueño dice
+      `"fotos":"error"` en vez de `"ok"`. Con S3, que el bucket responda.
 
 ## Arranque y parada
 
@@ -545,35 +706,20 @@ Dentro de la red, cada nombre de servicio resuelve a todas sus réplicas:
   las reutiliza (keep-alive): el reparto es por conexión, no por petición. Prometheus descubre las
   réplicas de los servicios por DNS.
 
-Las fotos en disco (`fotos-data`) las comparten las réplicas de **una misma máquina**; entre
-máquinas, S3.
+Las fotos en disco (`fotos-data`, el modo de la VPS) las comparten las réplicas de **una misma
+máquina**; entre máquinas, S3.
 
 ### Qué pasa con más de una réplica
 
 | Estado en memoria | Consecuencia con N réplicas | Gravedad |
 |---|---|---|
-| Rate limit de `@fastify/rate-limit` | **Es por proceso**: cada réplica cuenta por su lado y el límite efectivo se multiplica por N (10 reportes/hora por IP pasan a ser 30 con 3 réplicas). El freno principal —un reporte por cuenta cada 60 min— está en la base y no cambia | Media. Hasta que haya un almacén compartido (el plugin admite Redis) o el límite en el proxy de entrada |
+| Rate limit de `@fastify/rate-limit` | **Es por proceso**: cada réplica cuenta por su lado y el límite efectivo se multiplica por N (10 reportes/hora por IP pasan a ser 30 con 3 réplicas). El freno principal —el cupo diario por cuenta (3 reportes y 12 fotos) y el tope diario de altas por IP— está en la base y no cambia | Media. Hasta que haya un almacén compartido (el plugin admite Redis) o el límite en el proxy de entrada |
 | Métricas del registro propio | Cada réplica expone las suyas; Prometheus las suma | Ninguna, es lo esperado |
 | Caché de capas y de agregados de `geo-service` | Cada réplica tiene la suya; se invalidan por separado | Baja. `/capas/invalidar` habría que mandarlo a todas |
 | Serialización del recálculo completo | Es por proceso, pero el incremental usa `pg_advisory_xact_lock`, que **sí** es global | Ninguna para el camino normal |
 
 El freno de fuerza bruta del login **no** está en memoria: vive en la tabla `intento_login`, así
 que funciona igual con N réplicas.
-
-## Antes de abrir al público
-
-- [x] Los seeds sintéticos ya **no corren** con `NODE_ENV=production`: `sembrarSamples` falla de
-      entrada. Creaban `admin@curichi.local` y `tecnico@curichi.local` con contraseñas
-      documentadas y borraban los reportes de muestra.
-- [ ] Aun así, comprobar que esos dos usuarios no existen en la base de producción.
-- [ ] Crear el primer usuario admin real y verificar que entra.
-- [ ] Cargar y **activar** la versión de capas del municipio desde el panel.
-      Al activar una versión nueva, los navegadores que ya tengan la app instalada tardan hasta
-      5 minutos en cambiar de capa: es la ventana de frescura del service worker, que revalida con
-      el `ETag` que publica geo-service. No hay que borrar nada a mano.
-- [ ] Revisar los parámetros de dominio con el técnico municipal (`CLAUDE.md` §16, punto 7):
-      matriz de severidad, radio de 25 m, jitter de 30 m, rate limit de 10 reportes/hora.
-- [ ] Mapa base propio: ver la sección «El mapa base» más abajo. **Es un bloqueador para abrir al público.**
 
 ## El mapa base: lo único del mapa que no es nuestro
 
@@ -624,7 +770,7 @@ desarrollo y para la demostración al municipio, y el cambio sigue siendo de una
 | Construcción de las tres cachés en frío | 2,2 s (primera petición a `/geo/v1/capas`) |
 | Coste medido de una tesela con los datos reales | z14 sobre el centro: 41 KB, p50 11,1 ms · z16: 3,6 KB, p50 7,0 ms |
 | Cada cuánto cambia la capa | Cuando el municipio entrega una versión nueva: **una o dos veces al año** |
-| Cacheabilidad | `Cache-Control: public, max-age=300` y `ETag` por `version_capa` |
+| Cacheabilidad | URL con la huella del contenido e `immutable` por un año; las rutas sin huella, `public, no-cache` con `ETag` (ver «Cachés HTTP») |
 
 > El GeoJSON de render pasó de 26,9 MB a 15,5 MB al dejar en él solo los campos que el mapa
 > dibuja (`id`, `codigo`, `nombre`, `tipo`, `version_capa`, `distrito_id`,
@@ -640,12 +786,17 @@ quedar desactualizado cuando se activa una versión de capa.
 
 Lo que sí conviene hacer, y es mucho más barato:
 
-1. **Subir el `max-age` de las teselas.** Cinco minutos es un valor de desarrollo. Como la URL ya
-   lleva el `ETag` con `version_capa`, se puede servir con `max-age=31536000, immutable` y forzar
-   la recarga cambiando la versión. Un CDN por delante, si lo hay, hace el resto solo.
-2. **Caché delante** (un CDN) sobre `/geo/v1/teselas/*`: quita del servicio la mayor parte del
-   tráfico sin tocar una línea de código. El proxy de entrada del Compose **no** cachea: Caddy
-   necesitaría un módulo que no viene en la imagen oficial.
+1. **Cachear las teselas por un año, pero solo con la huella en la URL** (hecho en T6). La URL
+   sin huella, `/geo/v1/teselas/{capa}/{z}/{x}/{y}.mvt`, **no** lleva la versión: servirla con
+   `immutable` haría que navegadores y CDN siguieran mostrando la capa vieja hasta un año después
+   de activar la nueva, sin volver a preguntar. Por eso existen las rutas con la huella del
+   contenido (`/geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt` y
+   `/geo/v1/capas/{capa}/v/{huella}`): solo esas van con `max-age=31536000, immutable`, y las de
+   siempre quedan como alias con `public, no-cache` y `ETag`. Detalle en «Cachés HTTP».
+2. **Caché delante** (un CDN) sobre las URL con huella: quita del servicio la mayor parte del
+   tráfico sin tocar una línea de código, y no hay nada que purgar al cambiar de capa, porque cambia
+   la URL. El proxy de entrada del Compose **no** cachea: Caddy necesitaría un módulo que no viene
+   en la imagen oficial.
 
 **Cuándo replantearlo.** Si aparece alguna de estas, PMTiles empieza a tener sentido:
 
@@ -738,7 +889,7 @@ Consecuencias prácticas:
 | Caché de capas de geo-service | **Sí, con matices** | Es por proceso, así que cada réplica reconstruye la suya: más memoria y más trabajo, pero sin inconsistencia. La invalidación explícita solo llega a una réplica; las demás se enteran solas en 10 s o menos por el TTL de `versionesVigentes`. |
 | Caché de agregados | **Sí, con matices** | Igual: por proceso. Lo único que pasa es que N réplicas hacen N veces la consulta. |
 | Métricas | **Sí** | Cada réplica expone las suyas y Prometheus las suma. |
-| Fotos | **Sí, con `S3_ENDPOINT`** | `AlmacenS3` (Fase 5) las guarda en un servicio compatible con S3, así que todas las réplicas ven las mismas. Sin esa variable sigue usando `AlmacenDisco`, que es correcto **solo con una réplica**. Ver abajo. |
+| Fotos | **Sí en una máquina; entre máquinas, con `S3_ENDPOINT`** | En la VPS, `AlmacenDisco` sobre el volumen `fotos-data`, que comparten todas las réplicas de esa máquina (modo oficial, ADR 0006). Con réplicas en varias máquinas, `AlmacenS3` (Fase 5), que guarda en un servicio compatible con S3 y todas ven las mismas. Ver abajo. |
 
 ### Rate limiting con varias réplicas
 
@@ -764,8 +915,8 @@ Redis sin tocar el resto del código.
 
 | `S3_ENDPOINT` | Implementación | Réplicas que aguanta |
 |---|---|---|
-| vacío | `AlmacenDisco` sobre `STORAGE_DIR` | **una**; con dos, una foto subida a la réplica A no existe para la B |
-| definido | `AlmacenS3` | las que haga falta |
+| vacío | `AlmacenDisco` sobre `STORAGE_DIR` (en el Compose, el volumen `fotos-data`) | las de **una misma máquina**, que comparten el volumen; entre máquinas, una foto subida en la A no existe para la B. **Es el modo de la VPS** |
+| definido | `AlmacenS3` | las que haga falta, en cualquier máquina |
 
 `AlmacenS3` (`services/api-core/src/almacen-s3.ts`, Fase 5) habla S3 directamente con `fetch` y
 firma SigV4 con `node:crypto`: **no añade ninguna dependencia**. Solo hace PUT, GET y DELETE de un
@@ -792,11 +943,35 @@ S3_ESTILO_RUTA  1 = endpoint/bucket/clave (MinIO); 0 = bucket.endpoint/clave (AW
 fotos existentes, hay que copiar el contenido de `STORAGE_DIR` al bucket antes (los nombres de
 objeto son los mismos), o las viejas darán 404 mientras las nuevas funcionan.
 
-### Fotos en producción: S3 gestionado, no MinIO
+### Fotos en producción: el disco de la VPS
 
-El MinIO del Compose (perfil `minio`) es **para desarrollo**. En producción las fotos van a un S3
-gestionado (AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces…) o al almacenamiento S3 del
-propio municipio **si alguien lo mantiene con parches**. Por qué:
+Decisión del 2026-09-26 ([ADR 0006](../decisiones/0006-publicacion-sin-moderacion-y-vps.md)): en
+la VPS las fotos van al **disco**, en el volumen `fotos-data` (`S3_ENDPOINT_DOCKER` vacío). Es el
+modo oficial: una sola máquina, ningún servicio más que operar ni pagar, y las réplicas de api-core
+de esa máquina comparten el volumen. Lo que exige:
+
+- [ ] **Guarda de espacio.** Las fotos comparten disco con PostgreSQL: si el disco se llena, cae la
+      base. Con menos de `FOTOS_MIN_LIBRE_BYTES` libres (2 GiB por defecto, `<a confirmar al
+      dimensionar el disco>`), `POST /fotos` responde `507 SIN_ESPACIO` antes de procesar la imagen
+      y sin gastar cupo, los reportes sin foto siguen entrando y `/ready` sale degradado con
+      `"fotos":"poco_espacio"`.
+- [ ] **Alertas** sobre `curichi_fotos_disco_libre_bytes`: `DiscoDeFotosPorLlenarse` (alta, menos
+      del doble del umbral durante 30 min) y `DiscoDeFotosBajoElUmbral` (crítica, bajo el umbral
+      durante 5 min). El umbral lo leen de `curichi_fotos_disco_min_libre_bytes`, que api-core
+      publica desde `FOTOS_MIN_LIBRE_BYTES`; con `0` (guarda apagada) no avisan
+      (observabilidad.md §5).
+- [ ] **Dimensionar el disco** con el peso real de las fotos (WebP de 1600 px por lado como máximo):
+      `SELECT count(*), avg(bytes) FROM reporte_foto;`. El techo lo pone el número de cuentas que
+      reportan (cada una, hasta 12 fotos por día), no el cupo.
+- [ ] `PENDIENTE` **Copia de las fotos fuera de la VPS**: el respaldo de la base no las incluye (ver
+      «Respaldo y recuperación»).
+
+### Si las fotos salen del disco: S3 gestionado, no MinIO
+
+Con réplicas en más de una máquina, o si el disco de la VPS deja de alcanzar, las fotos van a un
+S3 gestionado (AWS S3, Cloudflare R2, Backblaze B2, DigitalOcean Spaces…) o al almacenamiento S3
+del propio municipio **si alguien lo mantiene con parches**; nunca al MinIO del Compose (perfil
+`minio`), que es **para desarrollo**. Por qué:
 
 - **MinIO dejó de publicar.** La edición comunitaria se archivó en abril de 2026: no hay más
   versiones, ni imágenes oficiales (`minio/minio` desapareció de Docker Hub y `quay.io/minio/minio`
@@ -867,5 +1042,5 @@ por cada fila borrada. Con los índices puestos, el mismo borrado de 2 000 000 d
 |---|---|---|
 | Un solo punto crítico gigante | **Abierto** | Con un millón de reportes densos, DBSCAN con `minpoints = 1` encadenó los 750 021 publicables en **un solo** punto crítico. Es la limitación documentada en CLAUDE.md §9.2 llevada al extremo. El radio de 25 m es un parámetro de dominio que §16 (punto 7) deja pendiente de validar con el técnico municipal: no es una decisión de ingeniería. Lo que sí se arregló es que eso ya no revienta el proceso ni bloquea una petición HTTP. |
 | Rate limiting por proceso | **Abierto, deliberado** | Ver arriba. Con `--scale` el límite por IP se multiplica por el número de réplicas hasta que haya un almacén compartido o el límite se ponga en el proxy de entrada. |
-| Fotos en disco local | **Resuelto en la Fase 5** | `AlmacenS3` existe, está probado contra MinIO y se activa con `S3_ENDPOINT`. Queda abierto solo el traslado de las fotos ya guardadas al cambiar de modo, que es una operación manual de una vez. |
+| Fotos en disco | **Modo oficial en la VPS** (ADR 0006) | Correcto en una máquina: sus réplicas comparten el volumen, con guarda de espacio y alertas. Para varias máquinas, `AlmacenS3` existe, está probado contra MinIO y se activa con `S3_ENDPOINT`. Abiertos: la copia de las fotos fuera de la VPS y el traslado manual de las ya guardadas si se pasa a S3. |
 | `CREATE INDEX` bloquea escrituras | **Aceptado** | Una migración que crea un índice toma un lock que impide escribir en la tabla. Medido: 0,95 s con 750 000 filas indexadas. A diez millones serían unos 10 s de escrituras bloqueadas. Si eso deja de ser tolerable, hace falta `CREATE INDEX CONCURRENTLY`, que no puede correr dentro de una transacción y obliga a cambiar el ejecutor de migraciones. |

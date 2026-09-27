@@ -44,8 +44,10 @@ pública como vecino y el panel técnico como administrador.
 - Desde la app pública también se puede **crear una cuenta nueva** en «Crear cuenta»; siempre
   queda con rol `ciudadano`.
 - La cuenta de usuario normal **no entra al panel técnico**: el panel lo dice y la API responde 403.
-- Cada cuenta puede enviar **un reporte cada 60 minutos**. Si querés probar varios envíos
-  seguidos, usá varias cuentas.
+- Cada cuenta puede enviar **3 reportes y 12 fotos por día** (a medianoche vuelve a empezar). Un
+  reporte aparece en el mapa 1 minuto después de enviarlo, o 4 minutos desde el 2.º del día, con la
+  etiqueta «NO SE HA VERIFICADO» hasta que un técnico lo valide. Para probar más envíos seguidos,
+  usá varias cuentas o subí `REPORTES_POR_DIA_POR_CUENTA` **solo en desarrollo**.
 - El administrador y el técnico también pueden entrar a la app pública. Ahí ven el mismo mapa que
   cualquiera —la vista con coordenadas exactas está solo en el panel— más un botón **«Panel
   técnico»**: en la barra de arriba en escritorio, y en «Cuenta» en el móvil. El panel tiene que
@@ -72,10 +74,10 @@ desplegada en ningún sitio.**
 | | |
 |---|---|
 | **Mapa público** | Sin cuenta. Agrupaciones, filtros, detalle, capas administrativas, PWA instalable |
-| **Reporte ciudadano** | Formulario de 5 pasos con GPS o selección manual, foto, previsualización de la unidad vecinal antes de enviar, borrador que sobrevive a una recarga |
+| **Reporte ciudadano** | Formulario de 4 pasos: ubicación del teléfono obligatoria (se pide al reportar, nunca al abrir la página) con el punto ajustable dentro de 60 m, foto opcional con la cámara dentro de la página, previsualización de la unidad vecinal antes de enviar, borrador que sobrevive a una recarga, cuenta regresiva hasta que se publica y «Mis reportes» |
 | **Cuentas de ciudadano** | Alta, ingreso, cierre de sesión. **Reportar exige cuenta; ver el mapa no** |
 | **Panel técnico** | Login, tabla y mapa sincronizados, filtros, validar/rechazar/fusionar/reclasificar, exportación CSV y GeoJSON, indicadores, coropletas, gestión de capas |
-| **Panel ejecutivo** | `localhost:3100/ejecutivo`. Dónde y cuánto se inunda, sin moderar ni exportar: pestañas por severidad (crítica, media, baja), gráficas por distrito y actualización cada 60 s |
+| **Panel ejecutivo** | `localhost:3100/ejecutivo`. Dónde y cuánto se inunda, sin moderar ni exportar: pestañas por severidad (crítica, media, baja), gráficas por distrito y actualización cada 10 s |
 | **Geoespacial** | PIP con índice GIST, bordes, huecos y fuera de cobertura; capas como GeoJSON o teselas vectoriales al vuelo; puntos críticos por DBSCAN |
 | **ETL** | Shapefile → GeoJSON → PostGIS, reproducible con un comando, con reporte de calidad |
 | **Seguridad** | Roles de PostgreSQL con privilegios mínimos, separación estricta de vista pública y técnica, cuota antiabuso por cuenta, EXIF eliminado, contenedores endurecidos. Ver [SECURITY.md](SECURITY.md) |
@@ -362,12 +364,15 @@ Y entonces:
    **Iniciar sesión**, **Crear cuenta** y **Cancelar**.
 3. **Crear cuenta** → nombre, correo y contraseña (mínimo 10 caracteres) → **Crear cuenta**.
 4. **Iniciar sesión** con eso mismo. Volvés al formulario.
-5. Completá los 5 pasos y enviá. Queda en estado `nuevo`: **no sale en el mapa todavía**.
-6. Intentá enviar otro. Sale **429** con el minuto exacto en que vas a poder: **un reporte por
-   cuenta cada 60 minutos**.
+5. Tocá «Compartir mi ubicación» (el navegador pide el permiso recién ahí), ajustá el punto dentro
+   de los 60 m, completá los 4 pasos y enviá. Queda en estado `nuevo` y ves una cuenta regresiva:
+   **1 minuto** después se publica en el mapa con «NO SE HA VERIFICADO» (4 minutos si es el 2.º o
+   el 3.º del día). Recargá el mapa para verlo; mientras espera, solo lo ves vos, en «Mis reportes».
+6. Enviá dos más. El 4.º del día sale **429** con `CUOTA_DE_REPORTES`: **3 reportes por cuenta y
+   por día**; al día siguiente vuelve a empezar.
 7. Entrá al panel en <http://localhost:3100> con `tecnico@curichi.local` /
-   `curichi-tecnico-local`, buscá el reporte y validalo.
-8. Volvé al mapa público: ahí está.
+   `curichi-tecnico-local` (la bandeja se actualiza sola cada 10 s), buscá el reporte y validalo.
+8. Recargá el mapa público: ahora dice «Verificado».
 
 ---
 
@@ -376,7 +381,7 @@ Y entonces:
 | | Ver el mapa | Crear reporte | Moderar, exportar | Administrar |
 |---|---|---|---|---|
 | **Sin cuenta** | ✅ | ❌ | ❌ | ❌ |
-| **`ciudadano`** | ✅ | ✅ (1 cada 60 min) | ❌ | ❌ |
+| **`ciudadano`** | ✅ | ✅ (3 por día) | ❌ | ❌ |
 | **`tecnico`** | ✅ | ✅ | ✅ | ❌ |
 | **`admin`** | ✅ | ✅ | ✅ | ✅ |
 
@@ -386,12 +391,16 @@ Y entonces:
   campo de rol y, por si acaso, el rol de PostgreSQL con el que corre la API **no tiene permiso
   para escribir la columna `rol`**. La escalada no depende de que el código sea cuidadoso.
 - Las cuentas técnicas se crean fuera de la aplicación, con el rol dueño de la base.
-- **Un reporte por cuenta cada 60 minutos**, ventana deslizante desde el último aceptado. Se
-  aplica con un `UPDATE` condicional atómico dentro de la misma transacción que inserta, así que
-  ni la concurrencia ni los reintentos lo saltan. Medido con 50 envíos simultáneos contra
-  PostgreSQL real: 1 aceptado, 49 rechazados, ningún 5xx.
+- **3 reportes y 12 fotos por cuenta y por día** calendario (en `ZONA_HORARIA`). Se cuentan en la
+  base con un `INSERT … ON CONFLICT DO UPDATE … WHERE` atómico dentro de la misma transacción que
+  inserta, así que ni la concurrencia ni los reintentos lo saltan: una prueba contra PostgreSQL
+  real (`cuota-concurrencia-pg.test.ts`) exige que 50 envíos simultáneos dejen exactamente 3.
 - Cambiar de IP **no** devuelve el turno: el límite es de la cuenta. El límite por IP sigue
-  existiendo y es independiente.
+  existiendo y es independiente, y el alta de cuentas tiene además un tope diario por IP
+  (`ALTAS_POR_DIA_POR_IP`, 10), porque cada cuenta nueva multiplica el cupo.
+- Sin moderación previa: un reporte se publica solo, con «NO SE HA VERIFICADO», 1 minuto después
+  de enviarlo (4 desde el 2.º del día). Rechazarlo o fusionarlo lo saca del mapa, y el admin puede
+  retirar uno ya verificado.
 
 ### Cuentas de desarrollo
 
@@ -616,9 +625,10 @@ demás.
   consultado *antes* de verificar la contraseña. Ningún token en `localStorage` ni en la URL.
 - **Autorización**: rol exigido por ruta. El autor de un reporte sale **siempre** de la sesión; el
   esquema de entrada no tiene campo de autor, de rol ni de estado.
-- **Antiabuso**: cuenta obligatoria para escribir, un reporte por cuenta cada 60 minutos (atómico
-  en la base), límites por IP para reportes, lecturas, ingresos y altas de cuenta, idempotencia en
-  la creación y honeypot en el formulario.
+- **Antiabuso**: cuenta obligatoria para escribir, 3 reportes y 12 fotos por cuenta y por día
+  (atómico en la base), el punto a 60 m o menos de la posición que informa el teléfono (que no se
+  guarda), límites por IP para reportes, lecturas, ingresos y altas de cuenta (con tope diario),
+  idempotencia por cuenta en la creación y honeypot en el formulario.
 - **Fotos**: tipo por *magic bytes* (no por extensión), tope de megapíxeles leído en la cabecera
   antes de decodificar, cargadores de libvips que no se usan **bloqueados**, plazo por imagen,
   EXIF eliminado y verificado después de codificar, nombre generado por el servidor.
@@ -648,16 +658,19 @@ dice qué se probó y qué no.
 | `minio-init` sale con «S3_ACCESS_KEY no puede ser el usuario root» | api-core ya no usa la credencial root de MinIO. Poné un `S3_ACCESS_KEY` / `S3_SECRET_KEY` propios en `.env` (p. ej. `curichi-fotos`) |
 | `migraciones` sale con 1 y api-core no arranca | `docker compose logs migraciones`. Con SQLSTATE `55P03` es un lock ocupado por el tráfico: repetir el `up` |
 | `bind: address already in use` | Otro proceso ocupa 3000, 3001, 3002, 3100, 5432, 8080, 8443 o 9000. Cambiá el puerto en `.env` (`PROXY_PUERTO_HTTP`, `PROXY_PUERTO_HTTPS` para el proxy) o liberalo (`netstat -ano \| findstr :3001` en Windows, `lsof -i :3001` en Linux/macOS) |
-| El contenedor `proxy` sale con «configuración inválida, no arranco» | Falta `DOMINIO_PUBLICO`, `DOMINIO_PANEL` o (con `PROXY_TLS=acme`) `ACME_EMAIL`, o los dos dominios son iguales. El log dice cuál. Si es api-core el que no arranca por `PANEL_ADMIN_URL`, es el mismo motivo: sale de `DOMINIO_PANEL` || `/ready` devuelve 503 con `"db":"error"` | PostgreSQL todavía no aceptó conexiones. `docker compose ps` hasta que diga `healthy`. Si tarda siempre, revisá `docker compose logs postgis` |
+| El contenedor `proxy` sale con «configuración inválida, no arranco» | Falta `DOMINIO_PUBLICO`, `DOMINIO_PANEL` o (con `PROXY_TLS=acme`) `ACME_EMAIL`, o los dos dominios son iguales. El log dice cuál. Si es api-core el que no arranca por `PANEL_ADMIN_URL`, es el mismo motivo: sale de `DOMINIO_PANEL` |
+| `/ready` devuelve 503 con `"db":"error"` | PostgreSQL todavía no aceptó conexiones. `docker compose ps` hasta que diga `healthy`. Si tarda siempre, revisá `docker compose logs postgis` |
 | Las migraciones fallan con `permission denied` | `DATABASE_URL` apunta a `curichi_api` en vez de al rol dueño. Las migraciones van con `curichi` |
 | `relation "reporte_inundacion" does not exist` | Falta `pnpm db:migrate` |
-| `/ready` dice `"fotos":"error"` y `degradado:true` | MinIO no está. La app sigue sirviendo el mapa y los reportes, pero no guarda ni devuelve fotos. Es intencional: no se saca de rotación por eso |
+| `/ready` dice `"fotos":"error"` y `degradado:true` | El almacén de fotos no responde: con S3, MinIO no está o cambiaron las credenciales; con disco, no se puede escribir en la carpeta (volumen de solo lectura o de otro dueño). La app sigue sirviendo el mapa y los reportes, pero no guarda ni devuelve fotos. Es intencional: no se saca de rotación por eso |
+| `/ready` dice `"fotos":"poco_espacio"` y las fotos dan **507** | Queda menos que `FOTOS_MIN_LIBRE_BYTES` (2 GiB) libre en el disco de las fotos. Los reportes sin foto siguen entrando. Liberá espacio o, en desarrollo, bajá la variable (`0` apaga la guarda) |
 | El mapa se ve negro | La CSP bloqueó las teselas, o no hay red. Mirá la consola del navegador: MapLibre 6 pide las teselas con `fetch`, así que `tile.openstreetmap.org` tiene que estar en `connect-src` además de `img-src` |
 | El mapa no carga y la consola habla del *worker* | El worker de MapLibre se sirve desde `public/maplibre/`. Si falta, `pnpm --filter web-ciudadano build` lo vuelve a copiar |
 | No puedo iniciar sesión y api-core responde 401 | Con `COOKIE_SEGURA=1` sobre `http://` el navegador no devuelve la cookie. En local tiene que valer `0` |
 | Inicio sesión en el panel y me saca al momento | La sesión caduca por inactividad (`SESION_IDLE_HORAS`) además de por tiempo total. Con relojes desfasados entre el contenedor y la máquina también pasa |
-| **429 al enviar un segundo reporte** | Es la cuota: **un reporte por cuenta cada 60 minutos**. No es un fallo. Para probar con varios, creá varias cuentas o bajá `REPORTE_MINUTOS_ENTRE_ENVIOS` **solo en desarrollo** |
-| **429 al crear cuentas seguidas** | Límite de altas por IP (5/h). En desarrollo se sube con `REGISTRO_MAX_POR_IP` |
+| **429 `CUOTA_DE_REPORTES` al enviar el 4.º reporte del día** | Es el cupo: **3 reportes y 12 fotos por cuenta y por día**, que vuelve a empezar a medianoche (`Retry-After` dice cuánto falta). No es un fallo. Para probar con más, creá cuentas nuevas o subí `REPORTES_POR_DIA_POR_CUENTA` (y `FOTOS_POR_DIA_POR_CUENTA`) **solo en desarrollo** |
+| **429 al crear cuentas seguidas** | Límite de altas por IP: 5 por hora (`REGISTRO_MAX_POR_IP`) y 10 por día (`ALTAS_POR_DIA_POR_IP`). En desarrollo se suben esas dos variables |
+| **Envié un reporte y no aparece en el mapa** | Se publica 1 minuto después de enviarlo, o 4 desde el 2.º del día, y la página pública no se actualiza sola: recargala. Mientras espera, lo ves en «Mis reportes» y nadie más lo ve, técnicos incluidos |
 | `pnpm etl:run` no encuentra los shapefiles | `data/raw/<version>/` está vacío. Es normal en un clon limpio: usá las capas sintéticas |
 | El ETL se detiene pidiendo el CRS | Falta el `.prj` de una capa. **No se adivina**: hay que preguntarle al municipio y pasarlo con `--crs-origen EPSG:xxxxx` |
 | Los E2E fallan con timeouts raros | Suele haber dos pilas compitiendo. Cerrá cualquier `pnpm dev` y dejá que Playwright levante la suya |

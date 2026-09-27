@@ -80,9 +80,29 @@ Usuarios de desarrollo: `tecnico@curichi.local` / `curichi-tecnico-local`,
 `curichi-vecina-local`.
 
 La cuenta ciudadana hace falta desde la migración 0009: **crear un reporte exige sesión** (ver el
-mapa no). Cada cuenta puede enviar un reporte cada 60 minutos; si al probar recibís un 429 con
-código `CUOTA_DE_REPORTES`, es eso y no un fallo. Para probar con varios reportes seguidos, creá
-varias cuentas o bajá `REPORTE_MINUTOS_ENTRE_ENVIOS` **solo en desarrollo**.
+mapa no). Lo que conviene saber al probar (ADR 0006):
+
+- **Cupo diario.** Cada cuenta puede enviar **3 reportes y 12 fotos por día** calendario en
+  `ZONA_HORARIA`; a medianoche vuelve a empezar. El 4.º reporte recibe `429 CUOTA_DE_REPORTES` y la
+  13.ª foto `429 CUOTA_DE_FOTOS`, con `Retry-After` hasta la medianoche: es eso y no un fallo. Para
+  probar más, creá cuentas nuevas o subí `REPORTES_POR_DIA_POR_CUENTA` y `FOTOS_POR_DIA_POR_CUENTA`
+  **solo en desarrollo**. Las altas de cuenta también tienen tope por IP: 5 por hora
+  (`REGISTRO_MAX_POR_IP`) y 10 por día (`ALTAS_POR_DIA_POR_IP`).
+- **Demora de publicación.** El reporte llega al servidor al tocar Enviar, pero aparece en el mapa
+  **1 minuto** después si es el 1.º del día de esa cuenta y **4 minutos** después si es el 2.º o
+  el 3.º. Mientras espera no lo ve nadie más que su autor (en «Mis reportes», con una cuenta
+  regresiva), técnicos incluidos: la bandeja del panel tampoco lo muestra. La página pública no se
+  actualiza sola: hay que recargarla. `REPORTE_DEMORA_PRIMERO_S` y `REPORTE_DEMORA_SIGUIENTES_S`
+  cambian la demora (de 0 a 3600 s) **solo para pruebas**; en producción no se definen.
+- **«NO SE HA VERIFICADO».** Pasada la demora, el reporte se ve en el mapa, en las tarjetas y en
+  el detalle con esa etiqueta exacta, con su foto. Validarlo lo pasa a «Verificado»; rechazarlo o
+  fusionarlo lo saca del mapa, y el admin puede retirar uno ya verificado. Los puntos críticos y
+  el color de gravedad por barrio cuentan solo verificados.
+- **Permisos.** La web no pide ubicación ni cámara al cargar. La ubicación se pide al tocar
+  «Compartir mi ubicación» dentro del reporte, y la cámara al tocar «Sacar foto». Sin ubicación con
+  un margen de 50 m o menos no se puede reportar, y el punto solo se mueve dentro de 60 m de esa
+  posición. Los dos permisos exigen HTTPS: `localhost` cuenta como seguro, pero un teléfono que
+  entra por la IP de la red local sin el proxy con TLS no puede reportar.
 
 ### La pila entera en Docker
 
@@ -239,6 +259,20 @@ pnpm db:generate       # crea un archivo de migración nuevo con marca de tiempo
 `pnpm db:migrate` usa `DATABASE_URL`, que es la del rol **dueño** (`curichi`). Los servicios NO
 usan ese rol: cada uno tiene el suyo con privilegios mínimos (ver abajo).
 
+**La migración 0015 aborta si quedan reportes en `nuevo`.** Es la que publica sin moderación
+previa, y esos reportes se enviaron con el texto «un técnico lo revisa antes de publicarlo»: el
+log dice cuántos son y no cambia nada. Lo normal es moderarlos antes (validar, rechazar o
+fusionar) y volver a migrar. Solo si publicarlos tal como están es una decisión tomada a sabiendas
+(en desarrollo, donde los `nuevo` son datos de ejemplo y de pruebas), se migra con la bandera, que
+vale solo para esa ejecución:
+
+```bash
+pnpm db:migrate -- --publicar-nuevos-existentes
+```
+
+En producción, lo mismo con el job: [`produccion.md`](produccion.md#migración-0015-publicación-sin-moderación-previa).
+La 0016 (contracción) va recién en un despliegue posterior al de la 0014 y la 0015.
+
 ### Roles de aplicación
 
 Tres roles, tres trabajos. `curichi` crea el esquema; `curichi_api` y `curichi_geo` lo usan en
@@ -305,7 +339,9 @@ SELECT relname, pg_size_pretty(pg_total_relation_size(c.oid))
 
 Las fotos van al disco del proceso **o** a un servicio compatible con S3, y la elección es
 explícita: se activa S3 poniendo `S3_ENDPOINT` (o `S3_ENDPOINT_DOCKER` si api-core corre en el
-Compose). Con el disco, una foto subida a una réplica no existe para las demás; con S3, sí.
+Compose). Con el disco, las réplicas de **una misma máquina** comparten el volumen `fotos-data`
+del Compose, y es el modo oficial en la VPS (ADR 0006), con la guarda de espacio
+`FOTOS_MIN_LIBRE_BYTES`; entre máquinas hace falta S3.
 `api-core` lo dice en el log al arrancar (`… · fotos en …`) y comprueba el bucket **antes** de
 escuchar: con una credencial equivocada se niega a arrancar en lugar de aceptar reportes y perder
 sus fotos de una en una.
@@ -334,9 +370,10 @@ ciudad con las cinco imágenes del CI por SHA, `DOMINIO_PUBLICO` y `DOMINIO_PANE
 `PROXY_TLS=acme` (el proxy saca los certificados solo), secretos generados (`GEO_TOKEN_INTERNO`
 incluido, de 32 caracteres o más), la IP del cliente comprobada con una cabecera falsa (el Compose
 ya pone `TRUST_PROXY=1` y `PROXY_DE_CONFIANZA=1`), `/metrics` con token, migraciones por el job `migraciones`,
-TLS con la base con `sslmode=verify-full` y su CA, fotos en un S3 gestionado, perfiles
-`respaldos` y `observabilidad` en marcha, y un mapa base que no sea el servidor público de
-OpenStreetMap.
+TLS con la base con `sslmode=verify-full` y su CA si no está en la misma máquina, fotos en el
+disco de la VPS con su guarda de espacio y una copia fuera de la máquina, perfiles `respaldos` y
+`observabilidad` en marcha, y un mapa base que no sea el servidor público de OpenStreetMap. Lo que
+bloquea la apertura, en orden: [«Antes de producción»](produccion.md#antes-de-producción).
 
 ## Respaldo y restauración
 
@@ -363,7 +400,9 @@ programada. Con la base real de 82 MB tarda **5,3 s** en total.
 | `GET /metrics` | Texto Prometheus, con token | Alertas y paneles |
 
 `/ready` de api-core devuelve **503 solo si la base no está**: es lo único que la réplica no puede
-suplir. Con geo-service o el almacén de fotos caídos responde 200 y marca `degradado: true`,
+suplir. Con geo-service o el almacén de fotos caídos (en disco, también si no se puede escribir:
+escribe y borra un archivo de prueba), o con `fotos: "poco_espacio"` (menos que
+`FOTOS_MIN_LIBRE_BYTES` libre), responde 200 y marca `degradado: true`,
 porque el mapa y el listado siguen sirviéndose y sacar todas las réplicas de rotación convertiría
 «no se pueden crear reportes» en «el sitio no existe».
 
@@ -406,7 +445,23 @@ envío lleva clave de idempotencia.
 ### Al subir una foto responde 500
 
 Casi siempre el almacén: `curl -s http://127.0.0.1:3001/ready` y mirar `fotos`. Si dice `error`,
-MinIO está caído o las credenciales cambiaron.
+con S3 MinIO está caído o las credenciales cambiaron; con disco, la carpeta de fotos no se puede
+escribir (volumen de solo lectura o de otro dueño).
+
+### Al subir una foto responde 507 `SIN_ESPACIO`
+
+Queda menos que `FOTOS_MIN_LIBRE_BYTES` (2 GiB por defecto) libre en el disco de las fotos, que en
+la VPS es también el de PostgreSQL. No se gastó cupo y los reportes sin foto siguen entrando;
+`/ready` dice `"fotos":"poco_espacio"` y avisan las alertas `DiscoDeFotos*`. `df -h` y
+`docker system df`; liberar espacio o agrandar el disco. En desarrollo, `FOTOS_MIN_LIBRE_BYTES=0`
+apaga la guarda.
+
+### Envié un reporte y no aparece en el mapa
+
+Se publica 1 minuto después de enviarlo, o 4 desde el 2.º del día de esa cuenta, y la página
+pública no se actualiza sola: hay que recargarla. Mientras espera no lo ve nadie más que su autor,
+en «Mis reportes», ni siquiera el técnico. Si pasó la demora y sigue sin verse, puede estar
+rechazado o fusionado: «Mis reportes» lo dice.
 
 ### El técnico ve `unidad_vecinal:…` donde debería ir el nombre de un barrio
 
