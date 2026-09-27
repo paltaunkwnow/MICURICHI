@@ -9,3 +9,4 @@ Formato: `NNNN-titulo-en-kebab.md` con Estado, Fecha, Contexto, Decisión, Conse
 | 0003 | [PGlite solo en local y pruebas](0003-pglite-solo-en-local-y-pruebas.md) | aceptada |
 | 0004 | [Una instalación por ciudad](0004-una-instalacion-por-ciudad.md) | aceptada |
 | 0005 | [La base local pasa a PostgreSQL en Docker](0005-base-local-en-docker.md) | aceptada |
+| 0006 | [Publicación sin moderación previa, ubicación del dispositivo, cámara y WebP en una VPS](0006-publicacion-sin-moderacion-y-vps.md) | aceptada; se implementa por tandas T1 a T9 (`docs/TRASPASO.md`) |
