@@ -286,7 +286,11 @@ export const FotoSubidaSchema = z.object({
   ancho: z.number().int(),
   alto: z.number().int(),
   bytes: z.number().int(),
-  mime: z.string(),
+  mime: z.literal(CONFIG_DOMINIO.FOTO_FORMATO_SALIDA).meta({
+    description:
+      'Formato guardado: siempre WebP, sea cual sea el de entrada (JPEG, PNG o WebP), con ' +
+      `${CONFIG_DOMINIO.FOTO_ANCHO_MAX_PX} px por lado como máximo`,
+  }),
   exif_sanitizado: z.literal(true),
 });
 export type FotoSubida = z.infer<typeof FotoSubidaSchema>;

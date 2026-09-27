@@ -1,5 +1,76 @@
 # Changelog — contracts
 
+## 0.8.0 — 2026-09-26
+
+**Dos cambios con ruptura: la respuesta de `POST /api/v1/fotos` y quién ve una foto sin reporte
+en `GET /api/v1/fotos/{key}`.** Toda foto nueva se guarda en WebP, con 1600 px por lado como
+máximo y sin metadatos, y una foto que todavía no tiene reporte solo la ve quien la subió. Es la
+versión de la tanda T1 del plan de producción (`docs/revision/2026-09-26-plan-produccion-vps.md`,
+paso S01).
+
+### Con ruptura: `FotoSubidaSchema.mime`
+
+| 0.7.0 | 0.8.0 |
+|---|---|
+| `mime: string` (api-core mandaba `image/jpeg`) | `mime: 'image/webp'` (`z.literal(FOTO_FORMATO_SALIDA)`) |
+
+Una respuesta con `image/jpeg`, `image/png` o cualquier otro valor ya no pasa el esquema. El tipo
+inferido `FotoSubida['mime']` pasa de `string` al literal `'image/webp'`.
+
+### Con ruptura: una foto sin reporte solo la ve quien la subió
+
+| 0.7.0 | 0.8.0 |
+|---|---|
+| `GET /fotos/{key}` de una foto sin reporte: `200` a cualquiera, con sesión o sin ella, durante las 24 h que puede quedar sin reporte | `200` solo a la cuenta que la subió (`subido_por`), con `private, no-store`; `404` a cualquier otro, técnicos y admin incluidos |
+
+Sin moderación previa (tanda T4), servirla a cualquiera la volvía un alojamiento público de
+imágenes. Un cliente que usaba la URL del servidor como miniatura sin sesión, o con la de otra
+cuenta, recibe `404`: la miniatura del formulario tiene que salir de la imagen local
+(`URL.createObjectURL`), como hace `web-ciudadano` desde esta versión.
+
+### Parámetros (`CONFIG_DOMINIO`, también en `dist/dominio.json`)
+
+| Constante | Valor | Qué es |
+|---|---|---|
+| `FOTO_FORMATO_SALIDA` | `'image/webp'` | Nueva. Formato en que se guarda y se sirve toda foto nueva, sea cual sea el de entrada |
+| `FOTO_CALIDAD_WEBP` | `80` | Nueva. Calidad de la codificación WebP `<a confirmar con el municipio>` |
+| `FOTO_ALTO_MAX_PX` | `1600` | Nueva. Con `FOTO_ANCHO_MAX_PX` (sin cambios, 1600), el tope pasa a ser **por lado**: la foto entra en 1600 × 1600 sin deformarse. Antes solo se acotaba el ancho y una foto vertical de 1200 × 4000 se guardaba entera |
+| `FOTO_MIME_PERMITIDOS` | sin cambios: JPEG, PNG y WebP | Pasa a ser solo la lista de formatos de **entrada**, reconocidos por su contenido. La salida es siempre `FOTO_FORMATO_SALIDA` |
+
+### OpenAPI
+
+- `POST /api/v1/fotos`: la descripción dice qué entra (JPEG, PNG o WebP) y qué se guarda (WebP de
+  calidad 80, 1600 px por lado como máximo, sin EXIF ni XMP ni perfil ICC, solo el primer cuadro
+  de una imagen animada). La respuesta 201 dice `image/webp`. Se documentan `400 SIN_ARCHIVO`,
+  `413 ARCHIVO_GRANDE` y `415 TIPO_NO_PERMITIDO` / `IMAGEN_INVALIDA`, que api-core ya devolvía.
+- `GET /api/v1/fotos/{key}`:
+  - 200 declara `image/webp` para las fotos nuevas e `image/jpeg` solo para las anteriores a
+    0.8.0, que se sirven como están y no se reconvierten.
+  - La clave sigue el patrón `^[a-f0-9-]{36}\.(webp|jpg)$`; cualquier otra da 404.
+  - Documenta la regla nueva de visibilidad de una foto sin reporte (arriba, «Con ruptura»).
+  - Sin cambios en T1: la foto de un reporte publicado la ve cualquiera, y la de uno sin publicar
+    solo técnico y admin.
+  - Sesión opcional (`security: [{}, { cookieSesion: [] }]`): el público no la necesita; el dueño
+    de una foto sin reporte, sí.
+  - Se documentan las cabeceras `Cache-Control` (`public, max-age=3600` solo con el reporte
+    publicado; `private, no-store` en cualquier otro caso) y `X-Content-Type-Options: nosniff`,
+    y las respuestas `404 NO_EXISTE` y `429`.
+- Componente `FotoSubida`: `mime` con `const: image/webp`.
+
+### Qué tienen que hacer los consumidores
+
+- `api-core` (paso S02): procesar con
+  `.rotate().resize({ width: FOTO_ANCHO_MAX_PX, height: FOTO_ALTO_MAX_PX, fit: 'inside', withoutEnlargement: true }).webp({ quality: FOTO_CALIDAD_WEBP })`,
+  sin `withMetadata` y con solo el primer cuadro; clave `${uuid}.webp`; el INSERT, el almacén y la
+  respuesta con `FOTO_FORMATO_SALIDA`. `GET /fotos/:key` acepta `.webp` y `.jpg`, y una foto sin
+  reporte se sirve solo si `subido_por` es la cuenta de la sesión, con `private, no-store`. Las
+  `.jpg` existentes no se tocan.
+- `web-ciudadano` (paso S03): la miniatura sale de `URL.createObjectURL` y no de la URL del
+  servidor; un borrador restaurado la pide con la cookie de su dueño. `FOTO_MIME_PERMITIDOS` ya no
+  hace falta en el `accept` de un input, porque la foto sale de la cámara dentro de la página.
+- `panel-admin`: nada. Muestra las fotos por su URL y el navegador sigue el `Content-Type`.
+- `e2e`: toda comprobación de que una foto subida vuelve como `image/jpeg` pasa a `image/webp`.
+
 ## 0.7.0 — 2026-09-26
 
 **Aditivo.** Mi Curichi se despliega una vez por ciudad con la misma imagen. La ciudad (centro,

@@ -20,8 +20,25 @@ export const CONFIG_DOMINIO = {
   CRS_METRICO_EPSG: 32720,
   FOTO_MAX_BYTES: 8 * 1024 * 1024,
   FOTOS_MAX_POR_REPORTE: 3,
+  /**
+   * Formatos que se aceptan al SUBIR, reconocidos por su contenido y no por la extensión. Lo que
+   * se guarda es otra cosa: siempre `FOTO_FORMATO_SALIDA`.
+   */
   FOTO_MIME_PERMITIDOS: ['image/jpeg', 'image/png', 'image/webp'] as const,
+  /**
+   * Formato en que se guarda y se sirve toda foto nueva, sea cual sea el de entrada. Volver a
+   * codificarla es además lo que le quita los metadatos. Las .jpg anteriores a 0.8.0 no se
+   * reconvierten.
+   */
+  FOTO_FORMATO_SALIDA: 'image/webp',
+  /** Calidad WebP de la foto guardada (0–100) <a confirmar con el municipio>. */
+  FOTO_CALIDAD_WEBP: 80,
+  /**
+   * Tope POR LADO: la foto guardada entra en un cuadrado de 1600 × 1600 sin deformarse. Solo con
+   * el ancho, una foto vertical de 1200 × 4000 se guardaba entera.
+   */
   FOTO_ANCHO_MAX_PX: 1600,
+  FOTO_ALTO_MAX_PX: 1600,
   /**
    * Fotos que una CUENTA puede subir por hora (§13), además del límite por IP. Con un reporte por
    * hora y hasta 3 fotos cada uno, 12 deja margen para reintentos y reemplazos sin que la subida

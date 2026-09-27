@@ -1486,6 +1486,9 @@ components:
           maximum: 9007199254740991
         mime:
           type: string
+          const: image/webp
+          description: "Formato guardado: siempre WebP, sea cual sea el de entrada (JPEG,
+            PNG o WebP), con 1600 px por lado como máximo"
         exif_sanitizado:
           type: boolean
           const: true
@@ -3179,9 +3182,14 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/fotos:
     post:
-      summary: Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte al
-        que va pegada. Se reprocesa y se eliminan metadatos EXIF antes de
-        guardarla.
+      summary: "Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte
+        al que va pegada. Entra JPEG, PNG o WebP, reconocidos por su contenido y
+        no por la extensión, y se guarda siempre en WebP (calidad 80), con 1600
+        px por lado como máximo y sin metadatos: el servidor la vuelve a
+        codificar y descarta EXIF (incluida la posición GPS), XMP y el perfil
+        ICC. De una imagen animada queda solo el primer cuadro. Hasta que su
+        autor la asocia a un reporte, una foto sin reporte solo la ve quien la
+        subió."
       tags:
         - fotos
       security: *a1
@@ -3197,11 +3205,17 @@ paths:
                   format: binary
       responses:
         "201":
-          description: Foto guardada
+          description: Foto guardada en image/webp
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/FotoSubida"
+        "400":
+          description: "SIN_ARCHIVO: falta la imagen en el campo archivo"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
         "401":
           description: SIN_SESION
           content:
@@ -3209,13 +3223,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "413":
-          description: Archivo demasiado grande
+          description: "ARCHIVO_GRANDE: archivo demasiado grande"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "415":
-          description: Tipo no permitido
+          description: TIPO_NO_PERMITIDO (solo JPEG, PNG o WebP) o IMAGEN_INVALIDA (no se
+            pudo leer)
           content:
             application/json:
               schema:
@@ -3228,18 +3243,60 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/fotos/{key}:
     get:
-      summary: Servir una foto ya sanitizada
+      summary: "Servir una foto ya sanitizada. Quién la ve: la de un reporte
+        publicado, cualquiera; la de un reporte sin publicar, técnico y admin;
+        una foto sin reporte solo la ve quien la subió, técnicos incluidos
+        afuera. A cualquier otro se le responde 404, igual que si no existiera."
       tags:
         - fotos
+      security:
+        - {}
+        - cookieSesion: []
       parameters:
         - name: key
           in: path
           required: true
+          description: "Clave devuelta por POST /fotos: un uuid con .webp, o con .jpg para
+            las fotos anteriores"
           schema:
             type: string
+            pattern: ^[a-f0-9-]{36}\.(webp|jpg)$
       responses:
         "200":
-          description: Imagen
+          description: "La imagen: image/webp para las fotos nuevas, image/jpeg solo para
+            las fotos anteriores a 0.8.0, que no se reconvierten"
+          headers:
+            Cache-Control:
+              description: public, max-age=3600 si el reporte está publicado; private,
+                no-store en cualquier otro caso, para que una caché compartida
+                no la sirva a quien no puede verla.
+              schema:
+                type: string
+            X-Content-Type-Options:
+              description: nosniff
+              schema:
+                type: string
+          content:
+            image/webp:
+              schema:
+                type: string
+                format: binary
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: "NO_EXISTE: la foto no existe o quien pregunta no puede verla"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "429":
+          description: Demasiadas lecturas desde la misma IP
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /api/v1/exportar:
     get:
       summary: Exportar CSV o GeoJSON con nota metodológica, en la vista técnica.

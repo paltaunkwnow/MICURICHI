@@ -272,7 +272,7 @@ export function construirOpenApi(): Record<string, unknown> {
       },
       '/api/v1/fotos': {
         post: op(
-          'Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte al que va pegada. Se reprocesa y se eliminan metadatos EXIF antes de guardarla.',
+          `Subir una foto (multipart). EXIGE SESIÓN, igual que crear el reporte al que va pegada. Entra JPEG, PNG o WebP, reconocidos por su contenido y no por la extensión, y se guarda siempre en WebP (calidad ${CONFIG_DOMINIO.FOTO_CALIDAD_WEBP}), con ${CONFIG_DOMINIO.FOTO_ANCHO_MAX_PX} px por lado como máximo y sin metadatos: el servidor la vuelve a codificar y descarta EXIF (incluida la posición GPS), XMP y el perfil ICC. De una imagen animada queda solo el primer cuadro. Hasta que su autor la asocia a un reporte, una foto sin reporte solo la ve quien la subió.`,
           'fotos',
           {
             security: seguridadSesion,
@@ -288,10 +288,16 @@ export function construirOpenApi(): Record<string, unknown> {
               },
             },
             responses: {
-              '201': { description: 'Foto guardada', content: json(ref('FotoSubida')) },
+              '201': {
+                description: 'Foto guardada en image/webp',
+                content: json(ref('FotoSubida')),
+              },
+              '400': error('SIN_ARCHIVO: falta la imagen en el campo archivo'),
               '401': error('SIN_SESION'),
-              '413': error('Archivo demasiado grande'),
-              '415': error('Tipo no permitido'),
+              '413': error('ARCHIVO_GRANDE: archivo demasiado grande'),
+              '415': error(
+                'TIPO_NO_PERMITIDO (solo JPEG, PNG o WebP) o IMAGEN_INVALIDA (no se pudo leer)',
+              ),
               '429': error(
                 `Demasiadas subidas: límite por IP y por cuenta (${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora)`,
               ),
@@ -300,10 +306,48 @@ export function construirOpenApi(): Record<string, unknown> {
         ),
       },
       '/api/v1/fotos/{key}': {
-        get: op('Servir una foto ya sanitizada', 'fotos', {
-          parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
-          responses: { '200': { description: 'Imagen' } },
-        }),
+        get: op(
+          'Servir una foto ya sanitizada. Quién la ve: la de un reporte publicado, cualquiera; la de un reporte sin publicar, técnico y admin; una foto sin reporte solo la ve quien la subió, técnicos incluidos afuera. A cualquier otro se le responde 404, igual que si no existiera.',
+          'fotos',
+          {
+            // Sesión opcional: el público no la necesita, pero el dueño de una foto sin reporte sí.
+            // Objeto propio y no el de seguridadSesion: si se comparte, el YAML generado usa alias.
+            security: [{}, { cookieSesion: [] }],
+            parameters: [
+              {
+                name: 'key',
+                in: 'path',
+                required: true,
+                description:
+                  'Clave devuelta por POST /fotos: un uuid con .webp, o con .jpg para las fotos anteriores',
+                schema: { type: 'string', pattern: '^[a-f0-9-]{36}\\.(webp|jpg)$' },
+              },
+            ],
+            responses: {
+              '200': {
+                description:
+                  'La imagen: image/webp para las fotos nuevas, image/jpeg solo para las fotos anteriores a 0.8.0, que no se reconvierten',
+                headers: {
+                  'Cache-Control': {
+                    description:
+                      'public, max-age=3600 si el reporte está publicado; private, no-store en cualquier otro caso, para que una caché compartida no la sirva a quien no puede verla.',
+                    schema: { type: 'string' },
+                  },
+                  'X-Content-Type-Options': {
+                    description: 'nosniff',
+                    schema: { type: 'string' },
+                  },
+                },
+                content: {
+                  'image/webp': { schema: { type: 'string', format: 'binary' } },
+                  'image/jpeg': { schema: { type: 'string', format: 'binary' } },
+                },
+              },
+              '404': error('NO_EXISTE: la foto no existe o quien pregunta no puede verla'),
+              '429': error('Demasiadas lecturas desde la misma IP'),
+            },
+          },
+        ),
       },
       '/api/v1/exportar': {
         get: op(
