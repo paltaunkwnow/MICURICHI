@@ -128,8 +128,8 @@ localmente, que es exactamente lo que hacía antes con todo el texto.
 ## El formulario no pierde lo escrito
 
 El asistente de cuatro pasos guarda un borrador en `sessionStorage` (`src/lib/borrador.ts`). El
-caso que lo justifica es el teléfono: al tocar «Agregar» foto el navegador cede el control a la
-cámara, y en un móvil con poca memoria eso puede descartar la pestaña. El borrador conserva
+caso que lo justifica es el teléfono: con la cámara abierta, o al salir un momento a otra
+aplicación, un móvil con poca memoria puede descartar la pestaña. El borrador conserva
 también **la clave de idempotencia**, para que reintentar el envío después de una recarga no cree
 un segundo reporte. Caduca a las 12 h **contadas desde que se empezó** (seguir escribiendo o
 restaurarlo no renueva el plazo), cada foto recuerda cuándo se subió y al restaurar se descartan
@@ -141,11 +141,47 @@ Las reglas del asistente que no necesitan React (qué habilita cada paso, la fec
 hora local, el GPS aproximado, la coherencia del sumidero, el paso al que lleva cada error) viven
 en `src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`.
 
+## La foto sale de la cámara, dentro de la página
+
+No hay ningún input de archivo ni galería (plan 2026-09-26, pedidos D y F). «Sacar foto»
+(`src/componentes/CamaraReporte.tsx`) pide la cámara con `getUserMedia` **recién al tocarlo**,
+nunca al cargar, con `facingMode: { ideal: 'environment' }` y 1920 × 1080 ideales (sin ancho ni
+alto, Chrome entrega 640 × 480). La vista va en un diálogo modal con el foco atrapado, un disparo
+de 72 px que se acciona con Enter o Espacio, «Repetir» y «Usar esta foto».
+
+- **Captura**: con `ImageCapture.takePhoto()` donde existe (Chrome), achicada a 1600 px por lado;
+  si no, el cuadro del video en un lienzo de 1600 px por lado como máximo y
+  `toBlob('image/jpeg', 0.9)`. Se manda JPEG porque Safari en iPhone no codifica WebP desde un
+  lienzo; el servidor la guarda en WebP y le quita los metadatos.
+- **Miniatura**: `URL.createObjectURL`, sin pedirla al servidor. Un borrador retomado usa la URL
+  del servidor, que al dueño se la sirve con su cookie.
+- **Se apaga** (`track.stop()` en cada pista) al cerrar, al usar la foto, al desmontar (cambiar de
+  paso, caducar la sesión, salir del formulario), en `pagehide` y cuando el permiso llega después
+  de haber cerrado.
+- **Errores**, cada uno con su texto: contexto no seguro (sin https no hay cámara), navegador sin
+  `mediaDevices`, permiso negado, sin cámara, cámara ocupada o cortada. La foto es opcional: en
+  todos los casos el reporte se puede enviar sin ella.
+- Es una barrera de la interfaz, no una garantía: con la sesión, cualquiera puede mandar otra
+  imagen a la API (CLAUDE.md §13).
+
+La lógica está en `src/lib/camara.ts` y se prueba sin navegador, con `getUserMedia` simulado
+(`camara.test.ts` y `camara-pagina.test.ts`).
+
+## Imágenes propias en WebP
+
+`public/santa-cruz-catedral.webp` y `public/logo.webp` se convirtieron una vez con sharp y se
+versionan así. El único PNG que queda es `public/logo.png`, solo como `apple-touch-icon`
+(`src/app/layout.tsx`), porque iOS no acepta WebP ahí. `src/lib/imagenes-propias.test.ts` falla si
+aparece otra referencia a un `.jpg` o `.png` propio en `src/` o `public/`.
+
 ## Cabeceras
 
 `next.config.ts` aplica CSP, `Permissions-Policy`, `nosniff`, `X-Frame-Options: DENY` y
 `Referrer-Policy`: son fijas, no dependen del despliegue. Avisos para quien las toque:
 
+- `Permissions-Policy` deja `geolocation` y `camera` al propio origen (`(self)`): sin
+  `camera=(self)`, `getUserMedia` falla con `NotAllowedError` aunque la persona diga que sí.
+  Micrófono, pagos y USB quedan cerrados.
 - El mapa base de MapLibre 6 pide las teselas raster con `fetch`, **no** con `<img>`: hace falta
   `connect-src`, con `img-src` solo el mapa queda en negro.
 - `'unsafe-eval'` está **solo** en desarrollo (lo necesita el recargado en caliente de Next). En

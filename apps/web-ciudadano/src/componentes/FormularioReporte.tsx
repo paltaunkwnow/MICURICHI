@@ -14,11 +14,11 @@ import {
   SUMIDERO_CERCANO,
   SUMIDERO_ESTADOS,
 } from 'contracts';
-import { Camera, Check, ChevronLeft, Copy, Navigation, Plus, ShieldCheck, X } from 'lucide-react';
+import { Camera, Check, ChevronLeft, Copy, Navigation, ShieldCheck, X } from 'lucide-react';
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { type ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type FieldErrors, useForm } from 'react-hook-form';
 import { crearReporte, nuevaClaveIdempotencia, resolverPunto, subirFoto } from '@/lib/api';
 import {
@@ -67,12 +67,13 @@ import {
   ubicacionDesdeGps,
   valoresIniciales,
 } from '@/lib/formulario-reporte';
-import { motivoDeRechazoDeFoto } from '@/lib/foto';
+import { MiniaturasLocales, motivoDeRechazoDeFoto } from '@/lib/foto';
 import { leerCoordenadas } from '@/lib/geo';
 import { recordarReporte } from '@/lib/misReportes';
 import { refrescarSesion, useSesion } from '@/lib/sesion';
 import { AccesoRequerido } from './AccesoRequerido';
 import { Aviso } from './Aviso';
+import { CamaraReporte } from './CamaraReporte';
 import { ChipSeveridad } from './ChipSeveridad';
 import { ErrorDeCarga } from './ErrorDeCarga';
 import { MapaDiferido } from './MapaDiferido';
@@ -97,12 +98,6 @@ const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
  * sacudida del pulgar sería una llamada a `POST /geo/v1/resolver`, que tiene límite por IP.
  */
 const ESPERA_RESOLVER_MS = 600;
-/**
- * Margen para el `change` de la cámara una vez que la página recupera el foco: en algunos
- * teléfonos llega un poco después. Pasado el margen se quita el espacio vacío; si llegó una foto,
- * su subida ya se ve aparte.
- */
-const ESPERA_REGRESO_CAMARA_MS = 1000;
 const MAX_FOTOS = CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE;
 const TEXTO_FOTOS_COMPLETAS = `Ya llegaste al máximo de ${MAX_FOTOS} fotos. Quitá una si querés cambiarla.`;
 const TEXTO_UBICACION_APROXIMADA =
@@ -252,8 +247,14 @@ export function FormularioReporte() {
   const [creado, setCreado] = useState<{ id: string } | null>(null);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [retomado, setRetomado] = useState(false);
-  /** Se abrió la cámara para «otro detalle» y todavía no volvió con una foto. */
-  const [esperandoCamara, setEsperandoCamara] = useState(false);
+  /**
+   * Miniatura local (`blob:`) de cada foto sacada en esta visita, por `objeto_key`: se ve al
+   * instante y sin pedirla al servidor. Una foto de un borrador retomado no la tiene y usa la URL
+   * del servidor, que a su dueño se la sirve con su cookie.
+   */
+  const [miniaturas, setMiniaturas] = useState<Record<string, string>>({});
+  /** Toda miniatura creada y todavía no liberada, para revocarlas al salir o al empezar de nuevo. */
+  const vistas = useRef(new MiniaturasLocales());
   /**
    * El borrador ya se leyó. El mapa del paso 1 no se monta antes: se crea UNA vez con su centro, y
    * si naciera en el centro por defecto mientras el borrador trae otro punto, el marcador clavado
@@ -263,8 +264,6 @@ export function FormularioReporte() {
   /** Tras un rechazo: llevar la vista hasta el primer mensaje de error del paso. */
   const [mostrarError, setMostrarError] = useState(false);
   const mapa = useRef<MapaGl | null>(null);
-  const archivo = useRef<HTMLInputElement>(null);
-  const camara = useRef<HTMLInputElement | null>(null);
   const ubicacionRef = useRef<Ubicacion | null>(null);
   ubicacionRef.current = ubicacion;
   const pasoRef = useRef(paso);
@@ -286,8 +285,12 @@ export function FormularioReporte() {
 
   /** Ubicación para la que vale `resuelto` (la misma referencia): esa no se vuelve a preguntar. */
   const resueltoPara = useRef<Ubicacion | null>(null);
-  const dejarDeVigilarCamara = useRef<(() => void) | null>(null);
-  useEffect(() => () => dejarDeVigilarCamara.current?.(), []);
+
+  // Al salir del formulario se libera la memoria de las miniaturas.
+  useEffect(() => {
+    const creadas = vistas.current;
+    return () => creadas.soltarTodas();
+  }, []);
 
   // El mapa del paso 1 se destruye al salir del paso: su referencia no puede quedar apuntando a un
   // mapa muerto, que el GPS o las coordenadas intentarían mover.
@@ -352,13 +355,18 @@ export function FormularioReporte() {
     form.reset(valoresIniciales());
     setResolviendo(false);
     setFotos([]);
+    // Una foto a medio subir es del formulario que se descarta: su miniatura se suelta con las
+    // demás y la subida, cuando responda, ya no se suma (ver `subir`). Se deja de esperarla para
+    // que «Continuar» y «Sacar foto» no queden trabados por ella.
+    vistas.current.soltarTodas();
+    subir.reset();
+    setMiniaturas({});
     setUbicacion(null);
     setResuelto(null);
     setErrorEnvio(null);
     setErrorUbicacion(null);
     setAvisoUbicacion(null);
     setErrorFoto(null);
-    setEsperandoCamara(false);
     setRetomado(false);
     setPaso(1);
     // Como recién abierto: el punto de partida vuelve a ser el del enlace, o el centro de la ciudad.
@@ -447,103 +455,61 @@ export function FormularioReporte() {
   }
 
   const subir = useMutation({
-    mutationFn: subirFoto,
-    onSuccess: (f) => {
+    mutationFn: ({ foto }: { foto: File; vista: string }) => subirFoto(foto),
+    // TanStack llama a estos dos aunque el formulario se haya reiniciado en el medio (`subir.reset()`
+    // solo deja de esperarla). Una subida empezada antes de «Empezar de nuevo» tiene su miniatura
+    // ya soltada: no se suma al formulario nuevo, que mostraría un `blob:` revocado, y su error no
+    // es de este formulario. La foto queda sin reporte y la borra el mantenimiento.
+    onSuccess: (f, { vista }) => {
+      if (!vistas.current.sigueViva(vista)) return;
       setFotos((prev) => [
         ...prev,
         { objeto_key: f.objeto_key, url: f.url, subida_en: Date.now() },
       ]);
+      setMiniaturas((m) => ({ ...m, [f.objeto_key]: vista }));
       setErrorFoto(null);
       toast('Foto agregada · metadatos eliminados');
     },
-    onError: (e) => {
+    onError: (e, { vista }) => {
+      const deEsteFormulario = vistas.current.sigueViva(vista);
+      vistas.current.soltar(vista);
       // 401: la sesión venció mientras se elegía la foto. Mismo camino que el envío («Se cerró tu
       // sesión», con el borrador guardado) en vez de un error suelto que no dice qué hacer.
       if (esSesionCaducada(e)) {
         setSesionCaducada(true);
         return;
       }
+      if (!deEsteFormulario) return;
       // El resto (incluido el 429 de cuota de fotos, con su propio texto) va junto a las fotos y
       // no toca nada más del formulario.
       setErrorFoto(mensajeDeFoto(e));
     },
   });
 
-  const mosaico = mosaicoDeFotos({
-    subidas: fotos.length,
-    subiendo: subir.isPending,
-    esperandoCamara,
-  });
+  const mosaico = mosaicoDeFotos({ subidas: fotos.length, subiendo: subir.isPending });
 
   /**
-   * Único camino de subida, sea el «Agregar» de la galería o la cámara de «otro detalle». Se
-   * comprueba ANTES de subir: el servidor lo rechaza igual (413 / 415), pero llegar hasta ahí
-   * significa haber mandado hasta 8 MB por datos móviles para que le digan que no, y quien peor
-   * conexión tiene es quien más lo paga.
+   * «Usar esta foto» de la cámara. Se comprueba ANTES de subir: el servidor lo rechaza igual
+   * (413 / 415), pero llegar hasta ahí significa haber mandado la foto por datos móviles para que
+   * le digan que no, y quien peor conexión tiene es quien más lo paga.
    */
-  function alElegirFoto(e: ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    e.target.value = '';
-    if (!f) return;
-    if (mosaico.completas) {
-      setErrorFoto(TEXTO_FOTOS_COMPLETAS);
-      return;
-    }
-    const error = motivoDeRechazoDeFoto(f);
+  function alSacarFoto(foto: File, vista: string) {
+    vistas.current.guardar(vista);
+    const error = mosaico.completas ? TEXTO_FOTOS_COMPLETAS : motivoDeRechazoDeFoto(foto);
     if (error) {
+      vistas.current.soltar(vista);
       setErrorFoto(error);
       return;
     }
-    subir.mutate(f);
+    setErrorFoto(null);
+    subir.mutate({ foto, vista });
   }
 
-  /**
-   * El input de la cámara está siempre montado (uno solo, no uno por espacio): quitar el espacio
-   * vacío nunca se lleva por delante una foto que todavía está llegando. `cancel` (Chrome 113+,
-   * Safari 16.4+, Firefox 91+) avisa que la persona cerró la cámara sin sacar nada.
-   */
-  const conectarCamara = useCallback((el: HTMLInputElement | null) => {
-    camara.current = el;
-    if (!el) return;
-    const alCancelar = () => setEsperandoCamara(false);
-    el.addEventListener('cancel', alCancelar);
-    return () => {
-      el.removeEventListener('cancel', alCancelar);
-      camara.current = null;
-    };
-  }, []);
-
-  /**
-   * Para los navegadores sin evento `cancel`: al volver de la cámara (la página recupera el foco o
-   * vuelve a estar visible) se quita el espacio vacío. Antes quedaba para siempre y ocupaba uno de
-   * los tres lugares de foto.
-   */
-  function vigilarRegresoDeLaCamara() {
-    dejarDeVigilarCamara.current?.();
-    let espera: ReturnType<typeof setTimeout> | null = null;
-    function quitarEscuchas() {
-      window.removeEventListener('focus', alVolver);
-      document.removeEventListener('visibilitychange', alVolver);
-    }
-    function alVolver() {
-      if (document.visibilityState !== 'visible') return;
-      quitarEscuchas();
-      espera = setTimeout(() => setEsperandoCamara(false), ESPERA_REGRESO_CAMARA_MS);
-    }
-    window.addEventListener('focus', alVolver);
-    document.addEventListener('visibilitychange', alVolver);
-    dejarDeVigilarCamara.current = () => {
-      quitarEscuchas();
-      if (espera) clearTimeout(espera);
-    };
-  }
-
-  function abrirOtroDetalle() {
-    if (mosaico.completas || subir.isPending) return;
-    setEsperandoCamara(true);
-    // El clic abre la cámara dentro del mismo toque, que es lo único que aceptan los navegadores.
-    // Si aun así no se abre, el espacio queda a la vista con su propio botón y basta con tocarlo.
-    camara.current?.click();
+  function quitarFoto(clave: string) {
+    setFotos((p) => p.filter((x) => x.objeto_key !== clave));
+    const vista = miniaturas[clave];
+    if (vista) vistas.current.soltar(vista);
+    setMiniaturas(({ [clave]: _quitada, ...resto }) => resto);
   }
 
   /** Respuesta a «¿Hay sumidero cercano?», con las otras dos puestas en regla (contracts 0.6.0). */
@@ -1058,108 +1024,60 @@ export function FormularioReporte() {
             <p className="pno">Paso 3 de {PASOS}</p>
             <p className="preg">Mostranos cómo se ve</p>
 
-            <ul className="mt-4 grid grid-cols-3 gap-2.5">
-              {fotos.map((f) => (
-                <li key={f.objeto_key} className="relative aspect-square">
-                  <span className="foto block h-full w-full">
-                    {/* biome-ignore lint/performance/noImgElement: miniatura de la foto ya subida */}
-                    <img src={urlFotoRelativa(f.url)} alt="Foto que subiste" />
-                  </span>
-                  <BotonQuitar
-                    etiqueta="Quitar esta foto"
-                    onClick={() => setFotos((p) => p.filter((x) => x.objeto_key !== f.objeto_key))}
-                  />
-                </li>
-              ))}
-              {subir.isPending ? (
-                <li className="aspect-square">
-                  <div
-                    role="status"
-                    data-testid="foto-subiendo-mosaico"
-                    className="grid h-full w-full place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600"
-                  >
-                    <Camera size={20} aria-hidden="true" />
-                    Subiendo…
-                  </div>
-                </li>
-              ) : null}
-              {mosaico.espacioCamara ? (
-                <li className="relative aspect-square" data-testid="espacio-camara">
-                  <label
-                    htmlFor="foto-camara"
-                    className="grid h-full w-full cursor-pointer place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white px-1 text-center text-[12.5px] text-tinta-600"
-                  >
-                    <Camera size={20} aria-hidden="true" />
-                    Foto de referencia
-                  </label>
-                  <BotonQuitar
-                    etiqueta="Quitar este espacio de foto"
-                    onClick={() => setEsperandoCamara(false)}
-                  />
-                </li>
-              ) : null}
-              {mosaico.agregar ? (
-                <li className="aspect-square">
-                  <button
-                    type="button"
-                    className="grid h-full w-full place-items-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-[#C9D2CD] bg-white text-[12.5px] text-tinta-600"
-                    onClick={() => archivo.current?.click()}
-                    disabled={subir.isPending}
-                  >
-                    <Plus size={20} aria-hidden="true" />
-                    Agregar
-                  </button>
-                </li>
-              ) : null}
-            </ul>
-            <input
-              ref={archivo}
-              id="fotos"
-              type="file"
-              accept={CONFIG_DOMINIO.FOTO_MIME_PERMITIDOS.join(',')}
-              className="sr-only"
-              aria-label="Elegir una foto del punto"
-              disabled={subir.isPending}
-              onChange={alElegirFoto}
+            {fotos.length > 0 || subir.isPending ? (
+              <ul className="mt-4 grid grid-cols-3 gap-2.5" aria-label="Fotos del reporte">
+                {fotos.map((f) => (
+                  <li key={f.objeto_key} className="relative aspect-square">
+                    <span className="foto block h-full w-full">
+                      {/* biome-ignore lint/performance/noImgElement: miniatura de la foto ya subida */}
+                      <img
+                        src={miniaturas[f.objeto_key] ?? urlFotoRelativa(f.url)}
+                        alt="Foto que sacaste"
+                      />
+                    </span>
+                    <BotonQuitar
+                      etiqueta="Quitar esta foto"
+                      onClick={() => quitarFoto(f.objeto_key)}
+                    />
+                  </li>
+                ))}
+                {subir.isPending ? (
+                  <li className="relative aspect-square">
+                    {subir.variables?.vista ? (
+                      <span className="foto block h-full w-full" aria-hidden="true">
+                        {/* biome-ignore lint/performance/noImgElement: miniatura local de la foto que se está subiendo */}
+                        <img src={subir.variables.vista} alt="" />
+                      </span>
+                    ) : null}
+                    <div
+                      role="status"
+                      data-testid="foto-subiendo-mosaico"
+                      className="absolute inset-0 grid place-items-center content-center justify-items-center gap-1 rounded-xl border-[1.5px] border-dashed border-verde-700 bg-white/75 px-1 text-center text-[12.5px] font-semibold text-tinta-900"
+                    >
+                      <Camera size={20} aria-hidden="true" />
+                      Subiendo…
+                    </div>
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
+            {/* La foto sale solo de la cámara, dentro de la página: no hay input de archivo ni
+                galería (plan 2026-09-26, pedido D). */}
+            <CamaraReporte
+              deshabilitada={mosaico.completas || subir.isPending}
+              alUsarFoto={alSacarFoto}
             />
-            {/* `capture` pide la cámara trasera en el teléfono; en escritorio se comporta como un
-                selector de archivos más. El tipo real lo decide el servidor por los bytes, y
-                antes `motivoDeRechazoDeFoto` descarta lo que no se admite. */}
-            <input
-              ref={conectarCamara}
-              id="foto-camara"
-              type="file"
-              accept="image/*"
-              capture="environment"
-              className="sr-only"
-              aria-label="Foto de referencia"
-              disabled={subir.isPending}
-              onClick={vigilarRegresoDeLaCamara}
-              onChange={(e) => {
-                setEsperandoCamara(false);
-                alElegirFoto(e);
-              }}
-            />
-            <button
-              type="button"
-              data-testid="boton-otro-detalle"
-              className="btn btn-fantasma btn-bloque mt-2.5"
-              onClick={abrirOtroDetalle}
-              disabled={mosaico.completas || subir.isPending}
-              aria-describedby="ayuda-otro-detalle"
-            >
-              <Camera size={18} aria-hidden="true" />
-              ¿Querés añadir otro detalle?
-            </button>
-            <p id="ayuda-otro-detalle" className="ayuda mt-1.5" aria-live="polite">
+            <p id="ayuda-foto" className="ayuda mt-1.5" aria-live="polite">
               {mosaico.completas
                 ? TEXTO_FOTOS_COMPLETAS
-                : 'Abre la cámara para sacar una foto de referencia de otro detalle del lugar.'}
+                : subir.isPending
+                  ? 'Subiendo la foto… Cuando termine, podés sacar otra.'
+                  : 'Es opcional: la cámara se abre acá mismo, y podés enviar el reporte sin foto.'}
             </p>
             <div className="mt-1.5 flex justify-between text-[13.5px] text-tinta-600">
               <span>Hasta {MAX_FOTOS} fotos</span>
               <span>
-                {fotos.length}/{MAX_FOTOS} · {CONFIG_DOMINIO.FOTO_MAX_BYTES / 1024 / 1024} MB c/u
+                {fotos.length}/{MAX_FOTOS}
               </span>
             </div>
             {errorFoto ? (

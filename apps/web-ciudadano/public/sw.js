@@ -27,7 +27,7 @@ const CACHE_SHELL = `curichi-shell-${VERSION}`;
 const CACHE_CAPAS = `curichi-capas-${VERSION}`;
 const VIGENTES = [CACHE_SHELL, CACHE_CAPAS];
 
-const SHELL = ['/', '/manifest.webmanifest', '/icono.svg', '/logo.png'];
+const SHELL = ['/', '/manifest.webmanifest', '/icono.svg', '/logo.webp'];
 
 /**
  * Topes de entradas. El de capas es el que importa: a 16 teselas por pantalla y varios niveles de

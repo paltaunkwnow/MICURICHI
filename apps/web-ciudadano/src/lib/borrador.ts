@@ -6,11 +6,11 @@ export { PASOS_REPORTE };
 /**
  * Borrador del formulario de reporte, para que recargar la página no cueste empezar de cero.
  *
- * El caso que lo justifica no es el descuido: es el teléfono. Al tocar «Agregar» foto, el
- * navegador cede el control a la cámara o al selector de archivos, y en un móvil con poca memoria
- * eso puede descartar la pestaña; al volver, la página se recarga. Sin esto, el vecino que ya
- * había contestado varias pantallas se encontraba con el paso 1 en blanco. El mismo caso se da al
- * tocar «atrás» sin querer, o al girar el teléfono en algunos navegadores.
+ * El caso que lo justifica no es el descuido: es el teléfono. Con la cámara abierta, o al salir un
+ * momento a otra aplicación, un móvil con poca memoria puede descartar la pestaña; al volver, la
+ * página se recarga. Sin esto, el vecino que ya había contestado varias pantallas se encontraba
+ * con el paso 1 en blanco. El mismo caso se da al tocar «atrás» sin querer, o al girar el teléfono
+ * en algunos navegadores.
  *
  * Va en `sessionStorage` y no en `localStorage` a propósito: el borrador pertenece a ESTA sesión
  * de la pestaña. Sobrevive a la recarga, que es lo que hace falta, y desaparece al cerrar, que es

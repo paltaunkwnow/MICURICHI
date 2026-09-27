@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   description:
     'Reporte ciudadano de puntos de inundación. Marcá dónde se junta el agua en tu barrio.',
   manifest: '/manifest.webmanifest',
+  // El único PNG que queda: iOS no acepta WebP como apple-touch-icon. En la interfaz el logo va en
+  // WebP (`/logo.webp`).
   icons: { icon: '/icono.svg', apple: '/logo.png' },
   applicationName: 'Mi Curichi',
   appleWebApp: { capable: true, title: 'Mi Curichi', statusBarStyle: 'default' },

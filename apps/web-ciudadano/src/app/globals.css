@@ -1251,3 +1251,79 @@ a.fila:hover {
   color: var(--color-tinta-600);
   margin-top: 5px;
 }
+
+/* ============================ cámara del reporte ============================ */
+
+/* Diálogo modal de «Sacar foto» (componentes/CamaraReporte.tsx). En el teléfono ocupa la
+   pantalla entera, como la cámara del sistema; en escritorio es una ventana centrada. */
+.camara {
+  width: 100%;
+  max-width: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--color-tinta-900);
+  color: #fff;
+}
+.camara[open] {
+  display: flex;
+  flex-direction: column;
+}
+.camara::backdrop {
+  background: rgb(6 26 40 / 0.85);
+}
+.camara-visor {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  background: #000;
+  overflow: hidden;
+}
+.camara-imagen {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.camara-imagen[hidden] {
+  display: none;
+}
+@media (min-width: 768px) {
+  .camara {
+    width: min(640px, calc(100% - 32px));
+    height: auto;
+    max-height: calc(100dvh - 48px);
+    margin: auto;
+    border-radius: var(--radius-tarjeta);
+  }
+  .camara-visor {
+    flex: none;
+    aspect-ratio: 4 / 3;
+  }
+}
+
+/* Disparo: aro blanco, como en cualquier cámara. Es un <button>: Enter y Espacio lo accionan. */
+.disparo {
+  flex: none;
+  padding: 0;
+  border: 4px solid #fff;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 0.9);
+  box-shadow: inset 0 0 0 4px var(--color-tinta-900);
+  cursor: pointer;
+  transition: transform 100ms ease;
+}
+.disparo:active:not(:disabled) {
+  transform: scale(0.94);
+}
+.disparo:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+.disparo:focus-visible {
+  outline-color: var(--color-verde-300);
+  outline-offset: 4px;
+}

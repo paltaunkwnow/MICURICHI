@@ -120,11 +120,13 @@ describe('comprobación de la foto antes de subirla', () => {
   });
 
   it('rechaza lo que no es imagen', () => {
-    expect(motivoDeRechazoDeFoto(archivo(1000, 'application/pdf'))).toMatch(/JPEG, PNG o WebP/);
+    expect(motivoDeRechazoDeFoto(archivo(1000, 'application/pdf'))).toMatch(
+      /formato que no admitimos/,
+    );
   });
 
-  it('rechaza un archivo vacío', () => {
-    expect(motivoDeRechazoDeFoto(archivo(0, 'image/jpeg'))).toMatch(/vacío/);
+  it('rechaza una foto vacía', () => {
+    expect(motivoDeRechazoDeFoto(archivo(0, 'image/jpeg'))).toMatch(/vacía/);
   });
 
   it('deja pasar el tipo vacío: lo decide el servidor mirando los bytes', () => {

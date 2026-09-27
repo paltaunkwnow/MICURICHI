@@ -25,10 +25,10 @@ describe('la ciudad de la instalación', () => {
   });
 
   it('la foto de la catedral de Santa Cruz solo se usa en Santa Cruz', () => {
-    expect(fotoDeCiudad(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO)).toBe('/santa-cruz-catedral.jpg');
+    expect(fotoDeCiudad(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO)).toBe('/santa-cruz-catedral.webp');
     // Mismo nombre escrito de otra forma: sigue siendo la misma ciudad.
     expect(fotoDeCiudad({ nombre: '  santa cruz de la SIERRA ', pais: 'BO' })).toBe(
-      '/santa-cruz-catedral.jpg',
+      '/santa-cruz-catedral.webp',
     );
     expect(fotoDeCiudad(COCHABAMBA)).toBeNull();
     expect(fotoDeCiudad({ nombre: 'Santa Cruz de la Sierra', pais: 'AR' })).toBeNull();

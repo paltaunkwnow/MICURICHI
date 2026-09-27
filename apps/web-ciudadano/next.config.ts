@@ -63,10 +63,12 @@ const cabeceras = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'X-Frame-Options', value: 'DENY' },
-  // El formulario usa la ubicación del dispositivo; nada más se necesita.
+  // El formulario usa la ubicación y la cámara (la foto se saca dentro de la página, con
+  // getUserMedia); sin `camera=(self)` el navegador la niega aunque la persona diga que sí. Las dos
+  // se piden solo al reportar, nunca al cargar. Nada más se necesita.
   {
     key: 'Permissions-Policy',
-    value: 'geolocation=(self), camera=(), microphone=(), payment=(), usb=()',
+    value: 'geolocation=(self), camera=(self), microphone=(), payment=(), usb=()',
   },
 ];
 

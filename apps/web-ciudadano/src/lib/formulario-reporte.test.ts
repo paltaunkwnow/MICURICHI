@@ -237,33 +237,41 @@ describe('paso 3: sumidero y fotos', () => {
     ).toEqual({ sumidero_cercano: null, sumidero_estado: null, agua_brota_sumidero: true });
   });
 
-  it('un espacio de cámara abierto y sin foto no ocupa lugar', () => {
-    // Con dos fotos y el espacio abierto (o cancelado) todavía cabe la tercera.
-    const m = mosaicoDeFotos({ subidas: 2, subiendo: false, esperandoCamara: true });
-    expect(m.completas).toBe(false);
-    expect(m.espacioCamara).toBe(true);
-    // El último lugar lo muestra el espacio de la cámara; «Agregar» no cabe al lado.
-    expect(m.agregar).toBe(false);
-    expect(mosaicoDeFotos({ subidas: 0, subiendo: false, esperandoCamara: true })).toMatchObject({
+  it('las fotos subidas y la que se está subiendo ocupan lugar; la cámara abierta no', () => {
+    expect(mosaicoDeFotos({ subidas: 0, subiendo: false })).toEqual({
       completas: false,
-      espacioCamara: true,
-      agregar: true,
+      libres: 3,
     });
+    expect(mosaicoDeFotos({ subidas: 2, subiendo: false })).toEqual({
+      completas: false,
+      libres: 1,
+    });
+    expect(mosaicoDeFotos({ subidas: 2, subiendo: true })).toEqual({ completas: true, libres: 0 });
+    expect(
+      mosaicoDeFotos({ subidas: CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE, subiendo: false }),
+    ).toEqual({ completas: true, libres: 0 });
   });
 
-  it('la foto que se está subiendo sí ocupa lugar', () => {
-    expect(mosaicoDeFotos({ subidas: 2, subiendo: true, esperandoCamara: false })).toMatchObject({
-      completas: true,
-      agregar: false,
-      espacioCamara: false,
-    });
-    expect(
-      mosaicoDeFotos({
-        subidas: CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE,
-        subiendo: false,
-        esperandoCamara: true,
-      }),
-    ).toMatchObject({ completas: true, espacioCamara: false, agregar: false });
+  it('la foto es opcional: sin ninguna se puede continuar y enviar', () => {
+    expect(mosaicoDeFotos({ subidas: 0, subiendo: false }).completas).toBe(false);
+    expect(puedeAvanzar(3, estado())).toBe(true);
+    expect(puedeAvanzar(4, estado())).toBe(true);
+    const cuerpo = armarEnvio(
+      {
+        ...valoresIniciales(),
+        lat: 0,
+        lon: 0,
+        ubicacion_metodo: 'gps',
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+        ubicacion_tipo: 'via_publica',
+      },
+      PUNTO,
+      [],
+    );
+    expect(cuerpo.fotos).toEqual([]);
+    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
   });
 
   it('mientras sube una foto no se puede continuar ni enviar', () => {

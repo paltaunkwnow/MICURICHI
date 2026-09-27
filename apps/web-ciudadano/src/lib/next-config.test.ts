@@ -51,6 +51,26 @@ describe('next.config.ts no congela nada del despliegue', () => {
     expect(JSON.stringify(reglas).toLowerCase()).not.toContain('strict-transport-security');
   });
 
+  it('Permissions-Policy deja usar ubicación y cámara solo al propio origen, y nada más', async () => {
+    const reglas = await reglasDeCabeceras(await cargarConfig(DE_DESPLIEGUE));
+    const politica = reglas
+      .flatMap((r) => r.headers)
+      .find((h) => h.key.toLowerCase() === 'permissions-policy')?.value;
+    const permisos = new Map(
+      (politica ?? '').split(',').map((d) => {
+        const [nombre = '', valor = ''] = d.trim().split('=');
+        return [nombre, valor] as const;
+      }),
+    );
+    // La cámara hace falta para «Sacar foto» dentro de la página; sin `(self)` getUserMedia
+    // falla con NotAllowedError aunque la persona diga que sí.
+    expect(permisos.get('camera')).toBe('(self)');
+    expect(permisos.get('geolocation')).toBe('(self)');
+    for (const cerrado of ['microphone', 'payment', 'usb']) {
+      expect(permisos.get(cerrado), cerrado).toBe('()');
+    }
+  });
+
   it('la CSP no abre orígenes nuevos: solo las teselas de OpenStreetMap', async () => {
     const reglas = await reglasDeCabeceras(await cargarConfig(DE_DESPLIEGUE));
     const csp = reglas

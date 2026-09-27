@@ -77,7 +77,7 @@ export function Bienvenida() {
       <div className="relative z-10 flex flex-1 flex-col px-[26px] pt-10">
         <div className="flex items-center gap-3">
           {/* biome-ignore lint/performance/noImgElement: logo estático de 200 px */}
-          <img src="/logo.png" alt="" width={40} height={40} className="rounded-xl" />
+          <img src="/logo.webp" alt="" width={40} height={40} className="rounded-xl" />
           <span className="titular text-[17px] text-white">Mi Curichi</span>
           <Link
             href="/"

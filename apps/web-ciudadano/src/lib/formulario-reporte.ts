@@ -200,31 +200,18 @@ export function respuestasSumidero(
 }
 
 /**
- * Qué se dibuja en la grilla de fotos. Solo ocupan lugar las fotos subidas y la que se está
- * subiendo: antes también contaba cada espacio abierto para la cámara, y cancelarla dejaba el
- * espacio vacío ocupando uno de los tres lugares para siempre.
+ * Lugares de foto que quedan. Ocupan lugar las fotos subidas y la que se está subiendo; la cámara
+ * abierta no, porque se saca dentro de la página y cerrarla no deja nada a medias.
  */
-export function mosaicoDeFotos(e: {
-  subidas: number;
-  subiendo: boolean;
-  esperandoCamara: boolean;
-}): {
+export function mosaicoDeFotos(e: { subidas: number; subiendo: boolean }): {
   completas: boolean;
   libres: number;
-  espacioCamara: boolean;
-  agregar: boolean;
 } {
   const libres = Math.max(
     0,
     CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE - e.subidas - (e.subiendo ? 1 : 0),
   );
-  const espacioCamara = e.esperandoCamara && !e.subiendo && libres > 0;
-  return {
-    completas: libres === 0,
-    libres,
-    espacioCamara,
-    agregar: libres - (espacioCamara ? 1 : 0) > 0,
-  };
+  return { completas: libres === 0, libres };
 }
 
 // ------------------------------------------------------------------ avanzar y enviar

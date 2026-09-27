@@ -31,7 +31,7 @@ export function BarraSuperior() {
     <header className="topnav">
       <Link href="/inicio" className="mrc" aria-label="Mi Curichi, inicio">
         {/* biome-ignore lint/performance/noImgElement: logo estático de 200 px, sin necesidad de optimización */}
-        <img src="/logo.png" alt="" width={34} height={34} />
+        <img src="/logo.webp" alt="" width={34} height={34} />
         Mi Curichi
       </Link>
       <nav aria-label="Principal">

@@ -33,7 +33,7 @@ export function descripcionDeInicio(ciudad: Pick<Ciudad, 'nombre'>): string {
  * Cruz: en otra instalación la lámina que la usa vuelve a la trama genérica de anillos.
  */
 const FOTOS_DE_CIUDAD: ReadonlyArray<{ nombre: string; pais: string; foto: string }> = [
-  { nombre: 'Santa Cruz de la Sierra', pais: 'BO', foto: '/santa-cruz-catedral.jpg' },
+  { nombre: 'Santa Cruz de la Sierra', pais: 'BO', foto: '/santa-cruz-catedral.webp' },
 ];
 
 const normalizar = (texto: string) =>
