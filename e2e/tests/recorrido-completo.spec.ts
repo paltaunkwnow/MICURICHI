@@ -3,16 +3,29 @@ import {
   API,
   CREDENCIALES_TECNICO,
   crearCuentaYEntrarPorUi,
+  elegirPuntoPorCoordenadas,
   esperarPila,
+  GPS_EN_EL_CENTRO,
   loginTecnico,
   PANEL,
-  PUNTO_CENTRO,
+  PRECISION_GPS_M,
+  PUNTO_AJUSTADO,
+  RADIO_DISPOSITIVO_M,
 } from './ayudas';
 
 /**
  * Camino crítico transversal (CLAUDE.md §4.7): el vecino reporta desde la app pública, el técnico lo
  * valida en el panel, el punto aparece en el mapa público y sale en la exportación.
+ *
+ * El vecino comparte su ubicación (el GPS simulado en PUNTO_CENTRO, con 10 m de precisión) y
+ * ajusta el punto a 50 m, dentro del círculo de 60 m. El técnico ve la distancia y la precisión,
+ * no la posición del teléfono (contracts 0.9.0).
  */
+test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] });
+
+/** Distancia entre `PUNTO_AJUSTADO` y el teléfono, redondeada al metro como la guarda api-core. */
+const DISTANCIA_M = 50;
+
 test.describe('recorrido completo ciudadano → técnico → mapa público → exportación', () => {
   const marca = `E2E-${Date.now()}`;
   let idReporte = '';
@@ -36,11 +49,9 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await page.waitForURL('**/reportar');
     await expect(page.getByRole('heading', { name: 'Reportar un punto' })).toBeVisible();
 
-    // Paso 1 · dónde. Alternativa accesible al mapa: escribir las coordenadas.
-    await page.getByTestId('opcion-coordenadas').click();
-    await page.locator('#lat').fill(String(PUNTO_CENTRO.lat));
-    await page.locator('#lon').fill(String(PUNTO_CENTRO.lon));
-    await page.getByTestId('boton-confirmar-ubicacion').click();
+    // Paso 1 · dónde. Se comparte la ubicación y el punto se ajusta con la alternativa accesible al
+    // arrastre: escribir las coordenadas, a 60 m o menos del teléfono.
+    await elegirPuntoPorCoordenadas(page, PUNTO_AJUSTADO);
 
     const resuelta = page.getByTestId('ubicacion-resuelta');
     await expect(resuelta).toBeVisible();
@@ -99,6 +110,13 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
 
     await expect(page.getByTestId('estado-actual')).toContainText('Validado');
+
+    // Cómo se ubicó: ajustado a mano dentro del radio, con la precisión y la distancia al teléfono.
+    await expect(
+      page.getByText(`Ajustado a mano, a ≤ ${RADIO_DISPOSITIVO_M} m del GPS`, { exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText(`± ${PRECISION_GPS_M} m`, { exact: true })).toBeVisible();
+    await expect(page.getByText(`a ${DISTANCIA_M} m del GPS`, { exact: true })).toBeVisible();
   });
 
   test('ya validado, aparece en el mapa público con su unidad vecinal', async ({
@@ -129,12 +147,20 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     expect(geojson.status()).toBe(200);
     const datos = await geojson.json();
     expect(datos.nota_metodologica).toContain('inventario de reportes ciudadanos');
-    expect(datos.features.some((x: { id: string }) => x.id === idReporte)).toBe(true);
+    const propio = datos.features.find((x: { id: string }) => x.id === idReporte);
+    expect(propio, 'el reporte tiene que estar en la exportación').toBeTruthy();
+    expect(propio.properties).toMatchObject({
+      ubicacion_metodo: 'manual',
+      precision_gps_m: PRECISION_GPS_M,
+      distancia_dispositivo_m: DISTANCIA_M,
+    });
+    expect(Object.keys(propio.properties)).not.toContain('dispositivo');
 
     const csv = await request.get(`${API}/api/v1/exportar?formato=csv`);
     expect(csv.status()).toBe(200);
     const texto = await csv.text();
     expect(texto).toContain('id,estado,severidad');
+    expect(texto).toContain('distancia_dispositivo_m');
     expect(texto).toContain(idReporte);
   });
 });

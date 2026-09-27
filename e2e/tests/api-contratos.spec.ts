@@ -9,6 +9,7 @@ import {
   loginCiudadano,
   loginTecnico,
   PNG_1X1,
+  PRECISION_GPS_M,
   PUNTO_CENTRO,
   PUNTO_FUERA,
   reporteValido,
@@ -82,8 +83,10 @@ test.describe('contratos de la API (sin navegador)', () => {
     });
     expect(bot.status()).toBe(400);
 
+    // El teléfono va en el mismo punto: si no, el rechazo sería por el radio de 60 m, que se
+    // comprueba antes que la cobertura.
     const fuera = await request.post(`${API}/api/v1/reportes`, {
-      data: { ...reporteValido('fuera'), ...PUNTO_FUERA },
+      data: reporteValido('fuera', PUNTO_FUERA),
     });
     expect(fuera.status()).toBe(422);
     expect((await fuera.json()).codigo).toBe('FUERA_DE_COBERTURA');
@@ -103,6 +106,10 @@ test.describe('contratos de la API (sin navegador)', () => {
     // Severidad v2: 2·2 (rodilla) + 3 (cada lluvia fuerte) = 7 → media.
     expect(p.severidad_calculada).toBe('media');
     expect(p.severidad_puntaje).toBe(7);
+    // El punto en la posición del teléfono (contracts 0.9.0): el método lo deriva el servidor.
+    expect(p.ubicacion_metodo).toBe('gps');
+    expect(p.precision_gps_m).toBe(PRECISION_GPS_M);
+    expect(p.distancia_dispositivo_m).toBe(0);
   });
 
   test('la exportación exige sesión de técnico', async ({ request }) => {

@@ -1,12 +1,13 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
   API,
+  compartirUbicacion,
   crearCuentaYEntrarPorUi,
   esperarPila,
   esperarRedQuieta,
   GEO,
+  GPS_EN_EL_CENTRO,
   numeroDePaso,
-  PUNTO_CENTRO,
   pasoActual,
   vigilarRed,
 } from './ayudas';
@@ -24,6 +25,10 @@ import {
 
 const CAMPOS_QUITADOS = ['manzana_id', 'direccion_aprox', 'duracion_estimada', 'afectacion'];
 
+// El recorrido reporta: el teléfono es el GPS simulado en PUNTO_CENTRO con 10 m de precisión, y el
+// permiso de ubicación se da acá, no en toda la suite (reportar exige compartirla).
+test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] });
+
 interface PasoVisto {
   n: number;
   m: number;
@@ -33,8 +38,11 @@ interface PasoVisto {
   preguntaFrecuencia: boolean;
 }
 
-/** Controles con los que el vecino contesta algo en este paso (sin el honeypot ni ocultos). */
-/** Un paso «con control» tiene un input, un textarea, un select el mapa (canvas, que carga diferido) o un botón propio del paso (p. ej. «Ingresar coordenadas» en el paso 1). */
+/**
+ * Controles con los que el vecino contesta algo en este paso (sin el honeypot ni ocultos): un
+ * input, un textarea, un select, el mapa (canvas, que carga diferido) o un botón propio del paso
+ * (p. ej. «Compartir mi ubicación» en el paso 1).
+ */
 async function contarControles(page: Page): Promise<number> {
   return page
     .locator(
@@ -52,17 +60,14 @@ async function camposViejosEnPantalla(page: Page): Promise<string[]> {
 }
 
 /**
- * Contesta lo que pida el paso en pantalla: la ubicación en el primero, la descripción donde
- * esté, y en cada grupo de radios sin elegir, una opción. No sabe qué preguntas hay: si el
- * formulario sigue pidiendo algo, lo contesta igual, para que el envío llegue a producirse.
+ * Contesta lo que pida el paso en pantalla: la ubicación en el primero (se comparte y el punto
+ * queda en la del teléfono), la descripción donde esté, y en cada grupo de radios sin elegir, una
+ * opción. No sabe qué preguntas hay: si el formulario sigue pidiendo algo, lo contesta igual, para
+ * que el envío llegue a producirse.
  */
 async function contestarPaso(page: Page, n: number) {
   if (n === 1) {
-    await page.getByTestId('opcion-coordenadas').click();
-    await page.locator('#lat').fill(String(PUNTO_CENTRO.lat));
-    await page.locator('#lon').fill(String(PUNTO_CENTRO.lon));
-    await page.getByTestId('boton-confirmar-ubicacion').click();
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+    await compartirUbicacion(page);
     return;
   }
   const preferidos: Record<string, string> = {
@@ -209,10 +214,8 @@ test.describe('quitar campos del reporte · app pública', () => {
   });
 
   test.describe('CA-W7: capas del mapa público', () => {
-    test.use({
-      geolocation: { latitude: PUNTO_CENTRO.lat, longitude: PUNTO_CENTRO.lon },
-      permissions: ['geolocation'],
-    });
+    // «Centrar el mapa en mi ubicación» solo lee la ubicación si el permiso ya se dio.
+    test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] });
 
     test('CA-W7: al acercar a zoom ≥ 15 no se pide la capa de manzanas; distritos y UV sí', async ({
       page,

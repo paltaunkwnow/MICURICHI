@@ -13,6 +13,81 @@ export const PUNTO_CENTRO = { lat: -17.7833, lon: -63.1821 };
 /** Punto claramente fuera del municipio. */
 export const PUNTO_FUERA = { lat: -17.5, lon: -63.0 };
 
+// ------------------------------------------------------------------ el teléfono
+
+/**
+ * Topes de la ubicación del dispositivo (contracts 0.9.0, `CONFIG_DOMINIO`). La suite no depende
+ * de `contracts`: si cambian allá, se cambian acá, y las pruebas del radio lo van a notar.
+ */
+export const RADIO_DISPOSITIVO_M = 60;
+export const PRECISION_DISPOSITIVO_MAX_M = 50;
+export const POSICION_ANTIGUEDAD_MAX_S = 600;
+
+/** Precisión del GPS simulado en toda la suite: holgada dentro de los 50 m que se exigen. */
+export const PRECISION_GPS_M = 10;
+
+/**
+ * El teléfono de los recorridos de reporte, para `test.use({ geolocation })`: en PUNTO_CENTRO y
+ * con 10 m de precisión. Reportar exige compartir la ubicación y el punto tiene que quedar a 60 m
+ * o menos de ella (plan 2026-09-26, pedido E).
+ *
+ * La posición sola no alcanza: el permiso lo da el contexto, igual que el de la cámara, y solo en
+ * las pruebas que reportan (`permissions: ['geolocation']`). Sin él, Chromium lo niega al primer
+ * pedido, como quien toca «Bloquear».
+ */
+export const GPS_EN_EL_CENTRO = {
+  latitude: PUNTO_CENTRO.lat,
+  longitude: PUNTO_CENTRO.lon,
+  accuracy: PRECISION_GPS_M,
+};
+
+/** Radio medio de la Tierra de `contracts` (haversine), para que las distancias coincidan. */
+const RADIO_TIERRA_M = 6_371_008.8;
+const METROS_POR_GRADO = (RADIO_TIERRA_M * Math.PI) / 180;
+const siete = (x: number) => Math.round(x * 1e7) / 1e7;
+
+/**
+ * El punto a `norteM` y `esteM` metros de `base` (negativos: al sur y al oeste), con 7 decimales,
+ * que es lo que se escribe en el campo de coordenadas.
+ */
+export function desplazar(
+  base: { lat: number; lon: number },
+  { norteM = 0, esteM = 0 }: { norteM?: number; esteM?: number },
+) {
+  const mLon = METROS_POR_GRADO * Math.cos((base.lat * Math.PI) / 180);
+  return { lat: siete(base.lat + norteM / METROS_POR_GRADO), lon: siete(base.lon + esteM / mLon) };
+}
+
+/** Distancia en metros, con la misma fórmula que `distanciaMetros` de `contracts`. */
+export function distanciaM(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+  const rad = Math.PI / 180;
+  const h =
+    Math.sin(((b.lat - a.lat) * rad) / 2) ** 2 +
+    Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(((b.lon - a.lon) * rad) / 2) ** 2;
+  return 2 * RADIO_TIERRA_M * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** Lo que dice el paso 1 de la distancia entre el punto y el teléfono (`distancia-al-punto`). */
+export function textoDistancia(punto: { lat: number; lon: number }, telefono = PUNTO_CENTRO) {
+  const n = Math.round(distanciaM(punto, telefono));
+  return n < 1 ? 'El punto está justo donde estás.' : `Ese punto está a ${n} m de vos.`;
+}
+
+/**
+ * Un punto a 50 m del teléfono (30 al norte y 40 al este), dentro del círculo: el vecino lo
+ * ajustó a mano. Ni su latitud ni su longitud coinciden con las del teléfono, así que se puede
+ * buscar la posición del teléfono en lo que guarda el servidor sin confundirla con la del punto.
+ */
+export const PUNTO_AJUSTADO = desplazar(PUNTO_CENTRO, { norteM: 30, esteM: 40 });
+
+/** El `dispositivo` de `POST /api/v1/reportes`: el teléfono en `punto`, con 10 m y recién leído. */
+export function dispositivoEn(
+  punto: { lat: number; lon: number },
+  { precisionM = PRECISION_GPS_M, antiguedadS = 0 } = {},
+) {
+  return { lat: punto.lat, lon: punto.lon, precision_m: precisionM, antiguedad_s: antiguedadS };
+}
+
 export const CREDENCIALES_TECNICO = {
   email: process.env.E2E_TECNICO_EMAIL ?? 'tecnico@curichi.local',
   password: process.env.E2E_TECNICO_PASSWORD ?? 'curichi-tecnico-local',
@@ -44,12 +119,16 @@ export const CREDENCIALES_VECINA = {
  * 2026-09-25-quitar-campos-del-reporte) el reporte solo pregunta profundidad y frecuencia: ya no lleva
  * duración ni afectación, y la severidad de este payload es 2·2 (rodilla) + 3 (cada lluvia fuerte)
  * = 7 → media.
+ *
+ * Desde contracts 0.9.0 lleva el `dispositivo`, en el mismo `punto` que el reporte, con 10 m de
+ * precisión: el servidor exige el punto a 60 m o menos del teléfono y deriva de ahí el método
+ * (`gps`, a 2 m o menos). Ya no lleva `ubicacion_metodo` ni `precision_gps_m`.
  */
-export function reporteValido(marca: string) {
+export function reporteValido(marca: string, punto: { lat: number; lon: number } = PUNTO_CENTRO) {
   return {
-    lat: PUNTO_CENTRO.lat,
-    lon: PUNTO_CENTRO.lon,
-    ubicacion_metodo: 'manual' as const,
+    lat: punto.lat,
+    lon: punto.lon,
+    dispositivo: dispositivoEn(punto),
     ubicacion_tipo: 'via_publica' as const,
     descripcion: `Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}`,
     profundidad_estimada: 'rodilla' as const,
@@ -310,15 +389,55 @@ export async function pasoActual(page: Page): Promise<{ n: number; m: number }> 
   return leidos[0] as { n: number; m: number };
 }
 
+/** El mapa del paso 1, que solo existe con la posición del teléfono ya compartida. */
+export function mapaDelPaso1(page: Page) {
+  return page.getByRole('region', { name: 'Mapa para elegir la ubicación del reporte' });
+}
+
+/** «Compartir mi ubicación», el único botón que pide la ubicación (plan 2026-09-26, pedido F). */
+export function botonCompartirUbicacion(page: Page) {
+  return page.getByTestId('boton-compartir-ubicacion');
+}
+
 /**
- * Abre `/reportar` (o el enlace dado) con la sesión ya puesta y espera a que el formulario haya
- * decidido si retoma un borrador: el mapa del paso 1 no se monta hasta después de leerlo, así que
- * verlo es la señal de que «borrador-retomado» ya está o ya no va a estar.
+ * Abre `/reportar` (o el enlace dado) con la sesión ya puesta. En el paso 1 todavía no hay mapa:
+ * sin la posición del teléfono solo está «Para reportar necesitamos tu ubicación» con su botón,
+ * y la ubicación no se pide hasta tocarlo.
  */
 export async function abrirFormulario(page: Page, url = '/reportar') {
   await page.goto(url);
   await expect(page.getByRole('heading', { name: 'Reportar un punto' })).toBeVisible();
-  if ((await numeroDePaso(page)) === 1) await esperarMapaDelPaso1(page);
+  if ((await numeroDePaso(page)) === 1) {
+    await expect(
+      page.getByRole('heading', { name: 'Para reportar necesitamos tu ubicación' }),
+    ).toBeVisible();
+    await expect(botonCompartirUbicacion(page)).toBeVisible();
+  }
+}
+
+/**
+ * Toca «Compartir mi ubicación». Un toque anterior a la hidratación se pierde sin error, así que
+ * se repite mientras el botón siga ahí; cuando la búsqueda arranca, el botón desaparece (queda
+ * «Buscando tu ubicación…», o el bloqueo si se negó el permiso).
+ */
+export async function tocarCompartirUbicacion(page: Page) {
+  const boton = botonCompartirUbicacion(page);
+  await expect(async () => {
+    if (await boton.isVisible()) await boton.click({ timeout: 2_000 });
+    await expect(boton).toBeHidden({ timeout: 3_000 });
+  }).toPass({ timeout: 30_000 });
+}
+
+/**
+ * Paso 1 con el teléfono de la prueba (`GPS_EN_EL_CENTRO` o el que declare el contexto): comparte
+ * la ubicación, espera el mapa con el círculo y que se resuelva la unidad vecinal del punto, que
+ * arranca en la posición del teléfono.
+ */
+export async function compartirUbicacion(page: Page) {
+  await tocarCompartirUbicacion(page);
+  const mapa = await esperarMapaDelPaso1(page);
+  await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+  return mapa;
 }
 
 /**
@@ -327,21 +446,38 @@ export async function abrirFormulario(page: Page, url = '/reportar') {
  * de esto no probaría nada.
  */
 export async function esperarMapaDelPaso1(page: Page) {
-  const mapa = page.getByRole('region', { name: 'Mapa para elegir la ubicación del reporte' });
+  const mapa = mapaDelPaso1(page);
   await expect(mapa).toBeVisible({ timeout: 30_000 });
   await expect(mapa.getByText('Cargando el mapa…')).toHaveCount(0, { timeout: 30_000 });
   return mapa;
 }
 
-/** Paso 1 por la alternativa accesible al mapa: escribir las coordenadas. */
-export async function elegirPuntoPorCoordenadas(page: Page, punto = PUNTO_CENTRO) {
+/** Escribe unas coordenadas en «Ingresar coordenadas» y las confirma, sin afirmar el resultado. */
+export async function escribirCoordenadas(page: Page, punto: { lat: number; lon: number }) {
   // El botón abre y cierra el bloque: al volver al paso 1 puede seguir abierto.
   if (!(await page.locator('#lat').isVisible()))
     await page.getByTestId('opcion-coordenadas').click();
   await page.locator('#lat').fill(String(punto.lat));
   await page.locator('#lon').fill(String(punto.lon));
   await page.getByTestId('boton-confirmar-ubicacion').click();
-  await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+}
+
+/**
+ * Paso 1 por la alternativa accesible al arrastre: escribir las coordenadas de un punto a 60 m o
+ * menos del teléfono. Si la ubicación todavía no se compartió, la comparte primero: sin ella no
+ * hay dónde escribirlas.
+ */
+export async function elegirPuntoPorCoordenadas(
+  page: Page,
+  punto: { lat: number; lon: number } = PUNTO_CENTRO,
+  telefono = PUNTO_CENTRO,
+) {
+  if (await botonCompartirUbicacion(page).isVisible()) await compartirUbicacion(page);
+  await escribirCoordenadas(page, punto);
+  await expect(page.getByTestId('error-coordenadas')).toHaveCount(0);
+  // La distancia es la del punto nuevo: con la unidad vecinal del anterior todavía a la vista,
+  // «ubicacion-resuelta» sola no probaría que el punto cambió.
+  await expect(page.getByTestId('distancia-al-punto')).toHaveText(textoDistancia(punto, telefono));
 }
 
 /** «Continuar» y espera al paso siguiente. */
@@ -424,6 +560,86 @@ export async function vigilarCamara(page: Page): Promise<() => Promise<CamaraVig
         encendidas: registro?.pistas.filter((p) => p.readyState === 'live').length ?? 0,
       };
     });
+}
+
+/** Lo que registró `vigilarSensores` desde que empezó el documento. */
+export interface SensoresVigilados {
+  /** Cada lectura de la ubicación, en orden, con las opciones con que se pidió. */
+  geolocalizacion: { metodo: 'getCurrentPosition' | 'watchPosition'; opciones: unknown }[];
+  /** Vigilancias de la ubicación apagadas con `clearWatch`. */
+  apagadas: number;
+  /** Nombre de cada permiso consultado con `navigator.permissions.query`. */
+  permisos: string[];
+  /** Llamadas a `getUserMedia` y a `enumerateDevices`: pedir o espiar la cámara. */
+  camara: number;
+}
+
+/**
+ * Espía la ubicación, los permisos y la cámara desde que empieza cada documento, para comprobar
+ * que al abrir la web no se pide ni se lee nada (plan 2026-09-26, pedido F). Registrar ANTES de
+ * navegar. No cambia lo que devuelve cada llamada: solo la anota.
+ */
+export async function vigilarSensores(page: Page): Promise<() => Promise<SensoresVigilados>> {
+  await page.addInitScript(() => {
+    const registro = { geolocalizacion: [], apagadas: 0, permisos: [], camara: 0 } as {
+      geolocalizacion: { metodo: string; opciones: unknown }[];
+      apagadas: number;
+      permisos: string[];
+      camara: number;
+    };
+    Object.defineProperty(window, '__sensoresE2E', { value: registro });
+    const copia = (x: unknown) => (x === undefined ? null : JSON.parse(JSON.stringify(x)));
+
+    const geo = navigator.geolocation;
+    if (geo) {
+      const leer = geo.getCurrentPosition.bind(geo);
+      const vigilar = geo.watchPosition.bind(geo);
+      const apagar = geo.clearWatch.bind(geo);
+      geo.getCurrentPosition = (exito, error, opciones) => {
+        registro.geolocalizacion.push({ metodo: 'getCurrentPosition', opciones: copia(opciones) });
+        leer(exito, error, opciones);
+      };
+      geo.watchPosition = (exito, error, opciones) => {
+        registro.geolocalizacion.push({ metodo: 'watchPosition', opciones: copia(opciones) });
+        return vigilar(exito, error, opciones);
+      };
+      geo.clearWatch = (id) => {
+        registro.apagadas += 1;
+        apagar(id);
+      };
+    }
+    const permisos = navigator.permissions;
+    if (permisos?.query) {
+      const consultar = permisos.query.bind(permisos);
+      permisos.query = (descriptor) => {
+        registro.permisos.push(String(descriptor?.name));
+        return consultar(descriptor);
+      };
+    }
+    const dispositivos = navigator.mediaDevices;
+    if (dispositivos?.getUserMedia) {
+      const pedir = dispositivos.getUserMedia.bind(dispositivos);
+      const listar = dispositivos.enumerateDevices.bind(dispositivos);
+      dispositivos.getUserMedia = (restricciones) => {
+        registro.camara += 1;
+        return pedir(restricciones);
+      };
+      dispositivos.enumerateDevices = () => {
+        registro.camara += 1;
+        return listar();
+      };
+    }
+  });
+  return () =>
+    page.evaluate(
+      () =>
+        (window as unknown as { __sensoresE2E?: SensoresVigilados }).__sensoresE2E ?? {
+          geolocalizacion: [],
+          apagadas: 0,
+          permisos: [],
+          camara: 0,
+        },
+    );
 }
 
 /** El diálogo de la cámara, que se llama como el botón que lo abre. */

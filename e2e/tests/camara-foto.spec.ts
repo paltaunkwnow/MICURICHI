@@ -2,12 +2,13 @@ import { expect, test } from '@playwright/test';
 import {
   API,
   abrirFormulario,
+  compartirUbicacion,
   continuar,
   cuentaNuevaEnElNavegador,
   dialogoCamara,
-  elegirPuntoPorCoordenadas,
   enviarYLeerCuerpo,
   esperarPila,
+  GPS_EN_EL_CENTRO,
   leerWebp,
   llegarAFotos,
   loginTecnico,
@@ -26,8 +27,9 @@ import {
 /** 1600 px por lado como máximo, en el teléfono y en el servidor (contracts 0.8.0). */
 const LADO_MAX_PX = 1600;
 
-// El permiso de cámara, solo en las pruebas que reportan.
-test.use({ permissions: ['camera'] });
+// Los permisos de cámara y de ubicación, solo en las pruebas que reportan: reportar exige compartir
+// la ubicación (el GPS simulado en PUNTO_CENTRO con 10 m de precisión).
+test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['camera', 'geolocation'] });
 
 test.describe('foto con la cámara dentro de la página', () => {
   test.beforeAll(async ({ request }) => {
@@ -46,7 +48,7 @@ test.describe('foto con la cámara dentro de la página', () => {
     });
     await cuentaNuevaEnElNavegador(page, 'camara-webp-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarAFotos(page);
 
     // Ni galería ni selector de archivos, en ningún equipo.
@@ -124,8 +126,9 @@ test.describe('foto con la cámara dentro de la página', () => {
 
 test.describe('sin permiso de cámara', () => {
   // Como quien toca «Bloquear» en el aviso del navegador: el contexto no da la cámara y
-  // `getUserMedia` responde `NotAllowedError` de verdad (ver playwright.config.ts).
-  test.use({ permissions: [] });
+  // `getUserMedia` responde `NotAllowedError` de verdad (ver playwright.config.ts). La ubicación
+  // sí, que sin ella no se llega al paso de fotos.
+  test.use({ permissions: ['geolocation'] });
 
   test.beforeAll(async ({ request }) => {
     await esperarPila(request);
@@ -137,7 +140,7 @@ test.describe('sin permiso de cámara', () => {
     const camara = await vigilarCamara(page);
     await cuentaNuevaEnElNavegador(page, 'camara-denegada-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarAFotos(page);
 
     await page.getByTestId('boton-sacar-foto').click();

@@ -1,32 +1,50 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
   abrirFormulario,
+  compartirUbicacion,
   continuar,
   cuentaNuevaEnElNavegador,
+  desplazar,
   elegirPuntoPorCoordenadas,
   enviarYLeerCuerpo,
   esperarMapaDelPaso1,
   esperarPila,
+  GPS_EN_EL_CENTRO,
   llegarARevision,
+  mapaDelPaso1,
   numeroDePaso,
+  PRECISION_GPS_M,
   PUBLICA,
+  PUNTO_AJUSTADO,
   PUNTO_CENTRO,
+  RADIO_DISPOSITIVO_M,
   reporteValido,
   responderPaso2,
   retenerPeticiones,
+  textoDistancia,
 } from './ayudas';
 
 /**
  * El formulario de reporte de la app pública, paso por paso, contra la pila real.
  *
- * Cubre lo que se corrigió en la revisión de producción: el punto del paso 1 lo elige la persona
- * (el centro del mapa ya no cuenta) y se conserva al ir y volver; un GPS impreciso no se presenta
- * como GPS; la fecha del evento se valida en su campo; y el aviso de turno aparece en cuanto el
- * turno se gasta, sin recargar.
+ * Paso 1 (plan 2026-09-26, pedido E): sin la posición del teléfono no hay mapa; al compartirla, el
+ * punto arranca en ella y se ajusta dentro de un círculo de 60 m, se conserva al ir y volver, y
+ * si el teléfono se movió antes de enviar se vuelve a ajustar. El envío lleva la posición aparte
+ * (`dispositivo`) y ya no manda método ni precisión. Además: la fecha del evento se valida en su
+ * campo, y el aviso de turno aparece en cuanto el turno se gasta, sin recargar.
+ *
+ * El teléfono es el GPS simulado de Chromium en PUNTO_CENTRO con 10 m de precisión, con el
+ * permiso dado (`GPS_EN_EL_CENTRO`). Los casos sin permiso, con mala precisión y el POST directo
+ * fuera del radio están en `ubicacion-obligatoria.spec.ts`.
  *
  * La sesión se pone por API (`cuentaNuevaEnElNavegador`): una cuenta nueva por caso, porque cada
  * cuenta solo puede enviar un reporte por hora.
  */
+
+test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] });
+
+/** Pasos del formulario: el último es la revisión, con «Enviar reporte». */
+const PASOS = 4;
 
 /** Marca que se pierde si la página se recarga: para afirmar que algo pasó «sin recargar». */
 async function marcarPagina(page: Page) {
@@ -57,64 +75,73 @@ test.beforeAll(async ({ request }) => {
   await esperarPila(request);
 });
 
-test.describe('paso 1: el punto lo elige la persona', () => {
-  test('al abrir no hay punto: el centro del mapa no cuenta y «Continuar» espera', async ({
+test.describe('paso 1: el punto, a 60 m o menos del teléfono', () => {
+  test('al abrir no hay mapa ni «Continuar»: primero se comparte la ubicación, y el punto arranca en el teléfono', async ({
     page,
   }) => {
     await cuentaNuevaEnElNavegador(page, 'abrir-');
     await abrirFormulario(page);
-    // Con el mapa ya cargado: antes, su `load` tomaba el centro como punto elegido.
-    await expect(page.getByTestId('ubicacion-pendiente')).toContainText(
-      'Mové el mapa hasta el punto exacto.',
+    await expect(
+      page.getByText('Usamos tu ubicación solo para comprobarlo: no la guardamos ni la ve nadie.'),
+    ).toBeVisible();
+    await expect(mapaDelPaso1(page)).toHaveCount(0);
+    await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
+
+    await compartirUbicacion(page);
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'El punto está justo donde estás.',
     );
-    await expect(page.getByTestId('ubicacion-resuelta')).toHaveCount(0);
-    await expect(page.getByTestId('boton-siguiente')).toBeDisabled();
+    await expect(page.getByTestId('ayuda-circulo')).toContainText(
+      `El círculo marca ${RADIO_DISPOSITIVO_M} m alrededor de tu ubicación (precisión de ${PRECISION_GPS_M} m)`,
+    );
+    await expect(page.getByTestId('boton-siguiente')).toBeEnabled();
   });
 
-  test('volver al paso 1 conserva el punto elegido, y es ese el que se envía', async ({ page }) => {
+  test('volver al paso 1 conserva el punto ajustado, y es ese el que se envía, con el teléfono aparte', async ({
+    page,
+  }) => {
     await cuentaNuevaEnElNavegador(page, 'vuelta-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await elegirPuntoPorCoordenadas(page, PUNTO_AJUSTADO);
     const lugar = await page.getByTestId('ubicacion-resuelta').locator('b').innerText();
 
     await continuar(page);
     await page.getByRole('button', { name: 'Volver al paso anterior' }).click();
     await expect.poll(() => numeroDePaso(page)).toBe(1);
     // El mapa del paso 1 se vuelve a crear al entrar: se espera a que cargue, que es cuando
-    // antes pisaba el punto con el centro por defecto.
+    // antes pisaba el punto con el centro por defecto. La ubicación no se vuelve a pedir.
     await esperarMapaDelPaso1(page);
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(textoDistancia(PUNTO_AJUSTADO));
     await expect(page.getByTestId('ubicacion-resuelta').locator('b')).toHaveText(lugar);
     await expect(page.getByTestId('boton-siguiente')).toBeEnabled();
 
     await llegarARevision(page, `E2E-vuelta-${Date.now()}`);
     const cuerpo = await enviarYLeerCuerpo(page);
-    expect(cuerpo.lat).toBeCloseTo(PUNTO_CENTRO.lat, 6);
-    expect(cuerpo.lon).toBeCloseTo(PUNTO_CENTRO.lon, 6);
-    expect(cuerpo.ubicacion_metodo).toBe('manual');
+    expect(cuerpo.lat).toBeCloseTo(PUNTO_AJUSTADO.lat, 7);
+    expect(cuerpo.lon).toBeCloseTo(PUNTO_AJUSTADO.lon, 7);
+    expect(cuerpo.dispositivo).toMatchObject({
+      lat: PUNTO_CENTRO.lat,
+      lon: PUNTO_CENTRO.lon,
+      precision_m: PRECISION_GPS_M,
+    });
+    // El método y la precisión ya no los manda la app: los deriva el servidor (contracts 0.9.0).
+    expect(cuerpo).not.toHaveProperty('ubicacion_metodo');
+    expect(cuerpo).not.toHaveProperty('precision_gps_m');
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
   });
 
-  test('mover el mapa vuelve a preguntar la unidad vecinal y «Continuar» espera la respuesta', async ({
+  test('mover el punto vuelve a preguntar la unidad vecinal y «Continuar» espera la respuesta', async ({
     page,
   }) => {
     await cuentaNuevaEnElNavegador(page, 'mover-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     const siguiente = page.getByTestId('boton-siguiente');
     await expect(siguiente).toBeEnabled();
 
     // La respuesta del punto nuevo se retiene para poder mirar el estado intermedio.
     const resolver = await retenerPeticiones(page, '**/geo/v1/resolver');
-    const mapa = await esperarMapaDelPaso1(page);
-    // Con el bloque de coordenadas abierto la pantalla puede haberse desplazado.
-    await mapa.scrollIntoViewIfNeeded();
-    const caja = await mapa.locator('canvas').first().boundingBox();
-    expect(caja, 'el mapa del paso 1 tiene que estar dibujado').toBeTruthy();
-    const { x, y, width, height } = caja as { x: number; y: number; width: number; height: number };
-    await page.mouse.move(x + width / 2, y + height / 2);
-    await page.mouse.down();
-    await page.mouse.move(x + width / 2 - 120, y + height / 2 - 60, { steps: 10 });
-    await page.mouse.up();
+    await page.getByRole('button', { name: 'Mover el punto 5 m al norte' }).click();
 
     await resolver.llegada;
     await expect(page.getByTestId('ubicacion-pendiente')).toContainText(
@@ -124,82 +151,106 @@ test.describe('paso 1: el punto lo elige la persona', () => {
     await expect(siguiente).toBeDisabled();
 
     resolver.liberar();
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText('Ese punto está a 5 m de vos.');
     await expect(siguiente).toBeEnabled();
   });
 
-  test('abrir el formulario y salir sin hacer nada no deja un borrador para retomar', async ({
+  test('abrir el formulario, compartir la ubicación y salir no deja un borrador para retomar', async ({
     page,
   }) => {
     await cuentaNuevaEnElNavegador(page, 'salir-');
     await abrirFormulario(page);
+    // El punto que pone la app en la posición del teléfono no es algo empezado.
+    await compartirUbicacion(page);
     await page.getByRole('link', { name: 'Salir del reporte' }).click();
     await page.waitForURL((u) => new URL(u).pathname === '/');
 
     await abrirFormulario(page);
+    // Compartir exige la página hidratada: para entonces, un borrador ya se habría retomado.
+    await compartirUbicacion(page);
     await expect(page.getByTestId('borrador-retomado')).toHaveCount(0);
     expect(await numeroDePaso(page)).toBe(1);
-    await expect(page.getByTestId('ubicacion-pendiente')).toBeVisible();
   });
 
-  test('el punto que trae «Me pasa a mí» sirve de partida, pero no cuenta como algo empezado', async ({
+  test('«Me pasa a mí»: el punto del enlace sirve de partida si queda cerca, y no cuenta como algo empezado', async ({
     page,
   }) => {
+    const enlace = desplazar(PUNTO_CENTRO, { norteM: -30 });
     await cuentaNuevaEnElNavegador(page, 'enlace-');
-    await abrirFormulario(page, `/reportar?lat=${PUNTO_CENTRO.lat}&lon=${PUNTO_CENTRO.lon}`);
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+    await abrirFormulario(page, `/reportar?lat=${enlace.lat}&lon=${enlace.lon}`);
+    await compartirUbicacion(page);
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'Ese punto está a 30 m de vos.',
+    );
+    await expect(page.getByTestId('aviso-ubicacion')).toHaveCount(0);
     await page.getByRole('link', { name: 'Salir del reporte' }).click();
     await page.waitForURL((u) => new URL(u).pathname === '/');
 
     await abrirFormulario(page);
+    await compartirUbicacion(page);
     await expect(page.getByTestId('borrador-retomado')).toHaveCount(0);
-    await expect(page.getByTestId('ubicacion-pendiente')).toBeVisible();
-  });
-});
-
-test.describe('paso 1 con el GPS del teléfono · preciso (20 m)', () => {
-  test.use({
-    geolocation: { latitude: PUNTO_CENTRO.lat, longitude: PUNTO_CENTRO.lon, accuracy: 20 },
-    permissions: ['geolocation'],
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'El punto está justo donde estás.',
+    );
   });
 
-  test('«Usar mi ubicación» envía el punto como GPS con su precisión', async ({ page }) => {
-    await cuentaNuevaEnElNavegador(page, 'gps-');
-    await abrirFormulario(page);
-    await page.getByRole('button', { name: 'Usar mi ubicación' }).click();
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
-    await expect(page.getByTestId('aviso-ubicacion-aproximada')).toHaveCount(0);
-
-    await llegarARevision(page, `E2E-gps-${Date.now()}`);
-    const cuerpo = await enviarYLeerCuerpo(page);
-    expect(cuerpo.ubicacion_metodo).toBe('gps');
-    expect(cuerpo.precision_gps_m).toBe(20);
-    expect(cuerpo.lat).toBeCloseTo(PUNTO_CENTRO.lat, 6);
-    await expect(page.getByTestId('reporte-creado')).toBeVisible();
-  });
-});
-
-test.describe('paso 1 con el GPS del teléfono · aproximado (20 km)', () => {
-  test.use({
-    geolocation: { latitude: PUNTO_CENTRO.lat, longitude: PUNTO_CENTRO.lon, accuracy: 20_000 },
-    permissions: ['geolocation'],
-  });
-
-  test('una ubicación de kilómetros de error se avisa y se envía como elección manual', async ({
+  test('«Me pasa a mí» de un punto lejano: el punto va a la posición del teléfono y lo dice', async ({
     page,
   }) => {
-    await cuentaNuevaEnElNavegador(page, 'gps-aprox-');
-    await abrirFormulario(page);
-    await page.getByRole('button', { name: 'Usar mi ubicación' }).click();
-    await expect(page.getByTestId('aviso-ubicacion-aproximada')).toContainText(
-      'Tu ubicación es aproximada',
+    const enlace = desplazar(PUNTO_CENTRO, { norteM: -200 });
+    await cuentaNuevaEnElNavegador(page, 'enlace-lejos-');
+    await abrirFormulario(page, `/reportar?lat=${enlace.lat}&lon=${enlace.lon}`);
+    await compartirUbicacion(page);
+    await expect(page.getByTestId('aviso-ubicacion')).toContainText(
+      `El punto del enlace queda a 200 m de vos, y solo se puede reportar a ${RADIO_DISPOSITIVO_M} m o menos de donde estás.`,
     );
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'El punto está justo donde estás.',
+    );
+    await expect(page.getByTestId('boton-siguiente')).toBeEnabled();
+  });
 
-    await llegarARevision(page, `E2E-gps-aprox-${Date.now()}`);
+  test('si el teléfono se movió más de 60 m antes de enviar, vuelve al paso 1 a ajustar el punto', async ({
+    page,
+    context,
+  }) => {
+    await cuentaNuevaEnElNavegador(page, 'movido-');
+    await abrirFormulario(page);
+    await compartirUbicacion(page);
+    await llegarARevision(page, `E2E-movido-${Date.now()}`);
+
+    // Al enviar se relee la posición: el teléfono ya está 70 m más al norte.
+    const nuevo = desplazar(PUNTO_CENTRO, { norteM: 70 });
+    await context.setGeolocation({
+      ...GPS_EN_EL_CENTRO,
+      latitude: nuevo.lat,
+      longitude: nuevo.lon,
+    });
+    const envios: string[] = [];
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/v1/reportes')
+        envios.push(r.url());
+    });
+    await page.getByTestId('boton-enviar').click();
+
+    await expect.poll(() => numeroDePaso(page)).toBe(1);
+    await expect(page.getByTestId('error-ubicacion')).toHaveText(
+      `Te moviste 70 m: ajustá el punto para que quede a ${RADIO_DISPOSITIVO_M} m o menos de donde estás.`,
+    );
+    await expect(page.getByTestId('boton-siguiente')).toBeDisabled();
+    expect(envios, 'no se envió un punto que el servidor iba a rechazar').toEqual([]);
+
+    // El círculo ya está en la posición nueva: el punto se lleva hasta ahí y se vuelve a la
+    // revisión, que es donde se había quedado.
+    await page.getByRole('button', { name: 'Poner el punto en mi ubicación' }).click();
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'El punto está justo donde estás.',
+    );
+    await page.getByTestId('boton-siguiente').click();
+    await expect.poll(() => numeroDePaso(page)).toBe(PASOS);
     const cuerpo = await enviarYLeerCuerpo(page);
-    expect(cuerpo.ubicacion_metodo).toBe('manual');
-    expect(cuerpo.precision_gps_m).toBeNull();
+    expect(cuerpo.lat).toBeCloseTo(nuevo.lat, 7);
+    expect(cuerpo.dispositivo).toMatchObject({ lat: nuevo.lat, lon: nuevo.lon });
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
   });
 });
@@ -210,7 +261,7 @@ test.describe('paso 2: la fecha del evento', () => {
   }) => {
     await cuentaNuevaEnElNavegador(page, 'fecha-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await continuar(page);
     await responderPaso2(page);
 
@@ -242,7 +293,7 @@ test.describe('después de enviar: el turno de la cuenta', () => {
     await cuentaNuevaEnElNavegador(page, 'turno-');
     await abrirFormulario(page);
     await expect(page.getByText(AVISO_TURNO, { exact: true })).toHaveCount(0);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarARevision(page, `E2E-turno-${Date.now()}`);
     await enviarYLeerCuerpo(page);
     const creado = page.getByTestId('reporte-creado');
@@ -264,7 +315,7 @@ test.describe('después de enviar: el turno de la cuenta', () => {
   }) => {
     await cuentaNuevaEnElNavegador(page, 'cuota-ui-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarARevision(page, `E2E-cuota-ui-${Date.now()}`);
 
     // La misma cuenta envía desde otro sitio (otra pestaña, otro teléfono) DESPUÉS de que esta

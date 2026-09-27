@@ -1,13 +1,15 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
   abrirFormulario,
+  botonCompartirUbicacion,
   CREDENCIALES_TECNICO,
+  compartirUbicacion,
   crearCuentaYEntrarPorUi,
   cuentaNuevaEnElNavegador,
-  elegirPuntoPorCoordenadas,
-  esperarMapaDelPaso1,
   esperarPila,
+  GPS_EN_EL_CENTRO,
   llegarAFotos,
+  mapaDelPaso1,
   numeroDePaso,
   PANEL,
   pasoActual,
@@ -27,11 +29,25 @@ function errorApi(status: number, codigo: string, mensaje: string, extra: object
 async function formularioEnFotos(page: Page, marca: string) {
   await cuentaNuevaEnElNavegador(page, marca);
   await abrirFormulario(page);
-  await elegirPuntoPorCoordenadas(page);
+  await compartirUbicacion(page);
   await llegarAFotos(page);
   const texto = `Se junta agua hasta la rodilla cada vez que llueve fuerte. ${marca}${Date.now()}`;
   await page.locator('textarea[name="descripcion"]').fill(texto);
   return texto;
+}
+
+/**
+ * Un borrador retomado vuelve al paso 1 a pedir la ubicación, que no se guarda con él (plan
+ * 2026-09-26, pedido E). Se comparte otra vez y «Continuar» lleva al paso donde se había quedado.
+ */
+async function retomarConLaUbicacion(page: Page, pasoGuardado: number) {
+  await expect(page.getByTestId('borrador-retomado')).toContainText(
+    'volvé a compartir tu ubicación: no la guardamos',
+  );
+  expect(await numeroDePaso(page)).toBe(1);
+  await compartirUbicacion(page);
+  await page.getByTestId('boton-siguiente').click();
+  await expect.poll(() => numeroDePaso(page)).toBe(pasoGuardado);
 }
 
 /**
@@ -127,8 +143,9 @@ test.describe('la interfaz no inventa cuando la API falla', () => {
 
 test.describe('el formulario no pierde lo escrito', () => {
   // Pruebas del formulario de reporte: las fotos salen de la cámara dentro de la página (la falsa
-  // de Chromium, ver playwright.config.ts), y el permiso es solo de ellas.
-  test.use({ permissions: ['camera'] });
+  // de Chromium, ver playwright.config.ts) y reportar exige compartir la ubicación (el GPS
+  // simulado en PUNTO_CENTRO con 10 m de precisión). Los dos permisos son solo de ellas.
+  test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['camera', 'geolocation'] });
 
   test('CA-X1: al recargar, retoma el borrador en el paso donde iba', async ({ page }) => {
     // Reportar exige cuenta desde la Fase 5, así que el formulario ni se monta sin sesión. Una
@@ -137,10 +154,11 @@ test.describe('el formulario no pierde lo escrito', () => {
     await crearCuentaYEntrarPorUi(page, '/reportar');
     await page.waitForURL('**/reportar');
 
-    // Paso 1: el centro del mapa ya NO es la ubicación al cargar; el punto lo elige la persona.
-    await esperarMapaDelPaso1(page);
-    await expect(page.getByTestId('boton-siguiente')).toBeDisabled();
-    await elegirPuntoPorCoordenadas(page);
+    // Paso 1: sin la ubicación compartida no hay mapa ni «Continuar»; al compartirla, el punto
+    // queda en la del teléfono.
+    await expect(botonCompartirUbicacion(page)).toBeVisible();
+    await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
+    await compartirUbicacion(page);
     await page.getByTestId('boton-siguiente').click();
     await expect.poll(() => numeroDePaso(page)).toBe(2);
 
@@ -152,7 +170,8 @@ test.describe('el formulario no pierde lo escrito', () => {
 
     await page.reload();
 
-    await expect(page.getByTestId('borrador-retomado')).toBeVisible();
+    // La posición del teléfono no viaja con el borrador: se vuelve a pedir y se sigue en el paso 2.
+    await retomarConLaUbicacion(page, 2);
     // El total de pasos no puede cambiar a mitad del recorrido.
     expect(await pasoActual(page)).toEqual({ n: 2, m: total });
     await expect(page.locator('input[name="profundidad_estimada"][value="rodilla"]')).toBeChecked();
@@ -160,13 +179,19 @@ test.describe('el formulario no pierde lo escrito', () => {
       page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]'),
     ).toBeChecked();
 
-    // Y se puede descartar a propósito, que es la otra mitad del trato: vuelve al paso 1 sin
-    // punto elegido.
+    // Y se puede descartar a propósito, que es la otra mitad del trato: vuelve al paso 1 con lo
+    // elegido olvidado. La ubicación ya compartida no se vuelve a pedir: el punto vuelve a la del
+    // teléfono.
     await page.getByRole('button', { name: 'Empezar de nuevo' }).click();
     await expect(page.getByTestId('borrador-retomado')).toHaveCount(0);
     await expect.poll(() => numeroDePaso(page)).toBe(1);
     expect((await pasoActual(page)).m).toBe(total);
-    await expect(page.getByTestId('ubicacion-pendiente')).toBeVisible();
+    await expect(mapaDelPaso1(page)).toBeVisible();
+    await expect(page.getByTestId('distancia-al-punto')).toHaveText(
+      'El punto está justo donde estás.',
+    );
+    await page.getByTestId('boton-siguiente').click();
+    await expect(page.locator('input[name="profundidad_estimada"]:checked')).toHaveCount(0);
   });
 
   test('si la sesión vence al subir una foto, dice «Se cerró tu sesión» y lo escrito sigue', async ({
@@ -185,11 +210,10 @@ test.describe('el formulario no pierde lo escrito', () => {
     ).toBeVisible();
 
     // La sesión de verdad sigue viva (el 401 era simulado): al volver, el formulario retoma el
-    // paso de fotos con lo escrito.
+    // paso de fotos con lo escrito, después de volver a compartir la ubicación.
     await page.unroute('**/api/v1/fotos');
     await page.reload();
-    await expect(page.getByTestId('borrador-retomado')).toBeVisible();
-    await expect.poll(() => numeroDePaso(page)).toBe(3);
+    await retomarConLaUbicacion(page, 3);
     await expect(page.locator('textarea[name="descripcion"]')).toHaveValue(texto);
   });
 

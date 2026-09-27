@@ -37,6 +37,12 @@ export default defineConfig({
      * sin ventana (`channel: 'chromium'`): el `chromium-headless-shell` que se usa por defecto
      * responde `NotSupportedError` a todo pedido sin ese argumento, aun con el permiso dado.
      * `playwright install chromium` baja los dos.
+     *
+     * La ubicación sigue la misma regla (plan 2026-09-26, pedido E): reportar exige compartirla, y
+     * cada prueba que reporta declara el teléfono y el permiso con
+     * `test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] })` (tests/ayudas.ts:
+     * PUNTO_CENTRO con 10 m de precisión). Sin el permiso, Chromium niega el primer pedido, como
+     * quien toca «Bloquear»; con `permissions: []`, lo da por negado de entrada.
      */
     channel: 'chromium',
     launchOptions: { args: ['--use-fake-device-for-media-stream'] },
@@ -48,8 +54,8 @@ export default defineConfig({
       use: { ...devices['Pixel 7'] },
       // El mapa es lo que más cambia entre tamaños: en móvil el detalle sube como hoja sobre el
       // mapa y no hay lista lateral donde caerse. Los dos archivos del mapa corren también acá, y
-      // la cámara, que en el teléfono es donde se usa.
-      testMatch: /(mapa-publico|mapa-seleccion|camara-foto)\.spec\.ts/,
+      // la cámara y la ubicación del reporte, que en el teléfono es donde se usan.
+      testMatch: /(mapa-publico|mapa-seleccion|camara-foto|ubicacion-obligatoria)\.spec\.ts/,
     },
   ],
   webServer: {

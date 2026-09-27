@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import {
   abrirFormulario,
+  compartirUbicacion,
   continuar,
   crearCuentaYEntrarPorUi,
   cuentaNuevaEnElNavegador,
@@ -8,10 +9,11 @@ import {
   elegirPuntoPorCoordenadas,
   enviarYLeerCuerpo,
   esperarPila,
+  GPS_EN_EL_CENTRO,
   llegarAFotos,
   llegarARevision,
   numeroDePaso,
-  PUNTO_CENTRO,
+  PUNTO_AJUSTADO,
   retenerPeticiones,
   sacarFotoConLaCamara,
   vigilarCamara,
@@ -27,9 +29,10 @@ import {
  * llegar a la pregunta buscada, para describir lo que ve el vecino y no el orden de los pasos.
  */
 
-// Todas las pruebas de este archivo recorren el formulario de reporte: el permiso de cámara es
-// suyo. La cámara es la falsa de Chromium (ver playwright.config.ts).
-test.use({ permissions: ['camera'] });
+// Todas las pruebas de este archivo recorren el formulario de reporte: los permisos de cámara y de
+// ubicación son suyos. La cámara es la falsa de Chromium (ver playwright.config.ts) y el teléfono,
+// el GPS simulado en PUNTO_CENTRO con 10 m de precisión: reportar exige compartir la ubicación.
+test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['camera', 'geolocation'] });
 
 const SUMIDERO_CERCANO = '¿Hay sumidero cercano?';
 const SUMIDERO_TAPADO = '¿Está tapado?';
@@ -40,14 +43,13 @@ async function desplegarOpcionales(page: Page) {
   for (let i = await plegados.count(); i > 0; i--) await plegados.first().click();
 }
 
-/** Contesta lo mínimo para poder seguir: la ubicación en el paso 1 y un valor por grupo. */
+/**
+ * Contesta lo mínimo para poder seguir: en el paso 1, compartir la ubicación (el punto queda en
+ * la del teléfono); en los demás, un valor por grupo.
+ */
 async function contestarPaso(page: Page, n: number) {
   if (n === 1) {
-    await page.getByTestId('opcion-coordenadas').click();
-    await page.locator('#lat').fill(String(PUNTO_CENTRO.lat));
-    await page.locator('#lon').fill(String(PUNTO_CENTRO.lon));
-    await page.getByTestId('boton-confirmar-ubicacion').click();
-    await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
+    await compartirUbicacion(page);
     return;
   }
   const preferidos: Record<string, string> = {
@@ -239,7 +241,8 @@ test.describe('formulario: lo que se envía del sumidero y cómo se sacan y sube
   }) => {
     await cuentaNuevaEnElNavegador(page, 'sumidero-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    // Un punto ajustado a mano, a 50 m del teléfono: dentro del círculo, el envío se acepta igual.
+    await elegirPuntoPorCoordenadas(page, PUNTO_AJUSTADO);
     await llegarARevision(page, `E2E-sumidero-${Date.now()}`);
 
     const cuerpo = await enviarYLeerCuerpo(page);
@@ -255,7 +258,7 @@ test.describe('formulario: lo que se envía del sumidero y cómo se sacan y sube
   }) => {
     await cuentaNuevaEnElNavegador(page, 'foto-lenta-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarAFotos(page);
     await page
       .locator('textarea[name="descripcion"]')
@@ -291,7 +294,7 @@ test.describe('formulario: lo que se envía del sumidero y cómo se sacan y sube
     const camara = await vigilarCamara(page);
     await cuentaNuevaEnElNavegador(page, 'camara-');
     await abrirFormulario(page);
-    await elegirPuntoPorCoordenadas(page);
+    await compartirUbicacion(page);
     await llegarAFotos(page);
 
     const miniaturas = page.getByRole('img', { name: 'Foto que sacaste' });
