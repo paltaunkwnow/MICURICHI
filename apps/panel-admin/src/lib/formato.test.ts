@@ -4,6 +4,7 @@ import {
   avisosResolucion,
   coordenadas,
   crearFormato,
+  distanciaDispositivo,
   etiquetaCapa,
   etiquetaDistrito,
   etiquetaEstado,
@@ -29,9 +30,35 @@ describe('etiquetas del dominio', () => {
     expect(etiquetaProfundidad('mas_70')).toContain('>70 cm');
   });
 
-  it('describe el método de ubicación y los booleanos nulos', () => {
-    expect(etiquetaMetodo('gps')).toBe('GPS del dispositivo');
-    expect(etiquetaMetodo('manual')).toBe('Selección manual en el mapa');
+  it('describe el método de ubicación respecto del GPS del teléfono', () => {
+    expect(etiquetaMetodo('gps', 1)).toBe('En la posición del GPS');
+    expect(etiquetaMetodo('manual', 12)).toBe('Ajustado a mano, a ≤ 60 m del GPS');
+  });
+
+  it('no promete el radio de 60 m en los reportes anteriores a la ubicación obligatoria', () => {
+    // Sin distancia guardada (reportes anteriores a contracts 0.9.0, o un api-core anterior que
+    // todavía no manda el campo), «manual» era un clic en cualquier parte del mapa.
+    expect(etiquetaMetodo('manual', null)).toBe(
+      'Selección manual en el mapa, sin control de distancia al GPS',
+    );
+    expect(etiquetaMetodo('manual', undefined)).toBe(
+      'Selección manual en el mapa, sin control de distancia al GPS',
+    );
+    expect(etiquetaMetodo('gps', null)).toBe('En la posición del GPS');
+  });
+
+  it('muestra la distancia al dispositivo en metros enteros', () => {
+    expect(distanciaDispositivo(12)).toBe('a 12 m del GPS');
+    expect(distanciaDispositivo(0)).toBe('a 0 m del GPS');
+    expect(distanciaDispositivo(null)).toBe(
+      'Sin dato: el reporte es anterior a la ubicación obligatoria',
+    );
+    expect(distanciaDispositivo(undefined)).toBe(
+      'Sin dato: el reporte es anterior a la ubicación obligatoria',
+    );
+  });
+
+  it('describe los booleanos nulos', () => {
     expect(etiquetaSiNo(null)).toBe('Sin dato');
     expect(etiquetaSiNo(true)).toBe('Sí');
   });

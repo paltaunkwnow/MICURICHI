@@ -8,6 +8,8 @@ import { useParams } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
+import { Dato } from '@/componentes/Dato';
+import { DatosUbicacion } from '@/componentes/DatosUbicacion';
 import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
@@ -15,29 +17,16 @@ import { ErrorApi, obtenerCapasMapa, obtenerReporte } from '@/lib/api';
 import { useFormato } from '@/lib/ciudad-contexto';
 import {
   avisosResolucion,
-  coordenadas,
   etiquetaCausa,
   etiquetaFrecuencia,
-  etiquetaMetodo,
   etiquetaProfundidad,
   etiquetaSeveridad,
   etiquetaSiNo,
   etiquetaSumideroCercano,
   etiquetaSumideroEstado,
-  etiquetaUbicacionTipo,
   idCorto,
-  precisionGps,
 } from '@/lib/formato';
 import { useUsuarioActual } from '@/lib/sesion';
-
-function Dato({ etiqueta, children }: { etiqueta: string; children: ReactNode }) {
-  return (
-    <>
-      <dt>{etiqueta}</dt>
-      <dd>{children ?? '—'}</dd>
-    </>
-  );
-}
 
 function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
@@ -126,34 +115,7 @@ export default function PaginaDetalleReporte() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(320px,2fr)]">
         <div className="flex min-w-0 flex-col gap-6">
           <Bloque titulo="Ubicación">
-            <dl className="lista-datos">
-              <Dato etiqueta="Distrito">
-                {p.distrito ? `${p.distrito.codigo} · ${p.distrito.nombre}` : null}
-              </Dato>
-              <Dato etiqueta="Unidad vecinal">
-                {p.unidad_vecinal
-                  ? `${p.unidad_vecinal.codigo} · ${p.unidad_vecinal.nombre}`
-                  : null}
-              </Dato>
-              <Dato etiqueta="Coordenadas (lat, lon)">
-                <span className="font-mono">{coordenadas(lon, lat)}</span>
-              </Dato>
-              <Dato etiqueta="Método de ubicación">{etiquetaMetodo(p.ubicacion_metodo)}</Dato>
-              <Dato etiqueta="Precisión GPS">{precisionGps(p.precision_gps_m)}</Dato>
-              <Dato etiqueta="Tipo de lugar">{etiquetaUbicacionTipo(p.ubicacion_tipo)}</Dato>
-              <Dato etiqueta="Versión de capa">{p.version_capa}</Dato>
-              {/*
-                No se usa `precision_degradada`: ese campo describe la coordenada de ESTA
-                respuesta, y la del técnico es siempre la exacta, así que acá valía "No" incluso
-                para una vivienda cuyo punto público sí sale desplazado. Lo que el técnico
-                necesita saber es qué ve el vecino, y eso lo decide `ubicacion_tipo` (§13).
-              */}
-              <Dato etiqueta="En el mapa público se ve">
-                {p.ubicacion_tipo === 'vivienda_o_predio'
-                  ? 'Desplazado hasta 30 m para no señalar la vivienda'
-                  : 'En su sitio, redondeado a 5 decimales'}
-              </Dato>
-            </dl>
+            <DatosUbicacion reporte={f} />
           </Bloque>
 
           <Bloque titulo="Evento reportado">

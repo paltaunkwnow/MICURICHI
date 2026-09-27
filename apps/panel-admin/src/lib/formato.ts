@@ -2,6 +2,7 @@ import {
   type CausaPresunta,
   type Ciudad,
   COLORES_SEVERIDAD,
+  CONFIG_DOMINIO,
   type EstadoReporte,
   ETIQUETAS,
   type Frecuencia,
@@ -97,8 +98,30 @@ export function etiquetaSumideroEstado(s: SumideroEstado) {
 export function etiquetaCapa(c: TipoCapa | string) {
   return c in ETIQUETAS.tipo_capa ? ETIQUETAS.tipo_capa[c as TipoCapa] : c;
 }
-export function etiquetaMetodo(m: UbicacionMetodo) {
-  return m === 'gps' ? 'GPS del dispositivo' : 'Selección manual en el mapa';
+/**
+ * Distancia entre el punto y el GPS del teléfono al enviar. `null` en los reportes anteriores a
+ * la ubicación obligatoria (contracts 0.9.0); `undefined` si responde un api-core anterior, que
+ * puede seguir corriendo mientras se despliega el nuevo.
+ */
+type DistanciaDispositivo = number | null | undefined;
+
+/**
+ * Desde 0.9.0, «manual» es un ajuste dentro del radio del GPS. Antes era un clic en cualquier
+ * parte del mapa: sin distancia guardada no se puede prometer el radio.
+ */
+export function etiquetaMetodo(m: UbicacionMetodo, distanciaM: DistanciaDispositivo) {
+  if (m === 'gps') return 'En la posición del GPS';
+  if (distanciaM === null || distanciaM === undefined) {
+    return 'Selección manual en el mapa, sin control de distancia al GPS';
+  }
+  return `Ajustado a mano, a ≤ ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m del GPS`;
+}
+
+export function distanciaDispositivo(m: DistanciaDispositivo) {
+  if (m === null || m === undefined) {
+    return 'Sin dato: el reporte es anterior a la ubicación obligatoria';
+  }
+  return `a ${Math.round(m)} m del GPS`;
 }
 export function etiquetaRol(r: Rol) {
   return ETIQUETAS.rol[r];
