@@ -77,7 +77,10 @@ describe('migración 0013 sobre una base en uso (desde 0012, con filas)', () => 
     ex = ejecutorPglite(db);
     hasta0012 = await aplicarMigraciones(ex, { hasta: '0012' });
     reporteViejo = await insertarReporte(ex, 'Reporte creado antes de la migración 0013');
-    resto = await aplicarMigraciones(ex);
+    // El reporte queda en «nuevo», y sin la bandera la 0015 se niega a publicarlo (su freno se
+    // prueba en migracion-0015-publicacion.test.ts); aquí interesa la 0013. Hasta la 0015: estas
+    // pruebas insertan como el api-core anterior, sin publicar_en, y la 0016 le quita el DEFAULT.
+    resto = await aplicarMigraciones(ex, { hasta: '0015', publicarNuevosExistentes: true });
     restriccionDesde0012 = await restriccionesDeLaColumna(ex);
   }, 240_000);
 
@@ -93,7 +96,7 @@ describe('migración 0013 sobre una base en uso (desde 0012, con filas)', () => 
     const todas = listarMigraciones();
     expect(hasta0012.aplicadas).toEqual(todas.filter((f) => numero(f) <= '0012'));
     expect(hasta0012.pendientes).toContain(ARCHIVO_0013);
-    expect(resto.aplicadas).toEqual(todas.filter((f) => numero(f) > '0012'));
+    expect(resto.aplicadas).toEqual(todas.filter((f) => numero(f) > '0012' && numero(f) <= '0015'));
     expect(resto.aplicadas).toContain(ARCHIVO_0013);
   });
 
@@ -193,7 +196,7 @@ describe('migración 0013 sobre una base en uso (desde 0012, con filas)', () => 
   });
 
   it('volver a migrar no aplica nada', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0015' });
     expect(otra.aplicadas).toEqual([]);
     expect(otra.omitidas).toContain(ARCHIVO_0013);
   });

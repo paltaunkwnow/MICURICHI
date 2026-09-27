@@ -34,10 +34,10 @@ async function crear(lon: number, lat: number, estado = 'validado'): Promise<str
   const r = await pool.query<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
        descripcion, profundidad_estimada, frecuencia, severidad_calculada,
-       severidad_puntaje, severidad_version, estado)
+       severidad_puntaje, severidad_version, estado, publicar_en)
      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual',
        'via_publica', 'Reporte de prueba de agrupacion incremental', 'rodilla', 'ocasional',
-       'media', 6, 2, $3::estado_reporte) RETURNING id::text`,
+       'media', 6, 2, $3::estado_reporte, now()) RETURNING id::text`,
     [lon, lat, estado],
   );
   return r.rows[0]!.id;
@@ -212,13 +212,13 @@ describe('el coste no crece con el tamaño de la tabla', () => {
       const lat = -17.7995 + Math.floor(foco / 40) * 0.0005 + (i % 2) * 0.00002;
       const b = params.length;
       filas.push(
-        `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', 'rodilla', 'ocasional', 'media', 6, 2, 'validado')`,
+        `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', 'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())`,
       );
       params.push(lon, lat);
     }
     await pool.query(
       `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-        profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado)
+        profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
        VALUES ${filas.join(',')}`,
       params,
     );

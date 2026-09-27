@@ -26,6 +26,13 @@ export interface OpcionesMigracion {
   hasta?: string;
   /** `lock_timeout` del SQL de cada migración, en ms. Por defecto `MIGRAR_LOCK_TIMEOUT_MS` o 10 000. */
   lockTimeoutMs?: number;
+  /**
+   * Permite que la 0015 publique los reportes en `nuevo` recibidos antes, que se enviaron con la
+   * promesa de revisión previa: sin esto, la migración aborta si queda alguno. Llega a cada
+   * migración como `SET LOCAL curichi.publicar_nuevos_existentes = 'si'`, que muere con su
+   * transacción. En el CLI, `--publicar-nuevos-existentes`.
+   */
+  publicarNuevosExistentes?: boolean;
 }
 
 export function listarMigraciones(directorio = DIRECTORIO_MIGRACIONES): string[] {
@@ -143,6 +150,8 @@ export async function aplicarMigraciones(
         [archivo],
       );
       if (yaEsta.length) return 'omitida' as const;
+      if (o.publicarNuevosExistentes)
+        await tx.ejecutar(`SET LOCAL curichi.publicar_nuevos_existentes = 'si'`);
       const sql = readFileSync(join(directorio, archivo), 'utf8');
       try {
         await tx.ejecutar(sql);

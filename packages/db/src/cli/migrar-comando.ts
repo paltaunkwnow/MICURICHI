@@ -38,7 +38,7 @@ function codigoDe(e: unknown): string | undefined {
 }
 
 /**
- * `node dist/cli/migrar.js [--hasta NNNN]`. Lee `DATABASE_URL` (obligatoria con
+ * `node dist/cli/migrar.js [--hasta NNNN] [--publicar-nuevos-existentes]`. Lee `DATABASE_URL` (obligatoria con
  * `NODE_ENV=production`; fuera de producción cae a la base local) y `MIGRAR_LOCK_TIMEOUT_MS`.
  * Devuelve 0 si todo quedó aplicado y 1 ante cualquier fallo, incluido un uso incorrecto.
  */
@@ -83,16 +83,23 @@ export async function ejecutarComandoMigrar(
 
   // 1) Uso y configuración: todo lo que puede estar mal escrito, antes de conectarse.
   let hasta: string | undefined;
+  let publicarNuevosExistentes: boolean;
   let lockTimeoutMs: number;
   let url: string;
   try {
     const { values } = parseArgs({
-      args: [...argumentos],
-      options: { hasta: { type: 'string' } },
+      // `pnpm --filter db migrate -- --publicar-nuevos-existentes` le pasa el `--` al script, y
+      // parseArgs trataría lo que sigue como posicional.
+      args: argumentos.filter((a) => a !== '--'),
+      options: {
+        hasta: { type: 'string' },
+        'publicar-nuevos-existentes': { type: 'boolean' },
+      },
       strict: true,
       allowPositionals: false,
     });
     hasta = values.hasta === undefined ? undefined : resolverHasta(values.hasta);
+    publicarNuevosExistentes = values['publicar-nuevos-existentes'] === true;
     lockTimeoutMs = lockTimeoutMigracionMs(entorno.MIGRAR_LOCK_TIMEOUT_MS);
     const deEntorno = entorno.DATABASE_URL?.trim();
     // En producción no hay «base por defecto»: caer a la local sería migrar otra base, o ninguna,
@@ -110,9 +117,17 @@ export async function ejecutarComandoMigrar(
   try {
     pool = nuevoPool(url);
     await esperarBaseDeDatos(pool, 10, 500);
+    // Queda en el log del despliegue ANTES de migrar: quien lo lea sabe que se usó a sabiendas.
+    if (publicarNuevosExistentes)
+      registrar(
+        'info',
+        'migrando con --publicar-nuevos-existentes: la 0015 publica sin revisión previa los reportes en «nuevo» recibidos antes',
+        { publicarNuevosExistentes },
+      );
     const r = await aplicarMigraciones(ejecutorPg(pool), {
       ...(hasta !== undefined ? { hasta } : {}),
       lockTimeoutMs,
+      publicarNuevosExistentes,
     });
     // El texto «migraciones aplicadas: ninguna» lo busca el CI para afirmar la idempotencia.
     registrar(
@@ -123,6 +138,7 @@ export async function ejecutarComandoMigrar(
         omitidas: r.omitidas.length,
         pendientes: r.pendientes,
         hasta: hasta ?? null,
+        publicarNuevosExistentes,
         duracionMs: Date.now() - inicio,
       },
     );

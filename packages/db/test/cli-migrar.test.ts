@@ -230,6 +230,87 @@ describe('CLI de migraciones: DATABASE_URL, --hasta, JSON y código de salida', 
   });
 });
 
+describe('--publicar-nuevos-existentes (migración 0015)', () => {
+  let otra: BaseVacia;
+
+  beforeAll(async () => {
+    otra = await levantarBaseVacia();
+  }, 120_000);
+
+  afterAll(async () => {
+    await otra?.cerrar();
+  });
+
+  it('sin la bandera la 0015 frena ante un «nuevo» anterior; con ella (también tras el -- de pnpm) pasa', async () => {
+    const hasta0014 = capturar();
+    expect(
+      await ejecutarComandoMigrar(
+        ['--hasta', '0014'],
+        { DATABASE_URL: otra.url },
+        { escribir: hasta0014.escribir },
+      ),
+    ).toBe(0);
+    const { default: pg } = await import('pg');
+    const pool = new pg.Pool({ connectionString: otra.url, max: 1 });
+    try {
+      await pool.query(
+        `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo,
+           ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, severidad_calculada,
+           severidad_puntaje)
+         VALUES (ST_SetSRID(ST_MakePoint(-63.18, -17.78), 4326), 'distrito_municipal:01',
+           'unidad_vecinal:A', 'gps', 'via_publica', 'Enviado con moderación previa', 'rodilla',
+           'ocasional', 'media', 6)`,
+      );
+    } finally {
+      await pool.end();
+    }
+
+    const sinBandera = capturar();
+    expect(
+      await ejecutarComandoMigrar(
+        [],
+        { DATABASE_URL: otra.url },
+        { escribir: sinBandera.escribir },
+      ),
+    ).toBe(1);
+    const error = sinBandera.lineas.at(-1)!;
+    expect(error.canal).toBe('stderr');
+    expect(JSON.stringify(error.json)).toMatch(/1 reporte en estado «nuevo»/);
+    expect(JSON.stringify(error.json)).toMatch(/--publicar-nuevos-existentes/);
+
+    // `pnpm --filter db migrate -- --publicar-nuevos-existentes` le pasa el `--` al script.
+    const conBandera = capturar();
+    expect(
+      await ejecutarComandoMigrar(
+        ['--', '--publicar-nuevos-existentes'],
+        { DATABASE_URL: otra.url },
+        { escribir: conBandera.escribir },
+      ),
+    ).toBe(0);
+    const fin = conBandera.lineas.find((l) => Array.isArray(l.json.aplicadas))!;
+    expect(fin.json.aplicadas).toContain('0015_publicacion_sin_moderacion.sql');
+    expect(fin.json.publicarNuevosExistentes).toBe(true);
+    // Quien lea el log del despliegue tiene que ver que se usó, antes de que pase.
+    expect(
+      conBandera.lineas.some(
+        (l) => l.canal === 'stdout' && /publicar-nuevos-existentes/.test(String(l.json.msg)),
+      ),
+    ).toBe(true);
+  }, 120_000);
+
+  it('un valor pegado a la bandera es un uso incorrecto y no se conecta', async () => {
+    const salida = capturar();
+    expect(
+      await ejecutarComandoMigrar(
+        ['--publicar-nuevos-existentes=no'],
+        { DATABASE_URL: otra.url },
+        { escribir: salida.escribir, crearPool: NO_CONECTAR },
+      ),
+    ).toBe(1);
+    expect(JSON.stringify(salida.lineas.at(-1)?.json)).toMatch(/publicar-nuevos-existentes/);
+  });
+});
+
 describe('el punto de entrada, como proceso (lo que ejecuta el job de despliegue)', () => {
   /** Ejecuta `src/cli/migrar.ts` como lo hace `pnpm db:migrate`, en un proceso aparte. */
   function correr(args: string[], env: Record<string, string>) {

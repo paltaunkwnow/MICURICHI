@@ -4,12 +4,13 @@
  *
  *   pnpm db:local            # datos persistentes en infra/.pglite
  *   PGLITE_MEMORIA=1 ...     # base efímera en memoria (tests, demos)
+ *   PGLITE_PUBLICAR_NUEVOS_EXISTENTES=1 ...   # deja que la 0015 publique los «nuevo» anteriores
  */
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ejecutorPglite } from '../ejecutor.js';
-import { aplicarMigraciones } from '../migrar.js';
+import { migrarBaseLocal } from './opciones.js';
 
 const raizRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const puerto = Number(
@@ -34,7 +35,11 @@ async function main() {
   console.log(`[db:local] ${version.rows[0]?.v}`);
   console.log(`[db:local] datos: ${enMemoria ? 'memoria (efímeros)' : dataDir}`);
 
-  const r = await aplicarMigraciones(ejecutorPglite(db));
+  const r = await migrarBaseLocal(ejecutorPglite(db), process.argv.slice(2), process.env);
+  if (r.publicarNuevosExistentes)
+    console.log(
+      '[db:local] con PGLITE_PUBLICAR_NUEVOS_EXISTENTES: la 0015 publica los «nuevo» anteriores',
+    );
   if (r.aplicadas.length)
     console.log(`[db:local] migraciones aplicadas: ${r.aplicadas.join(', ')}`);
   else console.log(`[db:local] migraciones al día (${r.omitidas.length})`);

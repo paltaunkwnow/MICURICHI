@@ -66,10 +66,10 @@ async function crearDesplazado(
   const r = await pool.query<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
        descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
-       severidad_version, estado)
+       severidad_version, estado, publicar_en)
      VALUES (ST_Transform(ST_Translate(ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), $3::int), $4, $5), 4326),
        'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica',
-       'Reporte de prueba de la metrica de recurrencia', 'rodilla', 'ocasional', 'media', 6, 2, 'validado')
+       'Reporte de prueba de la metrica de recurrencia', 'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())
      RETURNING id::text`,
     [origen.lon, origen.lat, crs, dx, dy],
   );

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Comprueba contra una base REAL que los roles de aplicación tienen exactamente los privilegios
- * de la migración 0008: ni uno más, ni uno menos.
+ * de las migraciones 0008, 0009, 0014 y 0016: ni uno más, ni uno menos.
  *
  * Existe como script y no como test de Vitest porque las pruebas del monorepo corren sobre PGlite,
  * que es de un solo usuario y no tiene roles: allí no hay nada que comprobar. Esto se ejecuta
@@ -12,73 +12,14 @@
  * Falla con código 1 si sobra o falta algún privilegio, para poder encadenarlo en un despliegue.
  */
 import pg from 'pg';
+// La matriz esperada vive aparte para que las pruebas comprueben que nombra todas las tablas.
+import { COLUMNAS_ESPERADAS, ESPERADO } from './matriz-privilegios.mjs';
 
 const URL_BASE = process.env.DATABASE_URL;
 if (!URL_BASE) {
   console.error('Definí DATABASE_URL (rol dueño) para poder leer el catálogo de privilegios.');
   process.exit(1);
 }
-
-/**
- * La matriz esperada. Es la misma que documenta la migración 0008 y el informe de seguridad; si
- * alguien añade una tabla o un GRANT, este script lo dice en vez de que se descubra más tarde.
- */
-const ESPERADO = {
-  curichi_api: {
-    'public.reporte_inundacion': ['SELECT', 'INSERT', 'UPDATE'],
-    'public.reporte_foto': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-    'public.auditoria': ['INSERT'],
-    // Solo SELECT a nivel de TABLA. El INSERT y el UPDATE existen, pero acotados a unas pocas
-    // columnas (migración 0009), y `has_table_privilege` no los cuenta: distingue el privilegio
-    // de tabla del de columna. Que aquí aparecieran sería justamente el fallo —significaría que
-    // api-core puede escribir `rol` y fabricarse un administrador—, así que esta línea es una
-    // aserción en negativo. Las columnas concretas se comprueban en COLUMNAS_ESPERADAS.
-    'public.usuario': ['SELECT'],
-    'public.sesion': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-    'public.intento_login': ['SELECT', 'INSERT', 'DELETE'],
-    'public.idempotencia': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-    'public.punto_critico': ['SELECT', 'INSERT', 'DELETE'],
-    'public.spatial_ref_sys': ['SELECT'],
-    'public._migraciones': [],
-    'geo.distrito_municipal': ['SELECT'],
-    'geo.unidad_vecinal': ['SELECT'],
-    'geo.manzana': ['SELECT'],
-    'geo.capa_version': ['SELECT', 'UPDATE'],
-  },
-  curichi_geo: {
-    'public.reporte_inundacion': ['SELECT'],
-    'public.punto_critico': ['SELECT'],
-    'public.spatial_ref_sys': ['SELECT'],
-    'public.reporte_foto': [],
-    'public.auditoria': [],
-    'public.usuario': [],
-    'public.sesion': [],
-    'public.intento_login': [],
-    'public.idempotencia': [],
-    'public._migraciones': [],
-    'geo.distrito_municipal': ['SELECT'],
-    'geo.unidad_vecinal': ['SELECT'],
-    'geo.manzana': ['SELECT'],
-    'geo.capa_version': ['SELECT'],
-  },
-};
-
-/**
- * Privilegios por COLUMNA. Sin esto, la matriz de arriba no distinguiría «puede escribir tres
- * columnas» de «puede escribir la tabla entera», y en `usuario` esa diferencia es exactamente la
- * que impide que el registro público pueda fabricar un administrador: si `rol` apareciera en
- * estas listas, un INSERT con `rol: 'admin'` dejaría de ser imposible para pasar a ser una
- * cuestión de que el código no se equivoque.
- */
-const COLUMNAS_ESPERADAS = {
-  curichi_api: {
-    'public.usuario': {
-      INSERT: ['email', 'nombre', 'password_hash'],
-      UPDATE: ['password_hash', 'ultimo_reporte_en'],
-    },
-  },
-  curichi_geo: {},
-};
 
 const OPERACIONES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
 /** Atributos de rol que ningún servicio debe tener. */
@@ -182,5 +123,5 @@ if (fallos.length) {
   process.exit(1);
 }
 console.log(
-  `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado en las migraciones 0008 y 0009`,
+  `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado en las migraciones 0008, 0009, 0014 y 0016`,
 );

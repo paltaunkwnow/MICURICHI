@@ -383,7 +383,8 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
       `SELECT to_regclass('geo.manzana')::text AS tabla, to_regclass('geo.manzana_vigente')::text AS vista`,
     );
     expect(rel).toStrictEqual({ tabla: 'geo.manzana', vista: 'geo.manzana_vigente' });
-    const verificador = readFileSync(resolve(RAIZ_DB, 'src/cli/verificar-privilegios.mjs'), 'utf8');
+    // La matriz que aplica verificar-privilegios.mjs vive aparte desde la 0014.
+    const verificador = readFileSync(resolve(RAIZ_DB, 'src/cli/matriz-privilegios.mjs'), 'utf8');
     expect(
       verificador.match(/'geo\.manzana':\s*\['SELECT'\]/g)?.length ?? 0,
     ).toBeGreaterThanOrEqual(2);

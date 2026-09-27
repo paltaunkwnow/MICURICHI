@@ -223,10 +223,14 @@ export async function sembrarSamples(
     const diasAtras = Math.floor(al() * 120);
     const desc = `${elegir(DESCRIPCIONES)} [muestra sintética]`;
     await ex.consultar(
-      `INSERT INTO reporte_inundacion (geom, creado_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+      `INSERT INTO reporte_inundacion (geom, creado_en, publicar_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
          ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
          sumidero_cercano, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, validado_por, validado_en)
-       SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval, now() - ($3 || ' days')::interval - interval '3 hours',
+       SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval,
+         -- Publicado desde que se creó (migración 0015): con el DEFAULT now(), el CHECK de
+         -- publicar_en (como mucho 1 hora después de creado_en) rechazaría toda fecha pasada.
+         now() - ($3 || ' days')::interval,
+         now() - ($3 || ' days')::interval - interval '3 hours',
          COALESCE((SELECT distrito_id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_distrito'),
          COALESCE((SELECT id FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), 'sin_uv'),
          -- version_capa es la versión con la que se RESOLVIÓ el punto (§7.1), no la de la muestra:

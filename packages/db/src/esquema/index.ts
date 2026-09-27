@@ -1,5 +1,5 @@
 /**
- * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0013) para consultas en api-core y geo-service.
+ * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0015) para consultas en api-core y geo-service.
  * La fuente de verdad del DDL son las migraciones SQL; este archivo no genera DDL.
  *
  * Una migración que añade o cambia columnas tiene que actualizar este archivo en el mismo cambio:
@@ -133,9 +133,29 @@ export const usuario = pgTable('usuario', {
   passwordHash: text('password_hash').notNull(),
   activo: boolean('activo').notNull().default(true),
   creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
-  /** Último reporte aceptado: estado de la cuota de 1 por hora y por cuenta (migración 0009). */
-  ultimoReporteEn: timestamp('ultimo_reporte_en', { withTimezone: true }),
 });
+
+/**
+ * Cupo diario por cuenta (migración 0014, contrato 0.10.0): una fila por cuenta y por día calendario
+ * de la ciudad. api-core la incrementa con INSERT … ON CONFLICT DO UPDATE … WHERE n < máximo y el
+ * mantenimiento borra los días anteriores. `dia` lo calcula quien escribe, en `ZONA_HORARIA`.
+ */
+export const cuotaReporteDiaria = pgTable(
+  'cuota_reporte_diaria',
+  {
+    usuarioId: uuid('usuario_id')
+      .notNull()
+      .references(() => usuario.id, { onDelete: 'cascade' }),
+    dia: date('dia').notNull(),
+    reportesN: smallint('reportes_n').notNull().default(0),
+    fotosN: smallint('fotos_n').notNull().default(0),
+    actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.usuarioId, t.dia] }),
+    index('cuota_reporte_diaria_dia').on(t.dia),
+  ],
+);
 
 export const sesion = pgTable('sesion', {
   id: text('id').primaryKey(),
@@ -173,6 +193,12 @@ export const reporteInundacion = pgTable(
     /** Punto publicable (migración 0005): redondeado y, en vivienda o predio, con jitter (§13). */
     geomPublico: geometry('geom_publico'),
     creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+    /**
+     * Desde cuándo es visible (migración 0015, contrato 0.11.0): api-core la fija al crear el
+     * reporte (60 o 240 s). CHECK entre `creado_en` y `creado_en + 1 hora`. Sin DEFAULT desde la
+     * 0016: un INSERT que no la fije falla en lugar de publicar el reporte al instante.
+     */
+    publicarEn: timestamp('publicar_en', { withTimezone: true }).notNull(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
     eventoEn: timestamp('evento_en', { withTimezone: true }),
     autorId: uuid('autor_id').references(() => usuario.id, { onDelete: 'set null' }),

@@ -13,6 +13,12 @@ pnpm db:seed:samples    # capas y reportes SINTÉTICOS de data/samples/geo + usu
 
 Datos persistentes en `infra/.pglite/` (ignorado por git). `PGLITE_MEMORIA=1 pnpm db:local` usa memoria.
 
+Con una base persistida que tenga reportes en `nuevo` de antes de la 0015, el arranque aborta por
+el freno de esa migración (ver «Migrar en producción»). En local suelen ser datos de ejemplo: para
+publicarlos a sabiendas y arrancar, `PGLITE_PUBLICAR_NUEVOS_EXISTENTES=1 pnpm db:local` (solo `1`
+lo activa). Llamando al script directo también vale la bandera: `pnpm --filter db local --
+--publicar-nuevos-existentes`.
+
 ## Usuarios locales creados por el seed (SOLO desarrollo)
 
 | Email | Rol | Contraseña por defecto | Variable para cambiarla |
@@ -33,8 +39,8 @@ exporta. El alta pública (`/auth/registro`) nunca crea este rol.
 
 | Comando | Qué hace |
 |---|---|
-| `pnpm db:migrate [--hasta NNNN]` | Aplica migraciones pendientes (`migraciones/NNNN_*.sql`, registro en `_migraciones`), con tsx |
-| `node dist/cli/migrar.js [--hasta NNNN]` | Lo mismo, compilado y sin tsx: es lo que ejecuta el despliegue (`pnpm --filter db migrate:prod`) |
+| `pnpm db:migrate [--hasta NNNN] [--publicar-nuevos-existentes]` | Aplica migraciones pendientes (`migraciones/NNNN_*.sql`, registro en `_migraciones`), con tsx |
+| `node dist/cli/migrar.js [--hasta NNNN] [--publicar-nuevos-existentes]` | Lo mismo, compilado y sin tsx: es lo que ejecuta el despliegue (`pnpm --filter db migrate:prod`) |
 | `pnpm db:generate <nombre>` | Crea un archivo de migración nuevo |
 | `pnpm --filter db puntos-criticos:recalcular` | Recalcula puntos críticos (§9.2) |
 | `pnpm --filter db cuentas -- crear\|desactivar\|reactivar ...` | Alta, baja y reactivación de cuentas técnicas, ejecutivas y de administrador (ver más abajo), con tsx |
@@ -56,6 +62,29 @@ servicios; el advisory lock hace que varias ejecuciones simultáneas sean segura
 - `--hasta NNNN` aplica hasta esa migración inclusive y se niega si la base ya va por delante. Sirve
   para restaurar un respaldo de una versión anterior: base vacía → `--hasta <versión del respaldo>`
   → `pg_restore --data-only` → migrar el resto, que es lo que convierte los datos viejos.
+- `--publicar-nuevos-existentes` (migración 0015, publicación sin moderación previa): los reportes
+  en `nuevo` recibidos antes se enviaron con la promesa de que un técnico los revisaba antes de
+  publicarlos, y la 0015 los haría públicos al instante. Por eso aborta, sin cambiar nada, si queda
+  alguno. Lo normal es moderar la bandeja antes de desplegar; la bandera los publica a sabiendas
+  (`SET LOCAL curichi.publicar_nuevos_existentes = 'si'`, solo en esa transacción) y queda en el
+  log. Con pnpm: `pnpm --filter db migrate -- --publicar-nuevos-existentes`.
+- La 0015 toma un bloqueo exclusivo sobre `reporte_inundacion` mientras rellena `publicar_en` y
+  reconstruye los dos índices públicos: lecturas y escrituras de reportes esperan hasta que termina.
+  Con decenas de miles de reportes son segundos; con muchos más, medirlo antes en una copia.
+- La 0016 (contracción) va en un despliegue **posterior** al de T3 y T4, cuando ya no queda ningún
+  api-core anterior atendiendo: revoca y borra `usuario.ultimo_reporte_en` (la espera de 60 min,
+  reemplazada por el cupo diario de la 0014) y le quita el DEFAULT now() a `publicar_en`. Desde
+  ahí, un INSERT en `reporte_inundacion` que no fije `publicar_en` falla con NOT NULL (23502) en
+  lugar de publicar el reporte al instante: pruebas, seeds y restauraciones tienen que fijarlo.
+  Solo toca el catálogo (no reescribe tablas) y los valores de `ultimo_reporte_en` se pierden.
+
+## Cupo diario (migración 0014)
+
+`cuota_reporte_diaria` guarda una fila por cuenta y por día calendario de la ciudad con
+`reportes_n` y `fotos_n`. api-core la incrementa con `INSERT … ON CONFLICT DO UPDATE … WHERE n <
+máximo`, y `dia` lo calcula quien escribe en `ZONA_HORARIA` (no hay DEFAULT: con `current_date` en
+UTC, en La Paz el día cambiaría a las 20:00). `ejecutarMantenimiento` borra los días anteriores al
+de hoy en la misma zona (`ZONA_HORARIA`, o la del contrato si no está definida).
 
 ## Primer administrador en producción
 
@@ -97,12 +126,14 @@ node dist/cli/cuentas.js reactivar --email admin@municipio.gob.bo
 
 Para correrlo dentro del contenedor de `api-core` (donde `db` viaja en `node_modules` con `dist/` y
 `migraciones/`, igual que `migrar.js`, ver más arriba), pasándole la URL del rol dueño en vez de la
-del contenedor:
+del contenedor. Las dos se leen sin eco y se pasan con `-e VAR` sin valor, así no quedan en el
+historial de la shell (como en `docs/operaciones/produccion.md`):
 
 ```bash
-docker compose exec -e DATABASE_URL="postgresql://curichi:<password-dueño>@postgis:5432/curichi" \
-  -e CUENTA_PASSWORD="<contraseña-de-la-cuenta-nueva>" \
-  api-core node node_modules/db/dist/cli/cuentas.js crear \
+read -rs DATABASE_URL && export DATABASE_URL        # postgresql://curichi:<password-dueño>@postgis:5432/curichi
+read -rs CUENTA_PASSWORD && export CUENTA_PASSWORD  # la de la cuenta nueva
+docker compose exec -e DATABASE_URL -e CUENTA_PASSWORD api-core \
+  node node_modules/db/dist/cli/cuentas.js crear \
   --email admin@municipio.gob.bo --nombre "Admin municipal" --rol admin
 ```
 

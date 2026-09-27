@@ -6,6 +6,7 @@
  *
  * Es idempotente y barato: se apoya en los índices parciales de la migración 0002.
  */
+import { CONFIG_DOMINIO } from 'contracts';
 import type { Ejecutor } from './ejecutor.js';
 
 export interface ResumenMantenimiento {
@@ -14,6 +15,8 @@ export interface ResumenMantenimiento {
   fotosHuerfanas: string[];
   intentosLoginBorrados: number;
   clavesIdempotenciaBorradas: number;
+  /** Filas de `cuota_reporte_diaria` de días anteriores al de hoy en la ciudad (migración 0014). */
+  cuotasDiariasBorradas: number;
 }
 
 export interface OpcionesMantenimiento {
@@ -25,6 +28,13 @@ export interface OpcionesMantenimiento {
   horasIntentosLogin?: number;
   /** Horas que se recuerda una clave de idempotencia. */
   horasIdempotencia?: number;
+  /**
+   * Zona horaria (IANA) en la que se decide qué día es hoy para el cupo diario. Por defecto
+   * `ZONA_HORARIA`, la misma variable con la que api-core fecha los turnos, o la del contrato.
+   */
+  zonaHoraria?: string;
+  /** Instante con el que se decide qué día es hoy para el cupo diario. Por defecto, `now()`. */
+  ahora?: Date;
 }
 
 export async function ejecutarMantenimiento(
@@ -35,6 +45,10 @@ export async function ejecutarMantenimiento(
   const horas = o.horasFotoHuerfana ?? 24;
   const horasIntentos = o.horasIntentosLogin ?? 24;
   const horasIdem = o.horasIdempotencia ?? 24;
+  const zona =
+    o.zonaHoraria?.trim() ||
+    process.env.ZONA_HORARIA?.trim() ||
+    CONFIG_DOMINIO.ZONA_HORARIA_POR_DEFECTO;
 
   const sesiones = await ex.consultar<{ id: string }>(
     'DELETE FROM sesion WHERE expira_en < now() RETURNING id',
@@ -64,11 +78,21 @@ export async function ejecutarMantenimiento(
      RETURNING clave`,
     [String(horasIdem)],
   );
+  // El cupo de un día que ya pasó no frena a nadie. «Hoy» es el día de la ciudad y no el de la
+  // sesión de PostgreSQL: con `current_date` en UTC, a las 20:00 de La Paz se borraría la fila de
+  // hoy y la cuenta recuperaría sus turnos.
+  const cuotas = await ex.consultar<{ usuario_id: string }>(
+    `DELETE FROM cuota_reporte_diaria
+     WHERE dia < (COALESCE($1::timestamptz, now()) AT TIME ZONE $2)::date
+     RETURNING usuario_id::text`,
+    [o.ahora?.toISOString() ?? null, zona],
+  );
   return {
     sesionesCaducadas: sesiones.length,
     ipHashBorrados: ips.length,
     fotosHuerfanas: fotos.map((f) => f.objeto_key),
     intentosLoginBorrados: intentos.length,
     clavesIdempotenciaBorradas: claves.length,
+    cuotasDiariasBorradas: cuotas.length,
   };
 }

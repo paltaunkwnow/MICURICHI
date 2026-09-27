@@ -110,7 +110,9 @@ describe('retención de datos (§13)', () => {
     const viejo = await insertarReporte(ex, -63.195, -17.79, 'validado');
     const nuevo = await insertarReporte(ex, -63.194, -17.791, 'validado');
     await ex.consultar(
-      `UPDATE reporte_inundacion SET ip_hash = 'abc', creado_en = now() - interval '40 days' WHERE id = $1`,
+      // publicar_en se mueve con creado_en: el CHECK de la 0015 la exige a 1 hora como mucho.
+      `UPDATE reporte_inundacion SET ip_hash = 'abc', creado_en = now() - interval '40 days',
+         publicar_en = now() - interval '40 days' WHERE id = $1`,
       [viejo],
     );
     await ex.consultar(`UPDATE reporte_inundacion SET ip_hash = 'def' WHERE id = $1`, [nuevo]);
