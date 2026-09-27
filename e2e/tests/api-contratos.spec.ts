@@ -1,17 +1,17 @@
 import { expect, test } from '@playwright/test';
 import {
   API,
-  crearReportePorApi,
+  crearReportePublicadoPorApi,
   cuentaNuevaConSesion,
   esperarPila,
   GEO,
   leerWebp,
-  loginCiudadano,
   loginTecnico,
   PNG_1X1,
   PRECISION_GPS_M,
   PUNTO_CENTRO,
   PUNTO_FUERA,
+  REPORTES_POR_DIA,
   reporteValido,
   TROZOS_DE_METADATOS,
   tesela,
@@ -66,8 +66,10 @@ test.describe('contratos de la API (sin navegador)', () => {
   test('la creación de reportes valida el payload, el honeypot y la cobertura', async ({
     request,
   }) => {
-    await loginCiudadano(request);
-    // Los tres casos se rechazan ANTES de tocar la cuota: dos en la validación del cuerpo y el
+    // Cuenta nueva y no la del seed: si alguno de los tres pasara por error, gastaría el cupo del
+    // día de una cuenta que comparte toda la suite.
+    await cuentaNuevaConSesion(request, 'validacion-');
+    // Los tres casos se rechazan ANTES de tocar el cupo: dos en la validación del cuerpo y el
     // tercero al resolver la unidad vecinal, los tres fuera de la transacción. Por eso pueden
     // ir seguidos con la misma cuenta.
     const corto = await request.post(`${API}/api/v1/reportes`, {
@@ -90,14 +92,18 @@ test.describe('contratos de la API (sin navegador)', () => {
     });
     expect(fuera.status()).toBe(422);
     expect((await fuera.json()).codigo).toBe('FUERA_DE_COBERTURA');
+
+    // Ninguno gastó el cupo del día.
+    const yo = await (await request.get(`${API}/api/v1/auth/yo`)).json();
+    expect(yo.reportes_restantes_hoy).toBe(REPORTES_POR_DIA);
   });
 
   test('CA-X1: el payload sin duración ni afectación crea un reporte con severidad v2', async ({
     request,
   }) => {
-    // `reporteValido` ya no lleva esos dos campos: si la API todavía los exige, esto es 400.
-    const id = await crearReportePorApi(request, `E2E-X1-${Date.now()}`);
-    await loginTecnico(request);
+    // `reporteValido` ya no lleva esos dos campos: si la API todavía los exige, esto es 400. La
+    // vista técnica lo muestra recién pasada su demora de publicación.
+    const id = await crearReportePublicadoPorApi(request, `E2E-X1-${Date.now()}`);
     const r = await request.get(`${API}/api/v1/tecnico/reportes/${id}`);
     expect(r.status()).toBe(200);
     const p = (await r.json()).properties;
@@ -160,8 +166,8 @@ test.describe('contratos de la API (sin navegador)', () => {
   test('fusionar un reporte consigo mismo da 409, también con el id en mayúsculas', async ({
     request,
   }) => {
-    const id = await crearReportePorApi(request, `E2E-FUSION-${Date.now()}`);
-    await loginTecnico(request);
+    // Publicado: mientras espera su demora, la moderación responde 404 y no llegaría al 409.
+    const id = await crearReportePublicadoPorApi(request, `E2E-FUSION-${Date.now()}`);
 
     // Antes el id en mayúsculas pasaba la comprobación de «distinto» y el reporte quedaba
     // duplicado de sí mismo.
@@ -216,7 +222,7 @@ test.describe('contratos de la API (sin navegador)', () => {
   test('un JSON mal formado responde 400 PAYLOAD_INVALIDO, sin códigos internos de Fastify', async ({
     request,
   }) => {
-    await loginCiudadano(request);
+    await cuentaNuevaConSesion(request, 'json-roto-');
     for (const ruta of ['/api/v1/reportes', '/api/v1/auth/login']) {
       const r = await request.post(`${API}${ruta}`, {
         headers: { 'content-type': 'application/json' },
@@ -333,7 +339,8 @@ test.describe('contratos de la API (sin navegador)', () => {
   });
 
   test('rechaza archivos que no son imágenes aunque la extensión mienta', async ({ request }) => {
-    await loginCiudadano(request);
+    // Cuenta nueva: la del seed comparte con toda la suite su cupo de 12 fotos por día.
+    await cuentaNuevaConSesion(request, 'foto-falsa-');
     const r = await request.post(`${API}/api/v1/fotos`, {
       multipart: {
         archivo: {

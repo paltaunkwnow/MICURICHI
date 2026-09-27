@@ -35,12 +35,69 @@ async function esperar(
   throw new Error(`No respondió ${url} en ${plazoMs / 1000} s (último intento: ${ultimo})`);
 }
 
+/** Lo que `playwright.config.ts` le pasa a api-core (ver `DEMORA_E2E_*` en tests/ayudas.ts). */
+const ENTORNO_E2E = { demoraPrimeroS: 2, reportesPorDia: 3 };
+
+const COMO_ARRANCAR =
+  'Arrancá la pila con el entorno de prueba de playwright.config.ts (lo más simple: cerrá el ' +
+  '`pnpm dev` que haya y dejá que Playwright lo levante), o al menos con ' +
+  'REPORTE_DEMORA_PRIMERO_S=2 REPORTE_DEMORA_SIGUIENTES_S=4 REPORTES_POR_DIA_POR_CUENTA=3 ' +
+  'ALTAS_POR_DIA_POR_IP=10000 COOKIE_SEGURA=0 (ver e2e/README.md).';
+
+/**
+ * La pila corre con la demora y el cupo de prueba. Sin esto, con la demora de producción (60 s)
+ * cada prueba que modera un reporte recién creado se come su timeout esperándolo y el fallo no
+ * dice por qué. Se pregunta con una cuenta nueva: `/auth/yo` devuelve cuánto tardaría en
+ * publicarse su primer reporte y cuántos le quedan hoy.
+ */
+async function comprobarEntornoDePrueba(
+  contexto: Awaited<ReturnType<typeof request.newContext>>,
+): Promise<void> {
+  const cuenta = {
+    email: `e2e-preparacion-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@curichi.test`,
+    nombre: 'Preparación de la suite',
+    password: 'contrasena-de-prueba-e2e',
+  };
+  const alta = await contexto.post(`${API}/api/v1/auth/registro`, { data: cuenta });
+  if (alta.status() !== 201)
+    throw new Error(
+      `No se pudo crear la cuenta de comprobación (HTTP ${alta.status()}): ¿api-core con el tope de altas de producción (ALTAS_POR_DIA_POR_IP=10)? ${COMO_ARRANCAR}`,
+    );
+  const login = await contexto.post(`${API}/api/v1/auth/login`, {
+    data: { email: cuenta.email, password: cuenta.password },
+  });
+  if (login.status() !== 200)
+    throw new Error(
+      `La cuenta de comprobación no pudo entrar (HTTP ${login.status()}): ¿el tope de logins de producción? ${COMO_ARRANCAR}`,
+    );
+  const respuesta = await contexto.get(`${API}/api/v1/auth/yo`);
+  if (respuesta.status() !== 200)
+    throw new Error(
+      `/auth/yo respondió ${respuesta.status()} justo después de entrar: la pila corre con COOKIE_SEGURA=1 y el cliente de Playwright no manda la cookie Secure sobre http. ${COMO_ARRANCAR}`,
+    );
+  const yo = (await respuesta.json()) as {
+    demora_proximo_s?: number;
+    reportes_restantes_hoy?: number;
+  };
+  if (
+    yo.demora_proximo_s !== ENTORNO_E2E.demoraPrimeroS ||
+    yo.reportes_restantes_hoy !== ENTORNO_E2E.reportesPorDia
+  )
+    throw new Error(
+      `api-core no corre con el entorno de prueba: /auth/yo dice demora_proximo_s=${yo.demora_proximo_s} ` +
+        `y reportes_restantes_hoy=${yo.reportes_restantes_hoy}, y la suite espera ` +
+        `${ENTORNO_E2E.demoraPrimeroS} y ${ENTORNO_E2E.reportesPorDia}. ${COMO_ARRANCAR}`,
+    );
+  await contexto.post(`${API}/api/v1/auth/logout`);
+}
+
 export default async function preparar(): Promise<void> {
   const contexto = await request.newContext();
   try {
     // 1) Los servicios, que son los que tienen que estar antes de nada.
     await esperar(contexto, `${API}/ready`, 180_000);
     await esperar(contexto, `${GEO}/health`, 60_000);
+    await comprobarEntornoDePrueba(contexto);
     // 2) Las páginas, para que el primer test no pague el compilado.
     for (const url of [
       `${PUBLICA}/`,

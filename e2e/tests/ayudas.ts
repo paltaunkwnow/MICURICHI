@@ -187,11 +187,13 @@ export async function loginCiudadano(request: APIRequestContext, datos = CREDENC
 /**
  * Crea una cuenta ciudadana nueva y entra con ella, devolviendo sus credenciales.
  *
- * Existe porque cada cuenta solo puede enviar **un reporte por hora**: si todos los casos
- * usaran la cuenta del seed, el segundo que intentara crear algo recibiría 429 y el resultado
- * dependería del orden y de cuántas veces se hubiera corrido la suite antes. Una cuenta por
- * caso hace que cada prueba parta de un estado limpio sin tocar la base por debajo ni apagar
- * el límite, que es justamente una de las cosas que hay que comprobar.
+ * Existe porque cada cuenta solo puede enviar **3 reportes por día** (contracts 0.10.0): si los
+ * casos usaran la cuenta del seed, a partir del cuarto envío del día recibirían 429 y el
+ * resultado dependería del orden y de cuántas veces se hubiera corrido la suite ese día (con
+ * `--repeat-each` o `--retries`, en la misma corrida). Además, el 1.º reporte del día de una
+ * cuenta se publica antes que los siguientes. Una cuenta por caso hace que cada prueba parta de
+ * un estado limpio sin tocar la base por debajo ni apagar el límite, que es justamente una de las
+ * cosas que hay que comprobar.
  */
 export async function cuentaNuevaConSesion(request: APIRequestContext, marca = '') {
   const datos = {
@@ -205,13 +207,87 @@ export async function cuentaNuevaConSesion(request: APIRequestContext, marca = '
   return datos;
 }
 
-/** Crea un reporte por API con una cuenta recién creada (para no gastar la cuota de otra). */
+/**
+ * Crea un reporte por API con una cuenta recién creada (para no gastar la cuota de otra). Queda
+ * en espera de su publicación: para moderarlo o consultarlo hay que `esperarPublicacion` (o usar
+ * `crearReportePublicadoPorApi`).
+ */
 export async function crearReportePorApi(request: APIRequestContext, marca: string) {
   await cuentaNuevaConSesion(request, 'rep-');
   const r = await request.post(`${API}/api/v1/reportes`, { data: reporteValido(marca) });
   expect(r.status(), await r.text()).toBe(201);
   const f = await r.json();
   return f.id as string;
+}
+
+/**
+ * Crea un reporte con una cuenta nueva, entra como técnico y espera a que se publique: deja
+ * `request` con la sesión del TÉCNICO, lista para moderarlo. Durante la demora nadie lo ve, ni
+ * los técnicos: un PATCH antes de tiempo da 404.
+ */
+export async function crearReportePublicadoPorApi(request: APIRequestContext, marca: string) {
+  const id = await crearReportePorApi(request, marca);
+  await loginTecnico(request);
+  await esperarPublicacion(request, id);
+  return id;
+}
+
+// ------------------------------------------------------------------ publicación y cupo
+
+/**
+ * Demoras de publicación de la pila E2E (`REPORTE_DEMORA_*_S` en playwright.config.ts): el 1.º
+ * reporte del día de una cuenta se ve 2 s después de enviarlo y los siguientes, 4 s. En
+ * producción son 60 y 240 (contracts 0.11.0). `global-setup.ts` comprueba que la pila corra así.
+ */
+export const DEMORA_E2E_PRIMERO_S = 2;
+export const DEMORA_E2E_SIGUIENTES_S = 4;
+
+/** Reportes por cuenta y por día (contracts 0.10.0, `REPORTES_POR_DIA_POR_CUENTA`). */
+export const REPORTES_POR_DIA = 3;
+
+/**
+ * Etiqueta pública de cada estado (contracts 0.11.0, `ETIQUETAS.estado_publico`). «NO SE HA
+ * VERIFICADO» es un texto exacto que decidió el usuario: no se traduce ni se abrevia.
+ */
+export const ETIQUETA_PUBLICA = {
+  nuevo: 'NO SE HA VERIFICADO',
+  validado: 'Verificado',
+  resuelto: 'Resuelto',
+} as const;
+
+/** «Te quedan N de 3 reportes hoy» (`cupo-reportes` del formulario y `cupo-cuenta` de la cuenta). */
+export function textoCupo(restantes: number) {
+  return `Te quedan ${restantes} de ${REPORTES_POR_DIA} reportes hoy`;
+}
+
+/** El mensaje del 429 `CUOTA_DE_REPORTES`, el mismo en api-core y en la app pública. */
+export const TEXTO_CUPO_AGOTADO = `Ya enviaste los ${REPORTES_POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.`;
+
+/** Lo que dice la cuenta regresiva de la confirmación (`cuenta-regresiva`) al llegar a cero. */
+export const TEXTO_YA_PUBLICADO = 'Ya está publicado · recargá el mapa para verlo';
+
+/**
+ * Espera a que el reporte `id` esté publicado. El servidor lo guarda al enviarlo y lo muestra
+ * pasada su demora (plan 2026-09-26, pedido C; en la pila E2E, `REPORTE_DEMORA_*_S` de pocos
+ * segundos), y durante la espera no lo ve nadie, ni los técnicos. Se lo pregunta a la vista técnica,
+ * así que `request` tiene que tener sesión de técnico o de admin (`loginTecnico`).
+ *
+ * Devuelve el momento (`Date.now()`) en que se lo vio publicado, para medir desde ahí cuánto tarda
+ * una pantalla en mostrarlo. No afirma nada sobre la demora en sí.
+ */
+export async function esperarPublicacion(
+  request: APIRequestContext,
+  id: string,
+  plazoMs = 30_000,
+): Promise<number> {
+  await expect
+    .poll(async () => (await request.get(`${API}/api/v1/tecnico/reportes/${id}`)).status(), {
+      message: `el reporte ${id} tiene que publicarse (¿api-core con REPORTE_DEMORA_*_S de prueba?)`,
+      timeout: plazoMs,
+      intervals: [250],
+    })
+    .toBe(200);
+  return Date.now();
 }
 
 /** Coordenadas de tesela (slippy map) para un punto y un zoom. */
@@ -269,8 +345,8 @@ export function leerWebp(datos: Buffer): { ancho: number; alto: number; trozos: 
  * Crea una cuenta y entra con ella **por la interfaz**, como haría un vecino.
  *
  * Cuenta nueva en cada llamada por el mismo motivo que en la API: una cuenta solo puede enviar
- * un reporte por hora, así que reutilizar la del seed haría que la suite fallara a partir del
- * segundo caso y, peor, que fallara solo a veces según cuándo se hubiera corrido la anterior.
+ * 3 reportes por día, así que reutilizar la del seed haría que la suite fallara a partir del
+ * cuarto caso y, peor, que fallara solo a veces según cuántas veces se hubiera corrido ese día.
  */
 export async function crearCuentaYEntrarPorUi(page: Page, volver = '/reportar') {
   const datos = {
@@ -712,18 +788,41 @@ export interface RedVigilada {
   enVuelo: Set<Request>;
 }
 
-/** Registrar ANTES de navegar: lo que salga antes no se ve. */
-export function vigilarRed(page: Page): RedVigilada {
+/**
+ * Registrar ANTES de navegar: lo que salga antes no se ve. Con `todoElContexto` mira el contexto
+ * entero: las otras pestañas y lo que pida el service worker por su cuenta, que Chromium informa
+ * en el contexto y no en la página.
+ */
+export function vigilarRed(page: Page, { todoElContexto = false } = {}): RedVigilada {
   const red: RedVigilada = { pedidas: [], enVuelo: new Set() };
-  page.on('request', (r) => {
+  const anotar = (r: Request) => {
     red.pedidas.push(r.url());
     red.enVuelo.add(r);
-  });
+  };
   const terminar = (r: Request) => {
     red.enVuelo.delete(r);
   };
-  page.on('requestfinished', terminar);
-  page.on('requestfailed', terminar);
+  if (todoElContexto) {
+    const contexto = page.context();
+    contexto.on('request', anotar);
+    contexto.on('requestfinished', terminar);
+    contexto.on('requestfailed', terminar);
+  } else {
+    page.on('request', anotar);
+    page.on('requestfinished', terminar);
+    page.on('requestfailed', terminar);
+  }
+  // Una navegación de página completa (`page.goto` a otra URL) puede cortar a mitad una petición
+  // de la página vieja. Esa petición nunca dispara `requestfinished` ni `requestfailed` —limitación
+  // conocida de Chromium/CDP: el frame principal es el MISMO objeto antes y después de navegar, así
+  // que no sirve mirar si quedó «destruido»— y se queda «en vuelo» para siempre: sin este oyente,
+  // `esperarRedQuieta` nunca ve la red quieta después de una navegación así (visto con un
+  // diagnóstico ad hoc: `enVuelo` se quedaba en 1 desde el primer tick hasta el último, por una
+  // petición de la página anterior). Al terminar la navegación del frame principal ya no puede
+  // haber nada legítimamente «en vuelo» de la página vieja, así que se limpia.
+  page.on('framenavigated', (frame) => {
+    if (frame === page.mainFrame()) red.enVuelo.clear();
+  });
   return red;
 }
 
@@ -761,4 +860,159 @@ export async function esperarRedQuieta(
       },
     )
     .toBe(true);
+}
+
+// ------------------------------------------------------------------ panel: sondeo
+
+/**
+ * Cabecera con que el panel marca sus refrescos automáticos: api-core no renueva con ellos la
+ * inactividad de la sesión. Lo que pide la persona (la primera carga de cada pantalla, un filtro)
+ * no la lleva.
+ */
+export const CABECERA_SONDEO = 'x-curichi-sondeo';
+
+/** Cada cuánto se refrescan solas la bandeja, el detalle, los indicadores y el panel ejecutivo. */
+export const INTERVALO_SONDEO_MS = 10_000;
+
+/**
+ * Pone la pestaña oculta o visible, como cuando la persona se va a otra y vuelve. Chromium sin
+ * ventana deja todas las pestañas «visibles» aunque otra pase adelante, así que se fija lo que
+ * leen las páginas (`document.visibilityState` y `document.hidden`) y se disparan los eventos que
+ * el navegador dispararía: `visibilitychange` (el que escucha TanStack Query) y `blur`/`focus`.
+ */
+export async function simularPestana(page: Page, estado: 'oculta' | 'visible') {
+  await page.evaluate((oculta) => {
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => (oculta ? 'hidden' : 'visible'),
+    });
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => oculta });
+    document.dispatchEvent(new Event('visibilitychange', { bubbles: true }));
+    window.dispatchEvent(new Event(oculta ? 'blur' : 'focus'));
+  }, estado === 'oculta');
+}
+
+// ------------------------------------------------------------------ mapa público
+
+/**
+ * Puntos que el mapa público tiene dibujados, leídos de su resumen accesible (`resumen-mapa`:
+ * «N puntos sueltos. M puntos agrupados en K zonas…»). El resumen sale de `queryRenderedFeatures`,
+ * que solo responde con lo que el worker de MapLibre ya procesó: más de cero quiere decir que el
+ * worker cargó y trabajó.
+ */
+export async function puntosEnElMapa(page: Page): Promise<number> {
+  const texto = await page
+    .getByTestId('resumen-mapa')
+    .textContent({ timeout: 5_000 })
+    .catch(() => null);
+  const sueltos = /(\d+)\s+puntos?\s+suelto/.exec(texto ?? '');
+  const agrupados = /(\d+)\s+puntos?\s+agrupado/.exec(texto ?? '');
+  return Number(sueltos?.[1] ?? 0) + Number(agrupados?.[1] ?? 0);
+}
+
+/** Espera a que el mapa público dibuje al menos un punto (ver `puntosEnElMapa`). */
+export async function esperarPuntosEnElMapa(page: Page) {
+  await expect
+    .poll(() => puntosEnElMapa(page), {
+      message: 'el mapa público tiene que dibujar puntos (worker de MapLibre cargado)',
+      timeout: 60_000,
+      intervals: [500],
+    })
+    .toBeGreaterThan(0);
+}
+
+// ------------------------------------------------------------------ CSP
+
+/** Una violación de la Content-Security-Policy, como la describe `securitypolicyviolation`. */
+export interface ViolacionCsp {
+  pagina: string;
+  directiva: string;
+  bloqueado: string;
+  origen: string;
+  disposicion: string;
+}
+
+/** Lo que junta `vigilarCsp` desde que se la llamó, en todas las navegaciones de la página. */
+export interface VigilanciaCsp {
+  violaciones: ViolacionCsp[];
+  /** Errores de consola y excepciones sin atrapar, cada uno con la página en que salió. */
+  errores: { pagina: string; texto: string }[];
+  /** Peticiones que el navegador cortó por la CSP. */
+  bloqueadas: { pagina: string; url: string }[];
+}
+
+/** Cómo escribe Chromium en la consola lo que bloquea la CSP. */
+const RE_MENSAJE_CSP =
+  /Content[ -]Security[ -]Policy|Refused to (load|execute|evaluate|connect|apply|create|frame|display|send|compile)/i;
+
+/**
+ * Junta los eventos `securitypolicyviolation`, los errores de consola, las excepciones sin atrapar
+ * y las peticiones cortadas por la CSP. Registrar ANTES de navegar: el oyente se instala al empezar
+ * cada documento, antes que cualquier script de la página, y la función expuesta sobrevive a las
+ * navegaciones.
+ */
+export async function vigilarCsp(page: Page): Promise<VigilanciaCsp> {
+  const v: VigilanciaCsp = { violaciones: [], errores: [], bloqueadas: [] };
+  await page.exposeBinding('__violacionCspE2E', ({ frame }, d: Omit<ViolacionCsp, 'pagina'>) => {
+    v.violaciones.push({ pagina: frame.url(), ...d });
+  });
+  await page.addInitScript(() => {
+    document.addEventListener(
+      'securitypolicyviolation',
+      (e) => {
+        const d = {
+          directiva: e.effectiveDirective || e.violatedDirective,
+          bloqueado: e.blockedURI,
+          origen: e.sourceFile ? `${e.sourceFile}:${e.lineNumber}` : '',
+          disposicion: e.disposition,
+        };
+        const avisar = (window as unknown as { __violacionCspE2E?: (d: unknown) => void })
+          .__violacionCspE2E;
+        // Sin la función expuesta, que igual quede en la consola, donde también se mira.
+        if (avisar) void avisar(d);
+        else console.error(`Content Security Policy (E2E): ${JSON.stringify(d)}`);
+      },
+      true,
+    );
+  });
+  page.on('console', (m) => {
+    if (m.type() === 'error') v.errores.push({ pagina: page.url(), texto: m.text() });
+  });
+  page.on('pageerror', (e) =>
+    v.errores.push({ pagina: page.url(), texto: `${e.name}: ${e.message}` }),
+  );
+  page.on('requestfailed', (r) => {
+    if (/csp/i.test(r.failure()?.errorText ?? ''))
+      v.bloqueadas.push({ pagina: page.url(), url: r.url() });
+  });
+  return v;
+}
+
+/**
+ * Ninguna violación de la CSP hasta ahora: ni eventos, ni mensajes de la CSP en la consola, ni
+ * peticiones cortadas. Los demás errores de consola no se juzgan acá (un 401 de `/auth/yo` sin
+ * sesión también sale como error), pero van en el mensaje para diagnosticar.
+ */
+export function comprobarSinViolacionesCsp(v: VigilanciaCsp, donde: string) {
+  const deLaCsp = v.errores.filter((e) => RE_MENSAJE_CSP.test(e.texto));
+  const otros = v.errores.filter((e) => !RE_MENSAJE_CSP.test(e.texto)).map((e) => e.texto);
+  expect(
+    { violaciones: v.violaciones, consola: deLaCsp, bloqueadas: v.bloqueadas },
+    `${donde}: sin violaciones de la CSP${otros.length ? ` (otros errores de consola: ${otros.slice(0, 5).join(' | ')})` : ''}`,
+  ).toEqual({ violaciones: [], consola: [], bloqueadas: [] });
+}
+
+/**
+ * La página llegó con la CSP de nonce (plan 2026-09-26, S40 y S41): sin ella, «sin violaciones» no
+ * probaría nada. `script-src` lleva un nonce y no lleva 'unsafe-inline'.
+ */
+export function comprobarCspConNonce(csp: string | undefined, donde: string) {
+  expect(csp, `${donde}: la página tiene que llegar con Content-Security-Policy`).toBeTruthy();
+  const scriptSrc =
+    (csp ?? '')
+      .split(';')
+      .map((d) => d.trim())
+      .find((d) => d.startsWith('script-src ')) ?? '';
+  expect(scriptSrc, `${donde}: script-src con nonce`).toMatch(/'nonce-[A-Za-z0-9+/=]{16,}'/);
+  expect(scriptSrc, `${donde}: script-src sin 'unsafe-inline'`).not.toContain("'unsafe-inline'");
 }

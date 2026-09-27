@@ -195,7 +195,8 @@ test.describe('quitar campos del reporte · app pública', () => {
     page,
     request,
   }) => {
-    // Un reporte ya publicado del seed sintético (validado o resuelto).
+    // Un reporte ya publicado (sin verificar, validado o resuelto): el del seed sintético o uno de
+    // otra prueba que ya cumplió su demora. El que envía CA-W3 no se consulta después.
     const r = await request.get(`${API}/api/v1/reportes?limite=1`);
     expect(r.status()).toBe(200);
     const lista = await r.json();
@@ -227,11 +228,20 @@ test.describe('quitar campos del reporte · app pública', () => {
       expect(capas.map((c: { capa: string }) => c.capa)).toContain('manzana');
 
       // No hay acceso a la instancia de MapLibre desde la página, así que la capa se observa por
-      // lo que el mapa pide: dibujar una capa implica pedir su GeoJSON o sus teselas.
-      const red = vigilarRed(page);
+      // lo que el mapa pide: dibujar una capa implica pedir su GeoJSON o sus teselas. Desde T6 la
+      // URL lleva la huella del contenido (`/geo/v1/capas/<capa>/v/<huella>` y
+      // `/geo/v1/teselas/<capa>/<huella>/z/x/y.mvt`, contracts 0.12.0): ya no hay una ruta fija
+      // por capa, así que se reconoce el prefijo y se acepta también el alias sin huella. Se mira
+      // el contexto entero (no solo la página) porque el service worker puede pedir la capa por su
+      // cuenta al reconstruir su caché.
+      const red = vigilarRed(page, { todoElContexto: true });
       const esCapa = (capa: string) => (u: string) => {
         const ruta = new URL(u).pathname;
-        return ruta.startsWith(`/geo/v1/teselas/${capa}/`) || ruta === `/geo/v1/capas/${capa}`;
+        return (
+          ruta.startsWith(`/geo/v1/teselas/${capa}/`) ||
+          ruta === `/geo/v1/capas/${capa}` ||
+          ruta.startsWith(`/geo/v1/capas/${capa}/v/`)
+        );
       };
       const baseAZoom15 = (u: string) => /tile\.openstreetmap\.org\/(1[5-9])\//.test(u);
 

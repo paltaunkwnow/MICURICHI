@@ -1,10 +1,13 @@
 import { expect, type Page, test } from '@playwright/test';
 import {
   abrirFormulario,
+  botonCompartirUbicacion,
   compartirUbicacion,
   continuar,
   cuentaNuevaEnElNavegador,
+  DEMORA_E2E_PRIMERO_S,
   desplazar,
+  ETIQUETA_PUBLICA,
   elegirPuntoPorCoordenadas,
   enviarYLeerCuerpo,
   esperarMapaDelPaso1,
@@ -18,10 +21,15 @@ import {
   PUNTO_AJUSTADO,
   PUNTO_CENTRO,
   RADIO_DISPOSITIVO_M,
+  REPORTES_POR_DIA,
   reporteValido,
   responderPaso2,
   retenerPeticiones,
+  TEXTO_CUPO_AGOTADO,
+  TEXTO_YA_PUBLICADO,
+  textoCupo,
   textoDistancia,
+  vigilarSensores,
 } from './ayudas';
 
 /**
@@ -31,14 +39,17 @@ import {
  * punto arranca en ella y se ajusta dentro de un círculo de 60 m, se conserva al ir y volver, y
  * si el teléfono se movió antes de enviar se vuelve a ajustar. El envío lleva la posición aparte
  * (`dispositivo`) y ya no manda método ni precisión. Además: la fecha del evento se valida en su
- * campo, y el aviso de turno aparece en cuanto el turno se gasta, sin recargar.
+ * campo, el formulario dice cuántos reportes le quedan hoy a la cuenta («Te quedan N de 3
+ * reportes hoy»), y el aviso de cupo agotado aparece recién al agotarlo, sin recargar y antes de
+ * pedir la ubicación (plan 2026-09-26, S16).
  *
  * El teléfono es el GPS simulado de Chromium en PUNTO_CENTRO con 10 m de precisión, con el
  * permiso dado (`GPS_EN_EL_CENTRO`). Los casos sin permiso, con mala precisión y el POST directo
  * fuera del radio están en `ubicacion-obligatoria.spec.ts`.
  *
  * La sesión se pone por API (`cuentaNuevaEnElNavegador`): una cuenta nueva por caso, porque cada
- * cuenta solo puede enviar un reporte por hora.
+ * cuenta puede enviar 3 reportes por día y los casos del cupo parten de una cuenta con el día
+ * entero.
  */
 
 test.use({ geolocation: GPS_EN_EL_CENTRO, permissions: ['geolocation'] });
@@ -68,8 +79,21 @@ function diaEnElNavegador(page: Page, dias: number): Promise<string> {
   }, dias);
 }
 
-/** Rótulo del aviso de turno de arriba del formulario (el de `error-envio` es una frase más larga). */
-const AVISO_TURNO = 'Ya enviaste un reporte hace poco';
+/** «Reportar un punto» de la barra superior: navega dentro de la app, sin recargar. */
+async function irAReportarSinRecargar(page: Page) {
+  await page.locator('header.topnav').getByRole('link', { name: 'Reportar un punto' }).click();
+  await page.waitForURL('**/reportar');
+}
+
+/** Envía `n` reportes por API con la sesión del navegador, como desde otro teléfono de la cuenta. */
+async function enviarPorOtroLado(page: Page, n: number, marca: string) {
+  for (let i = 1; i <= n; i++) {
+    const r = await page.request.post(`${PUBLICA}/api/v1/reportes`, {
+      data: reporteValido(`${marca}-${i}-${Date.now()}`),
+    });
+    expect(r.status(), await r.text()).toBe(201);
+  }
+}
 
 test.beforeAll(async ({ request }) => {
   await esperarPila(request);
@@ -81,8 +105,12 @@ test.describe('paso 1: el punto, a 60 m o menos del teléfono', () => {
   }) => {
     await cuentaNuevaEnElNavegador(page, 'abrir-');
     await abrirFormulario(page);
+    // Texto vigente desde la revisión de T2 (el punto arranca en la posición del teléfono, así
+    // que prometer que «no la ve nadie» era inexacto): PedirUbicacion.tsx.
     await expect(
-      page.getByText('Usamos tu ubicación solo para comprobarlo: no la guardamos ni la ve nadie.'),
+      page.getByText(
+        'Para comprobarlo usamos la posición de tu teléfono, que no guardamos aparte.',
+      ),
     ).toBeVisible();
     await expect(mapaDelPaso1(page)).toHaveCount(0);
     await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
@@ -286,58 +314,115 @@ test.describe('paso 2: la fecha del evento', () => {
   });
 });
 
-test.describe('después de enviar: el turno de la cuenta', () => {
-  test('tras un envío aceptado, «Ya enviaste…» aparece sin recargar la página', async ({
+test.describe('el cupo del día: «Te quedan N de 3 reportes hoy»', () => {
+  test('el formulario dice cuántos quedan y, tras enviar uno, lo actualiza sin recargar', async ({
     page,
   }) => {
-    await cuentaNuevaEnElNavegador(page, 'turno-');
+    await cuentaNuevaEnElNavegador(page, 'cupo-');
     await abrirFormulario(page);
-    await expect(page.getByText(AVISO_TURNO, { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId('cupo-reportes')).toHaveText(textoCupo(REPORTES_POR_DIA));
+    // Con cupo no hay aviso: aparece recién cuando se agota.
+    await expect(page.getByTestId('cupo-agotado')).toHaveCount(0);
     await compartirUbicacion(page);
-    await llegarARevision(page, `E2E-turno-${Date.now()}`);
+    await llegarARevision(page, `E2E-cupo-${Date.now()}`);
+
+    // Antes de enviar se dice cuándo se ve y con qué marca. La pila E2E publica a los 2 s
+    // (`DEMORA_E2E_PRIMERO_S`), que se redondea a «1 minuto»: el texto de 4 minutos lo prueba
+    // Vitest en web-ciudadano con la demora de producción.
+    const demora = page.getByTestId('aviso-demora');
+    await expect(demora).toContainText('Se publica 1 minuto después de enviarlo');
+    await expect(demora).toContainText(`«${ETIQUETA_PUBLICA.nuevo}»`);
+
+    await enviarYLeerCuerpo(page);
+    const creado = page.getByTestId('reporte-creado');
+    await expect(creado).toBeVisible();
+    // La cuenta regresiva parte de lo que dijo el servidor y termina en «Ya está publicado».
+    await expect(creado.getByTestId('cuenta-regresiva')).toHaveText(TEXTO_YA_PUBLICADO, {
+      timeout: (DEMORA_E2E_PRIMERO_S + 8) * 1000,
+    });
+
+    // Navegación dentro de la app (enlaces), sin recargar: la sesión en caché tiene que saber ya
+    // que el cupo bajó.
+    await marcarPagina(page);
+    await creado.getByRole('link', { name: 'Volver al mapa' }).click();
+    await page.waitForURL((u) => new URL(u).pathname === '/');
+    await irAReportarSinRecargar(page);
+    await expect(page.getByTestId('cupo-reportes')).toHaveText(textoCupo(REPORTES_POR_DIA - 1));
+    await expect(page.getByTestId('cupo-agotado')).toHaveCount(0);
+    await expect(botonCompartirUbicacion(page)).toBeVisible();
+    expect(await sigueSinRecargar(page), 'la página no se tiene que haber recargado').toBe(true);
+  });
+
+  test('el aviso de cupo agotado aparece recién al gastar el 3.º, sin recargar y antes de pedir la ubicación', async ({
+    page,
+  }) => {
+    const sensores = await vigilarSensores(page);
+    await cuentaNuevaEnElNavegador(page, 'cupo-3-');
+    // Dos de los tres ya se enviaron desde otro teléfono de la cuenta.
+    await enviarPorOtroLado(page, REPORTES_POR_DIA - 1, 'E2E-cupo-3');
+
+    await abrirFormulario(page);
+    await expect(page.getByTestId('cupo-reportes')).toHaveText(textoCupo(1));
+    await expect(page.getByTestId('cupo-agotado')).toHaveCount(0);
+    await compartirUbicacion(page);
+    await llegarARevision(page, `E2E-cupo-3-ultimo-${Date.now()}`);
     await enviarYLeerCuerpo(page);
     const creado = page.getByTestId('reporte-creado');
     await expect(creado).toBeVisible();
 
-    // Navegación dentro de la app (enlaces), sin recargar: la sesión en caché tiene que saber ya
-    // que el turno se gastó. Antes lo sabía recién cinco minutos después.
     await marcarPagina(page);
     await creado.getByRole('link', { name: 'Volver al mapa' }).click();
     await page.waitForURL((u) => new URL(u).pathname === '/');
-    await page.locator('header.topnav').getByRole('link', { name: 'Reportar un punto' }).click();
-    await page.waitForURL('**/reportar');
-    await expect(page.getByText(AVISO_TURNO, { exact: true })).toBeVisible();
+    const lecturasAntes = (await sensores()).geolocalizacion.length;
+    await irAReportarSinRecargar(page);
+
+    const aviso = page.getByTestId('cupo-agotado');
+    await expect(aviso).toBeVisible();
+    await expect(aviso).toContainText(TEXTO_CUPO_AGOTADO);
+    await expect(aviso).toContainText(textoCupo(0));
+    // En lugar del formulario: no hay paso 1 ni «Compartir mi ubicación», y no se leyó nada.
+    await expect(botonCompartirUbicacion(page)).toHaveCount(0);
+    await expect(page.getByTestId('cupo-reportes')).toHaveCount(0);
+    expect((await sensores()).geolocalizacion.length, 'no se pidió la ubicación').toBe(
+      lecturasAntes,
+    );
     expect(await sigueSinRecargar(page), 'la página no se tiene que haber recargado').toBe(true);
+
+    // Y abriendo /reportar de cero, lo mismo: la puerta se decide antes del paso 1.
+    await page.goto('/reportar');
+    await expect(page.getByTestId('cupo-agotado')).toBeVisible();
+    await expect(botonCompartirUbicacion(page)).toHaveCount(0);
   });
 
-  test('si el turno ya se gastó en otro lado, el 429 lo dice y «Ya enviaste…» aparece sin recargar', async ({
+  test('si el cupo se agotó en otro lado, el 429 lo dice y el aviso aparece sin recargar', async ({
     page,
   }) => {
-    await cuentaNuevaEnElNavegador(page, 'cuota-ui-');
+    await cuentaNuevaEnElNavegador(page, 'cupo-otro-');
+    await enviarPorOtroLado(page, REPORTES_POR_DIA - 1, 'E2E-cupo-otro');
     await abrirFormulario(page);
+    await expect(page.getByTestId('cupo-reportes')).toHaveText(textoCupo(1));
     await compartirUbicacion(page);
-    await llegarARevision(page, `E2E-cuota-ui-${Date.now()}`);
+    await llegarARevision(page, `E2E-cupo-otro-ui-${Date.now()}`);
 
-    // La misma cuenta envía desde otro sitio (otra pestaña, otro teléfono) DESPUÉS de que esta
-    // pantalla preguntara por la sesión: aquí todavía no hay aviso.
-    const otro = await page.request.post(`${PUBLICA}/api/v1/reportes`, {
-      data: reporteValido(`E2E-cuota-otro-${Date.now()}`),
-    });
-    expect(otro.status(), await otro.text()).toBe(201);
-    await expect(page.getByText(AVISO_TURNO, { exact: true })).toHaveCount(0);
+    // La misma cuenta gasta el último desde otro sitio (otra pestaña, otro teléfono) DESPUÉS de
+    // que esta pantalla preguntara por la sesión: aquí todavía no hay aviso.
+    await enviarPorOtroLado(page, 1, 'E2E-cupo-otro-ultimo');
+    await expect(page.getByTestId('cupo-agotado')).toHaveCount(0);
 
     await marcarPagina(page);
     const respuesta = page.waitForResponse(
       (r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/api/v1/reportes',
     );
     await page.getByTestId('boton-enviar').click();
-    expect((await respuesta).status()).toBe(429);
+    const r = await respuesta;
+    expect(r.status()).toBe(429);
+    expect((await r.json()).codigo).toBe('CUOTA_DE_REPORTES');
 
-    // El texto del servidor, que dice cuánto falta, y no un «probá de nuevo».
-    await expect(page.getByTestId('error-envio')).toContainText(
-      'Ya enviaste un reporte hace poco. Vas a poder enviar otro en',
-    );
-    await expect(page.getByText(AVISO_TURNO, { exact: true })).toBeVisible();
+    // El formulario vuelve a preguntar el cupo y, con 0, pasa al aviso: el texto del servidor,
+    // que dice cuándo vuelve, y no un «probá de nuevo».
+    const aviso = page.getByTestId('cupo-agotado');
+    await expect(aviso).toBeVisible();
+    await expect(aviso).toContainText(TEXTO_CUPO_AGOTADO);
     await expect(page.getByTestId('reporte-creado')).toHaveCount(0);
     expect(await sigueSinRecargar(page), 'la página no se tiene que haber recargado').toBe(true);
   });

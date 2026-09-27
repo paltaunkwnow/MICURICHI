@@ -2,14 +2,17 @@ import { expect, type Locator, type Page, type Request, test } from '@playwright
 import {
   API,
   CREDENCIALES_EJECUTIVO,
+  CREDENCIALES_TECNICO,
   crearReportePorApi,
   cuentaNuevaConSesion,
   esperarPila,
+  esperarPublicacion,
+  esperarRedQuieta,
   loginEjecutivo,
   loginTecnico,
   PANEL,
-  retenerPeticiones,
   sesionDelPanelEnElNavegador,
+  vigilarRed,
 } from './ayudas';
 
 /**
@@ -20,12 +23,23 @@ import {
  * reporte resuelto sale de ella y cuenta solo como trabajo hecho. Cada pestaña de severidad lleva
  * su propio conteo; la cifra grande no cambia al elegir una.
  *
- * El refresco automático (cada 60 s, y al volver a la pestaña) sale marcado con
- * `x-curichi-sondeo: 1` para no renovar la inactividad de la sesión; lo que pide la persona, no.
+ * Pantalla limpia (plan 2026-09-26, S27): la cifra grande con «N verificadas · M en revisión», las
+ * pestañas, las dos gráficas por distrito y la nota en una línea. Sin mapa, sin selector de
+ * período (siempre el histórico, `ventana=todo`), sin «actualizado hace…» ni «Último reporte». Los
+ * distritos de una capa anterior se listan en Indicadores. El refresco de cada 10 s y el de volver
+ * a la pestaña, con `x-curichi-sondeo: 1`, están en `panel-al-dia.spec.ts`.
  */
 
 const RESUMEN = `${API}/api/v1/ejecutivo/resumen`;
-const CABECERA_SONDEO = 'x-curichi-sondeo';
+
+/** Lo que salió de la pantalla ejecutiva en S27: ninguno puede volver. */
+const QUITADOS_DEL_EJECUTIVO = [
+  'ejecutivo-mapa',
+  'ejecutivo-ventana',
+  'ejecutivo-cargando-periodo',
+  'ejecutivo-capa-anterior',
+  'indicadores-capa-anterior',
+];
 
 interface ConteoActivas {
   total: number;
@@ -81,12 +95,8 @@ function comprobarTruncadaAlMinuto(v: string | null, donde: string) {
   expect(Date.parse(v) % 60_000, `${donde}: ultimo_reporte_en sin segundos (privacidad)`).toBe(0);
 }
 
-function esResumen(r: Request, ventana?: string): boolean {
-  const u = new URL(r.url());
-  return (
-    u.pathname.endsWith('/api/v1/ejecutivo/resumen') &&
-    (ventana === undefined || u.searchParams.get('ventana') === ventana)
-  );
+function esResumen(r: Request): boolean {
+  return new URL(r.url()).pathname.endsWith('/api/v1/ejecutivo/resumen');
 }
 
 async function entrarComoEjecutivo(page: Page) {
@@ -104,17 +114,30 @@ async function esperarResumen(page: Page) {
 }
 
 /**
- * Abre `/ejecutivo` con sesión y devuelve el resumen que recibió la pantalla. Se compara la
- * pantalla con ESA respuesta y no con otra pedida aparte: api-core cachea el resumen 30 s y dos
- * lecturas a cada lado del vencimiento pueden traer cifras distintas sin que nada esté mal.
+ * Abre una pantalla del panel con sesión y va guardando el último resumen que le llegó. La pantalla
+ * se refresca sola cada 10 s: se la compara con lo último que recibió, dentro de `toPass`, y no con
+ * otra lectura pedida aparte, que podría caer a un lado u otro de un refresco con un reporte
+ * publicado en el medio.
  */
-async function abrirConSuResumen(page: Page): Promise<Resumen> {
-  await sesionDelPanelEnElNavegador(page, CREDENCIALES_EJECUTIVO);
-  const respuesta = page.waitForResponse((r) => esResumen(r.request()) && r.status() === 200);
-  await page.goto(`${PANEL}/ejecutivo`);
-  const resumen = (await (await respuesta).json()) as Resumen;
-  await esperarResumen(page);
-  return resumen;
+async function abrirSiguiendoElResumen(
+  page: Page,
+  ruta = '/ejecutivo',
+  credenciales = CREDENCIALES_EJECUTIVO,
+): Promise<() => Resumen> {
+  let ultimo: Resumen | undefined;
+  page.on('response', async (r) => {
+    if (!esResumen(r.request()) || r.status() !== 200) return;
+    try {
+      ultimo = (await r.json()) as Resumen;
+    } catch {
+      // La página se cerró antes de leer el cuerpo: no hay nada que comparar.
+    }
+  });
+  await sesionDelPanelEnElNavegador(page, credenciales);
+  const primera = page.waitForResponse((r) => esResumen(r.request()) && r.status() === 200);
+  await page.goto(`${PANEL}${ruta}`);
+  ultimo ??= (await (await primera).json()) as Resumen;
+  return () => ultimo as Resumen;
 }
 
 test.describe('panel ejecutivo · API', () => {
@@ -173,12 +196,14 @@ test.describe('panel ejecutivo · API', () => {
   test('un reporte resuelto sale de las activas y pasa a «resueltas»', async ({ request }) => {
     const id = await crearReportePorApi(request, `E2E-EJ-${Date.now()}`);
     await loginTecnico(request);
+    // Durante su demora de publicación nadie lo ve, ni el técnico que lo tendría que validar.
+    await esperarPublicacion(request, id);
     const validar = await request.patch(`${API}/api/v1/reportes/${id}/estado`, {
       data: { estado: 'validado' },
     });
     expect(validar.status(), await validar.text()).toBe(200);
 
-    // Cada transición olvida el resumen cacheado: estas dos lecturas son frescas.
+    // api-core no guarda el resumen en caché: estas dos lecturas son frescas.
     const antes = (await (await request.get(`${RESUMEN}?ventana=todo`)).json()) as Resumen;
     const resolver = await request.patch(`${API}/api/v1/reportes/${id}/estado`, {
       data: { estado: 'resuelto', estado_motivo: 'Se destapó el sumidero (prueba E2E).' },
@@ -210,9 +235,10 @@ test.describe('panel ejecutivo · interfaz', () => {
     await esperarPila(request);
   });
 
-  test('tras el login aterriza en /ejecutivo con las activas, las pestañas y las dos gráficas', async ({
+  test('tras el login aterriza en /ejecutivo con la pantalla limpia: activas, pestañas y dos gráficas', async ({
     page,
   }) => {
+    const red = vigilarRed(page);
     await entrarComoEjecutivo(page);
     await esperarResumen(page);
 
@@ -236,110 +262,114 @@ test.describe('panel ejecutivo · interfaz', () => {
         .poll(() => g.locator('rect').count(), { message: `${grafica} dibuja al menos una barra` })
         .toBeGreaterThan(0);
     }
-    await expect(page.getByTestId('ejecutivo-mapa')).toBeVisible();
+    await expect(page.getByTestId('ejecutivo-nota')).toBeVisible();
+
+    // Lo que salió de la pantalla (S27).
+    for (const testId of QUITADOS_DEL_EJECUTIVO) {
+      await expect(page.getByTestId(testId), `sin «${testId}»`).toHaveCount(0);
+    }
+    await expect(page.locator('.maplibregl-map'), 'sin mapa').toHaveCount(0);
+    await expect(page.getByText(/actualizado hace/i)).toHaveCount(0);
+    await expect(page.getByText(/último reporte/i)).toHaveCount(0);
+
+    // Sin mapa no se pide ninguna capa, y el resumen es siempre el histórico entero.
+    await esperarRedQuieta(red, () => true);
+    const pedidas = red.pedidas.map((u) => new URL(u));
+    expect(
+      pedidas.filter((u) => u.pathname.startsWith('/geo/')).map((u) => u.pathname),
+      'sin mapa, ninguna capa ni tesela',
+    ).toEqual([]);
+    const resumenes = pedidas.filter((u) => u.pathname.endsWith('/api/v1/ejecutivo/resumen'));
+    expect(resumenes.length, 'la pantalla pidió el resumen').toBeGreaterThan(0);
+    for (const u of resumenes) expect(u.searchParams.get('ventana'), u.href).toBe('todo');
   });
 
   test('cada pestaña lleva su conteo de activas y la cifra grande no cambia al elegir una', async ({
     page,
   }) => {
-    const resumen = await abrirConSuResumen(page);
-    const s = resumen.activas.por_severidad;
-    const esperados: Record<string, number> = {
-      // «Crítica» suma crítica y alta (decisión del usuario, 2026-09-25).
-      critica: s.critica + s.alta,
-      media: s.media,
-      baja: s.baja,
-      todas: resumen.activas.total,
-    };
-
+    const resumen = await abrirSiguiendoElResumen(page);
+    await esperarResumen(page);
     const total = page.getByTestId('ejecutivo-total');
-    expect(await numeroEn(total)).toBe(resumen.activas.total);
-    for (const [pestana, n] of Object.entries(esperados)) {
-      expect(
-        await numeroEn(page.getByTestId(`ejecutivo-pestana-${pestana}`).locator('.n')),
-        `conteo de la pestaña «${pestana}»`,
-      ).toBe(n);
-    }
+
+    await expect(async () => {
+      const r = resumen();
+      const s = r.activas.por_severidad;
+      const esperados: Record<string, number> = {
+        // «Crítica» suma crítica y alta (decisión del usuario, 2026-09-25).
+        critica: s.critica + s.alta,
+        media: s.media,
+        baja: s.baja,
+        todas: r.activas.total,
+      };
+      expect(await numeroEn(total)).toBe(r.activas.total);
+      for (const [pestana, n] of Object.entries(esperados)) {
+        expect(
+          await numeroEn(page.getByTestId(`ejecutivo-pestana-${pestana}`).locator('.n')),
+          `conteo de la pestaña «${pestana}»`,
+        ).toBe(n);
+      }
+    }).toPass({ timeout: 15_000 });
 
     const media = page.getByTestId('ejecutivo-pestana-media');
     await expect(async () => {
       await media.click();
       await expect(media).toHaveAttribute('aria-selected', 'true');
     }).toPass({ timeout: 15_000 });
-    // La pestaña filtra el mapa y las gráficas; la cifra grande es siempre toda la inundación activa.
-    expect(await numeroEn(total)).toBe(resumen.activas.total);
+    // La pestaña filtra la gráfica de inundaciones; la cifra grande es siempre toda la inundación
+    // activa.
+    await expect(async () => {
+      expect(await numeroEn(total)).toBe(resumen().activas.total);
+    }).toPass({ timeout: 15_000 });
   });
 
-  test('los distritos de una capa anterior van aparte, y solo si los hay', async ({ page }) => {
-    const resumen = await abrirConSuResumen(page);
-    const anteriores = resumen.por_distrito.filter((d) => !d.en_capa_vigente);
-
-    const seccion = page.getByTestId('ejecutivo-capa-anterior');
-    if (!anteriores.length) {
-      await expect(seccion).toHaveCount(0);
-      return;
-    }
-    await expect(seccion).toBeVisible();
-    // Con el código completo: acortado podría repetir el de un distrito vigente.
-    for (const d of anteriores) await expect(seccion).toContainText(`${d.codigo} · ${d.nombre}`);
-  });
-
-  test('cambiar el período consulta esa ventana sin marca de sondeo y avisa mientras carga', async ({
+  test('la gráfica de inundaciones suma las activas, con «Otros» solo si hay activas fuera de los distritos vigentes', async ({
     page,
   }) => {
-    await sesionDelPanelEnElNavegador(page, CREDENCIALES_EJECUTIVO);
-    await page.goto(`${PANEL}/ejecutivo`);
+    const resumen = await abrirSiguiendoElResumen(page);
     await esperarResumen(page);
+    const grafica = page.getByTestId('ejecutivo-grafica-inundaciones');
+    // La tabla que acompaña a la gráfica para los lectores de pantalla, con los valores sin formato.
+    const tabla = page.getByRole('table', { name: /^Inundaciones activas por distrito/ });
 
-    // La respuesta se retiene para poder ver las cifras viejas atenuadas y rotuladas.
-    const retenida = await retenerPeticiones(page, /\/api\/v1\/ejecutivo\/resumen\?.*ventana=7d/);
-    const peticion = page.waitForRequest((r) => esResumen(r, '7d'));
-    await page.getByTestId('ejecutivo-ventana').selectOption('7d');
-    const enviada = await peticion;
-    expect(
-      await enviada.headerValue(CABECERA_SONDEO),
-      'lo que pide la persona renueva la sesión: no va marcado como sondeo',
-    ).toBeNull();
-
-    await retenida.llegada;
-    await expect(page.getByTestId('ejecutivo-cargando-periodo')).toBeVisible();
-    await expect(page.getByTestId('ejecutivo-contenido')).toHaveAttribute('aria-busy', 'true');
-
-    retenida.liberar();
-    await expect(page.getByTestId('ejecutivo-cargando-periodo')).toHaveCount(0);
-    await expect(page.getByTestId('ejecutivo-contenido')).not.toHaveAttribute('aria-busy', 'true');
+    await expect(async () => {
+      const r = resumen();
+      const vigentes = r.por_distrito.filter((d) => d.en_capa_vigente);
+      const otros = r.activas.total - vigentes.reduce((s, d) => s + d.activas.total, 0);
+      await expect(grafica.locator('g[data-barra]'), 'una barra por distrito vigente').toHaveCount(
+        vigentes.length + (otros > 0 ? 1 : 0),
+        { timeout: 1_000 },
+      );
+      await expect(
+        grafica.locator('g[data-barra="otros"]'),
+        `«Otros» con ${otros} activas fuera de los distritos vigentes`,
+      ).toHaveCount(otros > 0 ? 1 : 0, { timeout: 1_000 });
+      const valores = (await tabla.locator('tbody td').allTextContents()).map(Number);
+      expect(
+        valores.reduce((s, n) => s + n, 0),
+        'las barras suman la cifra grande',
+      ).toBe(r.activas.total);
+    }).toPass({ timeout: 15_000 });
   });
 
-  test('el refresco automático cada 60 s sale marcado como sondeo', async ({ page }) => {
-    // Reloj de la página controlado: el minuto se salta en vez de esperarlo. Instalado, el reloj
-    // corre como el real hasta que se lo adelanta, así que la página carga y se usa con normalidad.
-    await page.clock.install();
-    await sesionDelPanelEnElNavegador(page, CREDENCIALES_EJECUTIVO);
-    await page.goto(`${PANEL}/ejecutivo`);
-    await esperarResumen(page);
+  test('los distritos de una capa anterior se listan en Indicadores, y solo si los hay', async ({
+    page,
+  }) => {
+    // Indicadores es del técnico: el ejecutivo no entra.
+    const resumen = await abrirSiguiendoElResumen(page, '/indicadores', CREDENCIALES_TECNICO);
+    await expect(page.getByTestId('indicador-vigentes')).toHaveText(/\d/, { timeout: 60_000 });
+    const seccion = page.getByTestId('indicadores-capa-anterior');
 
-    const refresco = page.waitForRequest((r) => esResumen(r));
-    await page.clock.fastForward('01:05');
-    const r = await refresco;
-    expect(await r.headerValue(CABECERA_SONDEO)).toBe('1');
-    // Y el panel sigue mostrando cifras tras el refresco.
-    await esperarResumen(page);
-  });
-
-  test('volver a la pestaña del navegador refresca también como sondeo', async ({ page }) => {
-    await page.clock.install();
-    await sesionDelPanelEnElNavegador(page, CREDENCIALES_EJECUTIVO);
-    await page.goto(`${PANEL}/ejecutivo`);
-    await esperarResumen(page);
-
-    // El panel da los datos por frescos 30 s (`staleTime` del QueryClient): se los envejece sin
-    // llegar al minuto del refresco periódico, para que el que salga sea el de la pestaña.
-    const refresco = page.waitForRequest((r) => esResumen(r));
-    await page.clock.fastForward('00:31');
-    // Es lo que hace el navegador al volver a la pestaña; TanStack Query refresca al oírlo.
-    await page.evaluate(() => window.dispatchEvent(new Event('visibilitychange')));
-    const r = await refresco;
-    expect(await r.headerValue(CABECERA_SONDEO)).toBe('1');
+    await expect(async () => {
+      const anteriores = resumen().por_distrito.filter((d) => !d.en_capa_vigente);
+      if (!anteriores.length) {
+        await expect(seccion).toHaveCount(0, { timeout: 1_000 });
+        return;
+      }
+      await expect(seccion).toBeVisible({ timeout: 1_000 });
+      // Con el código completo: acortado podría repetir el de un distrito vigente.
+      for (const d of anteriores)
+        await expect(seccion).toContainText(`${d.codigo} · ${d.nombre}`, { timeout: 1_000 });
+    }).toPass({ timeout: 15_000 });
   });
 
   test('el ejecutivo que escribe /reportes en la barra vuelve a /ejecutivo, con el aviso', async ({

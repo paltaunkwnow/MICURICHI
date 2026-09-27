@@ -5,11 +5,10 @@ import {
   CREDENCIALES_ADMIN,
   CREDENCIALES_EJECUTIVO,
   CREDENCIALES_TECNICO,
-  crearReportePorApi,
+  crearReportePublicadoPorApi,
   cuentaNuevaConSesion,
   esperarPila,
   leerCiudad,
-  loginTecnico,
   PANEL,
   sesionDelPanelEnElNavegador,
 } from './ayudas';
@@ -45,10 +44,12 @@ async function numeroEn(elemento: Locator): Promise<number | null> {
   return r ? Number(r[0].replace(/\D/g, '')) : null;
 }
 
-/** Un reporte de una cuenta nueva, rechazado por el técnico. Deja `request` con sesión de técnico. */
+/**
+ * Un reporte de una cuenta nueva, rechazado por el técnico. Deja `request` con sesión de técnico.
+ * Se espera su publicación antes de moderarlo: mientras espera, el PATCH da 404.
+ */
 async function crearReporteRechazado(request: APIRequestContext, marca: string) {
-  const id = await crearReportePorApi(request, marca);
-  await loginTecnico(request);
+  const id = await crearReportePublicadoPorApi(request, marca);
   const r = await request.patch(`${API}/api/v1/reportes/${id}/estado`, {
     data: { estado: 'rechazado', estado_motivo: 'Prueba E2E: no corresponde.' },
   });
@@ -249,30 +250,41 @@ test.describe('panel técnico · indicadores y moderación', () => {
     // Precondición: al menos un rechazado, para que la diferencia se vea.
     await crearReporteRechazado(request, `E2E-IND-${Date.now()}`);
 
-    // Se compara la pantalla con la respuesta que recibió ella misma: api-core cachea los
-    // indicadores 30 s y una lectura aparte podría caer al otro lado del vencimiento.
+    // Se compara la pantalla con la última respuesta que recibió ella misma, y no con una lectura
+    // aparte: la pantalla se refresca sola cada 10 s y los reportes de otras pruebas se publican
+    // cuando cumplen su demora, así que dos lecturas separadas pueden no coincidir.
+    let ultima: {
+      total: number;
+      por_estado: Record<string, number>;
+      puntos_criticos_recurrentes: number;
+    } | null = null;
+    page.on('response', async (res) => {
+      if (new URL(res.url()).pathname !== '/api/v1/indicadores' || res.status() !== 200) return;
+      ultima = await res.json().catch(() => ultima);
+    });
     await sesionDelPanelEnElNavegador(page, CREDENCIALES_TECNICO);
-    const respuesta = page.waitForResponse(
-      (res) => new URL(res.url()).pathname === '/api/v1/indicadores' && res.status() === 200,
-    );
     await page.goto(`${PANEL}/indicadores`);
-    const d = await (await respuesta).json();
-    const e = d.por_estado as Record<string, number>;
-    const vigentes = (e.nuevo ?? 0) + (e.validado ?? 0) + (e.resuelto ?? 0);
-    const recibidos = Object.values(e).reduce((a, b) => a + b, 0);
-    expect(d.total, 'total = nuevos + validados + resueltos').toBe(vigentes);
-    expect(e.rechazado ?? 0).toBeGreaterThan(0);
-    expect(d.total, 'los rechazados no cuentan en el total').toBeLessThan(recibidos);
 
     const kpi = (id: string) => page.getByTestId(id).locator('p').first();
     await expect(page.getByTestId('indicador-vigentes')).toBeVisible({ timeout: 60_000 });
     await expect(page.getByTestId('indicador-vigentes')).toContainText(
       'sin rechazados ni duplicados',
     );
-    expect(await numeroEn(kpi('indicador-vigentes'))).toBe(d.total);
-    expect(await numeroEn(kpi('indicador-validados'))).toBe(e.validado ?? 0);
-    expect(await numeroEn(kpi('indicador-nuevos'))).toBe(e.nuevo ?? 0);
-    expect(await numeroEn(kpi('indicador-puntos-criticos'))).toBe(d.puntos_criticos_recurrentes);
+    await expect(async () => {
+      const d = ultima;
+      expect(d, 'la pantalla tiene que haber recibido /api/v1/indicadores').not.toBeNull();
+      if (!d) return;
+      const e = d.por_estado;
+      const vigentes = (e.nuevo ?? 0) + (e.validado ?? 0) + (e.resuelto ?? 0);
+      const recibidos = Object.values(e).reduce((a, b) => a + b, 0);
+      expect(d.total, 'total = nuevos + validados + resueltos').toBe(vigentes);
+      expect(e.rechazado ?? 0).toBeGreaterThan(0);
+      expect(d.total, 'los rechazados no cuentan en el total').toBeLessThan(recibidos);
+      expect(await numeroEn(kpi('indicador-vigentes'))).toBe(d.total);
+      expect(await numeroEn(kpi('indicador-validados'))).toBe(e.validado ?? 0);
+      expect(await numeroEn(kpi('indicador-nuevos'))).toBe(e.nuevo ?? 0);
+      expect(await numeroEn(kpi('indicador-puntos-criticos'))).toBe(d.puntos_criticos_recurrentes);
+    }).toPass({ timeout: 30_000 });
   });
 
   test('reabrir un rechazado exige motivo, en la API y en el formulario', async ({

@@ -3,19 +3,22 @@ import {
   API,
   CREDENCIALES_TECNICO,
   crearCuentaYEntrarPorUi,
+  ETIQUETA_PUBLICA,
   elegirPuntoPorCoordenadas,
   esperarPila,
+  esperarPublicacion,
   GPS_EN_EL_CENTRO,
   loginTecnico,
   PANEL,
   PRECISION_GPS_M,
   PUNTO_AJUSTADO,
-  RADIO_DISPOSITIVO_M,
 } from './ayudas';
 
 /**
- * Camino crítico transversal (CLAUDE.md §4.7): el vecino reporta desde la app pública, el técnico lo
- * valida en el panel, el punto aparece en el mapa público y sale en la exportación.
+ * Camino crítico transversal (CLAUDE.md §4.7): el vecino reporta desde la app pública, el punto
+ * aparece en el mapa público como «NO SE HA VERIFICADO» pasada su demora (sin moderación previa,
+ * plan 2026-09-26, pedido G), el técnico lo valida en el panel y pasa a «Verificado», y sale en la
+ * exportación.
  *
  * El vecino comparte su ubicación (el GPS simulado en PUNTO_CENTRO, con 10 m de precisión) y
  * ajusta el punto a 50 m, dentro del círculo de 60 m. El técnico ve la distancia y la precisión,
@@ -86,15 +89,33 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
 
     const exito = page.getByTestId('reporte-creado');
     await expect(exito).toBeVisible();
-    await expect(exito).toContainText('en revisión');
+    // Ya llegó: se publica pasada su demora, con la marca «NO SE HA VERIFICADO».
+    await expect(exito.getByTestId('cuenta-regresiva')).toBeVisible();
+    await expect(exito).toContainText(`«${ETIQUETA_PUBLICA.nuevo}»`);
     idReporte = (await exito.locator('[data-id]').first().getAttribute('data-id')) ?? '';
     expect(idReporte).not.toBe('');
   });
 
-  test('el reporte no se publica hasta que lo validan', async ({ request }) => {
+  test('sin moderación previa: pasada su demora se ve en el mapa público como «NO SE HA VERIFICADO»', async ({
+    page,
+    request,
+  }) => {
     expect(idReporte, 'el test anterior debe haber creado el reporte').not.toBe('');
+    await loginTecnico(request);
+    await esperarPublicacion(request, idReporte);
+
     const r = await request.get(`${API}/api/v1/reportes/${idReporte}`);
-    expect(r.status(), 'moderación previa: un reporte nuevo no es público').toBe(404);
+    expect(r.status(), 'publicado sin que nadie lo valide').toBe(200);
+    const p = (await r.json()).properties;
+    expect(p.estado).toBe('nuevo');
+    expect(p.verificado).toBe(false);
+    expect(p).not.toHaveProperty('autor_id');
+
+    await page.goto(`/reporte/${idReporte}`);
+    const hoja = page.getByTestId('hoja-detalle');
+    await expect(hoja).toBeVisible();
+    await expect(hoja.locator('[data-estado="nuevo"]')).toHaveText(ETIQUETA_PUBLICA.nuevo);
+    await expect(hoja.getByTestId('aviso-sin-verificar')).toContainText(ETIQUETA_PUBLICA.nuevo);
   });
 
   test('el técnico lo valida desde el panel', async ({ page }) => {
@@ -105,21 +126,26 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     await expect(page).toHaveURL(/\/reportes/);
 
     await page.goto(`${PANEL}/reportes/${idReporte}`);
+    // El técnico sabe que ya es público antes de tocar nada.
+    await expect(page.getByTestId('visibilidad-publica')).toHaveText(
+      `Visible en el mapa público como ${ETIQUETA_PUBLICA.nuevo}`,
+    );
     await page.getByTestId('boton-validar').click();
     const confirmar = page.getByTestId('confirmar-accion');
     if (await confirmar.isVisible().catch(() => false)) await confirmar.click();
 
     await expect(page.getByTestId('estado-actual')).toContainText('Validado');
+    await expect(page.getByTestId('visibilidad-publica')).toHaveText(
+      `Visible en el mapa público como ${ETIQUETA_PUBLICA.validado}`,
+    );
 
     // Cómo se ubicó: ajustado a mano dentro del radio, con la precisión y la distancia al teléfono.
-    await expect(
-      page.getByText(`Ajustado a mano, a ≤ ${RADIO_DISPOSITIVO_M} m del GPS`, { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText('Movido a mano por la persona', { exact: true })).toBeVisible();
     await expect(page.getByText(`± ${PRECISION_GPS_M} m`, { exact: true })).toBeVisible();
-    await expect(page.getByText(`a ${DISTANCIA_M} m del GPS`, { exact: true })).toBeVisible();
+    await expect(page.getByText(`a ${DISTANCIA_M} m del teléfono`, { exact: true })).toBeVisible();
   });
 
-  test('ya validado, aparece en el mapa público con su unidad vecinal', async ({
+  test('ya validado, el mapa público lo muestra como «Verificado» con su unidad vecinal', async ({
     page,
     request,
   }) => {
@@ -127,6 +153,7 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     expect(r.status()).toBe(200);
     const f = await r.json();
     expect(f.properties.estado).toBe('validado');
+    expect(f.properties.verificado).toBe(true);
     expect(f.properties.unidad_vecinal?.id).toBeTruthy();
     expect(f.properties.distrito?.id).toBeTruthy();
     expect(f.properties.severidad).toBeTruthy();
@@ -136,6 +163,9 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     // cada tamaño; se consulta dentro de la que corresponde a este proyecto de Playwright.
     const hoja = page.getByTestId('hoja-detalle');
     await expect(hoja).toBeVisible();
+    await expect(hoja.locator('[data-estado="validado"]')).toHaveText(ETIQUETA_PUBLICA.validado);
+    await expect(hoja.getByTestId('aviso-sin-verificar')).toHaveCount(0);
+    await expect(hoja.getByText(ETIQUETA_PUBLICA.nuevo)).toHaveCount(0);
     await expect(hoja.getByTestId('detalle-uv')).toContainText('UV');
     await expect(hoja.getByTestId('detalle-distrito')).toContainText('Distrito');
   });

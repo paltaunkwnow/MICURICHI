@@ -67,7 +67,7 @@ export default defineConfig({
     stdout: 'ignore',
     stderr: 'pipe',
     env: {
-      // La suite crea varios reportes desde la misma IP; con el límite de producción (10/h)
+      // La suite crea muchos reportes desde la misma IP; con el límite de producción (10/h)
       // los últimos casos recibirían 429 y el resultado dependería de cuántas veces se corrió.
       // Solo afecta al servidor que levanta Playwright.
       RATE_LIMIT_REPORTES_POR_HORA: '1000',
@@ -91,15 +91,30 @@ export default defineConfig({
       LOGIN_PETICIONES_POR_VENTANA: '1000',
       /**
        * Altas de cuenta. La suite crea una cuenta por caso que necesite reportar, porque cada
-       * cuenta solo puede enviar un reporte por hora y compartirla haría que el resultado
-       * dependiera del orden. El límite real (5 por IP y hora) dejaría fuera a la mitad de la
-       * suite desde la misma máquina.
-       *
-       * La cuota de un reporte por hora NO se toca: es una de las cosas que hay que comprobar,
-       * y `cuenta-ciudadana.spec.ts` verifica que el segundo envío de una cuenta se rechaza.
+       * cuenta puede enviar 3 reportes por día y compartirla haría que el resultado dependiera del
+       * orden y de cuántas veces se corrió la suite ese día. Los límites reales (5 por IP y hora,
+       * 10 por IP y día) dejarían fuera a la mayor parte de la suite desde la misma máquina.
        */
       REGISTRO_PETICIONES_POR_VENTANA: '1000',
       REGISTRO_MAX_POR_IP: '1000',
+      ALTAS_POR_DIA_POR_IP: '10000',
+      /**
+       * El cupo de 3 reportes por cuenta y por día (contracts 0.10.0) NO se sube: es una de las
+       * cosas que hay que comprobar (`cuenta-ciudadana.spec.ts` verifica que el 4.º se rechaza).
+       * Se fija para que un `.env` local con otro valor no cambie lo que la suite espera.
+       */
+      REPORTES_POR_DIA_POR_CUENTA: '3',
+      /**
+       * Demora de publicación (plan 2026-09-26, pedido C): en producción, 60 s el 1.º reporte del
+       * día de la cuenta y 240 s los siguientes. Acá 2 y 4 s: lo bastante para comprobar que
+       * durante la espera nadie lo ve y que el 2.º tarda más (`publicacion-diferida.spec.ts`), y
+       * lo bastante poco para que las pruebas que moderan un reporte recién creado no se coman el
+       * timeout esperándolo (`esperarPublicacion` en tests/ayudas.ts). Los mismos valores están en
+       * `DEMORA_E2E_PRIMERO_S` y `DEMORA_E2E_SIGUIENTES_S`, y `global-setup.ts` comprueba que la
+       * pila corra con ellos.
+       */
+      REPORTE_DEMORA_PRIMERO_S: '2',
+      REPORTE_DEMORA_SIGUIENTES_S: '4',
       LOGIN_MAX_FALLOS_IP: '100000',
       LOGIN_MAX_FALLOS_EMAIL: '100000',
       /**

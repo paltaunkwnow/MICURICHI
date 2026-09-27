@@ -66,24 +66,41 @@ test.describe('la cookie de técnico no cambia lo que ve el público', () => {
 
   test('el listado público responde igual con sesión y sin ella', async () => {
     const url = `${API}/api/v1/reportes?limite=500`;
-    const rCon = await conSesion.get(url);
-    const rSin = await anonimo.get(url);
-    expect(rCon.status()).toBe(200);
-    expect(rSin.status()).toBe(200);
+    type Coleccion = {
+      total: number;
+      features: Array<{ properties: Record<string, unknown> & { estado: string } }>;
+    };
+    let con: Coleccion | null = null;
+    // Las dos lecturas se repiten juntas si hace falta: un reporte de otra prueba puede cumplir
+    // su demora de publicación (2 o 4 s en la pila E2E) justo entre una y otra. Lo que no puede
+    // pasar nunca es que la cookie, por sí sola, cambie algo.
+    await expect(async () => {
+      const rCon = await conSesion.get(url);
+      const rSin = await anonimo.get(url);
+      expect(rCon.status()).toBe(200);
+      expect(rSin.status()).toBe(200);
+      const c = (await rCon.json()) as Coleccion;
+      const s = (await rSin.json()) as Coleccion;
+      // Si la cookie cambiara algo, `c.total` sería mayor: incluiría rechazados, duplicados o
+      // reportes que todavía esperan su publicación.
+      expect(c.total, 'la sesión no puede añadir reportes al listado público').toBe(s.total);
+      expect(JSON.stringify(c)).toBe(JSON.stringify(s));
+      con = c;
+    }).toPass({ timeout: 20_000 });
+    const lista = (con as Coleccion | null)?.features ?? [];
 
-    const con = await rCon.json();
-    const sin = await rSin.json();
-
-    // Si la cookie cambiara algo, `con.total` sería mayor: incluiría los que están en revisión.
-    expect(con.total, 'la sesión no puede añadir reportes al listado público').toBe(sin.total);
-    expect(JSON.stringify(con)).toBe(JSON.stringify(sin));
-
-    for (const f of con.features as Array<{ properties: Record<string, unknown> }>)
+    for (const f of lista)
       expect(tieneCamposTecnicos(f.properties), 'campos técnicos en la vista pública').toBe(false);
 
-    // Ningún reporte sin moderar puede aparecer (§7.3: solo validado y resuelto se publican).
-    for (const f of con.features as Array<{ properties: { estado: string } }>)
-      expect(['validado', 'resuelto']).toContain(f.properties.estado);
+    // Sin moderación previa (plan 2026-09-26, pedido G): los nuevos ya publicados se ven, con
+    // `verificado: false`; los rechazados y los duplicados, nunca.
+    for (const f of lista) {
+      expect(['nuevo', 'validado', 'resuelto']).toContain(f.properties.estado);
+      if ('verificado' in f.properties)
+        expect(f.properties.verificado, `verificado de un reporte ${f.properties.estado}`).toBe(
+          f.properties.estado !== 'nuevo',
+        );
+    }
   });
 
   test('el detalle público tampoco cambia con la sesión puesta', async () => {

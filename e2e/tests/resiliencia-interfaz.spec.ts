@@ -94,48 +94,40 @@ test.describe('la interfaz no inventa cuando la API falla', () => {
     }).toPass({ timeout: 30_000 });
   });
 
-  test('«Mis reportes» separa «en revisión» de «no pudimos preguntar»', async ({ page }) => {
-    await page.goto('/');
-    // Un reporte recordado por este dispositivo, como lo deja el formulario tras enviar.
-    await page.evaluate(() => {
-      localStorage.setItem(
-        'curichi.mis-reportes.v1',
-        JSON.stringify([
-          {
-            id: '00000000-0000-4000-8000-0000000000aa',
-            enviado_en: new Date().toISOString(),
-            titulo: 'Punto de prueba',
-            unidad_vecinal: 'UV-105',
-            distrito: 'D02',
-            severidad: 'alta',
-            tiene_foto: false,
-          },
-        ]),
-      );
-    });
-    await page.route('**/api/v1/reportes/**', (ruta) =>
-      ruta.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({ codigo: 'ERROR_INTERNO', mensaje: 'Error interno.' }),
-      }),
+  test('«Mis reportes» dice que no pudo preguntar, y no que la cuenta no tenga reportes', async ({
+    page,
+  }) => {
+    // La lista sale de la cuenta (`GET /api/v1/mis-reportes`), no del navegador: hace falta sesión.
+    await cuentaNuevaEnElNavegador(page, 'mis-500-');
+    await page.route('**/api/v1/mis-reportes', (ruta) =>
+      ruta.fulfill(errorApi(500, 'ERROR_INTERNO', 'Error interno.')),
     );
 
     await page.goto('/mis-reportes');
-    await expect(page.getByTestId('error-mis-reportes')).toBeVisible();
-    await expect(page.getByText('Estado desconocido')).toBeVisible();
-    await expect(page.getByText('esperando revisión')).toHaveCount(0);
+    const aviso = page.getByTestId('error-mis-reportes');
+    await expect(aviso).toBeVisible();
+    // Lo que NO puede pasar: afirmar que la cuenta no envió nada, ni pedirle que entre.
+    await expect(page.getByTestId('mis-reportes-vacio')).toHaveCount(0);
+    await expect(page.getByText('Todavía no enviaste ninguno')).toHaveCount(0);
+    await expect(page.getByTestId('acceso-mis-reportes')).toHaveCount(0);
+
+    // Vuelve la API: «Reintentar» trae la lista (vacía: la cuenta es nueva) sin recargar.
+    await page.unroute('**/api/v1/mis-reportes');
+    await aviso.getByRole('button', { name: 'Reintentar' }).click();
+    await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
+    await expect(page.getByTestId('error-mis-reportes')).toHaveCount(0);
   });
 
-  test('un código de seguimiento que nadie reconoce no se dibuja como reporte propio', async ({
+  test('un código de seguimiento que no es de la cuenta no se dibuja como reporte propio', async ({
     page,
   }) => {
+    await cuentaNuevaEnElNavegador(page, 'seguimiento-');
     await page.goto('/mis-reportes/00000000-0000-4000-8000-0000000000bb');
     await expect(page.getByTestId('seguimiento-desconocido')).toBeVisible();
     await expect(page.getByText('No encontramos ese reporte')).toBeVisible();
     // Lo que NO puede pasar: dibujar la línea de tiempo, que afirma que el reporte existe y
     // que está esperando revisión. (Se busca un hito y no «Lo enviaste», porque ese texto
-    // aparece también dentro del propio aviso: "Si lo enviaste desde otro teléfono…".)
+    // aparece también dentro del propio aviso: "Si lo enviaste con otra cuenta…".)
     await expect(page.getByText('Un técnico lo revisó')).toHaveCount(0);
     await expect(page.locator('main ol')).toHaveCount(0);
   });
@@ -149,8 +141,8 @@ test.describe('el formulario no pierde lo escrito', () => {
 
   test('CA-X1: al recargar, retoma el borrador en el paso donde iba', async ({ page }) => {
     // Reportar exige cuenta desde la Fase 5, así que el formulario ni se monta sin sesión. Una
-    // cuenta nueva por caso: cada una solo puede enviar un reporte por hora y compartir la del
-    // seed haría que el resultado dependiera del orden en que corrieron los tests.
+    // cuenta nueva por caso: cada una puede enviar 3 reportes por día y compartir la del seed
+    // haría que el resultado dependiera del orden en que corrieron los tests.
     await crearCuentaYEntrarPorUi(page, '/reportar');
     await page.waitForURL('**/reportar');
 
@@ -227,7 +219,7 @@ test.describe('el formulario no pierde lo escrito', () => {
 
     // El texto es inventado a propósito: tiene que verse el del servidor, no uno genérico.
     const mensaje =
-      'Llegaste al máximo de fotos por hora (prueba E2E). Vas a poder subir otra en 37 minutos.';
+      'Llegaste al máximo de fotos de hoy (prueba E2E). Vas a poder subir otra en 37 minutos.';
     await page.route('**/api/v1/fotos', (ruta) =>
       ruta.fulfill(
         errorApi(429, 'CUOTA_DE_FOTOS', mensaje, {

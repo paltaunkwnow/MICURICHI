@@ -4,8 +4,10 @@ import {
   CREDENCIALES_TECNICO,
   cuentaNuevaConSesion,
   esperarPila,
+  esperarPublicacion,
   esperarRedQuieta,
   GEO,
+  loginTecnico,
   PANEL,
   reporteValido,
   vigilarRed,
@@ -45,6 +47,9 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
   test.beforeAll(async ({ request }) => {
     await esperarPila(request);
     idReporte = await crearReporteMusloPermanente(request, marca);
+    // Mientras espera su publicación, ni el técnico lo ve: el detalle del panel daría 404.
+    await loginTecnico(request);
+    await esperarPublicacion(request, idReporte);
   });
 
   test('CA-P1: el detalle no muestra los cuatro datos y conserva «En el mapa público se ve»', async ({
@@ -113,10 +118,12 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     const distrito = prefijo('distrito_municipal');
     const uv = prefijo('unidad_vecinal');
 
+    await entrarAlPanel(page);
+    // Vigilar la red recién ACÁ (no antes de entrar al panel) para no arrastrar el ruido de la
+    // bandeja (`/reportes`), que dibuja su propio mapa y pide las mismas capas.
     const red = vigilarRed(page);
     const pedidas = () => red.pedidas.map((u) => new URL(u).pathname);
 
-    await entrarAlPanel(page);
     // El detalle abre el mapa en zoom 16 sobre el reporte: por encima del umbral de 15.
     await page.goto(`${PANEL}/reportes/${idReporte}`);
     await expect(

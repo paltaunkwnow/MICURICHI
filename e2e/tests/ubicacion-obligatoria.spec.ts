@@ -10,6 +10,7 @@ import {
   elegirPuntoPorCoordenadas,
   escribirCoordenadas,
   esperarPila,
+  esperarPublicacion,
   GPS_EN_EL_CENTRO,
   llegarARevision,
   loginTecnico,
@@ -21,6 +22,7 @@ import {
   PUNTO_AJUSTADO,
   PUNTO_CENTRO,
   RADIO_DISPOSITIVO_M,
+  REPORTES_POR_DIA,
   reporteValido,
   tocarCompartirUbicacion,
   vigilarSensores,
@@ -298,6 +300,7 @@ test.describe(`el punto no sale del círculo de ${RADIO_DISPOSITIVO_M} m`, () =>
     // Lo que guardó: la distancia y la precisión, no la posición del teléfono.
     const id = ((await r.json()) as { id: string }).id;
     await loginTecnico(request);
+    await esperarPublicacion(request, id);
     const tecnica = await request.get(`${API}/api/v1/tecnico/reportes/${id}`);
     expect(tecnica.status()).toBe(200);
     const f = await tecnica.json();
@@ -406,7 +409,7 @@ test.describe('el punto aceptado no se muda al volver a compartir la ubicación'
 test.describe('api-core vuelve a comprobar la ubicación', () => {
   test.skip(({ isMobile }) => isMobile, 'Sin navegador: basta con correrlo una vez.');
 
-  test(`un POST directo con el punto a 80 m da 422 y no gasta el turno; a ${RADIO_DISPOSITIVO_M} m entra`, async ({
+  test(`un POST directo con el punto a 80 m da 422 y no gasta el cupo; a ${RADIO_DISPOSITIVO_M} m entra`, async ({
     request,
   }) => {
     await cuentaNuevaConSesion(request, 'radio-api-');
@@ -446,14 +449,17 @@ test.describe('api-core vuelve a comprobar la ubicación', () => {
       'dispositivo',
     );
 
-    // En el borde entra. Con una cuenta que solo puede enviar un reporte por hora, que entre
-    // prueba que ninguno de los rechazos de arriba gastó el turno.
+    // Ninguno de los rechazos de arriba gastó el cupo del día, y en el borde entra.
+    const yo = await (await request.get(`${API}/api/v1/auth/yo`)).json();
+    expect(yo.reportes_restantes_hoy, 'los rechazos no gastan el cupo').toBe(REPORTES_POR_DIA);
     const borde = desplazar(PUNTO_CENTRO, { norteM: RADIO_DISPOSITIVO_M });
     const dentro = await enviar({ ...borde, dispositivo: dispositivoEn(PUNTO_CENTRO) });
     expect(dentro.status(), await dentro.text()).toBe(201);
     const id = (await dentro.json()).id as string;
 
+    // La vista técnica lo muestra recién pasada su demora de publicación.
     await loginTecnico(request);
+    await esperarPublicacion(request, id);
     const f = await (await request.get(`${API}/api/v1/tecnico/reportes/${id}`)).json();
     expect(f.properties).toMatchObject({
       ubicacion_metodo: 'manual',

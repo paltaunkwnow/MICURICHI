@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test';
-import { CREDENCIALES_TECNICO, esperarPila, leerCiudad, PANEL } from './ayudas';
+import {
+  CREDENCIALES_TECNICO,
+  cuentaNuevaEnElNavegador,
+  esperarPila,
+  leerCiudad,
+  PANEL,
+} from './ayudas';
 
 /**
  * El plano de zonificación que trae el panel es contenido de la instalación de Santa Cruz de la
@@ -69,9 +75,17 @@ test.describe('navegación de la app pública', () => {
     await expect(page.getByText('Si hay riesgo para la vida, llamá al 911.')).toBeVisible();
   });
 
-  test('«Mis reportes» explica que la lista vive en el dispositivo', async ({ page }) => {
-    // Sin cuentas de ciudadano, la lista sale de lo que guardó este navegador: en uno limpio está
-    // vacía, y eso es lo que tiene que decir en vez de fingir que no hay reportes en el sistema.
+  test('«Mis reportes» es de la cuenta: sin sesión pide entrar, y con una cuenta nueva está vacía', async ({
+    page,
+  }) => {
+    // Sin sesión no hay lista que mostrar: se ofrece entrar, sin fingir que no hay reportes.
+    await page.goto('/mis-reportes');
+    await expect(page.getByTestId('acceso-mis-reportes')).toBeVisible();
+    await expect(page.getByTestId('mis-reportes-vacio')).toHaveCount(0);
+
+    // Con sesión, la lista sale de `GET /api/v1/mis-reportes`: una cuenta recién creada no envió
+    // nada, y eso es lo que tiene que decir.
+    await cuentaNuevaEnElNavegador(page, 'mis-vacia-');
     await page.goto('/mis-reportes');
     await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Todavía no enviaste ninguno' })).toBeVisible();
@@ -81,12 +95,12 @@ test.describe('navegación de la app pública', () => {
     ).toBeVisible();
   });
 
-  test('«Borrar esta lista del dispositivo» la vacía en pantalla y en el navegador', async ({
-    page,
-  }) => {
+  test('la lista vieja que guardaba el navegador se borra y no se muestra', async ({ page }) => {
+    // Hasta contracts 0.11.0, el navegador recordaba los reportes enviados desde el dispositivo en
+    // `curichi.mis-reportes.v1`. Ya no se usa: la lista es la de la cuenta, en cualquier teléfono,
+    // y no queda en el dispositivo rastro de qué se reportó.
+    await cuentaNuevaEnElNavegador(page, 'lista-vieja-');
     await page.goto('/');
-    // Un reporte recordado por este dispositivo, como lo deja el formulario tras enviar. El id no
-    // existe: la API responde 404 y la tarjeta queda «esperando revisión».
     await page.evaluate(() => {
       localStorage.setItem(
         'curichi.mis-reportes.v1',
@@ -94,7 +108,7 @@ test.describe('navegación de la app pública', () => {
           {
             id: '00000000-0000-4000-8000-0000000000cc',
             enviado_en: new Date().toISOString(),
-            titulo: 'Punto para borrar',
+            titulo: 'Punto de la lista vieja',
             unidad_vecinal: 'UV-105',
             distrito: 'D02',
             severidad: 'media',
@@ -103,17 +117,15 @@ test.describe('navegación de la app pública', () => {
         ]),
       );
     });
+
     await page.goto('/mis-reportes');
-    await expect(page.getByText('Punto para borrar')).toBeVisible();
-
-    await page.getByTestId('boton-borrar-lista').click();
-    // Antes se borraba solo el almacenamiento y la lista seguía a la vista.
     await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
-    await expect(page.getByText('Punto para borrar')).toHaveCount(0);
-    expect(await page.evaluate(() => localStorage.getItem('curichi.mis-reportes.v1'))).toBeNull();
-
-    await page.reload();
-    await expect(page.getByTestId('mis-reportes-vacio')).toBeVisible();
+    await expect(page.getByText('Punto de la lista vieja')).toHaveCount(0);
+    // Ya no hay nada que borrar a mano: la app la borra sola.
+    await expect(page.getByTestId('boton-borrar-lista')).toHaveCount(0);
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem('curichi.mis-reportes.v1')))
+      .toBeNull();
   });
 
   test('el mapa deja cambiar la capa administrativa', async ({ page, isMobile }) => {
