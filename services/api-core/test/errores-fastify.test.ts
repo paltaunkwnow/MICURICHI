@@ -15,8 +15,7 @@ import type pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
-import { resolverDePrueba } from './ayudas.js';
+import { configDePrueba, resolverDePrueba } from './ayudas.js';
 
 let app: FastifyInstance;
 
@@ -32,7 +31,11 @@ beforeAll(async () => {
       options: { max: 8 },
     } as unknown as pg.Pool,
     cfg: {
-      ...leerConfig({ NODE_ENV: 'test', METRICAS_RUTA: '', RATE_LIMIT_REPORTES_POR_HORA: '1000' }),
+      ...configDePrueba({
+        NODE_ENV: 'test',
+        METRICAS_RUTA: '',
+        RATE_LIMIT_REPORTES_POR_HORA: '1000',
+      }),
       rutaOpenApi: '/no-existe.yaml',
     },
     resolver: resolverDePrueba,

@@ -5,12 +5,14 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
+  enEspera,
   iniciarSesion,
   liberarCuota,
+  publicarYa,
   reporteEn,
   reporteValido,
   resolverDePrueba,
@@ -50,7 +52,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -83,11 +85,16 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(f.properties.severidad_calculada).toBe('media');
     expect(f.geometry.coordinates).toEqual([-63.195, -17.79]);
   });
-  it('no publica reportes nuevos en el listado público ni en el detalle', async () => {
+  it('mientras espera no sale en público; después, como nuevo sin verificar (contracts 0.11.0)', async () => {
+    await enEspera(ex, id);
     const lista = await app.inject({ method: 'GET', url: '/api/v1/reportes' });
     expect(lista.json().features.map((x: { id: string }) => x.id)).not.toContain(id);
     const det = await app.inject({ method: 'GET', url: `/api/v1/reportes/${id}` });
     expect(det.statusCode).toBe(404);
+    await publicarYa(ex, id);
+    const ya = await app.inject({ method: 'GET', url: `/api/v1/reportes/${id}` });
+    expect(ya.statusCode).toBe(200);
+    expect(ya.json().properties).toMatchObject({ estado: 'nuevo', verificado: false });
   });
   it('el técnico sí lo ve, con coordenada exacta y campos de moderación', async () => {
     const det = await app.inject({
@@ -164,7 +171,9 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
       payload: { estado: 'nuevo', estado_motivo: 'Reapertura' },
       cookies: { curichi_sesion: cookieTecnico },
     });
-    expect(reabrirTecnico.statusCode).toBe(409);
+    // La transición existe pero es de admin: permiso (403), no estado imposible (409).
+    expect(reabrirTecnico.statusCode).toBe(403);
+    expect(reabrirTecnico.json().codigo).toBe('SIN_PERMISO');
     const reabrirAdmin = await app.inject({
       method: 'PATCH',
       url: `/api/v1/reportes/${otro}/estado`,
@@ -336,7 +345,7 @@ describe('validación, cobertura, privacidad y exportación', () => {
     const limitada = await crearApp({
       pool,
       cfg: {
-        ...leerConfig({ DATABASE_URL: base.url }),
+        ...configDePrueba({ DATABASE_URL: base.url }),
         rutaOpenApi: '/no-existe.yaml',
         rateLimitMax: 2,
       },

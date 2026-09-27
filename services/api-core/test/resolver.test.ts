@@ -14,10 +14,9 @@ import type pg from 'pg';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import { Metricas } from '../src/observabilidad.js';
 import { type ObservabilidadResolver, type ResolverGeo, ResolverHttp } from '../src/resolver.js';
-import { resolverDePrueba } from './ayudas.js';
+import { configDePrueba, resolverDePrueba } from './ayudas.js';
 
 const TOKEN = 'token-interno-de-ejemplo-con-32-caracteres-o-mas';
 
@@ -146,7 +145,7 @@ describe('crearApp conecta la observabilidad del resolver', () => {
       // Sin /docs: registrar Swagger con el OpenAPI entero es lo más lento de crearApp y aquí no
       // pinta nada.
       cfg: {
-        ...leerConfig({ NODE_ENV: 'test', METRICAS_RUTA: '' }),
+        ...configDePrueba({ NODE_ENV: 'test', METRICAS_RUTA: '' }),
         rutaOpenApi: '/no-existe.yaml',
       },
       resolver,

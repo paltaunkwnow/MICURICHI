@@ -1,32 +1,28 @@
 /**
- * Cuota de creación de reportes: **un reporte aceptado por cuenta cada N minutos** (§13).
+ * Cupo diario por cuenta (contracts 0.10.0, migración 0014): `REPORTES_POR_DIA_POR_CUENTA`
+ * reportes y `FOTOS_POR_DIA_POR_CUENTA` fotos por día calendario en `ZONA_HORARIA`, contados en
+ * `cuota_reporte_diaria` (una fila por cuenta y por día). Reemplaza a la espera de 60 min entre
+ * reportes (`usuario.ultimo_reporte_en`), que ya no se lee ni se escribe.
  *
  * POR QUÉ NO BASTA EL LÍMITE POR IP
  *
- * El límite por IP que ya existía (`rateLimitMax`) frena a una conexión, no a una persona. En una
- * ciudad donde la mayoría reporta desde datos móviles, la IP cambia sola: basta poner el teléfono
- * en modo avión y quitarlo para empezar de cero. Y al revés, un barrio entero detrás de un mismo
- * NAT comparte cubo, así que subir ese límite para no castigar al barrio es justamente lo que le
- * da margen al abuso. Los dos límites conviven porque miden cosas distintas y ninguno sustituye
- * al otro: la cuenta acota a la persona, la IP acota a la máquina.
+ * El límite por IP frena a una conexión, no a una persona: con datos móviles la IP cambia sola
+ * (modo avión y de vuelta), y un barrio detrás de un mismo NAT comparte el cubo. Los dos límites
+ * conviven porque miden cosas distintas: la cuenta acota a la persona, la IP a la máquina.
  *
- * POR QUÉ ESTE UPDATE Y NO UN SELECT SEGUIDO DE UN INSERT
+ * POR QUÉ UN INSERT … ON CONFLICT DO UPDATE … WHERE
  *
- * La forma intuitiva —leer el último reporte, comparar la hora, insertar— tiene una ventana de
- * carrera que se abre justo cuando importa: con dos peticiones simultáneas, las dos leen el mismo
- * estado anterior, las dos concluyen que ha pasado una hora y las dos insertan. No es teórico; es
- * exactamente lo que hace un script que envía en paralelo.
+ * Leer el contador, comparar e incrementar abre una ventana de carrera: dos envíos simultáneos
+ * leen lo mismo y entran los dos. Con el upsert condicional la fila `(usuario_id, dia)` hace de
+ * cerrojo: la segunda transacción espera a la primera y vuelve a evaluar el WHERE con el valor ya
+ * incrementado (EvalPlanQual). Sin fila devuelta, el cupo del día está agotado. El `n` devuelto
+ * es el número de reporte del día y decide la demora de publicación (1.º: 60 s; siguientes: 240 s).
  *
- * Este UPDATE condicional no tiene esa ventana. En READ COMMITTED, cuando dos transacciones
- * intentan actualizar la misma fila, la segunda espera a que la primera confirme y entonces
- * **vuelve a evaluar el WHERE contra la versión nueva de la fila** (EvalPlanQual). Como la
- * primera acaba de poner `ultimo_reporte_en = now()`, la condición ya no se cumple: se actualizan
- * 0 filas y esa petición se rechaza. La serialización la hace el bloqueo de fila de PostgreSQL,
- * que es precisamente para lo que está.
+ * EL DÍA ES EL DE LA CIUDAD
  *
- * Va DENTRO de la transacción que inserta el reporte, así que si el reporte no llega a guardarse
- * —fotos inválidas, error posterior— el ROLLBACK devuelve también la cuota. Nadie pierde su turno
- * por un envío que no se guardó.
+ * `dia` se calcula aquí, con la zona de la instalación, y no con `current_date`: con la sesión de
+ * PostgreSQL en UTC, en La Paz el día cambiaría a las 20:00. Todas las funciones aceptan `ahora`
+ * para que las pruebas fijen el instante (23:59 y 00:01 locales caen en días distintos).
  */
 
 interface ClienteSql {
@@ -36,61 +32,164 @@ interface ClienteSql {
   ): Promise<{ rows: T[]; rowCount: number | null }>;
 }
 
-export type ResultadoCuota =
-  | { permitido: true }
-  /** Rechazada: `reintentarEnS` va en `Retry-After` y `disponibleEn` se le muestra al vecino. */
-  | { permitido: false; reintentarEnS: number; disponibleEn: Date };
+export interface OpcionesDia {
+  /** Zona IANA de la ciudad (`cfg.zonaHoraria`). */
+  zona: string;
+  /** Instante a usar en lugar de `now()`. Solo para pruebas. */
+  ahora?: Date | string;
+}
+
+export interface OpcionesCupo extends OpcionesDia {
+  /** Tope del día para lo que se reserva. */
+  maximo: number;
+}
+
+/** Cuándo vuelve a haber cupo: la próxima medianoche de la ciudad. */
+export interface EsperaCupo {
+  /** Segundos hasta la medianoche, para `Retry-After`. Al menos 1. */
+  reintentarEnS: number;
+  /** La medianoche en ISO 8601 con el desfase de la ciudad (p. ej. `…T00:00:00-04:00`). */
+  disponibleEn: string;
+}
+
+export type ResultadoReserva =
+  | { permitido: true; n: number; dia: string }
+  | { permitido: false; espera: EsperaCupo };
+
+export interface CupoDelDia {
+  dia: string;
+  reportesN: number;
+  fotosN: number;
+  espera: EsperaCupo;
+}
+
+const ahoraSql = (o: OpcionesDia) =>
+  o.ahora === undefined ? null : o.ahora instanceof Date ? o.ahora.toISOString() : o.ahora;
 
 /**
- * Intenta consumir el turno de esta cuenta. Devuelve `permitido: false` sin tocar nada si la
- * cuenta envió un reporte hace menos de `minutos`.
+ * El día local y su medianoche siguiente. `$1` es el instante (o null = now()) y `$2` la zona.
+ * `medianoche_local` y `desfase_s` sirven para escribir la hora con el desfase de la ciudad.
  */
-export async function consumirCuotaDeReporte(
-  cliente: ClienteSql,
-  usuarioId: string,
-  minutos: number,
-): Promise<ResultadoCuota> {
-  const consumido = await cliente.query<{ ok: boolean }>(
-    `UPDATE usuario SET ultimo_reporte_en = now()
-      WHERE id = $1
-        AND (ultimo_reporte_en IS NULL OR ultimo_reporte_en <= now() - ($2 || ' minutes')::interval)
-      RETURNING true AS ok`,
-    [usuarioId, String(minutos)],
-  );
-  if (consumido.rowCount) return { permitido: true };
+const SQL_DIA = `
+  SELECT d.dia::text AS dia,
+         to_char(d.medianoche AT TIME ZONE $2::text, 'YYYY-MM-DD"T"HH24:MI:SS') AS medianoche_local,
+         extract(epoch FROM (d.medianoche AT TIME ZONE $2::text) - (d.medianoche AT TIME ZONE 'UTC'))::int AS desfase_s,
+         GREATEST(1, ceil(extract(epoch FROM d.medianoche - d.t)))::int AS segundos
+    FROM (SELECT a.t, (a.t AT TIME ZONE $2::text)::date AS dia,
+                 (((a.t AT TIME ZONE $2::text)::date + 1)::timestamp AT TIME ZONE $2::text) AS medianoche
+            FROM (SELECT COALESCE($1::timestamptz, now()) AS t) a) d`;
 
-  // Sin turno. Se relee para decirle a la persona CUÁNDO puede volver, en lugar de un «no» seco.
-  // La fila ya no está bloqueada (quien la tenía confirmó), así que esto ve el valor definitivo.
-  const fila = await cliente.query<{ disponible_en: string | null }>(
-    `SELECT (ultimo_reporte_en + ($2 || ' minutes')::interval)::text AS disponible_en
-       FROM usuario WHERE id = $1`,
-    [usuarioId, String(minutos)],
-  );
-  const texto = fila.rows[0]?.disponible_en;
-  // Si la fila desapareció entre medias (cuenta borrada), se responde con la ventana completa:
-  // nunca con 0, que invitaría a reintentar en bucle.
-  const disponibleEn = texto ? new Date(texto) : new Date(Date.now() + minutos * 60_000);
-  const restanteMs = disponibleEn.getTime() - Date.now();
+interface FilaDia extends Record<string, unknown> {
+  dia: string;
+  medianoche_local: string;
+  desfase_s: number;
+  segundos: number;
+}
+
+/** `-04:00` a partir de -14400 s. */
+function desfaseIso(segundos: number): string {
+  const signo = segundos < 0 ? '-' : '+';
+  const abs = Math.abs(segundos);
+  const hh = String(Math.floor(abs / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((abs % 3600) / 60)).padStart(2, '0');
+  return `${signo}${hh}:${mm}`;
+}
+
+function esperaDe(f: FilaDia): EsperaCupo {
   return {
-    permitido: false,
-    // Al menos 1 s: un Retry-After de 0 es una invitación a reintentar sin pausa.
-    reintentarEnS: Math.max(1, Math.ceil(restanteMs / 1000)),
-    disponibleEn,
+    reintentarEnS: f.segundos,
+    disponibleEn: `${f.medianoche_local}${desfaseIso(f.desfase_s)}`,
   };
 }
 
-/** Momento a partir del cual esta cuenta puede volver a reportar; null si puede ahora mismo. */
-export async function proximoEnvioPermitido(
+/** Día local, medianoche siguiente y minutos transcurridos desde la medianoche de hoy. */
+export async function momentoDelDia(
+  cliente: ClienteSql,
+  o: OpcionesDia,
+): Promise<{ dia: string; espera: EsperaCupo; minutosDesdeMedianoche: number }> {
+  const r = await cliente.query<FilaDia & { minutos: number }>(
+    `SELECT x.*, extract(epoch FROM COALESCE($1::timestamptz, now())
+                   - ((x.dia::date)::timestamp AT TIME ZONE $2::text)) / 60 AS minutos
+       FROM (${SQL_DIA}) x`,
+    [ahoraSql(o), o.zona],
+  );
+  const f = r.rows[0]!;
+  return { dia: f.dia, espera: esperaDe(f), minutosDesdeMedianoche: Number(f.minutos) };
+}
+
+/** Lo gastado hoy por la cuenta y cuándo vuelve el cupo. Solo lee. */
+export async function cupoDelDia(
   cliente: ClienteSql,
   usuarioId: string,
-  minutos: number,
-): Promise<Date | null> {
-  const r = await cliente.query<{ disponible_en: string | null }>(
-    `SELECT (ultimo_reporte_en + ($2 || ' minutes')::interval)::text AS disponible_en
-       FROM usuario
-      WHERE id = $1 AND ultimo_reporte_en > now() - ($2 || ' minutes')::interval`,
-    [usuarioId, String(minutos)],
+  o: OpcionesDia,
+): Promise<CupoDelDia> {
+  const r = await cliente.query<FilaDia & { reportes_n: number; fotos_n: number }>(
+    `SELECT x.*, COALESCE(c.reportes_n, 0)::int AS reportes_n, COALESCE(c.fotos_n, 0)::int AS fotos_n
+       FROM (${SQL_DIA}) x
+       LEFT JOIN cuota_reporte_diaria c ON c.usuario_id = $3 AND c.dia = x.dia::date`,
+    [ahoraSql(o), o.zona, usuarioId],
   );
-  const texto = r.rows[0]?.disponible_en;
-  return texto ? new Date(texto) : null;
+  const f = r.rows[0]!;
+  return { dia: f.dia, reportesN: f.reportes_n, fotosN: f.fotos_n, espera: esperaDe(f) };
+}
+
+async function reservar(
+  cliente: ClienteSql,
+  columna: 'reportes_n' | 'fotos_n',
+  usuarioId: string,
+  o: OpcionesCupo,
+): Promise<ResultadoReserva> {
+  const r = await cliente.query<{ n: number; dia: string }>(
+    `INSERT INTO cuota_reporte_diaria (usuario_id, dia, ${columna})
+     VALUES ($1::uuid, (COALESCE($3::timestamptz, now()) AT TIME ZONE $4::text)::date, 1)
+     ON CONFLICT (usuario_id, dia) DO UPDATE
+       SET ${columna} = cuota_reporte_diaria.${columna} + 1, actualizado_en = now()
+       WHERE cuota_reporte_diaria.${columna} < $2
+     RETURNING ${columna}::int AS n, dia::text AS dia`,
+    [usuarioId, o.maximo, ahoraSql(o), o.zona],
+  );
+  const fila = r.rows[0];
+  if (fila) return { permitido: true, n: fila.n, dia: fila.dia };
+  const d = await cliente.query<FilaDia>(SQL_DIA, [ahoraSql(o), o.zona]);
+  return { permitido: false, espera: esperaDe(d.rows[0]!) };
+}
+
+/**
+ * Reserva un turno de reporte. Va DENTRO de la transacción que inserta el reporte y DESPUÉS de la
+ * idempotencia: un reenvío del mismo envío no gasta turno, y si el reporte no llega a guardarse
+ * (fotos inválidas, error posterior) el ROLLBACK devuelve el turno.
+ */
+export function reservarTurnoDeReporte(
+  cliente: ClienteSql,
+  usuarioId: string,
+  o: OpcionesCupo,
+): Promise<ResultadoReserva> {
+  return reservar(cliente, 'reportes_n', usuarioId, o);
+}
+
+/**
+ * Reserva un turno de foto ANTES de leer y procesar la imagen, en su propia sentencia (no se
+ * retiene ninguna transacción mientras trabaja sharp). Si el procesamiento falla, se devuelve con
+ * `devolverTurnoDeFoto`. La limpieza de fotos huérfanas no lo toca: borrar lo propio no devuelve
+ * turnos.
+ */
+export function reservarTurnoDeFoto(
+  cliente: ClienteSql,
+  usuarioId: string,
+  o: OpcionesCupo,
+): Promise<ResultadoReserva> {
+  return reservar(cliente, 'fotos_n', usuarioId, o);
+}
+
+/** Devuelve el turno de foto reservado en `dia` (el de la reserva, aunque ya sea otro día). */
+export async function devolverTurnoDeFoto(
+  cliente: ClienteSql,
+  usuarioId: string,
+  dia: string,
+): Promise<void> {
+  await cliente.query(
+    `UPDATE cuota_reporte_diaria SET fotos_n = fotos_n - 1, actualizado_en = now()
+      WHERE usuario_id = $1 AND dia = $2::date AND fotos_n > 0`,
+    [usuarioId, dia],
+  );
 }

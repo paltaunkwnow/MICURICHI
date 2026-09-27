@@ -2,6 +2,7 @@ import {
   ReporteCambiarEstadoSchema,
   ReporteFusionarSchema,
   ReporteReclasificarSchema,
+  transicionExiste,
   transicionPermitida,
 } from 'contracts';
 import { ejecutorPg, recalcularEntornoDeReporte } from 'db';
@@ -10,8 +11,9 @@ import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { obtenerReporte } from '../consultas.js';
+import { condicionPublicado } from '../visibilidad.js';
 import { aFeature, type FilaReporte, vistaTecnica } from '../vistas.js';
-import { invalidarCachesDeAgregados } from './admin.js';
+import { invalidarAgregadosEnVuelo } from './admin.js';
 
 /**
  * Los uuid se normalizan a minúsculas al entrar. La base los compara como uuid, pero aquí se
@@ -25,7 +27,7 @@ const AFECTA_PUNTOS = new Set(['validado', 'resuelto']);
 
 export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
   type ResultadoCambio =
-    | { ok: false; error: 404 | 409; codigo: string; mensaje: string }
+    | { ok: false; error: 403 | 404 | 409; codigo: string; mensaje: string }
     | { ok: true; fila: FilaReporte };
 
   const noPermitida = (mensaje: string): ResultadoCambio => ({
@@ -64,13 +66,15 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       // id. Sin bloquear el canónico, dos fusiones cruzadas simultáneas (A→B y B→A) leían cada
       // una al otro todavía validado y se guardaban las dos: un ciclo. Con el orden fijo, la
       // segunda espera a la primera en vez de trabarse con ella, y al despertar ve el estado nuevo.
+      // Solo los ya publicados: nadie modera un reporte que todavía espera su publicar_en (404),
+      // ni lo usa como canónico.
       const bloqueadas = await cliente.query<{
         id: string;
         estado: string;
         estado_motivo: string | null;
       }>(
         `SELECT id::text, estado::text, estado_motivo FROM reporte_inundacion
-          WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE`,
+          WHERE id = ANY($1::uuid[]) AND ${condicionPublicado('')} ORDER BY id FOR UPDATE`,
         [fusionadoEn ? [id, fusionadoEn] : [id]],
       );
       const porId = new Map(bloqueadas.rows.map((f) => [f.id, f]));
@@ -82,9 +86,16 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       estadoAnterior = actual.estado;
       if (!transicionPermitida(actual.estado, nuevo, actor.rol)) {
         await cliente.query('ROLLBACK');
-        return noPermitida(
-          `No se puede pasar de ${actual.estado} a ${nuevo} con rol ${actor.rol}.`,
-        );
+        // La transición existe pero no para este rol (validado → rechazado y reabrir son de
+        // admin): es un permiso, no un estado imposible.
+        if (transicionExiste(actual.estado, nuevo))
+          return {
+            ok: false,
+            error: 403,
+            codigo: 'SIN_PERMISO',
+            mensaje: `Pasar de ${actual.estado} a ${nuevo} lo puede hacer solo un administrador.`,
+          };
+        return noPermitida(`No se puede pasar de ${actual.estado} a ${nuevo}.`);
       }
       // Se mira después del bloqueo: si otra fusión lo acaba de convertir en duplicado, aquí ya
       // se ve. Solo `validado` (§7.3): un resuelto o un duplicado no pueden ser canónicos.
@@ -147,10 +158,10 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     // Solo se recalcula la vecindad del reporte, no la tabla entera (§9.2).
     if (AFECTA_PUNTOS.has(estadoAnterior) || AFECTA_PUNTOS.has(nuevo))
       await recalcularPuntosDelEntorno(id);
-    // Después del recálculo: los indicadores cuentan también los puntos críticos. Solo en este
-    // proceso; las otras réplicas lo ven al vencer su TTL de 30 s (ver admin.ts).
-    invalidarCachesDeAgregados(app);
-    const fila = await obtenerReporte(dep.pool, id);
+    // Después del recálculo: los indicadores cuentan también los puntos críticos. No hay caché
+    // (ver admin.ts): esto solo evita que la próxima petición se suba a un cálculo de antes.
+    invalidarAgregadosEnVuelo(app);
+    const fila = await obtenerReporte(dep.pool, id, 'publicado');
     return { ok: true, fila: fila! };
   }
 
@@ -274,7 +285,8 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       try {
         await cliente.query('BEGIN');
         const bloqueado = await cliente.query<{ estado: string; severidad_manual: string | null }>(
-          'SELECT estado::text, severidad_manual::text FROM reporte_inundacion WHERE id = $1 FOR UPDATE',
+          `SELECT estado::text, severidad_manual::text FROM reporte_inundacion
+            WHERE id = $1 AND ${condicionPublicado('')} FOR UPDATE`,
           [p.data.id],
         );
         const actual = bloqueado.rows[0];
@@ -311,8 +323,8 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       }
       // La severidad no mueve el punto, pero sí puede cambiar su `severidad_max`.
       if (AFECTA_PUNTOS.has(estadoActual)) await recalcularPuntosDelEntorno(p.data.id);
-      invalidarCachesDeAgregados(app);
-      const fila = await obtenerReporte(dep.pool, p.data.id);
+      invalidarAgregadosEnVuelo(app);
+      const fila = await obtenerReporte(dep.pool, p.data.id, 'publicado');
       return aFeature(vistaTecnica(fila!, dep.cfg.urlPublica));
     },
   );

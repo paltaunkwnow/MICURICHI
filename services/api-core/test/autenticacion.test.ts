@@ -10,9 +10,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { type ConfigApi, leerConfig } from '../src/config.js';
+import type { ConfigApi } from '../src/config.js';
 import { hashIp, ipHashDiario } from '../src/privacidad.js';
-import { crearUsuarios, resolverDePrueba } from './ayudas.js';
+import { configDePrueba, crearUsuarios, resolverDePrueba } from './ayudas.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
@@ -31,7 +31,7 @@ async function app(extra: Partial<ConfigApi> = {}): Promise<FastifyInstance> {
   return crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
       ...extra,

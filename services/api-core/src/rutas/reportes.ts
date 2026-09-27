@@ -11,17 +11,18 @@ import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { cacheDeListadoPublico } from '../cache.js';
-import { listarReportes, MAX_OFFSET, obtenerReporte } from '../consultas.js';
-import { consumirCuotaDeReporte } from '../cuota.js';
+import { listarReportes, MAX_OFFSET, obtenerReporte, reportesDelAutor } from '../consultas.js';
+import { reservarTurnoDeReporte } from '../cuota.js';
 import {
   anotarResultado,
   ClaveIdempotenciaSchema,
+  claveDeCuenta,
   huellaDePayload,
   reclamarClave,
 } from '../idempotencia.js';
 import { ipHashDiario } from '../privacidad.js';
 import { revisarDispositivo } from '../ubicacion-dispositivo.js';
-import { aFeature, vistaPublica, vistaTecnica } from '../vistas.js';
+import { aFeature, vistaMiReporte, vistaPublica, vistaTecnica } from '../vistas.js';
 
 const IdParam = z.object({ id: z.uuid() });
 
@@ -30,14 +31,6 @@ export const HORAS_VALIDEZ_FOTO = 24;
 
 export function esTecnico(rol: string | undefined) {
   return rol === 'tecnico' || rol === 'admin';
-}
-
-/** «43 minutos», «1 minuto», «menos de un minuto»: para el mensaje de la cuota, en castellano. */
-export function minutosRestantes(segundos: number): string {
-  const m = Math.ceil(segundos / 60);
-  if (m <= 0) return 'un momento';
-  if (m === 1) return '1 minuto';
-  return `${m} minutos`;
 }
 
 export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
@@ -141,8 +134,10 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
       try {
         await cliente.query('BEGIN');
 
-        if (clave.success) {
-          const estado = await reclamarClave(cliente, clave.data, huella);
+        // Con el prefijo de la cuenta: la misma clave en dos cuentas son dos envíos distintos.
+        const claveGuardada = clave.success ? claveDeCuenta(autor.id, clave.data) : null;
+        if (claveGuardada) {
+          const estado = await reclamarClave(cliente, claveGuardada, huella);
           if (estado.tipo === 'conflicto') {
             await cliente.query('ROLLBACK');
             return res.status(409).send({
@@ -158,15 +153,12 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
                 codigo: 'ENVIO_EN_CURSO',
                 mensaje: 'Ese envío se está procesando. Esperá un momento antes de reintentar.',
               });
-            // Por la conexión que ya tenemos, no pidiendo otra al pool: ver más abajo.
-            const yaCreado = await obtenerReporte(cliente, estado.reporteId);
+            // Por la conexión que ya tenemos, no pidiendo otra al pool: ver más abajo. Con el mismo
+            // publicar_en que fijó el primer envío y los segundos que le quedan ahora.
+            const yaCreado = await obtenerReporte(cliente, estado.reporteId, 'cualquiera');
             if (yaCreado) {
               res.header('Idempotent-Replay', 'true');
-              return res
-                .status(200)
-                .send(
-                  aFeature(vistaPublica(yaCreado, dep.cfg.urlPublica, dep.cfg.salJitter, true)),
-                );
+              return res.status(200).send(aFeature(vistaMiReporte(yaCreado, dep.cfg.urlPublica)));
             }
             // La clave apunta a un reporte que ya no está. Antes se seguía adelante, pero la
             // transacción ya estaba deshecha por el ROLLBACK de arriba: el INSERT posterior
@@ -179,37 +171,48 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         }
 
         /*
-         * Cuota de la cuenta. Va AQUÍ y no antes por dos razones:
+         * Cupo diario de la cuenta. Va AQUÍ y no antes por dos razones:
          *
          *  - después de la idempotencia, para que un reenvío del mismo formulario (doble toque,
          *    reintento tras un corte de red) devuelva el reporte ya creado en vez de gastar el
          *    turno de la persona por segunda vez;
-         *  - dentro de la transacción, para que sea atómica de verdad y para que un fallo
+         *  - dentro de la transacción, para que sea atómico de verdad y para que un fallo
          *    posterior —fotos que ya no están— devuelva también el turno.
          *
-         * Es la autoridad: no hay ninguna otra comprobación de cuota que valga. Lo que la
-         * interfaz muestre con `puede_reportar_desde` es una cortesía, y el servidor no se fía
-         * de ella.
+         * Es la autoridad: lo que la interfaz muestre con `reportes_restantes_hoy` es una
+         * cortesía, y el servidor no se fía de ella.
          */
-        const cuota = await consumirCuotaDeReporte(cliente, autor.id, dep.cfg.minutosEntreReportes);
-        if (!cuota.permitido) {
+        const cupo = await reservarTurnoDeReporte(cliente, autor.id, {
+          maximo: dep.cfg.reportesPorDia,
+          zona: dep.cfg.zonaHoraria,
+        });
+        if (!cupo.permitido) {
           await cliente.query('ROLLBACK');
           app.metricas.contar('curichi_cuota_reportes_rechazos_total');
-          res.header('Retry-After', String(cuota.reintentarEnS));
+          res.header('Retry-After', String(cupo.espera.reintentarEnS));
           return res.status(429).send({
             codigo: 'CUOTA_DE_REPORTES',
-            mensaje: `Ya enviaste un reporte hace poco. Vas a poder enviar otro en ${minutosRestantes(cuota.reintentarEnS)}.`,
-            detalles: { disponible_en: cuota.disponibleEn.toISOString() },
+            mensaje: `Ya enviaste los ${dep.cfg.reportesPorDia} reportes de hoy. Vas a poder enviar otro mañana.`,
+            detalles: { disponible_en: cupo.espera.disponibleEn },
           });
         }
 
-        const ins = await cliente.query<{ id: string }>(
+        /*
+         * La demora de publicación (ADR 0006): el 1.º reporte del día de la cuenta se ve 60 s
+         * después y los siguientes, 240 s. `n` sale del contador de arriba, en esta misma
+         * transacción, así que dos envíos simultáneos reciben 60 y 240 sin carrera. La calcula la
+         * base con su reloj (el mismo de `creado_en` y del filtro `publicar_en <= now()`), y ningún
+         * cliente la puede adelantar.
+         */
+        const demoraS = cupo.n === 1 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS;
+        const ins = await cliente.query<{ id: string; publicar_en: Date }>(
           `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
            ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
            sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id,
-           distancia_dispositivo_m)
+           distancia_dispositivo_m, publicar_en)
          VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($23, $24), 4326), $3, $4, $5, $6, $7, $8::jsonb,
-           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25, $26) RETURNING id`,
+           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25, $26,
+           now() + make_interval(secs => $27::int)) RETURNING id, publicar_en`,
           [
             d.lon,
             d.lat,
@@ -246,9 +249,11 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             publico.lat,
             idNuevo,
             ubicacion.distanciaM,
+            demoraS,
           ],
         );
         const id = ins.rows[0]!.id;
+        const publicarEn = new Date(ins.rows[0]!.publicar_en).toISOString();
         const claves = [...new Set(d.fotos)];
         if (claves.length) {
           // Solo se reclaman fotos sin reporte, recién subidas y SUBIDAS POR QUIEN REPORTA: la
@@ -285,10 +290,11 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
               severidad: sev.banda,
               puntaje: sev.puntaje,
               reglas: sev.reglas,
+              publicar_en: publicarEn,
             }),
           ],
         );
-        if (clave.success) await anotarResultado(cliente, clave.data, id);
+        if (claveGuardada) await anotarResultado(cliente, claveGuardada, id);
         await cliente.query('COMMIT');
         // Sin la etiqueta `anonimo`: ya no existe esa posibilidad. El rol sí sirve, para poder
         // separar lo que reporta el vecindario de lo que carga un técnico desde el panel.
@@ -309,10 +315,10 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         //   8 envíos simultáneos → 1 × 201 y 7 × 503, todos a los 10 071 ms (el timeout)
         //  12 envíos simultáneos → 1 × 201 y 11 × 503
         // Con PGlite no se veía: es de conexión única y serializa, así que nunca hay dos a la vez.
-        const fila = await obtenerReporte(cliente, id);
-        return res
-          .status(201)
-          .send(aFeature(vistaPublica(fila!, dep.cfg.urlPublica, dep.cfg.salJitter, true)));
+        // La vista del autor (contracts 0.11.0): coordenada exacta, publicar_en y los segundos que
+        // faltan, calculados en la base; la cuenta regresiva de la interfaz parte de acá.
+        const fila = await obtenerReporte(cliente, id, 'cualquiera');
+        return res.status(201).send(aFeature(vistaMiReporte(fila!, dep.cfg.urlPublica)));
       } catch (e) {
         // Con .catch(): si el ROLLBACK también falla (conexión ya caída), el error que sube
         // tiene que seguir siendo el original, no el del rollback, que no explica nada.
@@ -399,8 +405,9 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     const p = IdParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    const fila = await obtenerReporte(dep.pool, p.data.id);
-    if (!fila || !['validado', 'resuelto'].includes(fila.estado))
+    // En espera, rechazado o duplicado: el mismo 404 que si no existiera.
+    const fila = await obtenerReporte(dep.pool, p.data.id, 'publico');
+    if (!fila)
       return res
         .status(404)
         .send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado o aún no publicado.' });
@@ -447,11 +454,36 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     const p = IdParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    const fila = await obtenerReporte(dep.pool, p.data.id);
+    // Mientras espera su publicar_en tampoco lo ve el técnico (ADR 0006).
+    const fila = await obtenerReporte(dep.pool, p.data.id, 'publicado');
     if (!fila)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
     return aFeature(vistaTecnica(fila, dep.cfg.urlPublica));
   });
+
+  /*
+   * ──────────────────────────── Mis reportes ────────────────────────────
+   *
+   * Los reportes de la cuenta de la sesión, en cualquier estado: el vecino ve el suyo mientras
+   * espera su publicación (con la cuenta regresiva) y también si lo rechazaron o lo fusionaron.
+   * Filtra por el autor de la sesión, nunca por algo que venga en la petición. Queda con
+   * `private, no-store` y `Vary: Cookie` por el valor por defecto de cache.ts.
+   */
+  app.get(
+    '/api/v1/mis-reportes',
+    { ...limiteLectura, preHandler: requerirRol('ciudadano', 'tecnico', 'admin', 'ejecutivo') },
+    async (req) => {
+      const filas = await reportesDelAutor(
+        dep.pool,
+        req.usuario!.id,
+        CONFIG_DOMINIO.MIS_REPORTES_MAX,
+      );
+      return {
+        type: 'FeatureCollection',
+        features: filas.map((f) => aFeature(vistaMiReporte(f, dep.cfg.urlPublica))),
+      };
+    },
+  );
 }
 
 export { CONFIG_DOMINIO };

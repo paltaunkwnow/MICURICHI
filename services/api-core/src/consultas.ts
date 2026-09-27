@@ -1,6 +1,7 @@
 /** Construcción de la consulta de listado con filtros (§7.5). */
 import { CONFIG_DOMINIO, type ReporteFiltros } from 'contracts';
 import type pg from 'pg';
+import { condicionPublicado, condicionPublico } from './visibilidad.js';
 import { type FilaReporte, SELECT_REPORTE } from './vistas.js';
 
 export interface OpcionesListado {
@@ -22,11 +23,19 @@ export function armarWhere(o: OpcionesListado): { where: string; params: unknown
   };
   const f = o.filtros;
   if (o.soloPublicos) {
-    cond.push(`r.estado IN ('validado', 'resuelto')`);
+    // Estados públicos y demora cumplida, en literal (ver visibilidad.ts: índices parciales).
+    cond.push(condicionPublico('r'));
     // Sin punto publicable no se publica. Es la opción segura: un reporte de vivienda sin
     // `geom_publico` calculado aparecería si no con su coordenada real bajo el filtro por bbox.
     cond.push('r.geom_publico IS NOT NULL');
-  } else if (f.estado?.length) cond.push(`r.estado = ANY(${p(f.estado)}::estado_reporte[])`);
+  } else {
+    // La vista técnica y la exportación tampoco ven lo que todavía espera su publicar_en: nadie
+    // modera ni exporta un reporte antes de que sea público.
+    cond.push(condicionPublicado('r'));
+  }
+  // En la ruta pública el filtro por estado se aplica DENTRO de los públicos (p. ej. solo los
+  // verificados); pedir `rechazado` ahí devuelve vacío, nunca lo amplía.
+  if (f.estado?.length) cond.push(`r.estado = ANY(${p(f.estado)}::estado_reporte[])`);
   if (f.severidad?.length)
     cond.push(
       `COALESCE(r.severidad_manual, r.severidad_calculada) = ANY(${p(f.severidad)}::severidad[])`,
@@ -146,10 +155,40 @@ export async function seleccionarParaExportar(
  */
 type Consultable = Pick<pg.Pool, 'query'> | Pick<pg.PoolClient, 'query'>;
 
+/**
+ * Qué reporte se puede leer: `publico` (vista pública), `publicado` (ya pasó su demora, en
+ * cualquier estado: técnica y moderación) o `cualquiera` (el autor y la relectura al crear).
+ * Sin valor por defecto a propósito: cada lector tiene que decir cuál es el suyo.
+ */
+export type Visibilidad = 'publico' | 'publicado' | 'cualquiera';
+
+const CONDICION: Record<Visibilidad, string> = {
+  publico: ` AND ${condicionPublico('r')}`,
+  publicado: ` AND ${condicionPublicado('r')}`,
+  cualquiera: '',
+};
+
 export async function obtenerReporte(
   ejecutor: Consultable,
   id: string,
+  visibilidad: Visibilidad,
 ): Promise<FilaReporte | null> {
-  const r = await ejecutor.query<FilaReporte>(`${SELECT_REPORTE} WHERE r.id = $1`, [id]);
+  const r = await ejecutor.query<FilaReporte>(
+    `${SELECT_REPORTE} WHERE r.id = $1${CONDICION[visibilidad]}`,
+    [id],
+  );
   return r.rows[0] ?? null;
+}
+
+/** Los reportes de un autor, los más recientes primero, en cualquier estado (`GET /mis-reportes`). */
+export async function reportesDelAutor(
+  ejecutor: Consultable,
+  autorId: string,
+  limite: number,
+): Promise<FilaReporte[]> {
+  const r = await ejecutor.query<FilaReporte>(
+    `${SELECT_REPORTE} WHERE r.autor_id = $1 ORDER BY r.creado_en DESC, r.id DESC LIMIT $2`,
+    [autorId, limite],
+  );
+  return r.rows;
 }

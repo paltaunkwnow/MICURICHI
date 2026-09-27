@@ -23,9 +23,8 @@ import type { FastifyInstance } from 'fastify';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenDisco, AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import { GeoNoDisponible } from '../src/resolver.js';
-import { resolverDePrueba } from './ayudas.js';
+import { configDePrueba, resolverDePrueba } from './ayudas.js';
 
 /** Pool que siempre falla con el error indicado, como si la base no estuviera. */
 function poolQueFalla(error: Error) {
@@ -73,7 +72,7 @@ beforeAll(async () => {
 }, 60_000);
 
 async function levantar(error: Error, geoUrl = 'http://127.0.0.1:59999') {
-  const cfg = leerConfig({ NODE_ENV: 'test', GEO_SERVICE_URL: geoUrl, METRICAS_RUTA: '' });
+  const cfg = configDePrueba({ NODE_ENV: 'test', GEO_SERVICE_URL: geoUrl, METRICAS_RUTA: '' });
   app = await crearApp({
     // biome-ignore lint/suspicious/noExplicitAny: pool de mentira, solo necesita la forma mínima
     pool: poolQueFalla(error) as any,
@@ -164,7 +163,7 @@ describe('geo-service caído: crear un reporte es 503, no 500', () => {
   };
 
   async function conResolverRoto(error: Error) {
-    const cfg = leerConfig({
+    const cfg = configDePrueba({
       NODE_ENV: 'test',
       METRICAS_RUTA: '',
       RATE_LIMIT_REPORTES_POR_HORA: '1000',
@@ -232,7 +231,7 @@ describe('almacén de fotos caído: degradado, no fuera de rotación', () => {
     // Con S3/MinIO caído esta réplica sirve el mapa y los reportes, pero ni guarda ni devuelve
     // fotos. Antes la readiness decía "ok" sin más y el fallo solo se veía cuando un vecino
     // intentaba adjuntar una foto y recibía un 500.
-    const cfg = leerConfig({
+    const cfg = configDePrueba({
       NODE_ENV: 'test',
       GEO_SERVICE_URL: 'http://127.0.0.1:59999',
       METRICAS_RUTA: '',
@@ -272,7 +271,7 @@ describe('almacén de fotos caído: degradado, no fuera de rotación', () => {
     const dir = mkdtempSync(join(tmpdir(), 'curichi-almacen-ready-'));
     const almacen = new AlmacenDisco(dir);
     rmSync(dir, { recursive: true, force: true });
-    const cfg = leerConfig({
+    const cfg = configDePrueba({
       NODE_ENV: 'test',
       GEO_SERVICE_URL: 'http://127.0.0.1:59999',
       METRICAS_RUTA: '',
@@ -302,7 +301,7 @@ describe('almacén de fotos caído: degradado, no fuera de rotación', () => {
   }, 20_000);
 
   it('sin sonda (disco o memoria) la readiness no inventa un fallo', async () => {
-    const cfg = leerConfig({
+    const cfg = configDePrueba({
       NODE_ENV: 'test',
       GEO_SERVICE_URL: 'http://127.0.0.1:59999',
       METRICAS_RUTA: '',
@@ -329,7 +328,7 @@ describe('almacén de fotos caído: degradado, no fuera de rotación', () => {
 describe('geo-service caído no saca a la réplica de rotación (§24)', () => {
   it('/ready sigue en 200 y marca degradado cuando solo falla geo-service', async () => {
     // Pool que SÍ funciona; geo-service apuntando a un puerto donde no hay nadie.
-    const cfg = leerConfig({
+    const cfg = configDePrueba({
       NODE_ENV: 'test',
       GEO_SERVICE_URL: 'http://127.0.0.1:59999',
       METRICAS_RUTA: '',

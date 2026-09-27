@@ -6,9 +6,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -48,10 +48,10 @@ async function sembrar(o: {
   const [r] = await ex.consultar<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo,
        ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
-       severidad_version, severidad_manual, severidad_motivo, estado, creado_en)
+       severidad_version, severidad_manual, severidad_motivo, estado, creado_en, publicar_en)
      VALUES (ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
        $1, 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte sembrado para el resumen ejecutivo',
-       'rodilla', 'ocasional', $2::severidad, 5, 2, $3::severidad, $4, $5::estado_reporte, $6::timestamptz)
+       'rodilla', 'ocasional', $2::severidad, 5, 2, $3::severidad, $4, $5::estado_reporte, $6::timestamptz, $6::timestamptz)
      RETURNING id::text`,
     [
       o.distrito,
@@ -129,7 +129,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -276,63 +276,33 @@ describe('GET /api/v1/ejecutivo/resumen: conteos', () => {
   });
 });
 
-describe('GET /api/v1/ejecutivo/resumen: caché', () => {
+describe('GET /api/v1/ejecutivo/resumen: sin caché, con deduplicación en vuelo (plan S25)', () => {
   /** La pasada sobre la tabla de reportes que hace el resumen. */
   const pasadas = (espia: ReturnType<typeof espiarPool>) => espia.contar(/FULL JOIN agg/);
 
-  async function appNueva() {
-    return crearApp({
-      pool,
-      cfg: {
-        ...leerConfig({ DATABASE_URL: base.url }),
-        rutaOpenApi: '/no-existe.yaml',
-        rateLimitMax: 1000,
-      },
-      resolver: resolverDePrueba,
-      almacen: new AlmacenMemoria(),
+  const pedir = (ventana: string) =>
+    app.inject({
+      method: 'GET',
+      url: `/api/v1/ejecutivo/resumen?ventana=${ventana}`,
+      cookies: sesion(cookieEjecutivo),
     });
-  }
 
-  it('la segunda petición es un acierto de caché y no vuelve a la base', async () => {
-    const otra = await appNueva();
-    try {
-      espia.reiniciar();
-      const primera = await otra.inject({
-        method: 'GET',
-        url: '/api/v1/ejecutivo/resumen?ventana=7d',
-        cookies: sesion(cookieEjecutivo),
-      });
-      expect(primera.headers['x-cache']).toBe('miss');
-      const segunda = await otra.inject({
-        method: 'GET',
-        url: '/api/v1/ejecutivo/resumen?ventana=7d',
-        cookies: sesion(cookieEjecutivo),
-      });
-      expect(segunda.headers['x-cache']).toBe('hit');
-      expect(segunda.json()).toEqual(primera.json());
-      expect(pasadas(espia)).toBe(1);
-    } finally {
-      await otra.close();
-    }
+  it('cada petición vuelve a la base: sin X-Cache y con la cifra del momento', async () => {
+    espia.reiniciar();
+    const primera = await pedir('7d');
+    const segunda = await pedir('7d');
+    expect(primera.headers['x-cache']).toBeUndefined();
+    expect(segunda.headers['x-cache']).toBeUndefined();
+    expect(segunda.json().activas).toEqual(primera.json().activas);
+    expect(pasadas(espia)).toBe(2);
   });
 
-  it('dos peticiones a la vez hacen una sola consulta', async () => {
-    const otra = await appNueva();
-    try {
-      espia.reiniciar();
-      const pedir = () =>
-        otra.inject({
-          method: 'GET',
-          url: '/api/v1/ejecutivo/resumen?ventana=30d',
-          cookies: sesion(cookieEjecutivo),
-        });
-      const [a, b] = await Promise.all([pedir(), pedir()]);
-      expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
-      expect(a.json()).toEqual(b.json());
-      expect(pasadas(espia)).toBe(1);
-    } finally {
-      await otra.close();
-    }
+  it('diez peticiones a la vez hacen una sola consulta', async () => {
+    espia.reiniciar();
+    const rs = await Promise.all(Array.from({ length: 10 }, () => pedir('30d')));
+    expect(rs.map((r) => r.statusCode)).toEqual(Array(10).fill(200));
+    for (const r of rs) expect(r.json()).toEqual(rs[0]!.json());
+    expect(pasadas(espia)).toBe(1);
   });
 });
 

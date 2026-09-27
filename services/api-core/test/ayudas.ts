@@ -2,6 +2,7 @@ import { RADIO_TIERRA_M, type ResolverRespuesta } from 'contracts';
 import type { Ejecutor } from 'db';
 import { hashPassword } from 'db';
 import type { FastifyInstance } from 'fastify';
+import { type ConfigApi, leerConfig } from '../src/config.js';
 import type { ResolverGeo } from '../src/resolver.js';
 
 /** Resolver falso coherente con las capas de prueba de db/test-utils: UV A es lon −63.20..−63.19, lat −17.80..−17.78. */
@@ -32,6 +33,34 @@ export const resolverDePrueba: ResolverGeo = {
 };
 
 export const PASSWORD_PRUEBA = 'contrasena-test-123';
+
+/**
+ * Configuración de las pruebas: la de `leerConfig` con la demora de publicación en 0 y 0, así un
+ * reporte recién creado se ve enseguida y las pruebas de filtros, moderación, fotos o privacidad no
+ * tienen que esperar 60 o 240 s. La demora real la prueba `publicacion-diferida.test.ts`, que usa
+ * `leerConfig` a secas (o `publicarYa` / `enEspera` para mover un reporte a mano).
+ */
+export function configDePrueba(env: NodeJS.ProcessEnv = {}): ConfigApi {
+  return leerConfig({ REPORTE_DEMORA_PRIMERO_S: '0', REPORTE_DEMORA_SIGUIENTES_S: '0', ...env });
+}
+
+/** Termina la espera de un reporte: lo publica ya (el CHECK exige `publicar_en >= creado_en`). */
+export async function publicarYa(ex: Ejecutor, id: string) {
+  await ex.consultar('UPDATE reporte_inundacion SET publicar_en = creado_en WHERE id = $1', [id]);
+}
+
+/**
+ * Pone un reporte en espera (media hora después de creado; el CHECK admite hasta una): para las
+ * pruebas que corren con la demora en 0 y necesitan un reporte que todavía no se publicó.
+ */
+export async function enEspera(ex: Ejecutor, id: string) {
+  const filas = await ex.consultar(
+    `UPDATE reporte_inundacion SET publicar_en = GREATEST(creado_en, now()) + interval '30 minutes'
+      WHERE id = $1 AND creado_en > now() - interval '25 minutes' RETURNING id`,
+    [id],
+  );
+  if (filas.length !== 1) throw new Error(`enEspera: el reporte ${id} no existe o es viejo`);
+}
 
 /**
  * Cuentas de prueba. `vecina` y `vecino` son ciudadanas: reportar exige sesión desde la 0009.
@@ -76,16 +105,20 @@ export async function iniciarSesion(app: FastifyInstance, email: string): Promis
 export const sesion = (cookie: string) => ({ curichi_sesion: cookie });
 
 /**
- * Devuelve el turno de reporte a una cuenta.
+ * Devuelve los turnos de reporte del día a una cuenta (contracts 0.10.0: `cuota_reporte_diaria`).
  *
- * NO desactiva la cuota: la cuota sigue aplicándose en cada creación, y hay pruebas dedicadas a
- * comprobar que rechaza el segundo envío y que resiste la concurrencia. Esto es para las pruebas
- * que necesitan VARIOS reportes para montar el escenario que sí están probando (fotos, filtros,
- * moderación, privacidad), y que si no tendrían que esperar una hora o inventar una cuenta por
- * reporte. Adelantar el reloj de la cuota es lo mismo que haría el paso del tiempo.
+ * NO desactiva el cupo: sigue aplicándose en cada creación, y hay pruebas dedicadas a comprobar
+ * que rechaza el 4.º envío y que resiste la concurrencia (`cupo-diario.test.ts` y los `*-pg`).
+ * Esto es para las pruebas que necesitan VARIOS reportes para montar el escenario que sí están
+ * probando (fotos, filtros, moderación, privacidad), y que si no tendrían que esperar al día
+ * siguiente o inventar una cuenta cada tres reportes. Las fotos del día no se tocan.
  */
 export async function liberarCuota(ex: Ejecutor, email: string = CUENTAS.vecina) {
-  await ex.consultar('UPDATE usuario SET ultimo_reporte_en = NULL WHERE email = $1', [email]);
+  await ex.consultar(
+    `UPDATE cuota_reporte_diaria SET reportes_n = 0
+      WHERE usuario_id = (SELECT id FROM usuario WHERE email = $1)`,
+    [email],
+  );
 }
 
 /**

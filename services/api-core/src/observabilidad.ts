@@ -53,6 +53,35 @@ export class Metricas {
    * sin sentido. La función se invoca al exponer, así que debe ser barata y no bloquear.
    */
   private medidores = new Map<string, { etiquetas: string; leer: () => number }>();
+  /**
+   * Lecturas que necesitan esperar (la base, `statfs`) y no pueden hacerse dentro de `leer`, que es
+   * síncrona. Corren en `actualizar()`, justo antes de cada scrape, y dejan su valor donde lo lee
+   * un medidor normal.
+   */
+  private actualizadores: Array<() => Promise<void>> = [];
+
+  alExponer(actualizar: () => Promise<void>) {
+    this.actualizadores.push(actualizar);
+  }
+
+  /**
+   * Corre los actualizadores con un plazo: una base colgada no puede colgar también /metrics, que es
+   * justo lo que se mira cuando algo va mal. Un fallo o un vencimiento dejan el valor anterior.
+   */
+  async actualizar(plazoMs = 2000): Promise<void> {
+    await Promise.all(
+      this.actualizadores.map((fn) => {
+        let temporizador: ReturnType<typeof setTimeout> | undefined;
+        const plazo = new Promise<void>((listo) => {
+          temporizador = setTimeout(listo, plazoMs);
+          temporizador.unref?.();
+        });
+        return Promise.race([fn().catch(() => {}), plazo]).finally(() =>
+          clearTimeout(temporizador),
+        );
+      }),
+    );
+  }
 
   medidor(nombre: string, leer: () => number, etiquetas: Record<string, string> = {}) {
     this.medidores.set(`${nombre}|${serializar(etiquetas)}`, {
@@ -225,12 +254,35 @@ export function instrumentarPool(pool: PoolObservable, metricas: Metricas): void
   metricas.medidor('curichi_db_pool_max', () => pool.options?.max ?? 0);
 }
 
+/**
+ * `curichi_reportes_sin_verificar_antiguedad_segundos`: cuánto hace que está publicado el reporte
+ * sin verificar (`nuevo`) más viejo; 0 si no hay ninguno. Sin moderación previa (ADR 0006) es lo
+ * que dice si la bandeja se atrasa: la alerta `BandejaSinVerificarAtrasada` lo mira. Se cuenta
+ * desde `publicar_en`, que es cuando empieza a estar a la vista; lo que espera no cuenta.
+ */
+export function instalarMetricaDeBandeja(
+  metricas: Metricas,
+  pool: { query: (sql: string) => Promise<{ rows: Array<{ s: number | string | null }> }> },
+): void {
+  let segundos = Number.NaN;
+  metricas.alExponer(async () => {
+    const r = await pool.query(
+      `SELECT COALESCE(extract(epoch FROM now() - min(publicar_en)), 0)::float8 AS s
+         FROM reporte_inundacion WHERE estado = 'nuevo' AND publicar_en <= now()`,
+    );
+    segundos = Math.max(0, Math.floor(Number(r.rows[0]?.s ?? 0)));
+  });
+  metricas.medidor('curichi_reportes_sin_verificar_antiguedad_segundos', () => segundos);
+}
+
 /** Por qué se cae (o no) cada intento de `POST /api/v1/fotos`, para `curichi_fotos_subidas_total`. */
 export type ResultadoSubidaFoto =
   | 'aceptada'
   | 'rechazada_tipo'
   | 'rechazada_tamano'
   | 'rechazada_cuota'
+  /** 507: con las fotos en disco, queda menos que `FOTOS_MIN_LIBRE_BYTES`. */
+  | 'rechazada_espacio'
   | 'error';
 
 /**
@@ -321,6 +373,7 @@ export function instalarObservabilidad(app: FastifyInstance, o: OpcionesObservab
   app.get(o.exponerEn, async (req, res) => {
     if (o.token && !igualEnTiempoConstante(req.headers['x-token-metricas'], o.token))
       return res.status(403).send('prohibido');
+    await o.metricas.actualizar();
     res.header('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
     // Nunca cacheado: son valores del instante.
     res.header('Cache-Control', 'no-store');

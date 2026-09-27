@@ -27,9 +27,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -70,7 +70,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -194,11 +194,11 @@ describe('el bbox público no puede usarse como oráculo de la coordenada exacta
       `INSERT INTO reporte_inundacion
          (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
           descripcion, profundidad_estimada, frecuencia,
-          severidad_calculada, severidad_puntaje, severidad_version, estado)
+          severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
        VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($3, $4), 4326),
           'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'vivienda_o_predio',
           'Reporte con punto publicable fijado para la prueba', 'rodilla', 'ocasional',
-          'media', 6, 2, 'validado')
+          'media', 6, 2, 'validado', now())
        RETURNING id::text`,
       [EXACTO.lon, EXACTO.lat, PUBLICADO.lon, PUBLICADO.lat],
     );

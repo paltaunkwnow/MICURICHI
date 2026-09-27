@@ -18,6 +18,7 @@ import { type ConfigApi, leerConfig } from '../src/config.js';
 import { TOPE_CONTEO } from '../src/consultas.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -34,7 +35,7 @@ let cookieTecnico: string;
 let cookieVecina: string;
 
 const configuracion = (extra: Partial<ConfigApi> = {}): ConfigApi => ({
-  ...leerConfig({ DATABASE_URL: base.url }),
+  ...configDePrueba({ DATABASE_URL: base.url }),
   rutaOpenApi: '/no-existe.yaml',
   rateLimitMax: 1000,
   ...extra,
@@ -77,10 +78,10 @@ async function sembrar(o: { uv: string; estado?: string; creado?: string; cuanto
   const filas = await ex.consultar<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
        ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-       severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en)
+       severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
      SELECT ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326),
        'distrito_municipal:01', $1, 'test', 'manual', 'via_publica', 'Reporte sembrado número ' || g,
-       'rodilla', 'ocasional', 'media', 6, 2, $2::estado_reporte, COALESCE($3::timestamptz, now())
+       'rodilla', 'ocasional', 'media', 6, 2, $2::estado_reporte, COALESCE($3::timestamptz, now()), COALESCE($3::timestamptz, now())
      FROM generate_series(1, $4::int) g
      RETURNING id::text`,
     [o.uv, o.estado ?? 'nuevo', o.creado ?? null, o.cuantos ?? 1],

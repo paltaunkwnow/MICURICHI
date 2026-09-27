@@ -13,8 +13,16 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
-import { CUENTAS, crearUsuarios, iniciarSesion, resolverDePrueba, sesion } from './ayudas.js';
+import {
+  CUENTAS,
+  configDePrueba,
+  crearUsuarios,
+  enEspera,
+  iniciarSesion,
+  publicarYa,
+  resolverDePrueba,
+  sesion,
+} from './ayudas.js';
 import { espiarPool } from './espia-pool.js';
 
 let base: BaseEfimera;
@@ -29,7 +37,7 @@ async function appNueva() {
   const app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -51,10 +59,11 @@ async function sembrar(o: {
   const filas = await ex.consultar<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
        ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-       severidad_calculada, severidad_puntaje, severidad_version, severidad_manual, severidad_motivo, estado)
+       severidad_calculada, severidad_puntaje, severidad_version, severidad_manual, severidad_motivo, estado,
+       publicar_en)
      SELECT ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
        'distrito_municipal:01', $1, $2, 'manual', 'via_publica', 'Reporte sembrado para indicadores',
-       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::severidad, $5, $6::estado_reporte
+       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::severidad, $5, $6::estado_reporte, now()
      FROM generate_series(1, $7::int)
      RETURNING id::text`,
     [
@@ -169,21 +178,47 @@ describe('qué cuenta', () => {
   });
 });
 
-describe('cuánto le cuesta a la base', () => {
-  it('la segunda petición sale de la caché, sin tocar la base', async () => {
+describe('sin caché: cada petición es la cifra del momento (plan S25)', () => {
+  const resumen = (app: FastifyInstance) =>
+    app.inject({
+      method: 'GET',
+      url: '/api/v1/ejecutivo/resumen?ventana=todo',
+      cookies: sesion(cookieTecnico),
+    });
+
+  it('dos peticiones seguidas van las dos a la base y no hay X-Cache', async () => {
     const app = await appNueva();
     espia.reiniciar();
     const primera = await indicadores(app);
-    expect(primera.headers['x-cache']).toBe('miss');
     const hechas = consultasDeReportes();
     expect(hechas).toBeGreaterThan(0);
     const segunda = await indicadores(app);
-    expect(segunda.headers['x-cache']).toBe('hit');
     expect(segunda.json()).toEqual(primera.json());
-    expect(consultasDeReportes()).toBe(hechas);
+    expect(consultasDeReportes()).toBe(2 * hechas);
+    for (const r of [primera, segunda, await resumen(app)])
+      expect(r.headers['x-cache']).toBeUndefined();
   });
 
-  it('dos peticiones a la vez hacen un solo cálculo', async () => {
+  it('después de publicarYa, /indicadores y en_revision suben sin esperar, en la misma app', async () => {
+    const app = await appNueva();
+    const [id] = await sembrar({ estado: 'nuevo', severidad: 'baja' });
+    await enEspera(ex, id!);
+    const antesInd = (await indicadores(app)).json();
+    const antesRes = (await resumen(app)).json();
+    await publicarYa(ex, id!);
+    const despuesInd = (await indicadores(app)).json();
+    const despuesRes = (await resumen(app)).json();
+    expect(despuesInd.por_estado.nuevo).toBe(antesInd.por_estado.nuevo + 1);
+    expect(despuesInd.total).toBe(antesInd.total + 1);
+    expect(despuesRes.activas.en_revision).toBe(antesRes.activas.en_revision + 1);
+    // Se retira para no mover las cifras de las pruebas siguientes.
+    await ex.consultar(
+      `UPDATE reporte_inundacion SET estado = 'rechazado', estado_motivo = 'Prueba' WHERE id = $1`,
+      [id],
+    );
+  });
+
+  it('diez GET simultáneos hacen un solo cálculo (deduplicación en vuelo)', async () => {
     const referencia = await appNueva();
     espia.reiniciar();
     await indicadores(referencia);
@@ -191,9 +226,38 @@ describe('cuánto le cuesta a la base', () => {
 
     const app = await appNueva();
     espia.reiniciar();
-    const [a, b] = await Promise.all([indicadores(app), indicadores(app)]);
-    expect([a.statusCode, b.statusCode]).toEqual([200, 200]);
+    const rs = await Promise.all(Array.from({ length: 10 }, () => indicadores(app)));
+    expect(rs.map((r) => r.statusCode)).toEqual(Array(10).fill(200));
     expect(consultasDeReportes()).toBe(unCalculo);
+
+    espia.reiniciar();
+    const res = await Promise.all(Array.from({ length: 10 }, () => resumen(app)));
+    expect(res.map((r) => r.statusCode)).toEqual(Array(10).fill(200));
+    expect(espia.contar(/FULL JOIN agg/)).toBe(1);
+  });
+
+  it('una consulta marcada como sondeo no renueva la inactividad de la sesión', async () => {
+    const app = await appNueva();
+    const cookie = await iniciarSesion(app, CUENTAS.tecnico);
+    await pool.query(
+      `UPDATE sesion SET ultimo_uso_en = now() - interval '11 hours' WHERE id = $1`,
+      [cookie],
+    );
+    for (const url of ['/api/v1/indicadores', '/api/v1/ejecutivo/resumen?ventana=todo']) {
+      const r = await app.inject({
+        method: 'GET',
+        url,
+        headers: { 'x-curichi-sondeo': '1' },
+        cookies: sesion(cookie),
+      });
+      expect(r.statusCode, url).toBe(200);
+    }
+    await new Promise((r) => setTimeout(r, 250)); // el refresco, si lo hubiera, va sin await
+    const s = await pool.query<{ viejo: boolean }>(
+      `SELECT (ultimo_uso_en < now() - interval '10 hours') AS viejo FROM sesion WHERE id = $1`,
+      [cookie],
+    );
+    expect(s.rows[0]?.viejo).toBe(true);
   });
 
   it('como mucho dos conexiones del pool a la vez', async () => {
@@ -206,7 +270,7 @@ describe('cuánto le cuesta a la base', () => {
   });
 });
 
-describe('moderar invalida los agregados de este proceso (indicadores y resumen ejecutivo)', () => {
+describe('moderar se ve enseguida en indicadores y resumen ejecutivo', () => {
   const resumen = (app: FastifyInstance) =>
     app.inject({
       method: 'GET',
@@ -222,21 +286,17 @@ describe('moderar invalida los agregados de este proceso (indicadores y resumen 
       cookies: sesion(cookieTecnico),
     });
 
-  /** Llena las dos cachés y comprueba que la segunda petición ya sale de ellas. */
+  /** Las cifras antes de moderar. */
   async function cebar(app: FastifyInstance) {
     const ind = await indicadores(app);
     const res = await resumen(app);
-    expect((await indicadores(app)).headers['x-cache']).toBe('hit');
-    expect((await resumen(app)).headers['x-cache']).toBe('hit');
     return { ind: ind.json(), res: res.json() };
   }
 
-  /** Lo que ve el técnico justo después de moderar: recalculado, no la copia de antes. */
+  /** Lo que ve el técnico justo después de moderar. */
   async function recalculados(app: FastifyInstance) {
     const ind = await indicadores(app);
     const res = await resumen(app);
-    expect(ind.headers['x-cache'], 'indicadores').toBe('miss');
-    expect(res.headers['x-cache'], 'resumen ejecutivo').toBe('miss');
     return { ind: ind.json(), res: res.json() };
   }
 
@@ -380,7 +440,7 @@ describe('moderar invalida los agregados de este proceso (indicadores y resumen 
       (d: { activas: { en_revision: number } }) => d.activas.en_revision,
     ],
   ] as const)
-    it(`${nombre}: un cálculo que empezó antes de moderar no vuelve a llenar la caché`, async () => {
+    it(`${nombre}: una petición después de moderar no se sube al cálculo de antes`, async () => {
       const app = await appNueva();
       const [id] = await sembrar({ estado: 'nuevo', severidad: 'baja' });
       const retenida = retenerResultado(patron);
@@ -390,14 +450,12 @@ describe('moderar invalida los agregados de este proceso (indicadores y resumen 
         expect((await moderar(app, id!, { estado: 'validado' })).statusCode).toBe(200);
         // No se sube al cálculo en vuelo: ese ya leyó la base antes de la moderación.
         const nueva = await conPlazo(pedir(app));
-        expect(nueva.headers['x-cache']).toBe('miss');
         retenida.soltar();
         const deAntes = (await vieja).json();
         expect(contar(nueva.json())).toBe(contar(deAntes) - 1);
-        // Y al terminar tarde, el cálculo viejo no pisa la caché con su cifra.
+        // Y el cálculo viejo, al terminar tarde, no es lo que recibe la petición siguiente.
         const luego = await pedir(app);
-        expect(luego.headers['x-cache']).toBe('hit');
-        expect(luego.json()).toEqual(nueva.json());
+        expect(contar(luego.json())).toBe(contar(nueva.json()));
       } finally {
         retenida.restaurar();
       }

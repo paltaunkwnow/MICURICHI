@@ -13,6 +13,7 @@ import type { FastifyBaseLogger } from 'fastify';
 import type pg from 'pg';
 import type { Almacen } from './almacen.js';
 import type { ConfigApi } from './config.js';
+import { LITERAL_ESTADOS_VERIFICADOS } from './visibilidad.js';
 
 const INTERVALO_MS = 6 * 60 * 60 * 1000; // cada 6 h
 
@@ -99,7 +100,7 @@ export function programarMantenimiento(
         const pendientes = await pool.query<{ hay: boolean }>(
           `SELECT EXISTS (
               SELECT 1 FROM reporte_inundacion
-               WHERE estado IN ('validado','resuelto') AND punto_critico_id IS NULL
+               WHERE estado IN (${LITERAL_ESTADOS_VERIFICADOS}) AND punto_critico_id IS NULL
              ) AS hay`,
         );
         if (pendientes.rows[0]?.hay) {
@@ -111,12 +112,20 @@ export function programarMantenimiento(
       }
       const r = await ejecutarMantenimiento(ejecutorPg(pool), {
         retencionIpHashDias: cfg.retencionIpHashDias,
+        // La misma zona con la que api-core fecha los cupos diarios: con otra, el mantenimiento
+        // borraría la fila de hoy antes de la medianoche de la ciudad y devolvería los turnos.
+        zonaHoraria: cfg.zonaHoraria,
       });
       for (const key of r.fotosHuerfanas) {
         // Si el borrado del objeto falla, la fila ya se fue: se registra y se sigue.
         await almacen.borrar(key).catch((e) => log.warn({ err: e, key }, 'no se pudo borrar foto'));
       }
-      if (r.sesionesCaducadas || r.ipHashBorrados || r.fotosHuerfanas.length)
+      if (
+        r.sesionesCaducadas ||
+        r.ipHashBorrados ||
+        r.fotosHuerfanas.length ||
+        r.cuotasDiariasBorradas
+      )
         log.info(
           { ...r, fotosHuerfanas: r.fotosHuerfanas.length },
           'mantenimiento: retención aplicada',

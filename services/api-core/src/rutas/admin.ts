@@ -5,23 +5,21 @@ import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { seleccionarParaExportar } from '../consultas.js';
+import { condicionPublicado } from '../visibilidad.js';
 import { aFeature, vistaTecnica } from '../vistas.js';
 import { invalidarResumenEjecutivo } from './ejecutivo.js';
 
-/** Invalidador de la caché de indicadores, uno por instancia de la app (los tests montan varias). */
+/** Invalidador de los cálculos en vuelo, uno por instancia de la app (los tests montan varias). */
 const invalidadoresIndicadores = new WeakMap<FastifyInstance, () => void>();
 
 /**
- * Olvida los agregados cacheados en ESTE proceso (indicadores y resumen ejecutivo): la próxima
- * petición los recalcula. Lo llaman cada transición de estado y cada reclasificación
- * (moderacion.ts) y la activación de una versión de capa; sin esto el técnico que acaba de
- * validar veía la cifra de antes hasta 30 s.
- *
- * Solo alcanza a este proceso. Con varias réplicas, las demás siguen sirviendo su copia hasta que
- * venza el TTL de 30 s (TTL_INDICADORES_MS, TTL_RESUMEN_MS); avisarles pediría un canal entre
- * procesos, por ejemplo LISTEN/NOTIFY de PostgreSQL.
+ * Olvida los cálculos de agregados que estén en vuelo en ESTE proceso (indicadores y resumen
+ * ejecutivo): una petición que llega después de moderar no puede recibir la cifra de un cálculo
+ * que leyó la base antes. Lo llaman cada transición de estado y cada reclasificación
+ * (moderacion.ts) y la activación de una versión de capa. Ya no hay caché que vaciar (plan S25):
+ * cada petición calcula, y lo que se comparte es solo el cálculo que está en curso.
  */
-export function invalidarCachesDeAgregados(app: FastifyInstance): void {
+export function invalidarAgregadosEnVuelo(app: FastifyInstance): void {
   invalidadoresIndicadores.get(app)?.();
   invalidarResumenEjecutivo(app);
 }
@@ -50,9 +48,6 @@ export function csvCelda(v: unknown): string {
   return NECESITA_COMILLAS.test(seguro) ? `"${seguro.replace(/"/g, '""')}"` : seguro;
 }
 
-/** Los indicadores se miran, no se operan: 30 s de desfase no cambian ninguna decisión. */
-const TTL_INDICADORES_MS = 30_000;
-
 /**
  * Estados que son un anegamiento. Rechazados y duplicados solo cuentan en `por_estado`: contarlos
  * en el resto dejaba que el spam subiera un distrito en el ranking.
@@ -79,6 +74,12 @@ const datosDeCapa = (
   ) c ON true`;
 
 /**
+ * Solo reportes ya publicados, también en `por_estado`: mientras un reporte espera su publicar_en
+ * no lo ve nadie más que su autor, y las cifras del técnico no pueden adelantarlo.
+ */
+const PUBLICADO = condicionPublicado('');
+
+/**
  * Dos tandas en paralelo, cada una en serie: como mucho dos conexiones del pool. Antes eran siete
  * consultas a la vez, siete de las ocho conexiones, y un par de paneles abiertos dejaban sin
  * conexiones al resto de la API.
@@ -94,7 +95,7 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT estado::text AS estado, COALESCE(severidad_manual, severidad_calculada)::text AS severidad,
                 count(*)::int AS n
-           FROM reporte_inundacion GROUP BY 1, 2`,
+           FROM reporte_inundacion WHERE ${PUBLICADO} GROUP BY 1, 2`,
       );
       const recurrentes = await pool.query<{ n: number }>(
         'SELECT count(*)::int AS n FROM punto_critico WHERE n_reportes >= 2',
@@ -112,7 +113,7 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT a.distrito_id, c.nombre, a.n
            FROM (SELECT distrito_id, count(*)::int AS n FROM reporte_inundacion
-                  WHERE estado = ANY($1::estado_reporte[]) GROUP BY distrito_id) a
+                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO} GROUP BY distrito_id) a
            ${datosDeCapa('distrito_municipal', 'a.distrito_id', 'x.nombre')}
           ORDER BY a.n DESC, a.distrito_id`,
         [ESTADOS_QUE_CUENTAN],
@@ -125,7 +126,7 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT a.unidad_vecinal_id, c.nombre, c.distrito_id, a.n
            FROM (SELECT unidad_vecinal_id, count(*)::int AS n FROM reporte_inundacion
-                  WHERE estado = ANY($1::estado_reporte[]) GROUP BY unidad_vecinal_id
+                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO} GROUP BY unidad_vecinal_id
                   ORDER BY count(*) DESC, unidad_vecinal_id LIMIT 50) a
            ${datosDeCapa('unidad_vecinal', 'a.unidad_vecinal_id', 'x.nombre, x.distrito_id')}
           ORDER BY a.n DESC, a.unidad_vecinal_id`,
@@ -257,45 +258,29 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
     return `﻿${lineas.join('\n')}\n`;
   });
 
-  let indicadoresGuardados: { valor: Indicadores; en: number } | null = null;
-  // Una sola consulta en vuelo: sin esto, al caducar la caché cada panel abierto lanzaría a la
-  // vez su propio cálculo completo.
-  let indicadoresEnVuelo: Promise<Indicadores> | null = null;
-  // Sube con cada invalidación. Un cálculo que leyó la base antes de moderar y termina después
-  // no puede volver a guardar su cifra, y la petición siguiente tampoco se sube a él.
+  /*
+   * SIN CACHÉ (plan S25): el panel técnico sondea cada 10 s y tiene que ver enseguida lo que se
+   * publica solo, al vencer su demora. Queda la deduplicación en vuelo: los paneles que piden a la
+   * vez comparten el mismo cálculo. El contador de generación sube con cada moderación, y una
+   * petición posterior no se sube a un cálculo que ya había leído la base antes.
+   */
+  let enVuelo: { generacion: number; promesa: Promise<Indicadores> } | null = null;
   let generacion = 0;
   invalidadoresIndicadores.set(app, () => {
     generacion++;
-    indicadoresGuardados = null;
-    indicadoresEnVuelo = null;
+    enVuelo = null;
   });
-
-  function calcularYGuardar(): Promise<Indicadores> {
-    const deEstaGeneracion = generacion;
-    const calculo: Promise<Indicadores> = calcularIndicadores(dep.pool)
-      .then((valor) => {
-        if (deEstaGeneracion === generacion) indicadoresGuardados = { valor, en: Date.now() };
-        return valor;
-      })
-      .finally(() => {
-        if (indicadoresEnVuelo === calculo) indicadoresEnVuelo = null;
-      });
-    indicadoresEnVuelo = calculo;
-    return calculo;
-  }
 
   app.get(
     '/api/v1/indicadores',
     { preHandler: requerirRol('tecnico', 'admin') },
-    async (_req, res): Promise<Indicadores> => {
-      if (indicadoresGuardados && Date.now() - indicadoresGuardados.en < TTL_INDICADORES_MS) {
-        res.header('X-Cache', 'hit');
-        app.metricas.contar('curichi_indicadores_cache_total', { resultado: 'hit' });
-        return indicadoresGuardados.valor;
-      }
-      res.header('X-Cache', 'miss');
-      app.metricas.contar('curichi_indicadores_cache_total', { resultado: 'miss' });
-      return indicadoresEnVuelo ?? calcularYGuardar();
+    async (): Promise<Indicadores> => {
+      if (enVuelo && enVuelo.generacion === generacion) return enVuelo.promesa;
+      const calculo = calcularIndicadores(dep.pool).finally(() => {
+        if (enVuelo?.promesa === calculo) enVuelo = null;
+      });
+      enVuelo = { generacion, promesa: calculo };
+      return calculo;
     },
   );
 
@@ -351,7 +336,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       await dep.resolver.invalidarCapas();
       // Cambian los nombres y `capas_vigentes`: el panel de capas refresca los indicadores tras
       // activar y tiene que verlos ya.
-      invalidarCachesDeAgregados(app);
+      invalidarAgregadosEnVuelo(app);
       const r = await dep.pool.query(
         'SELECT id, capa, version, fuente, fecha_vigencia::text, crs_origen, n_features, cargado_en, vigente, activado_por, activado_en FROM geo.capa_version WHERE id = $1',
         [p.data.id],

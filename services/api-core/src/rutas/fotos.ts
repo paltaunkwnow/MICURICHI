@@ -1,12 +1,15 @@
 /** Fotos: validación por magic bytes, reprocesado con sharp a WebP sin metadatos, almacenamiento y servido. */
 import { randomUUID } from 'node:crypto';
 import { CONFIG_DOMINIO, type Rol } from 'contracts';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import sharp from 'sharp';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
+import { devolverTurnoDeFoto, type EsperaCupo, reservarTurnoDeFoto } from '../cuota.js';
+import { revisarEspacio } from '../guarda-disco.js';
 import { registrarProcesadoDeFoto, registrarSubidaDeFoto } from '../observabilidad.js';
-import { esTecnico, minutosRestantes } from './reportes.js';
+import { condicionPublicado, condicionPublico } from '../visibilidad.js';
+import { esTecnico } from './reportes.js';
 
 /**
  * Cargadores de libvips que Mi Curichi NO usa, apagados a nivel de biblioteca.
@@ -188,71 +191,57 @@ export async function sanitizarImagen(
   return { datos, ancho: meta.width ?? 0, alto: meta.height ?? 0 };
 }
 
-/** Lo mínimo de `pg` que usa la cuota: vale el pool y un cliente con la transacción abierta. */
-interface ClienteSql {
-  query<T extends Record<string, unknown>>(sql: string, params?: unknown[]): Promise<{ rows: T[] }>;
-}
-
-/** Cuándo vuelve a tener cupo de fotos una cuenta que lo agotó. */
-export interface EsperaCuotaFotos {
-  reintentarEnS: number;
-  disponibleEn: Date;
-}
-
-/**
- * Cuota de fotos por cuenta (§13): `null` si a la cuenta le queda cupo en la última hora; si no,
- * cuándo lo recupera.
- *
- * Busca la `FOTOS_POR_HORA_POR_CUENTA`-ésima foto más reciente de la ventana. Si existe, la
- * cuenta ya llegó al tope, y el cupo vuelve cuando esa foto sale de la ventana: a partir de ahí
- * quedan dentro una menos que el tope. Una sola consulta sobre el índice (subido_por, creado_en)
- * de la migración 0012, y la espera se calcula con el reloj de la base, el mismo de `creado_en`.
- */
-export async function esperaCuotaDeFotos(
-  cliente: ClienteSql,
-  usuarioId: string,
-): Promise<EsperaCuotaFotos | null> {
-  const r = await cliente.query<{ disponible_en: Date; reintentar_en_s: number }>(
-    `SELECT creado_en + interval '1 hour' AS disponible_en,
-            ceil(extract(epoch FROM creado_en + interval '1 hour' - now()))::int AS reintentar_en_s
-       FROM reporte_foto
-      WHERE subido_por = $1 AND creado_en > now() - interval '1 hour'
-      ORDER BY creado_en DESC
-     OFFSET $2 LIMIT 1`,
-    [usuarioId, CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA - 1],
-  );
-  const fila = r.rows[0];
-  if (!fila) return null;
-  return {
-    // Al menos 1 s: un Retry-After de 0 es una invitación a reintentar sin pausa.
-    reintentarEnS: Math.max(1, fila.reintentar_en_s),
-    disponibleEn: new Date(fila.disponible_en),
-  };
-}
-
 interface VisibilidadFoto extends Record<string, unknown> {
   sin_reporte: boolean;
   subido_por: string | null;
-  publicada: boolean;
+  /** Autor del reporte al que está pegada (null sin reporte, o si se borró la cuenta). */
+  autor_id: string | null;
+  /** El reporte está en la vista pública (`condicionPublico`). */
+  publica: boolean;
+  /** El reporte ya pasó su demora, en cualquier estado (`condicionPublicado`). */
+  publicado: boolean;
 }
 
+/** Cómo se sirve una foto: a cualquiera y cacheable, solo a quien pregunta, o a nadie (404). */
+export type ModoFoto = 'publica' | 'privada' | null;
+
 /**
- * Quién ve una foto. Una foto sin reporte es solo de quien la subió: nadie más, técnicos
- * incluidos, porque todavía no hay nada que moderar y servirla a cualquiera la volvía un
- * alojamiento público de imágenes. La de un reporte publicado, cualquiera; la de uno sin
- * publicar, técnico y admin, que son quienes moderan.
+ * Quién ve una foto (contracts 0.11.0, ADR 0006):
+ *  - sin reporte, solo quien la subió, técnicos incluidos afuera: todavía no hay nada que moderar
+ *    y servirla a cualquiera la volvía un alojamiento público de imágenes;
+ *  - la de un reporte público (nuevo, validado o resuelto ya publicado), cualquiera;
+ *  - el AUTOR del reporte ve las suyas en cualquier estado: mientras espera su publicación y si lo
+ *    rechazaron o fusionaron (sin esto vería su propia foto rota en «Mis reportes»);
+ *  - técnico y admin, las de un reporte ya publicado en cualquier estado, porque lo moderan; nunca
+ *    las de uno que todavía espera su publicar_en.
  */
-export function puedeVerFoto(
+export function modoDeFoto(
   foto: VisibilidadFoto,
   usuarioId: string | undefined,
   rol: Rol | undefined,
-): boolean {
-  if (foto.sin_reporte) return usuarioId !== undefined && foto.subido_por === usuarioId;
-  return foto.publicada || esTecnico(rol);
+): ModoFoto {
+  if (foto.sin_reporte)
+    return usuarioId !== undefined && foto.subido_por === usuarioId ? 'privada' : null;
+  if (foto.publica) return 'publica';
+  if (usuarioId !== undefined && foto.autor_id === usuarioId) return 'privada';
+  if (esTecnico(rol) && foto.publicado) return 'privada';
+  return null;
+}
+
+/** ETag de una foto publicada. La clave es un uuid y el contenido de una clave nunca cambia. */
+const etagDeFoto = (key: string) => `"${key}"`;
+
+/** Si `If-None-Match` trae esa etiqueta (o `*`), con o sin `W/`. */
+export function coincideEtag(cabecera: string | string[] | undefined, etag: string): boolean {
+  if (!cabecera) return false;
+  const valores = (Array.isArray(cabecera) ? cabecera.join(',') : cabecera)
+    .split(',')
+    .map((v) => v.trim().replace(/^W\//, ''));
+  return valores.includes('*') || valores.includes(etag);
 }
 
 export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
-  function rechazarPorCuota(res: FastifyReply, espera: EsperaCuotaFotos) {
+  function rechazarPorCuota(res: FastifyReply, espera: EsperaCupo) {
     // Nombre exigido por la alerta CuotaDeFotosRechazando (infra/observabilidad/alertas.yml): no
     // se toca. curichi_fotos_subidas_total{resultado="rechazada_cuota"} es el contador nuevo, que
     // agrupa este motivo junto a los otros cuatro en el mismo panel.
@@ -261,8 +250,8 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
     res.header('Retry-After', String(espera.reintentarEnS));
     return res.status(429).send({
       codigo: 'CUOTA_DE_FOTOS',
-      mensaje: `Llegaste al máximo de ${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora. Vas a poder subir otra en ${minutosRestantes(espera.reintentarEnS)}.`,
-      detalles: { disponible_en: espera.disponibleEn.toISOString() },
+      mensaje: `Ya subiste las ${dep.cfg.fotosPorDia} fotos de hoy. Vas a poder subir otra mañana.`,
+      detalles: { disponible_en: espera.disponibleEn },
     });
   }
 
@@ -271,13 +260,15 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
    *
    * Era el último camino de escritura abierto a cualquiera: un desconocido podía hacer que el
    * servicio decodificara y reescribiera imágenes de hasta 8 MB —el trabajo más caro que hace
-   * este proceso— y dejara los bytes en el almacén, sin ninguna cuenta detrás y sin que ese
-   * consumo se pudiera atribuir a nadie. Pedir sesión aquí no añade fricción al vecino (ya la
-   * necesita para enviar el reporte) y sí le pone nombre a cada byte que entra.
+   * este proceso— y dejara los bytes en el almacén, sin ninguna cuenta detrás. Pedir sesión aquí
+   * no añade fricción al vecino (ya la necesita para enviar el reporte) y le pone nombre a cada
+   * byte que entra.
    *
-   * Y con nombre, tope: `FOTOS_POR_HORA_POR_CUENTA` por cuenta además del límite por IP, que una
-   * IP dinámica reinicia con poner el teléfono en modo avión. Cada foto guarda quién la subió
-   * (`subido_por`, migración 0012) y el reporte solo acepta las de su autor.
+   * Y con nombre, tope: `FOTOS_POR_DIA_POR_CUENTA` por cuenta y por día de la ciudad, además del
+   * límite por IP, que una IP dinámica reinicia con poner el teléfono en modo avión. El turno se
+   * reserva en la base ANTES de leer el archivo (una cuenta sin cupo no hace trabajar a sharp) y
+   * se devuelve si la foto no llega a guardarse. Cada foto guarda quién la subió (`subido_por`,
+   * migración 0012) y el reporte solo acepta las de su autor.
    */
   app.post(
     '/api/v1/fotos',
@@ -294,93 +285,121 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         return res
           .status(401)
           .send({ codigo: 'SIN_SESION', mensaje: 'Iniciá sesión para subir una foto.' });
-      // Primera mirada a la cuota, ANTES de leer el archivo: una cuenta sin cupo no llega a hacer
-      // trabajar a sharp. No es la que manda —dos subidas simultáneas pueden pasar las dos por
-      // aquí—; esa va dentro de la transacción de más abajo.
-      const sinCupo = await esperaCuotaDeFotos(dep.pool, autor.id);
-      if (sinCupo) return rechazarPorCuota(res, sinCupo);
-      // `req.file()` lanza si la petición no es multipart, y el manejador general publicaba el
-      // código interno del plugin (`FST_INVALID_MULTIPART_CONTENT_TYPE`) como si fuera un código
-      // del dominio. Lo que hay que decir es qué se esperaba.
-      const archivo = await req
-        .file({ limits: { fileSize: CONFIG_DOMINIO.FOTO_MAX_BYTES, files: 1 } })
-        .catch(() => null);
-      if (!archivo) {
-        registrarSubidaDeFoto(app.metricas, 'error');
-        return res
-          .status(400)
-          .send({ codigo: 'SIN_ARCHIVO', mensaje: 'Adjuntá una imagen en el campo "archivo".' });
-      }
-      const buf = await archivo.toBuffer().catch(() => null);
-      if (!buf || archivo.file.truncated) {
-        registrarSubidaDeFoto(app.metricas, 'rechazada_tamano');
-        return res.status(413).send({
-          codigo: 'ARCHIVO_GRANDE',
-          mensaje: `La foto supera ${CONFIG_DOMINIO.FOTO_MAX_BYTES / 1024 / 1024} MB.`,
+      // Antes que nada el disco: sin espacio no se lee la imagen, no trabaja sharp y no se gasta
+      // cupo. El reporte sin foto sigue entrando.
+      if ((await revisarEspacio(dep.almacen, dep.cfg.fotosMinLibreBytes, req.log)) !== 'ok') {
+        registrarSubidaDeFoto(app.metricas, 'rechazada_espacio');
+        req.log.warn('foto rechazada: el disco de fotos está bajo FOTOS_MIN_LIBRE_BYTES');
+        return res.status(507).send({
+          codigo: 'SIN_ESPACIO',
+          mensaje:
+            'Ahora no podemos guardar fotos. Podés enviar el reporte sin foto o probar más tarde.',
         });
       }
-      const mime = detectarMime(buf);
-      if (!mime || !(CONFIG_DOMINIO.FOTO_MIME_PERMITIDOS as readonly string[]).includes(mime)) {
-        registrarSubidaDeFoto(app.metricas, 'rechazada_tipo');
-        return res
-          .status(415)
-          .send({ codigo: 'TIPO_NO_PERMITIDO', mensaje: 'Solo se aceptan JPEG, PNG o WebP.' });
-      }
-      let procesada: Awaited<ReturnType<typeof sanitizarImagen>>;
-      const inicioProcesado = process.hrtime.bigint();
-      const segundosProcesado = () => Number(process.hrtime.bigint() - inicioProcesado) / 1e9;
+      // Atómica y en su propia sentencia: dos subidas simultáneas se serializan sobre la fila del
+      // día y no pueden gastar las dos el último turno. No se retiene ninguna transacción mientras
+      // trabaja sharp.
+      const reserva = await reservarTurnoDeFoto(dep.pool, autor.id, {
+        maximo: dep.cfg.fotosPorDia,
+        zona: dep.cfg.zonaHoraria,
+      });
+      if (!reserva.permitido) return rechazarPorCuota(res, reserva.espera);
+      let resultado: ResultadoSubida | null = null;
       try {
-        procesada = await sanitizarImagen(buf);
-      } catch (e) {
-        registrarProcesadoDeFoto(app.metricas, segundosProcesado());
-        registrarSubidaDeFoto(app.metricas, 'error');
-        req.log.warn({ err: e }, 'no se pudo procesar la imagen subida');
-        return res
-          .status(415)
-          .send({ codigo: 'IMAGEN_INVALIDA', mensaje: mensajePublicoDeImagen(e) });
-      }
-      registrarProcesadoDeFoto(app.metricas, segundosProcesado());
-      const key = `${randomUUID()}.webp`;
-      const cliente = await dep.pool.connect();
-      try {
-        await cliente.query('BEGIN');
-        // La cuota que manda, serializada por cuenta: el FOR UPDATE sobre la fila del usuario pone
-        // en cola las subidas simultáneas de la misma cuenta, y cada una cuenta ya con las fotos
-        // de las anteriores dentro. Sin él, todas leían el mismo conteo y entraban todas.
-        await cliente.query('SELECT 1 FROM usuario WHERE id = $1 FOR UPDATE', [autor.id]);
-        const espera = await esperaCuotaDeFotos(cliente, autor.id);
-        if (espera) {
-          await cliente.query('ROLLBACK');
-          return rechazarPorCuota(res, espera);
-        }
-        await cliente.query(
-          'INSERT INTO reporte_foto (objeto_key, mime, bytes, ancho, alto, exif_sanitizado, subido_por) VALUES ($1, $2, $3, $4, $5, true, $6)',
-          [key, MIME_SALIDA, procesada.datos.length, procesada.ancho, procesada.alto, autor.id],
-        );
-        await cliente.query('COMMIT');
-      } catch (e) {
-        await cliente.query('ROLLBACK').catch(() => {});
-        registrarSubidaDeFoto(app.metricas, 'error');
-        throw e;
+        resultado = await recibirYGuardar(req, autor.id);
       } finally {
-        cliente.release();
+        // Una foto que no se guardó no gasta cupo: tipo o tamaño equivocados, imagen ilegible o
+        // un fallo del almacén. Se devuelve ANTES de responder, así un reintento inmediato ya lo
+        // encuentra, y del día en que se reservó aunque la medianoche haya pasado en el medio.
+        if (!resultado?.guardada)
+          await devolverTurnoDeFoto(dep.pool, autor.id, reserva.dia).catch((err) =>
+            req.log.warn({ err }, 'no se pudo devolver el turno de foto'),
+          );
       }
-      // El objeto se guarda con la fila ya confirmada y la transacción cerrada: la subida al
-      // almacén puede tardar y no debe retener ni la conexión ni el bloqueo de la cuenta. Si
-      // falla, se quita la fila: una foto sin objeto no sirve y seguiría gastando cupo. Al revés
-      // (objeto primero) un corte entre los dos pasos dejaba un objeto sin fila, que ninguna
-      // limpieza encuentra; una fila sin objeto la retira el mantenimiento a las 24 h.
-      try {
-        await dep.almacen.guardar(key, procesada.datos, MIME_SALIDA);
-      } catch (e) {
-        await dep.pool
-          .query('DELETE FROM reporte_foto WHERE objeto_key = $1', [key])
-          .catch((err) => req.log.warn({ err, key }, 'no se pudo quitar la fila de la foto'));
-        registrarSubidaDeFoto(app.metricas, 'error');
-        throw e;
-      }
-      registrarSubidaDeFoto(app.metricas, 'aceptada');
-      return res.status(201).send({
+      return res.status(resultado.estado).send(resultado.cuerpo);
+    },
+  );
+
+  interface ResultadoSubida {
+    /** Si la foto quedó en la base y en el almacén: si no, se devuelve el turno. */
+    guardada: boolean;
+    estado: number;
+    cuerpo: unknown;
+  }
+
+  /** Lee, valida, reprocesa y guarda la foto. No responde: eso lo hace la ruta, ya con el cupo en orden. */
+  async function recibirYGuardar(req: FastifyRequest, autorId: string): Promise<ResultadoSubida> {
+    const no = (estado: number, cuerpo: { codigo: string; mensaje: string }) => ({
+      guardada: false,
+      estado,
+      cuerpo,
+    });
+    // `req.file()` lanza si la petición no es multipart, y el manejador general publicaba el
+    // código interno del plugin (`FST_INVALID_MULTIPART_CONTENT_TYPE`) como si fuera un código
+    // del dominio. Lo que hay que decir es qué se esperaba.
+    const archivo = await req
+      .file({ limits: { fileSize: CONFIG_DOMINIO.FOTO_MAX_BYTES, files: 1 } })
+      .catch(() => null);
+    if (!archivo) {
+      registrarSubidaDeFoto(app.metricas, 'error');
+      return no(400, {
+        codigo: 'SIN_ARCHIVO',
+        mensaje: 'Adjuntá una imagen en el campo "archivo".',
+      });
+    }
+    const buf = await archivo.toBuffer().catch(() => null);
+    if (!buf || archivo.file.truncated) {
+      registrarSubidaDeFoto(app.metricas, 'rechazada_tamano');
+      return no(413, {
+        codigo: 'ARCHIVO_GRANDE',
+        mensaje: `La foto supera ${CONFIG_DOMINIO.FOTO_MAX_BYTES / 1024 / 1024} MB.`,
+      });
+    }
+    const mime = detectarMime(buf);
+    if (!mime || !(CONFIG_DOMINIO.FOTO_MIME_PERMITIDOS as readonly string[]).includes(mime)) {
+      registrarSubidaDeFoto(app.metricas, 'rechazada_tipo');
+      return no(415, { codigo: 'TIPO_NO_PERMITIDO', mensaje: 'Solo se aceptan JPEG, PNG o WebP.' });
+    }
+    let procesada: Awaited<ReturnType<typeof sanitizarImagen>>;
+    const inicioProcesado = process.hrtime.bigint();
+    const segundosProcesado = () => Number(process.hrtime.bigint() - inicioProcesado) / 1e9;
+    try {
+      procesada = await sanitizarImagen(buf);
+    } catch (e) {
+      registrarProcesadoDeFoto(app.metricas, segundosProcesado());
+      registrarSubidaDeFoto(app.metricas, 'error');
+      req.log.warn({ err: e }, 'no se pudo procesar la imagen subida');
+      return no(415, { codigo: 'IMAGEN_INVALIDA', mensaje: mensajePublicoDeImagen(e) });
+    }
+    registrarProcesadoDeFoto(app.metricas, segundosProcesado());
+    const key = `${randomUUID()}.webp`;
+    try {
+      await dep.pool.query(
+        'INSERT INTO reporte_foto (objeto_key, mime, bytes, ancho, alto, exif_sanitizado, subido_por) VALUES ($1, $2, $3, $4, $5, true, $6)',
+        [key, MIME_SALIDA, procesada.datos.length, procesada.ancho, procesada.alto, autorId],
+      );
+    } catch (e) {
+      registrarSubidaDeFoto(app.metricas, 'error');
+      throw e;
+    }
+    // El objeto se guarda con la fila ya confirmada: la subida al almacén puede tardar y no debe
+    // retener una conexión. Si falla, se quita la fila: una foto sin objeto no sirve. Al revés
+    // (objeto primero) un corte entre los dos pasos dejaba un objeto sin fila, que ninguna
+    // limpieza encuentra; una fila sin objeto la retira el mantenimiento a las 24 h.
+    try {
+      await dep.almacen.guardar(key, procesada.datos, MIME_SALIDA);
+    } catch (e) {
+      await dep.pool
+        .query('DELETE FROM reporte_foto WHERE objeto_key = $1', [key])
+        .catch((err) => req.log.warn({ err, key }, 'no se pudo quitar la fila de la foto'));
+      registrarSubidaDeFoto(app.metricas, 'error');
+      throw e;
+    }
+    registrarSubidaDeFoto(app.metricas, 'aceptada');
+    return {
+      guardada: true,
+      estado: 201,
+      cuerpo: {
         objeto_key: key,
         url: `${dep.cfg.urlPublica}/api/v1/fotos/${key}`,
         ancho: procesada.ancho,
@@ -388,9 +407,9 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         bytes: procesada.datos.length,
         mime: MIME_SALIDA,
         exif_sanitizado: true,
-      });
-    },
-  );
+      },
+    };
+  }
 
   // Mismo motivo que el listado: era una ruta pública sin límite, y cada petición lee un
   // objeto del almacén.
@@ -407,26 +426,41 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
       if (!extension) return noEncontrada();
       const fila = await dep.pool.query<VisibilidadFoto>(
         `SELECT f.reporte_id IS NULL AS sin_reporte,
-                f.subido_por,
-                coalesce(r.estado IN ('validado', 'resuelto'), false) AS publicada
+                f.subido_por::text AS subido_por,
+                r.autor_id::text AS autor_id,
+                coalesce(${condicionPublico('r')}, false) AS publica,
+                coalesce(${condicionPublicado('r')}, false) AS publicado
          FROM reporte_foto f
          LEFT JOIN reporte_inundacion r ON r.id = f.reporte_id
         WHERE f.objeto_key = $1 AND f.exif_sanitizado`,
         [key],
       );
       const meta = fila.rows[0];
-      if (!meta || !puedeVerFoto(meta, req.usuario?.id, req.usuario?.rol)) return noEncontrada();
-      const obj = await dep.almacen.leer(key);
-      if (!obj) return noEncontrada();
-      res.header('Content-Type', MIME_POR_EXTENSION[extension]);
-      // Solo la foto de un reporte PUBLICADO va a cachés compartidas. La que aún no tiene reporte
-      // o la de uno sin publicar, no: la primera visita de un técnico la dejaría servible para
-      // cualquiera, y la que todavía no tiene reporte es solo de quien la subió. Y la publicada,
-      // una hora y sin `immutable`: su visibilidad sigue la del reporte, que puede dejar de
-      // publicarse (fusionado como duplicado), y con `max-age=86400, immutable` una caché la
-      // seguía sirviendo un día entero.
-      res.header('Cache-Control', meta.publicada ? 'public, max-age=3600' : 'private, no-store');
+      // La visibilidad se decide ANTES de mirar If-None-Match: una foto de un reporte retirado da
+      // 404 aunque la caché del navegador todavía tenga su ETag, nunca 304.
+      const modo = meta ? modoDeFoto(meta, req.usuario?.id, req.usuario?.rol) : null;
+      if (!modo) return noEncontrada();
       res.header('X-Content-Type-Options', 'nosniff');
+      if (modo === 'publica') {
+        // `public, no-cache`: cualquier caché la guarda, pero la revalida en cada uso. Retirar el
+        // reporte (rechazar o fusionar) es el único control que queda sin moderación previa, y con
+        // `max-age` una caché compartida seguiría sirviendo la foto retirada. El 304 es barato:
+        // no lee el objeto del almacén.
+        const etag = etagDeFoto(key);
+        res.header('Cache-Control', 'public, no-cache');
+        res.header('ETag', etag);
+        if (coincideEtag(req.headers['if-none-match'], etag)) return res.status(304).send();
+      } else {
+        // Del autor, de quien la subió o de un técnico: nunca en una caché compartida.
+        res.header('Cache-Control', 'private, no-store');
+      }
+      const obj = await dep.almacen.leer(key);
+      if (!obj) {
+        res.removeHeader('ETag');
+        res.header('Cache-Control', 'private, no-store');
+        return noEncontrada();
+      }
+      res.header('Content-Type', MIME_POR_EXTENSION[extension]);
       return res.send(obj.datos);
     },
   );

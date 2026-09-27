@@ -22,6 +22,17 @@ export const ClaveIdempotenciaSchema = z
   .max(200)
   .regex(/^[A-Za-z0-9_:.-]+$/, 'La clave de idempotencia usa caracteres no permitidos.');
 
+/**
+ * Clave tal como se guarda: con el prefijo de la cuenta (`${usuario_id}:${clave}`), en la misma
+ * columna de texto y sin migración. Sin el prefijo, dos cuentas que mandaran la misma clave (un
+ * generador malo en el cliente, o alguien que copia la de otro) chocaban: la segunda recibía el
+ * reporte de la primera o un 409. Las claves viejas sin prefijo no colisionan con ninguna nueva y
+ * vencen solas a las 24 h.
+ */
+export function claveDeCuenta(usuarioId: string, clave: string): string {
+  return `${usuarioId}:${clave}`;
+}
+
 /** Horas que se recuerda una clave. Pasadas, el mismo envío volvería a crear un reporte. */
 export const HORAS_VALIDEZ_CLAVE = 24;
 

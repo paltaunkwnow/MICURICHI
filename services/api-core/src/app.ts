@@ -15,7 +15,13 @@ import type { Almacen } from './almacen.js';
 import { instalarAuth } from './auth.js';
 import { aplicarCachePorDefecto } from './cache.js';
 import type { ConfigApi } from './config.js';
-import { instalarObservabilidad, instrumentarPool, Metricas } from './observabilidad.js';
+import { instalarMetricasDeDisco, revisarEspacio } from './guarda-disco.js';
+import {
+  instalarMetricaDeBandeja,
+  instalarObservabilidad,
+  instrumentarPool,
+  Metricas,
+} from './observabilidad.js';
 import { opcionFastify } from './proxy.js';
 import { GeoNoDisponible, type ResolverGeo } from './resolver.js';
 import { rutasAdmin } from './rutas/admin.js';
@@ -105,6 +111,8 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
     exponerEn: dep.cfg.rutaMetricas,
     token: dep.cfg.tokenMetricas,
   });
+  instalarMetricasDeDisco(metricas, dep.almacen, dep.cfg.fotosMinLibreBytes);
+  instalarMetricaDeBandeja(metricas, dep.pool as Parameters<typeof instalarMetricaDeBandeja>[1]);
   // El cliente de geo-service tiene fallos que no devuelve a nadie (la invalidación de capas es
   // de mejor esfuerzo): sin este logger y estas métricas, esos fallos no dejaban rastro.
   dep.resolver.observar?.({ log: app.log, metricas });
@@ -256,6 +264,14 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
           estado.fotos = 'error';
         }
       } else estado.fotos = 'ok';
+      // Con poco disco se rechazan las fotos (507): la réplica sigue sirviendo todo lo demás.
+      if (
+        estado.fotos === 'ok' &&
+        (await revisarEspacio(dep.almacen, dep.cfg.fotosMinLibreBytes, req.log)) === 'poco_espacio'
+      ) {
+        req.log.warn('readiness: el disco de fotos está bajo FOTOS_MIN_LIBRE_BYTES');
+        estado.fotos = 'poco_espacio';
+      }
       // La readiness decide si el balanceador manda tráfico a ESTA réplica, así que solo puede
       // mirar lo que impide a esta réplica atender. Antes bastaba con que geo-service estuviera
       // caído para devolver 503, y como todas las réplicas hablan con el mismo geo-service,

@@ -7,12 +7,13 @@ import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import { Metricas } from '../src/observabilidad.js';
 import { detectarMime } from '../src/rutas/fotos.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
+  enEspera,
   iniciarSesion,
   liberarCuota,
   multipart,
@@ -53,7 +54,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -324,9 +325,9 @@ describe('métrica de subidas de fotos (revisión de producción, §13)', () => 
   });
 });
 
-describe('moderación previa de las fotos (§13)', () => {
+describe('visibilidad de las fotos de un reporte (§13, contracts 0.11.0)', () => {
   /** Sube una foto y la asocia a un reporte que queda en el estado pedido. */
-  async function fotoDeReporteEn(estado: string): Promise<string> {
+  async function fotoDeReporteEn(estado: string, espera = false): Promise<string> {
     const jpeg = await sharp({ create: { width: 40, height: 30, channels: 3, background: '#123' } })
       .jpeg()
       .toBuffer();
@@ -348,13 +349,21 @@ describe('moderación previa de las fotos (§13)', () => {
         creado.json().id,
         estado,
       ]);
+    if (espera) await enEspera(ex, creado.json().id);
     return key;
   }
 
-  it('no sirve la foto de un reporte que todavía no se publicó', async () => {
+  it('no sirve la foto de un reporte que todavía espera su publicación', async () => {
+    const key = await fotoDeReporteEn('nuevo', true);
+    const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
+    expect(r.statusCode, 'mientras espera no se publica: su foto tampoco').toBe(404);
+  });
+
+  it('sí sirve la de un nuevo ya publicado: sin verificar, pero público', async () => {
     const key = await fotoDeReporteEn('nuevo');
     const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
-    expect(r.statusCode, 'un reporte en "nuevo" no se publica: su foto tampoco').toBe(404);
+    expect(r.statusCode).toBe(200);
+    expect(r.headers['cache-control']).toBe('public, no-cache');
   });
 
   it('no sirve la foto de un reporte rechazado', async () => {
@@ -364,15 +373,16 @@ describe('moderación previa de las fotos (§13)', () => {
   });
 
   /**
-   * Caché pública, pero de una hora y SIN `immutable`: la visibilidad de la foto sigue la del
-   * reporte, que el técnico puede rechazar o fusionar después. Con `max-age=86400, immutable`,
-   * una caché compartida seguía sirviéndola un día entero aunque el reporte dejara de publicarse.
+   * Caché pública pero SIN plazo: `no-cache` obliga a revalidar con ETag en cada uso. La
+   * visibilidad de la foto sigue la del reporte, que el técnico puede rechazar o fusionar después;
+   * con `max-age` una caché compartida la seguía sirviendo aunque el reporte dejara de publicarse.
    */
-  it('sí sirve la de un reporte validado, con caché pública de una hora y sin immutable', async () => {
+  it('sí sirve la de un reporte validado, con caché pública que revalida y sin immutable', async () => {
     const key = await fotoDeReporteEn('validado');
     const r = await app.inject({ method: 'GET', url: `/api/v1/fotos/${key}` });
     expect(r.statusCode).toBe(200);
-    expect(r.headers['cache-control']).toBe('public, max-age=3600');
+    expect(r.headers['cache-control']).toBe('public, no-cache');
+    expect(r.headers.etag).toBe(`"${key}"`);
   });
 
   /**
@@ -410,7 +420,7 @@ describe('moderación previa de las fotos (§13)', () => {
     expect(r.statusCode).toBe(200);
     expect(r.headers['content-type']).toBe('image/jpeg');
     expect(r.headers['x-content-type-options']).toBe('nosniff');
-    expect(r.headers['cache-control']).toBe('public, max-age=3600');
+    expect(r.headers['cache-control']).toBe('public, no-cache');
     const o = await app.inject({ method: 'GET', url: `/api/v1/fotos/${otra}` });
     expect(o.statusCode).toBe(404);
     expect(o.json().codigo).toBe('NO_EXISTE');

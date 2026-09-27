@@ -1,10 +1,16 @@
-/** Conversión de filas de reporte a las vistas pública (jitter) y técnica (exacta). CLAUDE.md §13. */
+/**
+ * Conversión de filas de reporte a las vistas pública (jitter), técnica (exacta) y del autor
+ * (exacta, con la demora). CLAUDE.md §13.
+ */
 import {
   CONFIG_DOMINIO,
   coordenadaPublica,
+  type EstadoReporte,
+  type MiReporte,
   type ReportePublico,
   type ReporteTecnico,
 } from 'contracts';
+import { esEstadoPublico, esRetirado, esVerificado } from './visibilidad.js';
 
 export interface FilaReporte {
   id: string;
@@ -14,6 +20,10 @@ export interface FilaReporte {
   lon_publico?: number | null;
   lat_publico?: number | null;
   creado_en: Date;
+  /** Desde cuándo lo ve el público (migración 0015). */
+  publicar_en: Date;
+  /** Segundos que faltan para `publicar_en`, calculados en la base al leer (0 si ya pasó). */
+  segundos_para_publicar: number;
   actualizado_en: Date;
   evento_en: Date | null;
   autor_id: string | null;
@@ -41,7 +51,7 @@ export interface FilaReporte {
   severidad_puntaje: number;
   severidad_manual: ReportePublico['severidad'] | null;
   severidad_motivo: string | null;
-  estado: ReportePublico['estado'];
+  estado: EstadoReporte;
   estado_motivo: string | null;
   fusionado_en_id: string | null;
   punto_critico_id: string | null;
@@ -54,7 +64,9 @@ export interface FilaReporte {
 export const SELECT_REPORTE = `
   SELECT r.id, ST_X(r.geom) AS lon, ST_Y(r.geom) AS lat,
          ST_X(r.geom_publico) AS lon_publico, ST_Y(r.geom_publico) AS lat_publico,
-         r.creado_en, r.actualizado_en, r.evento_en, r.autor_id,
+         r.creado_en, r.publicar_en,
+         GREATEST(0, ceil(extract(epoch FROM r.publicar_en - now())))::int AS segundos_para_publicar,
+         r.actualizado_en, r.evento_en, r.autor_id,
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
          r.ubicacion_metodo, r.precision_gps_m, r.distancia_dispositivo_m, r.ubicacion_tipo, r.descripcion,
@@ -81,17 +93,20 @@ export function urlFoto(base: string, key: string) {
   return `${base}/api/v1/fotos/${key}`;
 }
 
+/** Propiedades comunes a las tres vistas, con el estado tal cual está en la base. */
+type PropsBase = Omit<ReportePublico, 'estado'> & { estado: EstadoReporte; verificado: boolean };
+
 /**
  * `salJitter` es un secreto del servidor. Sin él la semilla del desplazamiento sería el `id`
  * del reporte, que se publica en la propia respuesta: como el algoritmo está en el repositorio,
  * cualquiera podría recalcular el offset y recuperar la coordenada exacta de la vivienda.
  */
-export function vistaPublica(
+function vistaBase(
   f: FilaReporte,
   urlBase: string,
   salJitter: string,
-  exacta = false,
-): { lon: number; lat: number; props: ReportePublico } {
+  exacta: boolean,
+): { lon: number; lat: number; props: PropsBase } {
   const degradar = !exacta && f.ubicacion_tipo === 'vivienda_o_predio';
   let { lat, lon } = f;
   if (!exacta) {
@@ -140,6 +155,7 @@ export function vistaPublica(
       severidad: f.severidad_manual ?? f.severidad_calculada,
       severidad_calculada: f.severidad_calculada,
       estado: f.estado,
+      verificado: esVerificado(f.estado),
       punto_critico_id: f.punto_critico_id,
       n_reportes_punto: f.n_reportes_punto,
       precision_degradada: degradar,
@@ -147,12 +163,28 @@ export function vistaPublica(
   };
 }
 
+/**
+ * Vista pública. Solo para filas que ya pasaron por `condicionPublico`: si llega un rechazado o
+ * un duplicado es un error de la consulta, y se corta con un 500 antes que publicarlo.
+ */
+export function vistaPublica(
+  f: FilaReporte,
+  urlBase: string,
+  salJitter: string,
+): { lon: number; lat: number; props: ReportePublico } {
+  const base = vistaBase(f, urlBase, salJitter, false);
+  const estado = base.props.estado;
+  if (!esEstadoPublico(estado))
+    throw new Error(`vista pública de un reporte en estado no público (${estado})`);
+  return { ...base, props: { ...base.props, estado } };
+}
+
 export function vistaTecnica(
   f: FilaReporte,
   urlBase: string,
 ): { lon: number; lat: number; props: ReporteTecnico } {
   // El técnico ve la coordenada exacta: no hay jitter y la sal es irrelevante.
-  const base = vistaPublica(f, urlBase, '', true);
+  const base = vistaBase(f, urlBase, '', true);
   return {
     lon: base.lon,
     lat: base.lat,
@@ -180,7 +212,32 @@ export function vistaTecnica(
   };
 }
 
-export function aFeature(v: { lon: number; lat: number; props: ReportePublico | ReporteTecnico }) {
+/**
+ * Vista del AUTOR (contracts 0.11.0): la respuesta de `POST /reportes` (201 y replay) y cada
+ * elemento de `GET /mis-reportes`. Coordenada exacta —la eligió él— y, en cualquier estado, cuándo
+ * se publica y si lo retiraron. Nunca el autor ni campos de moderación; sale con `private, no-store`.
+ */
+export function vistaMiReporte(
+  f: FilaReporte,
+  urlBase: string,
+): { lon: number; lat: number; props: MiReporte } {
+  const base = vistaBase(f, urlBase, '', true);
+  return {
+    ...base,
+    props: {
+      ...base.props,
+      publicar_en: iso(f.publicar_en)!,
+      segundos_para_publicar: f.segundos_para_publicar,
+      retirado: esRetirado(f.estado),
+    },
+  };
+}
+
+export function aFeature<P extends ReportePublico | ReporteTecnico | MiReporte>(v: {
+  lon: number;
+  lat: number;
+  props: P;
+}) {
   return {
     type: 'Feature' as const,
     id: v.props.id,

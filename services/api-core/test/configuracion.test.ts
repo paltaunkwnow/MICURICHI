@@ -15,7 +15,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
-import { CUENTAS, crearUsuarios, iniciarSesion, resolverDePrueba, sesion } from './ayudas.js';
+import {
+  CUENTAS,
+  configDePrueba,
+  crearUsuarios,
+  iniciarSesion,
+  resolverDePrueba,
+  sesion,
+} from './ayudas.js';
 
 describe('config.ts: ciudad del despliegue (CIUDAD_*)', () => {
   it('sin variables, la ciudad es la por defecto (Santa Cruz)', () => {
@@ -125,7 +132,7 @@ describe('GET /api/v1/configuracion', () => {
         options: { max: 8 },
       } as unknown as pg.Pool,
       cfg: {
-        ...leerConfig({
+        ...configDePrueba({
           CIUDAD_NOMBRE: 'Asunción',
           CIUDAD_PAIS: 'PY',
           CIUDAD_LOCALE: 'es-PY',
@@ -178,7 +185,10 @@ describe('GET /api/v1/auth/yo: panel_url según rol', () => {
     conPanel = await crearApp({
       pool,
       cfg: {
-        ...leerConfig({ DATABASE_URL: base.url, PANEL_ADMIN_URL: 'https://panel.curichi.gob.bo' }),
+        ...configDePrueba({
+          DATABASE_URL: base.url,
+          PANEL_ADMIN_URL: 'https://panel.curichi.gob.bo',
+        }),
         rutaOpenApi: '/no-existe.yaml',
       },
       resolver: resolverDePrueba,
@@ -186,7 +196,7 @@ describe('GET /api/v1/auth/yo: panel_url según rol', () => {
     });
     sinPanel = await crearApp({
       pool,
-      cfg: { ...leerConfig({ DATABASE_URL: base.url }), rutaOpenApi: '/no-existe.yaml' },
+      cfg: { ...configDePrueba({ DATABASE_URL: base.url }), rutaOpenApi: '/no-existe.yaml' },
       resolver: resolverDePrueba,
       almacen: new AlmacenMemoria(),
     });

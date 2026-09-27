@@ -18,10 +18,10 @@ import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import { Metricas } from '../src/observabilidad.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -31,7 +31,8 @@ import {
   sesion,
 } from './ayudas.js';
 
-const LIMITE = CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA;
+const LIMITE = CONFIG_DOMINIO.FOTOS_POR_DIA_POR_CUENTA;
+const ZONA = CONFIG_DOMINIO.ZONA_HORARIA_POR_DEFECTO;
 
 let base: BaseEfimera;
 let pool: pg.Pool;
@@ -62,7 +63,7 @@ beforeAll(async () => {
     // El límite por IP bien alto: aquí se prueba el de la CUENTA, que es el que no se esquiva
     // cambiando de conexión.
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -86,9 +87,10 @@ afterAll(async () => {
   await base?.cerrar();
 });
 
-// Cada prueba parte de cero fotos: la cuota mira la última hora de cada cuenta.
+// Cada prueba parte de cero fotos y con el cupo del día entero.
 beforeEach(async () => {
   await pool.query('DELETE FROM reporte_foto');
+  await pool.query('DELETE FROM cuota_reporte_diaria');
 });
 
 function subir(cookie: string, datos: Buffer = JPEG) {
@@ -106,7 +108,7 @@ function subir(cookie: string, datos: Buffer = JPEG) {
  */
 const PLAZO = { timeout: 30_000 };
 
-/** Fotos que la cuenta ya subió hace `minutos` minutos, sin pasar por sharp ni por la ruta. */
+/** Filas de fotos subidas hace `minutos` minutos, sin pasar por sharp ni por la ruta ni por el cupo. */
 async function fotosPrevias(usuarioId: string | null, n: number, minutos: number) {
   const claves: string[] = [];
   for (let i = 0; i < n; i++) {
@@ -181,52 +183,103 @@ describe('autoría de la foto', PLAZO, () => {
   });
 });
 
-describe(`cuota de ${LIMITE} fotos por hora y por cuenta`, PLAZO, () => {
-  it('la foto que supera el tope es 429 CUOTA_DE_FOTOS con Retry-After hasta que se libera cupo', async () => {
-    await fotosPrevias(idVecina, LIMITE - 1, 50);
+/** Fotos ya gastadas hoy (o `dias` atrás) por la cuenta, en el contador de la base. */
+async function fotosGastadas(usuarioId: string, n: number, dias = 0) {
+  await pool.query(
+    `INSERT INTO cuota_reporte_diaria (usuario_id, dia, fotos_n)
+     VALUES ($1, (now() AT TIME ZONE $2)::date - $4::int, $3)
+     ON CONFLICT (usuario_id, dia) DO UPDATE SET fotos_n = EXCLUDED.fotos_n`,
+    [usuarioId, ZONA, n, dias],
+  );
+}
+
+async function gastadasHoy(usuarioId: string): Promise<number> {
+  const r = await pool.query<{ n: number }>(
+    `SELECT COALESCE(sum(fotos_n), 0)::int AS n FROM cuota_reporte_diaria
+      WHERE usuario_id = $1 AND dia = (now() AT TIME ZONE $2)::date`,
+    [usuarioId, ZONA],
+  );
+  return r.rows[0]!.n;
+}
+
+describe(`cupo de ${LIMITE} fotos por día y por cuenta`, PLAZO, () => {
+  it('la foto que supera el tope es 429 CUOTA_DE_FOTOS con Retry-After hasta la medianoche', async () => {
+    await fotosGastadas(idVecina, LIMITE - 1);
     const ultima = await subir(cookieVecina);
     expect(ultima.statusCode, 'la foto número LIMITE todavía entra').toBe(201);
 
     const sobra = await subir(cookieVecina);
     expect(sobra.statusCode).toBe(429);
     expect(sobra.json().codigo).toBe('CUOTA_DE_FOTOS');
+    expect(sobra.json().mensaje).toBe(
+      `Ya subiste las ${LIMITE} fotos de hoy. Vas a poder subir otra mañana.`,
+    );
     // Revisión de producción, §13: contador nuevo por resultado, junto a la métrica de la alerta
     // CuotaDeFotosRechazando (curichi_cuota_fotos_rechazos_total, sin tocar).
     expect(metricas.exponer()).toContain(
       'curichi_fotos_subidas_total{resultado="rechazada_cuota"}',
     );
-    // El cupo vuelve cuando la más vieja de la ventana (hace 50 min) cumple la hora: ~10 min.
-    const espera = Number(sobra.headers['retry-after']);
-    expect(espera).toBeGreaterThanOrEqual(590);
-    expect(espera).toBeLessThanOrEqual(601);
-    expect(sobra.json().mensaje).toMatch(/10 minutos/);
-    expect(new Date(sobra.json().detalles.disponible_en).getTime()).toBeGreaterThan(Date.now());
-    expect(await fotosDe(idVecina)).toBe(LIMITE);
+    const m = await pool.query<{ m: Date }>(
+      `SELECT (((now() AT TIME ZONE $1)::date + 1)::timestamp AT TIME ZONE $1) AS m`,
+      [ZONA],
+    );
+    const esperado = Math.ceil((new Date(m.rows[0]!.m).getTime() - Date.now()) / 1000);
+    expect(Math.abs(Number(sobra.headers['retry-after']) - esperado)).toBeLessThanOrEqual(5);
+    expect(sobra.json().detalles.disponible_en).toMatch(/T00:00:00-04:00$/);
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE);
   });
 
-  it('las fotos de hace más de una hora ya no cuentan', async () => {
-    await fotosPrevias(idVecina, LIMITE, 61);
+  it(`la ${LIMITE + 1}.ª foto da 429 aunque se hayan borrado las huérfanas`, async () => {
+    for (let i = 0; i < LIMITE; i++) expect((await subir(cookieVecina)).statusCode).toBe(201);
+    // Lo que hace el mantenimiento con las fotos sin reporte (o la cuenta, borrando lo suyo):
+    // no devuelve turnos, porque el contador vive aparte.
+    await pool.query('DELETE FROM reporte_foto WHERE subido_por = $1', [idVecina]);
+    const r = await subir(cookieVecina);
+    expect(r.statusCode).toBe(429);
+    expect(r.json().codigo).toBe('CUOTA_DE_FOTOS');
+  }, 120_000);
+
+  it('las fotos de ayer ya no cuentan', async () => {
+    await fotosGastadas(idVecina, LIMITE, 1);
     expect((await subir(cookieVecina)).statusCode).toBe(201);
+    expect(await gastadasHoy(idVecina)).toBe(1);
   });
 
   it('el tope es de la cuenta: otra cuenta sigue subiendo', async () => {
-    await fotosPrevias(idVecina, LIMITE, 5);
+    await fotosGastadas(idVecina, LIMITE);
     expect((await subir(cookieVecina)).statusCode).toBe(429);
     expect((await subir(cookieVecino)).statusCode).toBe(201);
     expect(await fotosDe(idVecino)).toBe(1);
   });
 
   it('sin cupo no se llega a leer ni a procesar el archivo', async () => {
-    await fotosPrevias(idVecina, LIMITE, 5);
-    // Un archivo que no es imagen daría 415 si se procesara: la cuota se mira antes, y así una
+    await fotosGastadas(idVecina, LIMITE);
+    // Un archivo que no es imagen daría 415 si se procesara: el cupo se mira antes, y así una
     // cuenta sin cupo no puede seguir haciendo trabajar a sharp.
     const r = await subir(cookieVecina, Buffer.from('<html>esto no es una foto</html>'));
     expect(r.statusCode).toBe(429);
-    expect(await fotosDe(idVecina)).toBe(LIMITE);
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE);
+  });
+
+  it('una foto que no se guarda devuelve el turno (tipo equivocado o imagen ilegible)', async () => {
+    await fotosGastadas(idVecina, LIMITE - 1);
+    const noEsImagen = await subir(cookieVecina, Buffer.from('<html>esto no es una foto</html>'));
+    expect(noEsImagen.statusCode).toBe(415);
+    expect(noEsImagen.json().codigo).toBe('TIPO_NO_PERMITIDO');
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE - 1);
+    // Magic bytes de JPEG y después basura: pasa el tipo y falla en sharp.
+    const rota = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
+    const ilegible = await subir(cookieVecina, rota);
+    expect(ilegible.statusCode).toBe(415);
+    expect(ilegible.json().codigo).toBe('IMAGEN_INVALIDA');
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE - 1);
+    // Y el último turno sigue ahí para una foto de verdad.
+    expect((await subir(cookieVecina)).statusCode).toBe(201);
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE);
   });
 
   it('varias subidas simultáneas de la misma cuenta no pasan del tope', async () => {
-    await fotosPrevias(idVecina, LIMITE - 2, 5);
+    await fotosGastadas(idVecina, LIMITE - 2);
     // Cuatro a la vez y no más: esta suite corre sobre PGlite, que serializa las transacciones
     // de todas las conexiones (ADR 0003).
     const codigos = (await Promise.all(Array.from({ length: 4 }, () => subir(cookieVecina)))).map(
@@ -234,6 +287,7 @@ describe(`cuota de ${LIMITE} fotos por hora y por cuenta`, PLAZO, () => {
     );
     expect(codigos.filter((c) => c === 201)).toHaveLength(2);
     expect(codigos.filter((c) => c === 429)).toHaveLength(2);
-    expect(await fotosDe(idVecina)).toBe(LIMITE);
+    expect(await gastadasHoy(idVecina)).toBe(LIMITE);
+    expect(await fotosDe(idVecina)).toBe(2);
   });
 });

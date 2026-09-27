@@ -11,9 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { CACHE_PRIVADA } from '../cache.js';
-
-/** El panel ejecutivo se mira, no se opera: 30 s de desfase no cambian ninguna decisión. */
-const TTL_RESUMEN_MS = 30_000;
+import { condicionPublicado } from '../visibilidad.js';
 
 const DIAS_VENTANA: Record<VentanaResumen, number | null> = { '7d': 7, '30d': 30, todo: null };
 
@@ -53,6 +51,8 @@ WITH r AS (
          COALESCE(severidad_manual, severidad_calculada)::text AS severidad, creado_en
   FROM reporte_inundacion
   WHERE estado IN ('nuevo', 'validado', 'resuelto')
+    -- Lo que todavía espera su publicar_en no lo ve nadie más que su autor (ADR 0006).
+    AND ${condicionPublicado('')}
     AND ($1::timestamptz IS NULL OR creado_en >= $1::timestamptz)
 ),
 agg AS (
@@ -87,7 +87,7 @@ ORDER BY 2 NULLS LAST, 1`;
 
 /**
  * Hora truncada al minuto (contracts 0.6.0): con pocos reportes en un distrito, los segundos
- * señalan a una persona, y aquí se cuentan reportes en `nuevo`, que todavía no son públicos. Se
+ * señalan a una persona (el mapa público no publica la hora de creación exacta de nadie). Se
  * trunca en JS sobre el instante y no con `date_trunc`, que trunca en la zona de la sesión.
  */
 const alMinuto = (f: Date | null) =>
@@ -176,28 +176,36 @@ async function calcularResumen(
   });
 }
 
-/** Invalidador de la caché del resumen, uno por instancia de la app (los tests montan varias). */
+/** Invalidador de los cálculos en vuelo, uno por instancia de la app (los tests montan varias). */
 const invalidadores = new WeakMap<FastifyInstance, () => void>();
 
 /**
- * Olvida el resumen cacheado en ESTE proceso. Lo usa `invalidarCachesDeAgregados` (admin.ts)
- * después de cada moderación; las demás réplicas siguen con su copia hasta el TTL.
+ * Olvida el cálculo del resumen que esté en vuelo en ESTE proceso. Lo usa
+ * `invalidarAgregadosEnVuelo` (admin.ts) después de cada moderación: una petición que llega
+ * después de moderar no puede recibir la cifra de un cálculo que leyó la base antes.
  */
 export function invalidarResumenEjecutivo(app: FastifyInstance): void {
   invalidadores.get(app)?.();
 }
 
 export async function rutasEjecutivo(app: FastifyInstance, dep: Dependencias) {
-  const cache = new Map<VentanaResumen, { valor: ResumenEjecutivo; en: number }>();
-  // Una sola consulta en vuelo por ventana: sin esto, al caducar la caché cada panel abierto
-  // lanzaría a la vez su propia pasada completa sobre la tabla de reportes.
-  const enVuelo = new Map<VentanaResumen, Promise<ResumenEjecutivo>>();
-  // Sube con cada invalidación. Un cálculo que leyó la base antes de moderar y termina después
-  // no puede volver a guardar su cifra, y la petición siguiente tampoco se sube a él.
+  /*
+   * SIN CACHÉ (plan S25): el panel ejecutivo y el técnico sondean cada 10 s y tienen que ver lo que
+   * pasa, también lo que se publica solo al vencer su demora, sin que nadie modere. Con una VPS y
+   * pocas pantallas internas el costo es despreciable.
+   *
+   * Lo que queda es la deduplicación en vuelo: una sola pasada por ventana a la vez. Diez paneles
+   * que piden juntos comparten el mismo cálculo en lugar de lanzar diez pasadas sobre la tabla.
+   * El contador de generación sube con cada moderación: una petición posterior no se sube a un
+   * cálculo que ya había leído la base antes de moderar.
+   */
+  const enVuelo = new Map<
+    VentanaResumen,
+    { generacion: number; promesa: Promise<ResumenEjecutivo> }
+  >();
   let generacion = 0;
   invalidadores.set(app, () => {
     generacion++;
-    cache.clear();
     enVuelo.clear();
   });
 
@@ -215,26 +223,14 @@ export async function rutasEjecutivo(app: FastifyInstance, dep: Dependencias) {
       // Cifras internas del municipio: nunca en una caché compartida.
       res.header('Cache-Control', CACHE_PRIVADA);
 
-      const guardado = cache.get(ventana);
-      if (guardado && Date.now() - guardado.en < TTL_RESUMEN_MS) {
-        res.header('X-Cache', 'hit');
-        app.metricas.contar('curichi_ejecutivo_cache_total', { resultado: 'hit' });
-        return guardado.valor;
-      }
-      res.header('X-Cache', 'miss');
-      app.metricas.contar('curichi_ejecutivo_cache_total', { resultado: 'miss' });
-      let promesa = enVuelo.get(ventana);
-      if (!promesa) {
-        const deEstaGeneracion = generacion;
-        const calculo: Promise<ResumenEjecutivo> = calcularResumen(dep, ventana)
-          .then((valor) => {
-            if (deEstaGeneracion === generacion) cache.set(ventana, { valor, en: Date.now() });
-            return valor;
-          })
-          .finally(() => {
-            if (enVuelo.get(ventana) === calculo) enVuelo.delete(ventana);
-          });
-        enVuelo.set(ventana, calculo);
+      const actual = enVuelo.get(ventana);
+      let promesa: Promise<ResumenEjecutivo>;
+      if (actual && actual.generacion === generacion) promesa = actual.promesa;
+      else {
+        const calculo = calcularResumen(dep, ventana).finally(() => {
+          if (enVuelo.get(ventana)?.promesa === calculo) enVuelo.delete(ventana);
+        });
+        enVuelo.set(ventana, { generacion, promesa: calculo });
         promesa = calculo;
       }
       const valor = await promesa;

@@ -4,30 +4,67 @@ Fastify + PostGIS. Único punto de escritura de reportes. Contratos en `packages
 
 | Ruta | Rol | Qué hace |
 |---|---|---|
-| `POST /api/v1/reportes` | sesión (1 por cuenta cada 60 min, 10/h por IP, honeypot) | Comprueba la posición del teléfono (`dispositivo`, ver abajo), resuelve UV en geo-service, calcula severidad (§9.1), crea en `nuevo`. Solo adjunta fotos subidas por la misma cuenta, sin reporte y de menos de 24 h (si no, 400 `FOTOS_INVALIDAS`) |
-| `GET /api/v1/reportes`, `GET /api/v1/reportes/:id` | público / técnico | Público: solo `validado`/`resuelto`, coordenadas redondeadas y con jitter si es vivienda. Técnico: todo, exacto |
-| `PATCH /api/v1/reportes/:id/estado` | técnico, admin | Máquina de estados §7.3 con auditoría y recálculo de puntos críticos |
+| `POST /api/v1/reportes` | sesión (3 por cuenta y por día, 10/h por IP, honeypot) | Comprueba la posición del teléfono (`dispositivo`, ver abajo), resuelve UV en geo-service, calcula severidad (§9.1), crea en `nuevo` con `publicar_en` (ver «Publicación»). Solo adjunta fotos subidas por la misma cuenta, sin reporte y de menos de 24 h (si no, 400 `FOTOS_INVALIDAS`). Responde `MiReporteFeature` (201, y 200 en el replay idempotente) |
+| `GET /api/v1/reportes`, `GET /api/v1/reportes/:id` | público | `nuevo` (con `verificado: false`), `validado` y `resuelto` ya publicados (`publicar_en <= now()`); coordenadas redondeadas y con jitter si es vivienda; nunca el autor. En espera, rechazado o duplicado: 404 |
+| `GET /api/v1/tecnico/reportes(/:id)` | técnico, admin | Todos los estados, exactos, con los campos de moderación; solo los ya publicados |
+| `GET /api/v1/mis-reportes` | sesión | Los reportes de la cuenta (50 como máximo, los más recientes primero) en cualquier estado, también en espera, rechazados o fusionados (`retirado`), con `publicar_en` y `segundos_para_publicar`. `private, no-store` y `Vary: Cookie` |
+| `PATCH /api/v1/reportes/:id/estado` | técnico, admin | Máquina de estados §7.3 con auditoría y recálculo de puntos críticos. `validado → rechazado` (retirar del mapa un verificado) y reabrir un rechazado son de admin: al técnico, 403 `SIN_PERMISO`. Un reporte que espera su `publicar_en` da 404 |
 | `PATCH /api/v1/reportes/:id/severidad` | técnico, admin | Reclasificación manual con motivo (la calculada se conserva) |
 | `POST /api/v1/reportes/:id/fusionar` | técnico, admin | Marca duplicado de un canónico validado |
-| `POST /api/v1/fotos` | sesión (`FOTOS_POR_HORA_POR_CUENTA` = 12/h por cuenta, 30/h por IP) | Entra JPEG, PNG o WebP (por magic bytes) y sale siempre **WebP** (calidad `FOTO_CALIDAD_WEBP` = 80), 1600 px por lado como máximo sin agrandar, **sin EXIF, XMP ni perfil ICC** (se comprueba recorriendo el RIFF) y solo el primer cuadro de una imagen animada. Clave `<uuid>.webp`. Guarda quién la subió (`subido_por`). Sin cupo: 429 `CUOTA_DE_FOTOS` con `Retry-After`, antes de leer el archivo |
-| `GET /api/v1/fotos/:key` | público, sesión opcional | Claves `<uuid>.webp` y `<uuid>.jpg` (las anteriores al contrato 0.8.0, que no se reconvierten y se sirven como `image/jpeg`); otra extensión, 404. Una foto **sin reporte** solo la ve quien la subió (`subido_por` = sesión), técnicos incluidos afuera; la de un reporte publicado, cualquiera; la de uno sin publicar, técnico y admin. `Cache-Control`: publicada `public, max-age=3600`; el resto, 404 incluido, `private, no-store` |
+| `POST /api/v1/fotos` | sesión (`FOTOS_POR_DIA_POR_CUENTA` = 12 por cuenta y por día, 30/h por IP) | Entra JPEG, PNG o WebP (por magic bytes) y sale siempre **WebP** (calidad `FOTO_CALIDAD_WEBP` = 80), 1600 px por lado como máximo sin agrandar, **sin EXIF, XMP ni perfil ICC** (se comprueba recorriendo el RIFF) y solo el primer cuadro de una imagen animada. Clave `<uuid>.webp`. Guarda quién la subió (`subido_por`). Sin cupo: 429 `CUOTA_DE_FOTOS` con `Retry-After` hasta la medianoche, antes de leer el archivo. Con poco disco: 507 `SIN_ESPACIO` (ver «Guarda de disco») |
+| `GET /api/v1/fotos/:key` | público, sesión opcional | Claves `<uuid>.webp` y `<uuid>.jpg` (las anteriores al contrato 0.8.0, que no se reconvierten y se sirven como `image/jpeg`); otra extensión, 404. La de un reporte público, cualquiera, con `public, no-cache` y `ETag` (`If-None-Match` da 304, pero la visibilidad se mira antes: una foto retirada da 404). El autor del reporte ve las suyas en cualquier estado, y técnico y admin las de un reporte ya publicado aunque esté rechazado o duplicado, con `private, no-store`. Una foto **sin reporte** solo la ve quien la subió, técnicos incluidos afuera. Todo lo demás, 404 con `private, no-store` |
 | `GET /api/v1/exportar?formato=csv\|geojson` | técnico, admin | Con nota metodológica |
-| `GET /api/v1/indicadores` | técnico, admin | Conteos por estado, severidad, distrito, UV; puntos críticos recurrentes |
-| `GET /api/v1/ejecutivo/resumen?ventana=7d\|30d\|todo` | ejecutivo, técnico, admin | Resumen del panel ejecutivo (`ResumenEjecutivoSchema`): totales, por severidad efectiva, por estado (`nuevo`/`validado`/`resuelto`; duplicados y rechazados no cuentan) y por distrito vigente (incluidos los que tienen 0). Ventana sobre `creado_en`. Caché en memoria de 30 s por ventana; `Cache-Control: private, no-store` |
+| `GET /api/v1/indicadores` | técnico, admin | Conteos por estado, severidad, distrito, UV; puntos críticos recurrentes. Solo reportes publicados. Sin caché: los pedidos simultáneos comparten el cálculo en curso |
+| `GET /api/v1/ejecutivo/resumen?ventana=7d\|30d\|todo` | ejecutivo, técnico, admin | Resumen del panel ejecutivo (`ResumenEjecutivoSchema`): totales, por severidad efectiva, por estado (`nuevo`/`validado`/`resuelto`; duplicados y rechazados no cuentan) y por distrito vigente (incluidos los que tienen 0). Solo reportes publicados; ventana sobre `creado_en`. Sin caché, con deduplicación en vuelo por ventana; `Cache-Control: private, no-store` |
 | `GET /api/v1/admin/capas`, `POST /api/v1/admin/capas/:id/activar` | técnico / admin | Versiones de capas; activar una (invalida la caché de geo-service) |
 | `GET /api/v1/configuracion` | público | Ciudad del despliegue (`ConfiguracionPublicaSchema`: nombre, país, zona horaria, locale, centro y zoom inicial del mapa). Una instalación es una ciudad; los frontends la leen en tiempo de ejecución en vez de fijarla al compilar. `Cache-Control: public, max-age=300` |
-| `POST /api/v1/auth/login`, `logout`, `GET /api/v1/auth/yo` | | Sesión por cookie `curichi_sesion` (httpOnly, SameSite=Lax); contraseñas con scrypt. `/auth/yo` agrega `panel_url` (URL de `apps/panel-admin`, o `null` si no se configuró) solo para `tecnico`, `admin` y `ejecutivo`; al ciudadano no se le manda el campo |
-| `GET /health`, `GET /ready`, `GET /docs` | | |
+| `POST /api/v1/auth/registro` | público | Alta de cuenta ciudadana. Freno por IP: `REGISTRO_MAX_POR_IP` por hora y `ALTAS_POR_DIA_POR_IP` (10) por día de la ciudad, contados en la base (429 `DEMASIADAS_CUENTAS`) |
+| `POST /api/v1/auth/login`, `logout`, `GET /api/v1/auth/yo` | | Sesión por cookie `curichi_sesion` (httpOnly, SameSite=Lax); contraseñas con Argon2id. `/auth/yo` agrega `reportes_restantes_hoy`, `puede_reportar_desde` (null, o la próxima medianoche local si no le quedan) y `demora_proximo_s` (60 o 240), y `panel_url` (URL de `apps/panel-admin`, o `null` si no se configuró) solo para `tecnico`, `admin` y `ejecutivo`; al ciudadano no se le manda ese campo |
+| `GET /health`, `GET /ready`, `GET /docs` | | `/ready` (`ReadyApiCoreSchema`): 503 solo sin base; `fotos: 'error'` o `'poco_espacio'` y `degradado: true` siguen en 200 |
 
 **Roles.** `ciudadano` (alta pública), `tecnico`, `admin` y `ejecutivo` (contracts 0.5.0; se asigna
 fuera de `/auth/registro`). El ejecutivo inicia sesión, puede reportar y subir fotos como cualquier
 sesión y ve `/api/v1/ejecutivo/resumen`; recibe 403 `SIN_PERMISO` en `/api/v1/tecnico/*`,
 `/api/v1/exportar`, `/api/v1/indicadores`, `/api/v1/admin/*` y en toda la moderación.
 
-**Sondeo.** Una petición con la cabecera `x-curichi-sondeo: 1` (la manda el panel ejecutivo en su
-consulta automática cada 60 s) valida la sesión pero no renueva `ultimo_uso_en`: si no, un panel
-abierto mantenía viva la sesión para siempre y la caducidad por inactividad (`SESION_IDLE_HORAS`,
-12 h) no llegaba nunca.
+**Sondeo.** Una petición con la cabecera `x-curichi-sondeo: 1` (la mandan los paneles técnico y
+ejecutivo en su consulta automática) valida la sesión pero no renueva `ultimo_uso_en`: si no, un
+panel abierto mantenía viva la sesión para siempre y la caducidad por inactividad
+(`SESION_IDLE_HORAS`, 12 h) no llegaba nunca.
+
+**Cupo diario (contracts 0.10.0).** Cada cuenta puede crear `REPORTES_POR_DIA_POR_CUENTA` (3)
+reportes y subir `FOTOS_POR_DIA_POR_CUENTA` (12) fotos por día calendario en `ZONA_HORARIA`,
+contados en la base (`cuota_reporte_diaria`, migración 0014, con un `INSERT … ON CONFLICT DO
+UPDATE … WHERE n < máximo` atómico: vale igual con varias réplicas). El turno de reporte se
+reserva dentro de la transacción del reporte y después de la idempotencia (un replay no gasta; un
+envío que falla lo devuelve); el de foto, antes de leer la imagen, y se devuelve si la foto no se
+guarda. Borrar fotos huérfanas no devuelve turnos. Agotado: 429 `CUOTA_DE_REPORTES` («Ya enviaste
+los 3 reportes de hoy. Vas a poder enviar otro mañana.») o `CUOTA_DE_FOTOS`, con `Retry-After`
+hasta la medianoche local y `detalles.disponible_en` con el desfase de la ciudad. La clave de
+idempotencia se guarda con el prefijo de la cuenta (`<usuario_id>:<clave>`): la misma clave en
+dos cuentas crea dos reportes. `usuario.ultimo_reporte_en` ya no se lee ni se escribe (se quita en
+la 0016).
+
+**Publicación (contracts 0.11.0, ADR 0006).** No hay moderación previa: un reporte se publica
+cuando llega su `publicar_en`, que se fija al crearlo con el número de reporte del día que devuelve
+el contador del cupo, en la misma transacción: 60 s el 1.º (`DEMORA_PUBLICACION_PRIMERO_S`) y
+240 s el 2.º y el 3.º. Mientras espera no lo ve nadie más que su autor, técnicos incluidos: ni en
+las vistas pública y técnica, ni en la exportación, los indicadores, el resumen ejecutivo o las
+fotos, y moderarlo da 404. La regla vive en `src/visibilidad.ts` (`condicionPublico`, con el
+literal de `ESTADOS_PUBLICOS` para que PostgreSQL use los índices parciales de la 0015, y
+`condicionPublicado`). `REPORTE_DEMORA_PRIMERO_S` y `REPORTE_DEMORA_SIGUIENTES_S` (0 a 3600) existen
+solo para las pruebas: `test/ayudas.ts` (`configDePrueba`) arranca con 0 y 0, y en producción
+definirlas deja un aviso en el log del arranque. La métrica
+`curichi_reportes_sin_verificar_antiguedad_segundos` dice cuánto hace que está publicado el `nuevo`
+más viejo (0 si no hay), para la alerta `BandejaSinVerificarAtrasada`.
+
+**Guarda de disco (contracts 0.13.0).** Con las fotos en disco, si queda menos que
+`FOTOS_MIN_LIBRE_BYTES` (2 GiB por defecto; 0 la apaga) según `statfs` del directorio de fotos,
+`POST /fotos` responde 507 `SIN_ESPACIO` antes de leer la imagen y sin gastar cupo, y `/ready` sale
+con `fotos: 'poco_espacio'` y `degradado: true`. En la VPS ese disco es también el de PostgreSQL.
+`/metrics` expone `curichi_fotos_disco_libre_bytes`, `curichi_fotos_disco_total_bytes` (los de las
+alertas `DiscoDeFotos*`) y `curichi_fotos_disco_min_libre_bytes` (el umbral configurado), leídos
+en cada scrape. Con S3 no hay guarda ni esas métricas.
 
 **Posición del teléfono (contracts 0.9.0).** `POST /api/v1/reportes` exige `dispositivo`
 (`{ lat, lon, precision_m, antiguedad_s }`). Después de Zod y antes de resolver la UV se revisa, en

@@ -1,5 +1,5 @@
 /**
- * Cuentas ciudadanas, autorización de la creación y cuota de un reporte por hora.
+ * Cuentas ciudadanas, autorización de la creación y cupo diario de reportes.
  *
  * EL PROBLEMA QUE CIERRA TODO ESTO. Hasta la Fase 5, crear un reporte era anónimo y el único
  * freno era por IP. Una IP doméstica o móvil cambia sola —modo avión y de vuelta— así que el
@@ -11,6 +11,7 @@
  * técnica (esto último es el hallazgo A-01 de la auditoría, que no se puede reabrir por la
  * puerta de atrás al añadir sesiones a la app pública).
  */
+import { CONFIG_DOMINIO } from 'contracts';
 import { ejecutorPg } from 'db';
 import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
@@ -18,9 +19,10 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { type ConfigApi, leerConfig } from '../src/config.js';
+import type { ConfigApi } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -43,7 +45,7 @@ async function levantar(extra: Partial<ConfigApi> = {}): Promise<FastifyInstance
   return crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       // Alto a propósito: lo que se prueba acá es la cuota POR CUENTA. El límite por IP existe y
       // tiene su propia prueba en reportes.test.ts; si saltara aquí, los 429 no dirían cuál de
@@ -265,111 +267,32 @@ describe('el autor lo decide el servidor: no hay forma de reportar en nombre de 
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
-describe('un reporte por cuenta y por hora', () => {
+describe('cupo diario por cuenta (el detalle, en cupo-diario.test.ts)', () => {
   beforeEach(async () => {
     await liberarCuota(ex, CUENTAS.vecina);
     await liberarCuota(ex, CUENTAS.vecino);
   });
 
-  it('el segundo envío dentro de la ventana se rechaza con 429 y Retry-After', async () => {
-    expect((await enviar(cookieVecina)).statusCode).toBe(201);
-    const segundo = await enviar(cookieVecina);
-    expect(segundo.statusCode).toBe(429);
-    expect(segundo.json().codigo).toBe('CUOTA_DE_REPORTES');
-    const retry = Number(segundo.headers['retry-after']);
+  it(`el ${CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA + 1}.º envío del día se rechaza con 429 y Retry-After`, async () => {
+    for (let i = 0; i < CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA; i++)
+      expect((await enviar(cookieVecina)).statusCode).toBe(201);
+    const sobra = await enviar(cookieVecina);
+    expect(sobra.statusCode).toBe(429);
+    expect(sobra.json().codigo).toBe('CUOTA_DE_REPORTES');
+    const retry = Number(sobra.headers['retry-after']);
     expect(retry).toBeGreaterThan(0);
-    expect(retry).toBeLessThanOrEqual(60 * 60);
+    expect(retry).toBeLessThanOrEqual(25 * 60 * 60);
     // Y se le dice cuándo, no solo que no.
-    const disponible = new Date(segundo.json().detalles.disponible_en).getTime();
+    const disponible = new Date(sobra.json().detalles.disponible_en).getTime();
     expect(disponible).toBeGreaterThan(Date.now());
-  });
-
-  it('cada cuenta tiene su propio turno: la de al lado no queda bloqueada', async () => {
-    expect((await enviar(cookieVecina)).statusCode).toBe(201);
-    expect((await enviar(cookieVecina)).statusCode).toBe(429);
-    expect((await enviar(cookieVecino)).statusCode).toBe(201);
-  });
-
-  it('pasada la ventana vuelve a haber turno', async () => {
-    expect((await enviar(cookieVecina)).statusCode).toBe(201);
-    expect((await enviar(cookieVecina)).statusCode).toBe(429);
-    // Atrasar la marca 61 minutos equivale a que pase el tiempo; la lógica que se comprueba es
-    // la del UPDATE condicional, no la del reloj.
-    await pool.query(
-      `UPDATE usuario SET ultimo_reporte_en = now() - interval '61 minutes' WHERE email = $1`,
-      [CUENTAS.vecina],
-    );
-    expect((await enviar(cookieVecina)).statusCode).toBe(201);
-  });
-
-  /**
-   * LA PRUEBA QUE IMPORTA: cambiar de IP no devuelve el turno.
-   *
-   * Es exactamente el ataque que motivó todo esto. Con `TRUST_PROXY=1` el servicio se cree el
-   * `X-Forwarded-For`, así que cada petición parece venir de una máquina distinta y el límite
-   * por IP se reinicia en cada una. El de la cuenta no se mueve.
-   */
-  it('una IP distinta en cada intento no da más turnos', async () => {
-    const conProxy = await levantar({ confiarEnProxy: 1, rateLimitMax: 2 });
-    try {
-      const cookie = await iniciarSesion(conProxy, CUENTAS.vecina);
-      await liberarCuota(ex, CUENTAS.vecina);
-      const codigos: number[] = [];
-      for (let i = 0; i < 6; i++) {
-        const r = await conProxy.inject({
-          method: 'POST',
-          url: '/api/v1/reportes',
-          payload: reporteValido,
-          cookies: sesion(cookie),
-          headers: { 'x-forwarded-for': `203.0.113.${i + 10}` },
-        });
-        codigos.push(r.statusCode);
-      }
-      // Uno pasa y los cinco restantes chocan con la cuota de la cuenta. Con `rateLimitMax: 2`
-      // y una IP fija habrían sido 429 «de rate limit» a partir del tercero; que todos digan
-      // CUOTA_DE_REPORTES es lo que demuestra que el freno que actúa es el de la cuenta.
-      expect(codigos.filter((c) => c === 201)).toHaveLength(1);
-      expect(codigos.filter((c) => c === 429)).toHaveLength(5);
-    } finally {
-      await conProxy.close();
-    }
-  });
-
-  it('el reintento idempotente no gasta un segundo turno', async () => {
-    const clave = 'cuota-reintento-0001';
-    const primera = await enviar(cookieVecina, reporteValido, {
-      headers: { 'idempotency-key': clave },
-    });
-    expect(primera.statusCode).toBe(201);
-    const repeticion = await enviar(cookieVecina, reporteValido, {
-      headers: { 'idempotency-key': clave },
-    });
-    expect(repeticion.statusCode).toBe(200);
-    expect(repeticion.headers['idempotent-replay']).toBe('true');
-    expect(repeticion.json().id).toBe(primera.json().id);
-  });
-
-  /**
-   * Si la transacción se deshace, el turno se devuelve. Aquí se fuerza con una foto que no
-   * existe, que es el caso real: el vecino adjunta una foto cuyo vale caducó y el reporte no
-   * llega a guardarse. Sería injusto que además perdiera su turno de la hora.
-   */
-  it('un envío que falla no consume el turno', async () => {
-    const fallido = await enviar(cookieVecina, {
-      ...reporteValido,
-      fotos: ['00000000-0000-0000-0000-000000000000.jpg'],
-    });
-    expect(fallido.statusCode).toBe(400);
-    expect(fallido.json().codigo).toBe('FOTOS_INVALIDAS');
-    expect((await enviar(cookieVecina)).statusCode).toBe(201);
   });
 
   /**
    * CINCO ENVÍOS A LA VEZ, cada uno con su clave.
    *
    * Es el caso que un SELECT-y-después-INSERT no aguanta: todas las transacciones leerían el
-   * mismo estado anterior, todas concluirían que hay turno y todas insertarían. Con el UPDATE
-   * condicional, PostgreSQL serializa por la fila del usuario y solo la primera lo cumple.
+   * mismo estado anterior, todas concluirían que hay turno y todas insertarían. Con el upsert
+   * condicional, PostgreSQL serializa por la fila del día y solo entran los del cupo.
    *
    * Cinco y no cincuenta porque esta suite corre sobre PGlite, que es de una sola conexión: una
    * transacción esperando un bloqueo de fila deja al motor entero esperando, y por encima de
@@ -394,14 +317,18 @@ describe('un reporte por cuenta y por hora', () => {
       [CUENTAS.vecina],
     );
     // LA INVARIANTE, que es la que importa: pase lo que pase con los códigos, de cinco envíos
-    // simultáneos sale UN reporte.
-    expect(Number(despues[0]!.n) - Number(antes[0]!.n)).toBe(1);
+    // simultáneos salen exactamente los del cupo del día.
+    expect(Number(despues[0]!.n) - Number(antes[0]!.n)).toBe(
+      CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
+    );
     // Los códigos NO se afirman aquí. Sobre PGlite, la transacción que gana el turno confirma
     // bien —por eso el reporte existe— pero la respuesta de su petición puede perderse en el
     // multiplexado y volver como 500. Afirmarlo aquí sería afirmar el comportamiento del
-    // entorno de pruebas, no el del código. El reparto exacto (1 × 201, 49 × 429, ni un 5xx)
+    // entorno de pruebas, no el del código. El reparto exacto (3 × 201, 47 × 429, ni un 5xx)
     // está medido contra PostgreSQL 18 real en `cuota-concurrencia-pg.test.ts`.
-    expect(resultados.filter((r) => r.statusCode === 201).length).toBeLessThanOrEqual(1);
+    expect(resultados.filter((r) => r.statusCode === 201).length).toBeLessThanOrEqual(
+      CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
+    );
   }, 120_000);
 });
 
@@ -616,7 +543,7 @@ describe('alta de cuenta ciudadana', () => {
     }
   });
 
-  it('la cuenta recién creada arranca con su turno de reporte disponible', async () => {
+  it('la cuenta recién creada arranca con todo el cupo del día', async () => {
     const datos = nuevo();
     expect((await registrar(app, datos)).statusCode).toBe(201);
     const entrada = await app.inject({
@@ -627,14 +554,16 @@ describe('alta de cuenta ciudadana', () => {
     const cookie = entrada.cookies.find((c) => c.name === 'curichi_sesion')!.value;
     const yo = await app.inject({ method: 'GET', url: '/api/v1/auth/yo', cookies: sesion(cookie) });
     expect(yo.json().puede_reportar_desde).toBeNull();
+    expect(yo.json().reportes_restantes_hoy).toBe(CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA);
     expect((await enviar(cookie)).statusCode).toBe(201);
-    // Y tras usarlo, /auth/yo dice cuándo vuelve a tenerlo.
+    // Y tras usar uno, /auth/yo lo descuenta; todavía puede reportar.
     const yo2 = await app.inject({
       method: 'GET',
       url: '/api/v1/auth/yo',
       cookies: sesion(cookie),
     });
-    expect(new Date(yo2.json().puede_reportar_desde).getTime()).toBeGreaterThan(Date.now());
+    expect(yo2.json().reportes_restantes_hoy).toBe(CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA - 1);
+    expect(yo2.json().puede_reportar_desde).toBeNull();
   });
 
   it('/auth/yo no devuelve la contraseña ni nada que no sea de quien pregunta', async () => {
@@ -645,10 +574,12 @@ describe('alta de cuenta ciudadana', () => {
     });
     expect(yo.statusCode).toBe(200);
     expect(Object.keys(yo.json()).sort()).toEqual([
+      'demora_proximo_s',
       'email',
       'id',
       'nombre',
       'puede_reportar_desde',
+      'reportes_restantes_hoy',
       'rol',
     ]);
   });

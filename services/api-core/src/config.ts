@@ -12,6 +12,34 @@ import { type ConfianzaProxy, leerConfianzaProxy } from './proxy.js';
 
 const raizRepo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 
+/**
+ * 2 GiB <a confirmar al dimensionar el disco>. El valor efectivo sale en la métrica
+ * `curichi_fotos_disco_min_libre_bytes` y las alertas `DiscoDeFotos*`
+ * (infra/observabilidad/alertas.yml) comparan contra ella: cambiar `FOTOS_MIN_LIBRE_BYTES` no
+ * exige tocar las alertas.
+ */
+export const FOTOS_MIN_LIBRE_BYTES_POR_DEFECTO = 2 * 1024 ** 3;
+
+/** Tope de las demoras de publicación: el CHECK `publicar_en_rango` de la migración 0015 es de 1 h. */
+const DEMORA_MAX_S = 3600;
+
+/** Variables que solo existen para las pruebas y no deberían estar definidas en producción. */
+const VARIABLES_DE_PRUEBA = ['REPORTE_DEMORA_PRIMERO_S', 'REPORTE_DEMORA_SIGUIENTES_S'] as const;
+
+/**
+ * Avisos para el log del arranque: configuración válida pero sospechosa. No detienen el servicio
+ * (una prueba de carga en un entorno con NODE_ENV=production puede querer la demora en 0), pero
+ * con la demora cambiada un reporte se publica antes o después de lo que aprobó el usuario.
+ */
+export function avisosDeConfiguracion(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (env.NODE_ENV !== 'production') return [];
+  const definidas = VARIABLES_DE_PRUEBA.filter((v) => env[v]?.trim());
+  if (!definidas.length) return [];
+  return [
+    `${definidas.join(' y ')} ${definidas.length > 1 ? 'están definidas' : 'está definida'} en producción: son solo para pruebas y cambian cuánto tarda en publicarse un reporte (${CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S} y ${CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S} s según el contrato). Quitalas del entorno.`,
+  ];
+}
+
 /** Valores por defecto que NO pueden salir a producción: son públicos, están en el repositorio. */
 const SAL_IP_POR_DEFECTO = 'sal-local-cambiar-en-produccion';
 const SAL_JITTER_POR_DEFECTO = 'jitter-local-cambiar-en-produccion';
@@ -35,6 +63,12 @@ export interface ConfigApi {
   geoTokenInterno: string;
   corsOrigenes: string[];
   dirAlmacen: string;
+  /**
+   * Guarda de disco de las fotos (`FOTOS_MIN_LIBRE_BYTES`, por defecto 2 GiB). Solo con las fotos
+   * en disco: por debajo, `POST /fotos` responde 507 SIN_ESPACIO antes de procesar y sin gastar
+   * cupo, y `/ready` sale degradado. En la VPS ese disco es también el de PostgreSQL. 0 la apaga.
+   */
+  fotosMinLibreBytes: number;
   urlPublica: string;
   cookieSegura: boolean;
   sesionDias: number;
@@ -58,11 +92,29 @@ export interface ConfigApi {
   registroPorIp: number;
   registroVentanaMinutos: number;
   /**
-   * Minutos que una CUENTA espera entre dos reportes aceptados. Es el límite antiabuso principal
-   * desde que reportar exige cuenta: el de IP no resiste a una IP dinámica, este sí. Configurable
-   * para poder bajarlo en una prueba de carga; el valor de producción es el del contrato.
+   * Reportes por CUENTA y por día calendario en `zonaHoraria` (contracts 0.10.0), contados en la
+   * base (`cuota_reporte_diaria`). Es el límite antiabuso principal desde que reportar exige
+   * cuenta: el de IP no resiste a una IP dinámica, este sí. `REPORTES_POR_DIA_POR_CUENTA`; sin
+   * definir, el del contrato.
    */
-  minutosEntreReportes: number;
+  reportesPorDia: number;
+  /** Fotos por cuenta y por día calendario (`FOTOS_POR_DIA_POR_CUENTA`, contrato: 12). */
+  fotosPorDia: number;
+  /**
+   * Altas de cuenta por IP y por día calendario, contadas en la base (`ALTAS_POR_DIA_POR_IP`,
+   * contrato: 10). Es además del tope por hora (`registroPorIp`): el cupo es por cuenta, y crear
+   * cuentas lo multiplicaría.
+   */
+  altasPorDiaPorIp: number;
+  /**
+   * Segundos entre que un reporte llega y que se publica: el 1.º del día de la cuenta y los
+   * siguientes (contracts 0.11.0, ADR 0006). Por defecto las constantes del contrato (60 y 240).
+   * `REPORTE_DEMORA_PRIMERO_S` y `REPORTE_DEMORA_SIGUIENTES_S` existen SOLO para las pruebas (de 0
+   * a 3600: el CHECK de la base no deja pasar de una hora); en producción definirlas deja un aviso
+   * en el log del arranque (`avisosDeConfiguracion`).
+   */
+  demoraPrimeroS: number;
+  demoraSiguientesS: number;
   rateLimitMax: number;
   rateLimitVentanaMs: number;
   /**
@@ -134,6 +186,13 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
       .map((s) => s.trim())
       .filter(Boolean),
     dirAlmacen: env.STORAGE_DIR ?? resolve(raizRepo, 'infra/.storage/fotos'),
+    fotosMinLibreBytes: enteroEnRango(
+      'FOTOS_MIN_LIBRE_BYTES',
+      env.FOTOS_MIN_LIBRE_BYTES,
+      FOTOS_MIN_LIBRE_BYTES_POR_DEFECTO,
+      0,
+      Number.MAX_SAFE_INTEGER,
+    ),
     urlPublica: env.PUBLIC_BASE_URL ?? '',
     cookieSegura: env.COOKIE_SEGURA === '1',
     sesionDias: Number(env.SESION_DIAS ?? 7),
@@ -142,8 +201,34 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
     registroPeticionesPorVentana: Number(env.REGISTRO_PETICIONES_POR_VENTANA ?? 10),
     registroPorIp: Number(env.REGISTRO_MAX_POR_IP ?? REGISTROS_POR_IP_POR_DEFECTO),
     registroVentanaMinutos: Number(env.REGISTRO_VENTANA_MINUTOS ?? REGISTRO_VENTANA_MINUTOS),
-    minutosEntreReportes: Number(
-      env.REPORTE_MINUTOS_ENTRE_ENVIOS ?? CONFIG_DOMINIO.MINUTOS_ENTRE_REPORTES_POR_CUENTA,
+    reportesPorDia: enteroPositivo(
+      'REPORTES_POR_DIA_POR_CUENTA',
+      env.REPORTES_POR_DIA_POR_CUENTA,
+      CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
+    ),
+    fotosPorDia: enteroPositivo(
+      'FOTOS_POR_DIA_POR_CUENTA',
+      env.FOTOS_POR_DIA_POR_CUENTA,
+      CONFIG_DOMINIO.FOTOS_POR_DIA_POR_CUENTA,
+    ),
+    altasPorDiaPorIp: enteroPositivo(
+      'ALTAS_POR_DIA_POR_IP',
+      env.ALTAS_POR_DIA_POR_IP,
+      CONFIG_DOMINIO.ALTAS_POR_DIA_POR_IP,
+    ),
+    demoraPrimeroS: enteroEnRango(
+      'REPORTE_DEMORA_PRIMERO_S',
+      env.REPORTE_DEMORA_PRIMERO_S,
+      CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S,
+      0,
+      DEMORA_MAX_S,
+    ),
+    demoraSiguientesS: enteroEnRango(
+      'REPORTE_DEMORA_SIGUIENTES_S',
+      env.REPORTE_DEMORA_SIGUIENTES_S,
+      CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S,
+      0,
+      DEMORA_MAX_S,
     ),
     limitesLogin: {
       maxPorEmail: Number(env.LOGIN_MAX_FALLOS_EMAIL ?? LIMITES_LOGIN_POR_DEFECTO.maxPorEmail),
@@ -167,6 +252,31 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
   };
   if (produccion) verificarProduccion(cfg);
   return cfg;
+}
+
+/**
+ * Entero de `min` a `max`, o el valor por defecto si la variable falta o está vacía. Un valor
+ * presente pero inválido detiene el arranque: con `Number()` a secas, «tres» daba NaN y todas las
+ * comparaciones del cupo salían falsas, así que nadie podía reportar y nada lo avisaba.
+ */
+function enteroEnRango(
+  nombre: string,
+  valor: string | undefined,
+  porDefecto: number,
+  min: number,
+  max: number,
+): number {
+  const v = valor?.trim();
+  if (!v) return porDefecto;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < min || n > max)
+    throw new Error(`${nombre} inválida: «${v}». Tiene que ser un entero de ${min} a ${max}.`);
+  return n;
+}
+
+/** Un cupo: al menos 1 (con 0 nadie podría reportar) y acotado para que quepa en smallint. */
+function enteroPositivo(nombre: string, valor: string | undefined, porDefecto: number): number {
+  return enteroEnRango(nombre, valor, porDefecto, 1, 10_000);
 }
 
 /** `undefined`, vacía o solo espacios cuentan como ausente: cae al valor de la ciudad por defecto. */

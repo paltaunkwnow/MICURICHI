@@ -16,7 +16,24 @@ export interface Almacen {
    * `node` no podía escribir, y sin esta sonda `/ready` decía `fotos: ok` igual).
    */
   comprobar?(): Promise<void>;
+  /**
+   * Espacio del disco donde quedan las fotos. Solo lo implementa `AlmacenDisco`: en la VPS ese disco
+   * es también el de PostgreSQL, y si se llena cae la base. Con S3 el espacio no es asunto de esta
+   * réplica y no hay guarda (ni métricas de disco).
+   */
+  espacioLibre?(): Promise<EspacioDisco>;
 }
+
+export interface EspacioDisco {
+  /** Bytes que puede usar un proceso sin privilegios (`bavail`, no `bfree`). */
+  libre: number;
+  total: number;
+}
+
+/** Lo que se usa de `fs.statfs`: se inyecta en las pruebas para simular un disco casi lleno. */
+export type LectorStatfs = (
+  ruta: string,
+) => Promise<{ bsize: number; bavail: number; blocks: number }>;
 
 const MIME_POR_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -26,8 +43,13 @@ const MIME_POR_EXT: Record<string, string> = {
 };
 
 export class AlmacenDisco implements Almacen {
-  constructor(private dir: string) {
+  private statfs: LectorStatfs;
+  constructor(
+    private dir: string,
+    opciones: { statfs?: LectorStatfs } = {},
+  ) {
     mkdirSync(dir, { recursive: true });
+    this.statfs = opciones.statfs ?? ((ruta) => fs.statfs(ruta));
   }
   private ruta(key: string) {
     if (!/^[a-f0-9-]{36}\.(jpg|png|webp)$/.test(key)) throw new Error('clave de objeto inválida');
@@ -64,6 +86,11 @@ export class AlmacenDisco implements Almacen {
     } finally {
       await fs.rm(ruta, { force: true }).catch(() => {});
     }
+  }
+  /** `bavail` y no `bfree`: los bloques reservados para root no los puede usar el proceso. */
+  async espacioLibre(): Promise<EspacioDisco> {
+    const s = await this.statfs(this.dir);
+    return { libre: s.bavail * s.bsize, total: s.blocks * s.bsize };
   }
 }
 

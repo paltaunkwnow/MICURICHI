@@ -14,9 +14,10 @@ const REFRESCO_USO_MS = 60_000;
 
 /**
  * Cabecera con la que un cliente marca una petición automática, no hecha por la persona: el panel
- * ejecutivo consulta el resumen cada 60 s. La sesión se valida igual (sin sesión viva es 401),
- * pero la petición no cuenta como uso: si contara, un panel abierto en una pantalla renovaba
- * `ultimo_uso_en` cada minuto y la caducidad por inactividad no llegaba nunca.
+ * (técnico y ejecutivo) refresca reportes, indicadores y resumen cada 10 s. La sesión se valida
+ * igual (sin sesión viva es 401), pero la petición no cuenta como uso: si contara, un panel abierto
+ * en una pantalla renovaba `ultimo_uso_en` sin que nadie lo tocara y la caducidad por inactividad
+ * no llegaba nunca.
  */
 export const CABECERA_SONDEO = 'x-curichi-sondeo';
 

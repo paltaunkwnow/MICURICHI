@@ -19,7 +19,7 @@ import {
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Dependencias } from '../app.js';
 import { COOKIE_SESION, crearSesion } from '../auth.js';
-import { proximoEnvioPermitido } from '../cuota.js';
+import { cupoDelDia, momentoDelDia } from '../cuota.js';
 import { hashIp } from '../privacidad.js';
 
 /**
@@ -84,29 +84,57 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
           detalles: p.error.issues.map((i) => ({ campo: i.path.join('.'), mensaje: i.message })),
         });
 
-      const ex = ejecutorPg(dep.pool);
-      const freno = await estadoDeRegistro(
-        ex,
-        req.ip,
-        dep.cfg.salIp,
-        dep.cfg.registroPorIp,
-        dep.cfg.registroVentanaMinutos,
-      );
-      if (freno.bloqueado) {
+      const ipHash = hashIp(req.ip, dep.cfg.salIp);
+      // Fuera de la transacción: dentro pediría otra conexión al pool mientras la transacción
+      // retiene la suya y, con el pool lleno de altas esperando el bloqueo, no llegaría nunca.
+      const hoy = await momentoDelDia(dep.pool, { zona: dep.cfg.zonaHoraria });
+      // Contar y anotar en una transacción serializada por IP: sin el bloqueo, altas simultáneas
+      // desde la misma IP leían todas el mismo conteo antes de que ninguna anotara y pasaban
+      // todas, por encima de los dos topes.
+      const freno = await ejecutorPg(dep.pool).transaccion(async (tx) => {
+        await tx.consultar('SELECT pg_advisory_xact_lock(hashtext($1))', [`alta-cuenta:${ipHash}`]);
+        const porHora = await estadoDeRegistro(
+          tx,
+          req.ip,
+          dep.cfg.salIp,
+          dep.cfg.registroPorIp,
+          dep.cfg.registroVentanaMinutos,
+        );
+        if (porHora.bloqueado)
+          return { tope: 'hora' as const, reintentarEnS: porHora.reintentarEnS };
+        // Tope por DÍA calendario de la ciudad, además del de la hora: el cupo de reportes es por
+        // cuenta, y sin este tope una IP podía sacar cinco cuentas nuevas cada hora, todo el día.
+        // Se cuenta en la misma tabla, sobre las altas desde la medianoche local.
+        const porDia = await estadoDeRegistro(
+          tx,
+          req.ip,
+          dep.cfg.salIp,
+          dep.cfg.altasPorDiaPorIp,
+          hoy.minutosDesdeMedianoche,
+        );
+        if (porDia.bloqueado)
+          return { tope: 'dia' as const, reintentarEnS: hoy.espera.reintentarEnS };
+        // Se anota ANTES de saber si el correo estaba libre: probar correos hasta encontrar uno
+        // disponible tiene que consumir cuota igual que crear la cuenta.
+        await anotarRegistro(tx, req.ip, dep.cfg.salIp);
+        return null;
+      });
+      if (freno) {
         req.log.warn(
-          { ipHash: hashIp(req.ip, dep.cfg.salIp) },
-          'alta de cuenta frenada: demasiadas desde la misma IP',
+          { ipHash },
+          freno.tope === 'hora'
+            ? 'alta de cuenta frenada: demasiadas desde la misma IP'
+            : 'alta de cuenta frenada: tope diario de altas desde la misma IP',
         );
         res.header('Retry-After', String(freno.reintentarEnS));
         return res.status(429).send({
           codigo: 'DEMASIADAS_CUENTAS',
           mensaje:
-            'Se crearon demasiadas cuentas desde esta conexión. Probá de nuevo dentro de un rato.',
+            freno.tope === 'hora'
+              ? 'Se crearon demasiadas cuentas desde esta conexión. Probá de nuevo dentro de un rato.'
+              : 'Hoy ya se crearon demasiadas cuentas desde esta conexión. Probá de nuevo mañana.',
         });
       }
-      // Se anota ANTES de saber si el correo estaba libre: probar correos hasta encontrar uno
-      // disponible tiene que consumir cuota igual que crear la cuenta.
-      await anotarRegistro(ex, req.ip, dep.cfg.salIp);
 
       // El hash se calcula siempre, exista o no el correo. Es el coste dominante de la petición
       // (~60 ms de Argon2id) y calcularlo solo en una de las dos ramas dejaría una diferencia de
@@ -132,10 +160,7 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
       } else {
         // Al log sí, porque el log no es la respuesta: saber que alguien reintenta con correos
         // existentes es señal de sondeo. Sin el correo y sin la IP en claro (§13).
-        req.log.info(
-          { ipHash: hashIp(req.ip, dep.cfg.salIp) },
-          'alta de cuenta sobre un correo que ya existía',
-        );
+        req.log.info({ ipHash }, 'alta de cuenta sobre un correo que ya existía');
       }
 
       // La misma respuesta en los dos casos. Quien tenga cuenta y llegue aquí por error entra
@@ -241,13 +266,13 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
   });
 
   /**
-   * Estado de la sesión. Devuelve además `puede_reportar_desde`: el momento en que esta cuenta
-   * vuelve a tener turno para reportar, o null si lo tiene ahora. Es dato propio de quien
+   * Estado de la sesión. Devuelve además `reportes_restantes_hoy` y `puede_reportar_desde` (null,
+   * o la próxima medianoche de la ciudad si ya no le quedan reportes hoy). Es dato propio de quien
    * pregunta —solo llega con su cookie— y sirve para que la interfaz avise antes de que el vecino
    * rellene cinco pantallas para encontrarse un 429 al final.
    *
-   * No sustituye a la comprobación del servidor: la autoridad sigue siendo el UPDATE atómico de
-   * `cuota.ts`. Esto es cortesía, no control.
+   * No sustituye a la comprobación del servidor: la autoridad sigue siendo el contador atómico de
+   * `cuota.ts` al crear. Esto es cortesía, no control.
    *
    * `panel_url` (contracts 0.7.0) solo se agrega para `ROLES_DEL_PANEL` (`tecnico`, `admin`,
    * `ejecutivo`): antes viajaba fija en el JavaScript público de la app ciudadana, a la vista de
@@ -257,15 +282,15 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
    */
   app.get('/api/v1/auth/yo', async (req, res) => {
     if (!req.usuario) return res.status(401).send({ codigo: 'SIN_SESION', mensaje: 'Sin sesión.' });
-    const desde = await proximoEnvioPermitido(
-      dep.pool,
-      req.usuario.id,
-      dep.cfg.minutosEntreReportes,
-    );
+    const cupo = await cupoDelDia(dep.pool, req.usuario.id, { zona: dep.cfg.zonaHoraria });
+    const restantes = Math.max(0, dep.cfg.reportesPorDia - cupo.reportesN);
     const esRolDelPanel = (ROLES_DEL_PANEL as readonly Rol[]).includes(req.usuario.rol);
     return SesionActualSchema.parse({
       ...req.usuario,
-      puede_reportar_desde: desde ? desde.toISOString() : null,
+      reportes_restantes_hoy: restantes,
+      puede_reportar_desde: restantes > 0 ? null : cupo.espera.disponibleEn,
+      // Para avisar ANTES de enviar cuánto va a tardar en verse: la misma regla que el INSERT.
+      demora_proximo_s: cupo.reportesN === 0 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS,
       ...(esRolDelPanel ? { panel_url: dep.cfg.panelAdminUrl } : {}),
     });
   });

@@ -25,9 +25,9 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -53,7 +53,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ NODE_ENV: 'test', METRICAS_RUTA: '' }),
+      ...configDePrueba({ NODE_ENV: 'test', METRICAS_RUTA: '' }),
       // Sin límite de creación: lo que se prueba aquí es el pool, no el rate limit.
       rateLimitMax: 100_000,
     },

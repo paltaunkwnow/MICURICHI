@@ -22,9 +22,9 @@ import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   multipart,
@@ -34,7 +34,7 @@ import {
 
 const URL_ADMIN = process.env.DATABASE_URL_PG_REAL;
 const NOMBRE_BASE = `curichi_fotos_${Date.now()}`;
-const LIMITE = CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA;
+const LIMITE = CONFIG_DOMINIO.FOTOS_POR_DIA_POR_CUENTA;
 
 let pool: pg.Pool;
 let app: FastifyInstance;
@@ -69,7 +69,7 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
     app = await crearApp({
       pool,
       cfg: {
-        ...leerConfig({ DATABASE_URL: urlBase }),
+        ...configDePrueba({ DATABASE_URL: urlBase }),
         rutaOpenApi: '/no-existe.yaml',
         rateLimitMax: 10_000,
       },
@@ -122,9 +122,10 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
 
   it(`${LIMITE + 8} subidas simultáneas de una cuenta dejan exactamente ${LIMITE}`, async () => {
     await pool.query('DELETE FROM reporte_foto');
+    await pool.query('DELETE FROM cuota_reporte_diaria');
     const rs = await Promise.all(Array.from({ length: LIMITE + 8 }, () => subir(cookieVecina)));
     const reparto = contar(rs.map((r) => r.statusCode));
-    // Ni un 5xx: esperar el bloqueo de la fila del usuario no es un error.
+    // Ni un 5xx: esperar el bloqueo de la fila del cupo del día no es un error.
     expect(
       Object.keys(reparto).every((c) => Number(c) < 500),
       JSON.stringify(reparto),
@@ -134,8 +135,9 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
     expect(await fotosDe(CUENTAS.vecina)).toBe(LIMITE);
   }, 180_000);
 
-  it('dos cuentas a la vez no se estorban: el bloqueo es por fila de usuario', async () => {
+  it('dos cuentas a la vez no se estorban: el bloqueo es por fila de cuenta y día', async () => {
     await pool.query('DELETE FROM reporte_foto');
+    await pool.query('DELETE FROM cuota_reporte_diaria');
     const rs = await Promise.all([
       ...Array.from({ length: 8 }, () => subir(cookieVecina)),
       ...Array.from({ length: 8 }, () => subir(cookieVecino)),

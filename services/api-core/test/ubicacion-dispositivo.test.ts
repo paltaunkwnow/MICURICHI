@@ -17,12 +17,12 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import { opcionesLogger } from '../src/registro.js';
 import { revisarDispositivo, TOLERANCIA_RADIO_M } from '../src/ubicacion-dispositivo.js';
 import {
   alNorte,
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -76,7 +76,8 @@ async function cuantosReportes(): Promise<number> {
 
 async function turnoGastado(): Promise<boolean> {
   const r = await pool.query<{ gastado: boolean }>(
-    'SELECT ultimo_reporte_en IS NOT NULL AS gastado FROM usuario WHERE email = $1',
+    `SELECT COALESCE(sum(c.reportes_n), 0) > 0 AS gastado
+       FROM cuota_reporte_diaria c JOIN usuario u ON u.id = c.usuario_id WHERE u.email = $1`,
     [CUENTAS.vecina],
   );
   return r.rows[0]!.gastado;
@@ -97,7 +98,7 @@ beforeAll(async () => {
   await cargarCapasDePrueba(ex);
   await crearUsuarios(ex);
   const cfg = {
-    ...leerConfig({ DATABASE_URL: base.url }),
+    ...configDePrueba({ DATABASE_URL: base.url }),
     rutaOpenApi: '/no-existe.yaml',
     rateLimitMax: 1000,
   };
@@ -265,6 +266,30 @@ describe('POST /reportes: radio, precisión y antigüedad', () => {
       precision: reporteValido.dispositivo.precision_m,
       distancia_dispositivo_m: 60,
     });
+  });
+
+  /**
+   * El método lo deriva el servidor con el margen del propio teléfono: `gps` si el punto quedó a
+   * `max(2, precision_m)` o menos, `manual` si más lejos (antes era un corte fijo de 2 m y casi
+   * todo salía manual por el ruido entre dos lecturas del GPS).
+   */
+  it('precisión de 10 m: el punto a 8 m se guarda como gps y a 15 m como manual', async () => {
+    const guardado = async (metros: number) => {
+      const r = await crear({
+        ...reporteValido,
+        ...alNorte(PUNTO, metros),
+        dispositivo: dispositivo({ precision_m: 10 }),
+      });
+      expect(r.statusCode, r.body).toBe(201);
+      const fila = await pool.query<{ metodo: string; distancia: number }>(
+        `SELECT ubicacion_metodo::text AS metodo, distancia_dispositivo_m AS distancia
+           FROM reporte_inundacion WHERE id = $1`,
+        [r.json().id],
+      );
+      return fila.rows[0];
+    };
+    expect(await guardado(8)).toEqual({ metodo: 'gps', distancia: 8 });
+    expect(await guardado(15)).toEqual({ metodo: 'manual', distancia: 15 });
   });
 
   it('en la posición del teléfono: gps a 0 m, y la vista técnica lo muestra', async () => {

@@ -23,10 +23,11 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
+  enEspera,
   iniciarSesion,
   liberarCuota,
   reporteEn,
@@ -43,6 +44,8 @@ let cookieVecina: string;
 let ex: ReturnType<typeof ejecutorPg>;
 let idPublicado: string;
 let idSinPublicar: string;
+/** Publicado y rechazado: fuera del mapa público, dentro de la vista técnica. */
+let idRechazado: string;
 
 const LAT = -17.7912345;
 const LON = -63.1934567;
@@ -67,7 +70,7 @@ beforeAll(async () => {
   app = await crearApp({
     pool,
     cfg: {
-      ...leerConfig({ DATABASE_URL: base.url }),
+      ...configDePrueba({ DATABASE_URL: base.url }),
       rutaOpenApi: '/no-existe.yaml',
       rateLimitMax: 1000,
     },
@@ -78,7 +81,8 @@ beforeAll(async () => {
   cookieAdmin = await iniciarSesion(app, CUENTAS.admin);
   cookieVecina = await iniciarSesion(app, CUENTAS.vecina);
 
-  // Uno publicado (vivienda: es el caso con ubicación degradada) y otro que sigue en `nuevo`.
+  // Uno publicado (vivienda: es el caso con ubicación degradada) y otro que todavía espera su
+  // publicar_en: desde contracts 0.11.0 `nuevo` se publica, y lo que no se ve es lo que espera.
   const a = await crearVivienda();
   idPublicado = a.json().id as string;
   await app.inject({
@@ -89,6 +93,15 @@ beforeAll(async () => {
   });
   const b = await crearVivienda();
   idSinPublicar = b.json().id as string;
+  await enEspera(ex, idSinPublicar);
+  const c = await crearVivienda();
+  idRechazado = c.json().id as string;
+  await app.inject({
+    method: 'PATCH',
+    url: `/api/v1/reportes/${idRechazado}/estado`,
+    cookies: { curichi_sesion: cookieTecnico },
+    payload: { estado: 'rechazado', estado_motivo: 'No es un anegamiento' },
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -113,6 +126,7 @@ describe('la ruta pública devuelve la vista pública pase lo que pase', () => {
     const fs = r.json().features as Array<{ id: string; properties: Record<string, unknown> }>;
     expect(fs.map((f) => f.id)).toContain(idPublicado);
     expect(fs.map((f) => f.id)).not.toContain(idSinPublicar);
+    expect(fs.map((f) => f.id)).not.toContain(idRechazado);
     for (const f of fs) expect(esVistaTecnica(f.properties)).toBe(false);
   });
 
@@ -158,7 +172,7 @@ describe('la ruta pública devuelve la vista pública pase lo que pase', () => {
     }
   });
 
-  it('el detalle público de un reporte sin moderar es 404 incluso para el técnico', async () => {
+  it('el detalle público de un reporte que espera su publicación es 404 incluso para el técnico', async () => {
     const r = await app.inject({
       method: 'GET',
       url: `/api/v1/reportes/${idSinPublicar}`,
@@ -254,7 +268,7 @@ describe('la ruta técnica exige intención explícita Y autorización', () => {
     expect(r.json().codigo).toBe('SIN_PERMISO');
   });
 
-  it('con rol técnico devuelve la coordenada exacta y los reportes sin moderar', async () => {
+  it('con rol técnico devuelve la coordenada exacta y los retirados, pero no lo que espera', async () => {
     const r = await app.inject({
       method: 'GET',
       url: '/api/v1/tecnico/reportes?limite=500',
@@ -266,14 +280,16 @@ describe('la ruta técnica exige intención explícita Y autorización', () => {
       geometry: { coordinates: [number, number] };
       properties: Record<string, unknown>;
     }>;
-    expect(fs.map((f) => f.id)).toContain(idSinPublicar);
+    expect(fs.map((f) => f.id)).toContain(idRechazado);
+    // Lo que todavía espera su publicar_en no lo ve nadie más que su autor, técnicos incluidos.
+    expect(fs.map((f) => f.id)).not.toContain(idSinPublicar);
     const pub = fs.find((f) => f.id === idPublicado)!;
     expect(pub.geometry.coordinates).toEqual([LON, LAT]);
     expect(esVistaTecnica(pub.properties)).toBe(true);
 
     const d = await app.inject({
       method: 'GET',
-      url: `/api/v1/tecnico/reportes/${idSinPublicar}`,
+      url: `/api/v1/tecnico/reportes/${idRechazado}`,
       cookies: { curichi_sesion: cookieTecnico },
     });
     expect(d.statusCode).toBe(200);
@@ -393,7 +409,7 @@ describe('una caché compartida delante del servicio no puede mezclar representa
     });
     expect(tec.statusCode).toBe(200);
     const ids = (tec.json().features as Array<{ id: string }>).map((f) => f.id);
-    expect(ids).toContain(idSinPublicar);
+    expect(ids).toContain(idRechazado);
   });
 
   it('peticiones concurrentes mezcladas mantienen cada una su representación', async () => {

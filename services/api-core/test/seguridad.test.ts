@@ -6,7 +6,7 @@ import { igualEnTiempoConstante } from '../src/observabilidad.js';
 import { leerConfianzaProxy, opcionFastify } from '../src/proxy.js';
 import { serializadores } from '../src/registro.js';
 import { csvCelda } from '../src/rutas/admin.js';
-import { type FilaReporte, vistaPublica, vistaTecnica } from '../src/vistas.js';
+import { type FilaReporte, vistaMiReporte, vistaPublica, vistaTecnica } from '../src/vistas.js';
 
 const ENTORNO_MINIMO = {
   // Las sales tienen que superar SAL_MIN_LONGITUD: el jitter siembra con un hash no
@@ -146,6 +146,8 @@ function fila(parcial: Partial<FilaReporte> = {}): FilaReporte {
     lon: -63.1953,
     lat: -17.7891,
     creado_en: new Date('2026-01-01T12:00:00Z'),
+    publicar_en: new Date('2026-01-01T12:01:00Z'),
+    segundos_para_publicar: 0,
     actualizado_en: new Date('2026-01-01T12:00:00Z'),
     evento_en: null,
     autor_id: null,
@@ -428,5 +430,30 @@ describe('el registro no identifica a quien entra', () => {
     const a = s.req(peticion) as { ipHash: string };
     const b = otra.req(peticion) as { ipHash: string };
     expect(a.ipHash).not.toBe(b.ipHash);
+  });
+});
+
+describe('vistas y estados (contracts 0.11.0)', () => {
+  it('la pública lleva verificado y no acepta un estado retirado', () => {
+    expect(vistaPublica(fila({ estado: 'nuevo' }), '', 'sal').props.verificado).toBe(false);
+    expect(vistaPublica(fila({ estado: 'validado' }), '', 'sal').props.verificado).toBe(true);
+    expect(vistaPublica(fila({ estado: 'resuelto' }), '', 'sal').props.verificado).toBe(true);
+    // Si una consulta pública se olvidara del filtro, esto corta con un 500 antes de publicarlo.
+    for (const estado of ['rechazado', 'duplicado'] as const)
+      expect(() => vistaPublica(fila({ estado }), '', 'sal')).toThrow(/no público/);
+  });
+
+  it('la del autor: exacta, con publicar_en, los segundos y si lo retiraron; sin autor', () => {
+    const v = vistaMiReporte(fila({ estado: 'duplicado', segundos_para_publicar: 0 }), '');
+    expect([v.lat, v.lon]).toEqual([fila().lat, fila().lon]);
+    expect(v.props).toMatchObject({
+      estado: 'duplicado',
+      verificado: false,
+      retirado: true,
+      publicar_en: '2026-01-01T12:01:00.000Z',
+      segundos_para_publicar: 0,
+    });
+    expect(v.props).not.toHaveProperty('autor_id');
+    expect(v.props).not.toHaveProperty('estado_motivo');
   });
 });

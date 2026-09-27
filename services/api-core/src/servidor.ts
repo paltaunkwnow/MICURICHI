@@ -2,7 +2,7 @@ import { cerrarWorkersDePassword, crearPool, esperarBaseDeDatos, verificarPrivil
 import { AlmacenDisco } from './almacen.js';
 import { AlmacenS3, leerConfigS3 } from './almacen-s3.js';
 import { crearApp } from './app.js';
-import { leerConfig } from './config.js';
+import { avisosDeConfiguracion, leerConfig } from './config.js';
 import { programarMantenimiento } from './mantenimiento.js';
 import { opcionesLogger } from './registro.js';
 import { ResolverHttp } from './resolver.js';
@@ -27,7 +27,7 @@ const almacenS3 = configS3 ? new AlmacenS3(configS3) : null;
 const almacen = almacenS3 ?? new AlmacenDisco(cfg.dirAlmacen);
 const dondeVanLasFotos = configS3
   ? `S3 ${configS3.endpoint}/${configS3.bucket}`
-  : `disco ${cfg.dirAlmacen} (una sola réplica)`;
+  : `disco ${cfg.dirAlmacen} (una sola réplica; guarda de ${cfg.fotosMinLibreBytes} bytes libres)`;
 // La IP del cliente NO va en claro al log: el serializador la sustituye por el hash con sal
 // (ver registro.ts). El de por defecto de Fastify escribía `remoteAddress` en cada petición.
 const logger = opcionesLogger({
@@ -41,6 +41,9 @@ const app = await crearApp({
   almacen,
   logger,
 });
+// Configuración válida pero que no debería estar en producción (las demoras de publicación de
+// las pruebas): no se frena el arranque, pero queda escrito.
+for (const aviso of avisosDeConfiguracion()) app.log.warn(aviso);
 let mantenimiento: { detener(): void } | null = null;
 try {
   app.log.info('esperando base de datos…');

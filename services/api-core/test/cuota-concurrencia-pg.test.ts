@@ -1,5 +1,6 @@
 /**
- * La cuota de un reporte por hora, bajo concurrencia REAL, contra PostgreSQL de verdad.
+ * El cupo diario de reportes y los topes de altas de cuenta por IP, bajo concurrencia REAL,
+ * contra PostgreSQL de verdad.
  *
  * POR QUÉ ESTE ARCHIVO EXISTE APARTE
  *
@@ -24,6 +25,7 @@
  * base existente. Sin esa variable se omite, con lo que el resto del monorepo sigue corriendo en
  * cualquier máquina sin Docker.
  */
+import { CONFIG_DOMINIO } from 'contracts';
 import { aplicarMigraciones, ejecutorPg } from 'db';
 import { cargarCapasDePrueba } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
@@ -31,9 +33,10 @@ import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AlmacenMemoria } from '../src/almacen.js';
 import { crearApp } from '../src/app.js';
-import { leerConfig } from '../src/config.js';
+import type { ConfigApi } from '../src/config.js';
 import {
   CUENTAS,
+  configDePrueba,
   crearUsuarios,
   iniciarSesion,
   liberarCuota,
@@ -78,7 +81,7 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
     app = await crearApp({
       pool,
       cfg: {
-        ...leerConfig({ DATABASE_URL: urlBase }),
+        ...configDePrueba({ DATABASE_URL: urlBase }),
         rutaOpenApi: '/no-existe.yaml',
         rateLimitMax: 10_000,
       },
@@ -127,7 +130,9 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
     }, {});
   }
 
-  it('50 envíos simultáneos con claves DISTINTAS dejan exactamente uno aceptado', async () => {
+  const POR_DIA = CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA;
+
+  it(`50 envíos simultáneos con claves DISTINTAS dejan exactamente ${POR_DIA}`, async () => {
     await liberarCuota(ex);
     const antes = await reportesDeVecina();
     const rs = await Promise.all(
@@ -139,9 +144,9 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
       Object.keys(reparto).every((c) => Number(c) < 500),
       JSON.stringify(reparto),
     ).toBe(true);
-    expect(reparto['201'], JSON.stringify(reparto)).toBe(1);
-    expect(reparto['429'], JSON.stringify(reparto)).toBe(49);
-    expect((await reportesDeVecina()) - antes).toBe(1);
+    expect(reparto['201'], JSON.stringify(reparto)).toBe(POR_DIA);
+    expect(reparto['429'], JSON.stringify(reparto)).toBe(50 - POR_DIA);
+    expect((await reportesDeVecina()) - antes).toBe(POR_DIA);
   }, 180_000);
 
   it('50 envíos simultáneos con la MISMA clave dejan uno, por idempotencia y no por cuota', async () => {
@@ -168,11 +173,11 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
     const antes = await reportesDeVecina();
     const rs = await Promise.all(Array.from({ length: 50 }, () => enviar()));
     const reparto = contar(rs.map((r) => r.statusCode));
-    expect(reparto['201'], JSON.stringify(reparto)).toBe(1);
-    expect((await reportesDeVecina()) - antes).toBe(1);
+    expect(reparto['201'], JSON.stringify(reparto)).toBe(POR_DIA);
+    expect((await reportesDeVecina()) - antes).toBe(POR_DIA);
   }, 180_000);
 
-  it('dos cuentas a la vez consiguen un reporte cada una, no una sola', async () => {
+  it('dos cuentas a la vez consiguen su cupo cada una, no una sola', async () => {
     await liberarCuota(ex, CUENTAS.vecina);
     await liberarCuota(ex, CUENTAS.vecino);
     const otra = await iniciarSesion(app, CUENTAS.vecino);
@@ -187,7 +192,138 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
         }),
       ),
     ]);
-    // Uno por cuenta: el bloqueo es por fila de usuario, así que dos cuentas no se estorban.
-    expect(mezcla.filter((r) => r.statusCode === 201)).toHaveLength(2);
+    // El cupo de cada cuenta: el bloqueo es por fila de cuenta y día, así que no se estorban.
+    expect(mezcla.filter((r) => r.statusCode === 201)).toHaveLength(2 * POR_DIA);
   }, 180_000);
+
+  /**
+   * La demora sale del `n` del contador, en la misma transacción que el INSERT (ADR 0006): dos
+   * envíos simultáneos de la misma cuenta se serializan sobre la fila del día y reciben uno el
+   * 1.º turno (60 s) y el otro el 2.º (240 s), nunca los dos 60.
+   */
+  it('dos envíos simultáneos de una cuenta se publican a 60 y a 240 s', async () => {
+    const conDemora = await crearApp({
+      pool,
+      cfg: {
+        ...configDePrueba({ DATABASE_URL: urlBase }),
+        rutaOpenApi: '/no-existe.yaml',
+        rateLimitMax: 10_000,
+        demoraPrimeroS: CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S,
+        demoraSiguientesS: CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S,
+      },
+      resolver: resolverDePrueba,
+      almacen: new AlmacenMemoria(),
+    });
+    try {
+      await pool.query('DELETE FROM cuota_reporte_diaria');
+      const cookieDemora = await iniciarSesion(conDemora, CUENTAS.vecina);
+      const rs = await Promise.all(
+        [0, 1].map((i) =>
+          conDemora.inject({
+            method: 'POST',
+            url: '/api/v1/reportes',
+            payload: reporteValido,
+            cookies: sesion(cookieDemora),
+            headers: { 'idempotency-key': `demora-simultanea-${i}` },
+          }),
+        ),
+      );
+      expect(rs.map((r) => r.statusCode)).toEqual([201, 201]);
+      const demoras = rs
+        .map((r) => {
+          const p = r.json().properties as { creado_en: string; publicar_en: string };
+          return Math.round((Date.parse(p.publicar_en) - Date.parse(p.creado_en)) / 1000);
+        })
+        .sort((a, b) => a - b);
+      expect(demoras).toEqual([
+        CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S,
+        CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S,
+      ]);
+    } finally {
+      await conDemora.close();
+    }
+  }, 180_000);
+
+  /*
+   * Altas de cuenta desde una misma IP. Los dos topes (por hora y por día) cuentan filas de
+   * `intento_login` y el alta anota la suya después: sin serializar por IP, las altas simultáneas
+   * leen todas el mismo conteo antes de que ninguna anote y pasan todas.
+   */
+  describe('altas simultáneas desde una misma IP', () => {
+    async function appDeAltas(extra: Partial<ConfigApi>): Promise<FastifyInstance> {
+      return crearApp({
+        pool,
+        cfg: {
+          ...configDePrueba({ DATABASE_URL: urlBase }),
+          rutaOpenApi: '/no-existe.yaml',
+          rateLimitMax: 10_000,
+          // La ráfaga en memoria, fuera del medio: se prueba el freno que vive en la base.
+          registroPeticionesPorVentana: 10_000,
+          ...extra,
+        },
+        resolver: resolverDePrueba,
+        almacen: new AlmacenMemoria(),
+      });
+    }
+
+    async function altas(a: FastifyInstance, n: number, prefijo: string) {
+      await pool.query("DELETE FROM intento_login WHERE clave LIKE 'registro:%'");
+      const rs = await Promise.all(
+        Array.from({ length: n }, (_, i) =>
+          a.inject({
+            method: 'POST',
+            url: '/api/v1/auth/registro',
+            payload: {
+              email: `${prefijo}-${i}@test.local`,
+              nombre: 'Vecina Nueva',
+              password: 'contrasena-larga-de-prueba',
+            },
+          }),
+        ),
+      );
+      const creadas = await pool.query<{ n: number }>(
+        'SELECT count(*)::int AS n FROM usuario WHERE email LIKE $1',
+        [`${prefijo}-%`],
+      );
+      const anotadas = await pool.query<{ n: number }>(
+        "SELECT count(*)::int AS n FROM intento_login WHERE clave LIKE 'registro:%'",
+      );
+      return {
+        reparto: contar(rs.map((r) => r.statusCode)),
+        codigos429: new Set(rs.filter((r) => r.statusCode === 429).map((r) => r.json().codigo)),
+        creadas: creadas.rows[0]!.n,
+        anotadas: anotadas.rows[0]!.n,
+      };
+    }
+
+    const TOPE_DIA = CONFIG_DOMINIO.ALTAS_POR_DIA_POR_IP;
+
+    it(`30 altas a la vez dejan exactamente ${TOPE_DIA} (tope diario)`, async () => {
+      const a = await appDeAltas({ registroPorIp: 10_000 });
+      try {
+        const r = await altas(a, 30, 'alta-dia');
+        expect(r.reparto['201'], JSON.stringify(r.reparto)).toBe(TOPE_DIA);
+        expect(r.reparto['429'], JSON.stringify(r.reparto)).toBe(30 - TOPE_DIA);
+        expect([...r.codigos429]).toEqual(['DEMASIADAS_CUENTAS']);
+        expect(r.creadas).toBe(TOPE_DIA);
+        expect(r.anotadas).toBe(TOPE_DIA);
+      } finally {
+        await a.close();
+      }
+    }, 180_000);
+
+    it('20 altas a la vez dejan exactamente las del tope por hora', async () => {
+      const porHora = 3;
+      const a = await appDeAltas({ registroPorIp: porHora, altasPorDiaPorIp: 10_000 });
+      try {
+        const r = await altas(a, 20, 'alta-hora');
+        expect(r.reparto['201'], JSON.stringify(r.reparto)).toBe(porHora);
+        expect(r.reparto['429'], JSON.stringify(r.reparto)).toBe(20 - porHora);
+        expect(r.creadas).toBe(porHora);
+        expect(r.anotadas).toBe(porHora);
+      } finally {
+        await a.close();
+      }
+    }, 180_000);
+  });
 });
