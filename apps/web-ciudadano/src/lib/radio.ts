@@ -189,11 +189,21 @@ export function coordenadasEscritas(
 }
 
 /**
+ * El punto que la persona aceptó con «Continuar» en el paso 1 deja de ser precargado: desde ahí
+ * es el lugar del agua que eligió, aunque lo haya puesto la app, y no se muda solo cuando vuelve a
+ * llegar la posición del teléfono (tras un 422 de la posición, un borrador retomado o una posición
+ * vencida). Sin la marca devuelve el mismo objeto, para no volver a resolver la unidad vecinal.
+ */
+export function aceptarPunto(u: Ubicacion): Ubicacion {
+  if (!u.precargada) return u;
+  return { lat: u.lat, lon: u.lon };
+}
+
+/**
  * Lo que cuenta como elegido por la persona cuando vuelve a llegar la posición del teléfono: el
- * punto que movió ella, o el que puso la app y ella ya aceptó con «Continuar» (`aceptado`: el
- * resto del reporte estaba contestado, como tras un 422 de la posición, una posición vencida o un
- * borrador retomado). Ese es el lugar del agua y no se muda a la posición nueva del teléfono.
- * Solo el que puso la app y nadie aceptó todavía se recalcula.
+ * punto que movió o aceptó ella, o el que puso la app y que ella aceptó con «Continuar»
+ * (`aceptado`: hay un paso pendiente). Ese es el lugar del agua y no se muda a la posición nueva
+ * del teléfono. Solo el que puso la app y nadie aceptó todavía se recalcula.
  */
 export function puntoYaElegido(
   actual: Ubicacion | null,
@@ -207,7 +217,8 @@ export function puntoYaElegido(
  * Dónde se pone el punto cuando llega la posición del teléfono: lo que la persona ya había
  * elegido (un borrador, o el punto de antes de volver a compartir) si sigue a 60 m o menos; si no,
  * el del enlace «Me pasa a mí» si queda cerca; y si no, la posición del teléfono. Cuando algo
- * elegido se descarta, se dice por qué.
+ * elegido se descarta, se dice por qué, y `movido` avisa que el punto que la persona había
+ * elegido ya no es el mismo: el formulario no la lleva directo a la revisión.
  */
 export function puntoInicial({
   ancla,
@@ -217,22 +228,28 @@ export function puntoInicial({
   ancla: PuntoLatLon;
   guardado: Ubicacion | null;
   enlace: PuntoLatLon | null;
-}): { punto: Ubicacion; aviso: string | null } {
+}): { punto: Ubicacion; aviso: string | null; movido: boolean } {
   const enElTelefono: Ubicacion = { lat: ancla.lat, lon: ancla.lon, precargada: true };
   if (guardado) {
-    if (dentroDelRadio(guardado, ancla)) return { punto: guardado, aviso: null };
+    if (dentroDelRadio(guardado, ancla)) return { punto: guardado, aviso: null, movido: false };
     return {
       punto: enElTelefono,
-      aviso: `El punto que habías elegido queda a ${distanciaRedondeada(guardado, ancla)} m de donde estás ahora, y solo se puede reportar a ${RADIO_M} m o menos. Lo pusimos en tu ubicación: ajustalo si hace falta.`,
+      aviso: `Movimos el punto a tu ubicación: el que habías elegido queda a ${distanciaRedondeada(guardado, ancla)} m de donde estás ahora, y solo se puede reportar a ${RADIO_M} m o menos. Revisalo y ajustalo antes de seguir.`,
+      movido: true,
     };
   }
   if (enlace) {
     if (dentroDelRadio(enlace, ancla))
-      return { punto: { lat: enlace.lat, lon: enlace.lon, precargada: true }, aviso: null };
+      return {
+        punto: { lat: enlace.lat, lon: enlace.lon, precargada: true },
+        aviso: null,
+        movido: false,
+      };
     return {
       punto: enElTelefono,
       aviso: `El punto del enlace queda a ${distanciaRedondeada(enlace, ancla)} m de vos, y solo se puede reportar a ${RADIO_M} m o menos de donde estás. Lo pusimos en tu ubicación.`,
+      movido: false,
     };
   }
-  return { punto: enElTelefono, aviso: null };
+  return { punto: enElTelefono, aviso: null, movido: false };
 }

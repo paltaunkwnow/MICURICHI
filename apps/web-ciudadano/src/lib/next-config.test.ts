@@ -71,21 +71,50 @@ describe('next.config.ts no congela nada del despliegue', () => {
     }
   });
 
-  it('la CSP no abre orígenes nuevos: solo las teselas de OpenStreetMap', async () => {
-    const reglas = await reglasDeCabeceras(await cargarConfig(DE_DESPLIEGUE));
-    const csp = reglas
-      .flatMap((r) => r.headers)
-      .find((h) => h.key.toLowerCase() === 'content-security-policy')?.value;
-    expect(csp).toBeDefined();
-    const directivas = new Map(
-      (csp ?? '').split(';').map((d) => {
-        const [nombre = '', ...valores] = d.trim().split(/\s+/);
-        return [nombre, valores] as const;
-      }),
+  it('no fija ninguna CSP: la única es la de src/proxy.ts, con el nonce de cada petición', async () => {
+    // Una segunda política sin el nonce se aplicaría junto con la del proxy y bloquearía los
+    // <script> en línea de Next; una con 'unsafe-inline' dejaría el nonce sin efecto práctico.
+    for (const NODE_ENV of ['production', 'development']) {
+      const reglas = await reglasDeCabeceras(await cargarConfig({ ...DE_DESPLIEGUE, NODE_ENV }));
+      const claves = reglas.flatMap((r) => r.headers.map((h) => h.key.toLowerCase()));
+      expect(claves, NODE_ENV).not.toContain('content-security-policy');
+      expect(claves, NODE_ENV).not.toContain('content-security-policy-report-only');
+    }
+  });
+
+  it('el worker de MapLibre y los glifos con ?v= se sirven immutable por un año', async () => {
+    const reglas = await reglasDeCabeceras(await cargarConfig({}));
+    const inmutable = 'public, max-age=31536000, immutable';
+    for (const prefijo of ['/maplibre/', '/glifos/']) {
+      const regla = reglas.find(
+        (r) =>
+          r.source.startsWith(prefijo) &&
+          r.headers.some((h) => h.key.toLowerCase() === 'cache-control'),
+      );
+      expect(regla, prefijo).toBeDefined();
+      expect(
+        regla?.headers.find((h) => h.key.toLowerCase() === 'cache-control')?.value,
+        prefijo,
+      ).toBe(inmutable);
+      // Solo con la versión en la URL: sin ella, la copia de un año no se podría renovar nunca.
+      expect(regla?.has, prefijo).toEqual([{ type: 'query', key: 'v' }]);
+    }
+    // Nada más se marca immutable: ni el service worker, ni el manifiesto, ni las páginas.
+    const conCacheControl = reglas.filter((r) =>
+      r.headers.some((h) => h.key.toLowerCase() === 'cache-control'),
     );
-    const origenes = [...directivas.values()].flat().filter((v) => /^(https?:|wss?:)/.test(v));
-    expect(new Set(origenes)).toEqual(new Set(['https://tile.openstreetmap.org']));
-    expect(directivas.get('connect-src')).toEqual(["'self'", 'https://tile.openstreetmap.org']);
-    expect(directivas.get('default-src')).toEqual(["'self'"]);
+    expect(conCacheControl.map((r) => r.source.split('/')[1]).sort()).toEqual([
+      'glifos',
+      'maplibre',
+    ]);
+  });
+
+  it('conserva el resto de las cabeceras de seguridad en todas las rutas', async () => {
+    const reglas = await reglasDeCabeceras(await cargarConfig(DE_DESPLIEGUE));
+    const todas = reglas.find((r) => r.source === '/(.*)');
+    const cabeceras = new Map(todas?.headers.map((h) => [h.key.toLowerCase(), h.value]));
+    expect(cabeceras.get('x-content-type-options')).toBe('nosniff');
+    expect(cabeceras.get('x-frame-options')).toBe('DENY');
+    expect(cabeceras.get('referrer-policy')).toBe('strict-origin-when-cross-origin');
   });
 });

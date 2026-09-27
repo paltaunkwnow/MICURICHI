@@ -14,6 +14,7 @@ import {
 import Link from 'next/link';
 import { useState } from 'react';
 import { colorSeveridad, etiquetaSeveridad, SEVERIDADES_ORDEN } from '@/lib/formato';
+import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { BarraInferior } from './BarraInferior';
 
@@ -27,18 +28,17 @@ const PASOS: Array<{ Icono: LucideIcon; agua: boolean; titulo: string; texto: st
     texto: `Compartís tu ubicación y marcás dónde se junta el agua, a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos de donde estás, y contás hasta dónde llega. Menos de dos minutos, y no hace falta medir nada.`,
   },
   {
-    Icono: Search,
+    Icono: Layers,
     agua: true,
-    titulo: '2 · Un técnico lo revisa',
-    texto:
-      'La municipalidad lo verifica antes de publicarlo. Si otro vecino ya lo marcó, los reportes se suman en el mismo punto.',
+    titulo: '2 · Aparece en el mapa',
+    texto: `Se publica ${Math.round(CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S / 60)} minuto después de enviarlo (${Math.round(CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S / 60)} minutos desde el segundo del día), visible para todos con su severidad y la marca «${TEXTO_SIN_VERIFICAR}».`,
   },
   {
-    Icono: Layers,
+    Icono: Search,
     agua: false,
-    titulo: '3 · Se publica en el mapa',
+    titulo: '3 · Un técnico lo revisa',
     texto:
-      'Queda visible para todos con su severidad. Mientras más vecinos lo reporten, más peso tiene.',
+      'Si corresponde, pasa a «Verificado»; si no, lo retira del mapa. Si otro vecino ya lo marcó, los reportes se suman en el mismo punto.',
   },
   {
     Icono: ChartColumn,
@@ -296,9 +296,13 @@ export function ComoFunciona() {
             </Aviso>
             <h2 className="glbl">Qué pasa después de que reportás</h2>
             <p className="text-[15.5px] leading-[1.55] text-tinta-600">
-              Tu reporte queda en revisión. Un técnico municipal lo valida, lo rechaza si no
-              corresponde, o lo marca como duplicado de otro. Recién cuando lo valida aparece en el
-              mapa público: eso es lo que evita que el inventario se llene de repetidos.
+              Tu reporte aparece en el mapa unos minutos después de enviarlo, con la marca «
+              {TEXTO_SIN_VERIFICAR}»: todavía nadie del municipio lo revisó y puede tener errores.
+              Después un técnico municipal lo verifica, lo retira del mapa si no corresponde o lo
+              suma a otro punto que reportaba lo mismo. Los puntos críticos y el color de cada
+              barrio se arman solo con los reportes verificados, para que uno equivocado no los
+              cambie. Cada cuenta puede enviar {CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA} reportes
+              por día.
             </p>
           </div>
         ) : null}

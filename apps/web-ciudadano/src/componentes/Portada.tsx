@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { obtenerCapas, obtenerReportes } from '@/lib/api';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { useEsEscritorio } from '@/lib/useEsEscritorio';
+import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { MapaDiferido } from './MapaDiferido';
 import { PlanoAnillos } from './PlanoAnillos';
@@ -22,17 +23,17 @@ const PASOS: Array<{ n: number; titulo: string; texto: string; Icono: LucideIcon
     },
     {
       n: 2,
-      titulo: 'Un técnico lo revisa',
-      texto:
-        'La municipalidad lo verifica antes de publicarlo. Si otro vecino ya lo marcó, se suman.',
-      Icono: Search,
+      titulo: 'Aparece en el mapa',
+      texto: `A los pocos minutos se ve con su severidad y la marca «${TEXTO_SIN_VERIFICAR}», hasta que un técnico lo revise.`,
+      Icono: Layers,
       agua: true,
     },
     {
       n: 3,
-      titulo: 'Se publica en el mapa',
-      texto: 'Queda visible con su severidad. Mientras más vecinos lo reporten, más peso tiene.',
-      Icono: Layers,
+      titulo: 'Un técnico lo revisa',
+      texto:
+        'Si corresponde queda «Verificado»; si no, lo retira del mapa. Si otro vecino ya lo marcó, se suman.',
+      Icono: Search,
       agua: false,
     },
     {
@@ -49,7 +50,7 @@ const PASOS: Array<{ n: number; titulo: string; texto: string; Icono: LucideIcon
  * siendo la entrada de la app —`/` no cambia—, así que esta página es para quien llega de fuera
  * y necesita saber qué es Mi Curichi.
  *
- * Las tres cifras del encabezado son datos reales: los puntos publicados salen del listado y el
+ * Las tres cifras del encabezado son datos reales: los puntos reportados salen del listado y el
  * número de distritos y de unidades vecinales, de las capas vigentes que sirve geo-service.
  */
 export function Portada() {
@@ -61,7 +62,7 @@ export function Portada() {
   const reportes = useQuery({
     queryKey: ['reportes', { limite: '60' }],
     queryFn: ({ signal }) => obtenerReportes({ limite: '60' }, signal),
-    staleTime: 60_000,
+    // Sin `staleTime` propio: el cliente de consultas no deja caducar ['reportes'] (S31).
     enabled: visible,
   });
   const capas = useQuery({
@@ -74,7 +75,7 @@ export function Portada() {
   const distritos = capas.data?.find((c) => c.capa === 'distrito_municipal');
   const unidades = capas.data?.find((c) => c.capa === 'unidad_vecinal');
   const cifras: Array<[string | number, string]> = [
-    [reportes.data?.total ?? '—', 'puntos publicados'],
+    [reportes.data?.total ?? '—', 'puntos reportados'],
     [distritos?.n_features ?? '—', 'distritos municipales'],
     [unidades?.n_features ?? '—', 'unidades vecinales'],
   ];
@@ -91,8 +92,8 @@ export function Portada() {
             Dónde se junta el agua cuando llueve fuerte
           </h1>
           <p className="mt-4 max-w-[46ch] text-[17px] leading-[1.55] text-white/95 md:text-[18px]">
-            Un mapa hecho por los vecinos. Marcás el punto en dos minutos, un técnico lo revisa y la
-            municipalidad usa el inventario para priorizar obras de drenaje.
+            Un mapa hecho por los vecinos. Marcás el punto en dos minutos, aparece en el mapa, un
+            técnico lo revisa y la municipalidad usa el inventario para priorizar obras de drenaje.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link href="/" className="btn bg-white text-tinta-900 no-underline hover:bg-white/90">
@@ -118,7 +119,7 @@ export function Portada() {
           {visible ? (
             <MapaDiferido
               className="map"
-              ariaLabel="Vista general de los puntos publicados"
+              ariaLabel="Vista general de los puntos reportados"
               reportes={reportes.data?.features ?? []}
               capas={capas.data ?? []}
               // Vista general: un nivel más lejos que el mapa principal de esta ciudad.

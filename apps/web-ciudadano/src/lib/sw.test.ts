@@ -3,12 +3,15 @@
  * `caches` y `fetch` globales. Aquí se carga su código en una función con esos nombres inyectados
  * y se conduce el manejador `fetch` a mano.
  *
- * Lo que se prueba es la decisión, que es donde estaba el fallo: una capa guardada se servía para
- * siempre, así que al activar una versión nueva de capa el vecino seguía viendo los límites
- * viejos hasta que borrara los datos del sitio.
+ * Lo que se prueba es la decisión, que es donde estaban los fallos: una capa guardada se servía
+ * para siempre, así que al activar una versión nueva de capa el vecino seguía viendo los límites
+ * viejos hasta que borrara los datos del sitio. Desde la v6 (contracts 0.12.0) la URL de cada
+ * capa y tesela lleva la huella del contenido: lo guardado con una huella nunca queda viejo, y lo
+ * que hay que cuidar es borrar las huellas que dejaron de ser vigentes.
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { type CapaInfo, rutaCapaConHuella, rutaTeselasConHuella } from 'contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const ORIGEN = 'http://localhost:3000';
@@ -109,32 +112,89 @@ function cargarSw(red: typeof fetch) {
   return { oyentes, almacen, cachesFalso };
 }
 
-/** Dispara un manejador y devuelve lo que pasó a `respondWith`, o `null` si no interceptó. */
+/**
+ * Dispara un manejador y devuelve lo que pasó a `respondWith`, o `null` si no interceptó. Espera
+ * también lo que el service worker dejó pendiente con `waitUntil` (el borrado de huellas viejas).
+ */
 async function disparar(oyente: Oyente, pedido: Peticion): Promise<Response | null> {
   let devuelta: Promise<Response> | null = null;
+  const pendientes: Promise<unknown>[] = [];
   oyente({
     request: pedido,
     respondWith: (p) => {
       devuelta = p;
     },
-    waitUntil: () => {},
+    waitUntil: (p) => pendientes.push(p),
   });
-  return devuelta === null ? null : await (devuelta as Promise<Response>);
+  const res = devuelta === null ? null : await (devuelta as Promise<Response>);
+  await Promise.all(pendientes);
+  return res;
 }
 
-/** Envejece la copia guardada como si hubieran pasado los 5 minutos de `max-age`. */
-async function caducar(cache: CacheFalsa, url: string): Promise<void> {
-  const guardada = cache.mapa.get(url) as Response;
-  const cabeceras = new Headers(guardada.headers);
-  cabeceras.set('x-curichi-guardado-en', String(Date.now() - 600_000));
-  cache.mapa.set(url, new Response(await guardada.clone().blob(), { headers: cabeceras }));
+/** Corre un manejador de ciclo de vida (`install`, `activate`) hasta el final. */
+async function ciclo(oyente: Oyente | undefined): Promise<void> {
+  if (!oyente) throw new Error('sin manejador');
+  const pendientes: Promise<unknown>[] = [];
+  oyente({
+    request: { url: ORIGEN, method: 'GET' },
+    respondWith: () => {},
+    waitUntil: (p) => pendientes.push(p),
+  });
+  await Promise.all(pendientes);
 }
 
-const CAPA = `${ORIGEN}/geo/v1/capas/unidades-vecinales`;
 /** Deben coincidir con los de public/sw.js; si cambian ahí, estos tests lo dicen. */
-const CACHE_SHELL = 'curichi-shell-v5';
-const CACHE_CAPAS = 'curichi-capas-v5';
+const CACHE_SHELL = 'curichi-shell-v6';
+const CACHE_CAPAS = 'curichi-capas-v6';
 const MAX_CAPAS = 400;
+
+const VIEJA = '0123456789abcdef';
+const NUEVA = 'fedcba9876543210';
+const DISTRITOS = 'aaaaaaaaaaaaaaaa';
+
+const capaGeojson = (h: string) => `${ORIGEN}${rutaCapaConHuella('distrito_municipal', h)}`;
+const tesela = (h: string, x = 1) => `${ORIGEN}/geo/v1/teselas/unidad_vecinal/${h}/13/${x}/2.mvt`;
+const LISTA = `${ORIGEN}/geo/v1/capas`;
+
+/** La lista de `/geo/v1/capas` con la huella vigente de cada capa. */
+function listaVigente(uv: string): CapaInfo[] {
+  const base = { version: 'DM_UV_MZ_2025', n_features: 10, bytes_web: 1000, bbox: null };
+  return [
+    {
+      ...base,
+      capa: 'distrito_municipal',
+      modo: 'geojson',
+      url: rutaCapaConHuella('distrito_municipal', DISTRITOS),
+    },
+    {
+      ...base,
+      capa: 'unidad_vecinal',
+      modo: 'teselas',
+      url: rutaTeselasConHuella('unidad_vecinal', uv),
+    },
+  ];
+}
+
+/** Red falsa: la lista dice que la UV vigente es `uv`; las huellas viejas dan 410. */
+function redDeGeo(uv: string) {
+  return vi.fn(async (pedido: Request | string) => {
+    const url = clave(pedido);
+    if (url === LISTA)
+      return Response.json(listaVigente(uv), { headers: { 'cache-control': 'public, no-cache' } });
+    if (url.includes('/geo/v1/teselas/unidad_vecinal/') && !url.includes(`/${uv}/`))
+      return Response.json(
+        { codigo: 'CAPA_CAMBIO', mensaje: 'La capa cambió.' },
+        { status: 410, headers: { 'cache-control': 'no-store' } },
+      );
+    return new Response(`cuerpo de ${url}`, {
+      status: 200,
+      headers: { 'cache-control': 'public, max-age=31536000, immutable' },
+    });
+  });
+}
+
+const pedidos = (red: ReturnType<typeof vi.fn>, url: string) =>
+  red.mock.calls.filter(([p]) => clave(p as Request | string) === url).length;
 
 describe('service worker de la app pública', () => {
   let red: ReturnType<typeof vi.fn>;
@@ -153,69 +213,6 @@ describe('service worker de la app pública', () => {
     expect(red).not.toHaveBeenCalled();
   });
 
-  it('sirve una capa guardada y todavía fresca sin pedir nada a la red', async () => {
-    red.mockResolvedValue(new Response('de la red', { status: 200 }));
-    const { oyentes } = cargarSw(red as unknown as typeof fetch);
-    const manejador = oyentes.get('fetch') as Oyente;
-
-    const primera = await disparar(manejador, new Request(CAPA));
-    expect(await (primera as Response).text()).toBe('de la red');
-    expect(red).toHaveBeenCalledTimes(1);
-
-    const segunda = await disparar(manejador, new Request(CAPA));
-    expect(await (segunda as Response).text()).toBe('de la red');
-    expect(red, 'la segunda debe salir de la caché').toHaveBeenCalledTimes(1);
-  });
-
-  it('revalida con If-None-Match cuando la copia caducó y conserva el cuerpo si da 304', async () => {
-    red.mockResolvedValueOnce(
-      new Response('capa v1', { status: 200, headers: { etag: '"unidad_vecinal-2026-09"' } }),
-    );
-    const { oyentes, almacen } = cargarSw(red as unknown as typeof fetch);
-    const manejador = oyentes.get('fetch') as Oyente;
-    await disparar(manejador, new Request(CAPA));
-    await caducar(almacen.get(CACHE_CAPAS) as CacheFalsa, CAPA);
-
-    red.mockResolvedValueOnce(new Response(null, { status: 304 }));
-    const segunda = await disparar(manejador, new Request(CAPA));
-    expect(red).toHaveBeenCalledTimes(2);
-    const enviada = red.mock.calls[1]?.[0] as Request;
-    expect(enviada.headers.get('If-None-Match')).toBe('"unidad_vecinal-2026-09"');
-    expect(await (segunda as Response).text(), 'el 304 no trae cuerpo: se reusa el guardado').toBe(
-      'capa v1',
-    );
-  });
-
-  it('cambia de versión de capa cuando el servicio devuelve un ETag nuevo', async () => {
-    red.mockResolvedValueOnce(
-      new Response('capa v1', { status: 200, headers: { etag: '"unidad_vecinal-2026-09"' } }),
-    );
-    const { oyentes, almacen } = cargarSw(red as unknown as typeof fetch);
-    const manejador = oyentes.get('fetch') as Oyente;
-    await disparar(manejador, new Request(CAPA));
-    const cache = almacen.get(CACHE_CAPAS) as CacheFalsa;
-    await caducar(cache, CAPA);
-
-    red.mockResolvedValueOnce(
-      new Response('capa v2', { status: 200, headers: { etag: '"unidad_vecinal-2027-01"' } }),
-    );
-    const segunda = await disparar(manejador, new Request(CAPA));
-    expect(await (segunda as Response).text()).toBe('capa v2');
-    expect(await (cache.mapa.get(CAPA) as Response).clone().text()).toBe('capa v2');
-  });
-
-  it('sin red devuelve la capa vieja: dibujar algo es mejor que una pantalla vacía', async () => {
-    red.mockResolvedValueOnce(new Response('capa v1', { status: 200 }));
-    const { oyentes, almacen } = cargarSw(red as unknown as typeof fetch);
-    const manejador = oyentes.get('fetch') as Oyente;
-    await disparar(manejador, new Request(CAPA));
-    await caducar(almacen.get(CACHE_CAPAS) as CacheFalsa, CAPA);
-
-    red.mockRejectedValueOnce(new Error('sin red'));
-    const segunda = await disparar(manejador, new Request(CAPA));
-    expect(await (segunda as Response).text()).toBe('capa v1');
-  });
-
   it('la navegación va a la red primero, para no servir el HTML de un despliegue viejo', async () => {
     red.mockResolvedValue(new Response('<html>nuevo</html>', { status: 200 }));
     const { oyentes, cachesFalso } = cargarSw(red as unknown as typeof fetch);
@@ -232,6 +229,135 @@ describe('service worker de la app pública', () => {
 
     const r = await disparar(oyentes.get('fetch') as Oyente, navegar(`${ORIGEN}/reportar`));
     expect(await (r as Response).text()).toBe('shell /');
+  });
+});
+
+describe('service worker · capas y teselas con huella (v6)', () => {
+  it('una capa con huella se pide una vez y después sale siempre de la caché, sin revalidar', async () => {
+    const red = redDeGeo(NUEVA);
+    const { oyentes, almacen } = cargarSw(red as unknown as typeof fetch);
+    const manejador = oyentes.get('fetch') as Oyente;
+
+    const primera = await disparar(manejador, new Request(capaGeojson(DISTRITOS)));
+    expect(await primera?.text()).toBe(`cuerpo de ${capaGeojson(DISTRITOS)}`);
+    expect((almacen.get(CACHE_CAPAS) as CacheFalsa).mapa.has(capaGeojson(DISTRITOS))).toBe(true);
+
+    // Un año después sigue siendo el mismo contenido: la huella lo garantiza.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 200 * 24 * 3600_000);
+    try {
+      for (let i = 0; i < 3; i++) {
+        const otra = await disparar(manejador, new Request(capaGeojson(DISTRITOS)));
+        expect(await otra?.text()).toBe(`cuerpo de ${capaGeojson(DISTRITOS)}`);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(red).toHaveBeenCalledTimes(1);
+  });
+
+  it('una tesela con huella vacía (204) se guarda y se sirve como 204', async () => {
+    const red = vi.fn(async () => new Response(null, { status: 204 }));
+    const { oyentes } = cargarSw(red as unknown as typeof fetch);
+    const manejador = oyentes.get('fetch') as Oyente;
+    expect((await disparar(manejador, new Request(tesela(NUEVA))))?.status).toBe(204);
+    expect((await disparar(manejador, new Request(tesela(NUEVA))))?.status).toBe(204);
+    expect(red).toHaveBeenCalledTimes(1);
+  });
+
+  it('un 410 CAPA_CAMBIO no se guarda, llega a la página y se borran las huellas viejas', async () => {
+    const red = redDeGeo(NUEVA);
+    const { oyentes, cachesFalso } = cargarSw(red as unknown as typeof fetch);
+    const capas = await cachesFalso.open(CACHE_CAPAS);
+    // Lo que quedó de antes de que el administrador activara la capa nueva.
+    await capas.put(tesela(VIEJA, 1), new Response('uv vieja'));
+    await capas.put(capaGeojson(DISTRITOS), new Response('distritos vigentes'));
+
+    const r = await disparar(oyentes.get('fetch') as Oyente, new Request(tesela(VIEJA, 2)));
+    // La página necesita ver el 410 para volver a pedir /geo/v1/capas y cambiar la fuente.
+    expect(r?.status).toBe(410);
+    expect(capas.mapa.has(tesela(VIEJA, 2)), 'un 410 no se guarda').toBe(false);
+    expect(pedidos(red, LISTA), 'vuelve a pedir la lista de capas vigentes').toBe(1);
+    expect(capas.mapa.has(tesela(VIEJA, 1)), 'la huella vieja se borra').toBe(false);
+    expect(capas.mapa.has(capaGeojson(DISTRITOS)), 'la vigente se conserva').toBe(true);
+  });
+
+  it('una ráfaga de 410 pide la lista de capas una sola vez', async () => {
+    const red = redDeGeo(NUEVA);
+    const { oyentes } = cargarSw(red as unknown as typeof fetch);
+    const manejador = oyentes.get('fetch') as Oyente;
+    const respuestas = await Promise.all(
+      Array.from({ length: 12 }, (_, x) => disparar(manejador, new Request(tesela(VIEJA, x)))),
+    );
+    expect(respuestas.every((r) => r?.status === 410)).toBe(true);
+    expect(pedidos(red, LISTA)).toBe(1);
+  });
+
+  it('cuando la página pide la lista de capas, se borran las huellas que ya no figuran', async () => {
+    const red = redDeGeo(NUEVA);
+    const { oyentes, cachesFalso } = cargarSw(red as unknown as typeof fetch);
+    const capas = await cachesFalso.open(CACHE_CAPAS);
+    await capas.put(tesela(VIEJA), new Response('uv vieja'));
+    await capas.put(tesela(NUEVA), new Response('uv nueva'));
+
+    const r = await disparar(oyentes.get('fetch') as Oyente, new Request(LISTA));
+    expect(await r?.json(), 'la lista llega entera a la página').toEqual(listaVigente(NUEVA));
+    expect(capas.mapa.has(tesela(VIEJA))).toBe(false);
+    expect(capas.mapa.has(tesela(NUEVA))).toBe(true);
+    expect(pedidos(red, LISTA), 'sin pedirla dos veces').toBe(1);
+  });
+
+  it('al activarse borra las cachés de versiones anteriores y las huellas que ya no son vigentes', async () => {
+    const red = redDeGeo(NUEVA);
+    const { oyentes, cachesFalso, almacen } = cargarSw(red as unknown as typeof fetch);
+    await cachesFalso.open('curichi-shell-v5');
+    await cachesFalso.open('curichi-capas-v5');
+    await cachesFalso.open(CACHE_SHELL);
+    const capas = await cachesFalso.open(CACHE_CAPAS);
+    await capas.put(tesela(VIEJA), new Response('uv vieja'));
+    await capas.put(tesela(NUEVA), new Response('uv nueva'));
+    await capas.put(capaGeojson(DISTRITOS), new Response('distritos'));
+
+    await ciclo(oyentes.get('activate'));
+    expect([...almacen.keys()].sort()).toEqual([CACHE_CAPAS, CACHE_SHELL].sort());
+    expect(capas.mapa.has(tesela(VIEJA))).toBe(false);
+    expect(capas.mapa.has(tesela(NUEVA))).toBe(true);
+    expect(capas.mapa.has(capaGeojson(DISTRITOS))).toBe(true);
+  });
+
+  it('al activarse sin red no borra ninguna huella: sin la lista no sabe cuál es vieja', async () => {
+    const red = vi.fn(async () => {
+      throw new Error('sin red');
+    });
+    const { oyentes, cachesFalso } = cargarSw(red as unknown as typeof fetch);
+    const capas = await cachesFalso.open(CACHE_CAPAS);
+    await capas.put(tesela(VIEJA), new Response('uv'));
+    await ciclo(oyentes.get('activate'));
+    expect(capas.mapa.has(tesela(VIEJA))).toBe(true);
+  });
+
+  it('las rutas sin huella (alias) van a la red cada vez y, sin red, devuelven la última copia', async () => {
+    const alias = `${ORIGEN}/geo/v1/capas/unidad_vecinal`;
+    const red = vi.fn(async () => new Response('capa por alias', { status: 200 }));
+    const { oyentes } = cargarSw(red as unknown as typeof fetch);
+    const manejador = oyentes.get('fetch') as Oyente;
+    await disparar(manejador, new Request(alias));
+    await disparar(manejador, new Request(alias));
+    // `public, no-cache`: la revalidación la hace la caché HTTP del navegador, no el SW.
+    expect(red).toHaveBeenCalledTimes(2);
+
+    red.mockRejectedValue(new Error('sin red'));
+    expect(await (await disparar(manejador, new Request(alias)))?.text()).toBe('capa por alias');
+  });
+
+  it('/geo/v1/capas/vigentes no es una capa: no entra en la caché de capas', async () => {
+    const red = vi.fn(async () => Response.json({ unidad_vecinal: 'DM_UV_MZ_2025' }));
+    const { oyentes, almacen } = cargarSw(red as unknown as typeof fetch);
+    const manejador = oyentes.get('fetch') as Oyente;
+    await disparar(manejador, new Request(`${ORIGEN}/geo/v1/capas/vigentes`));
+    await disparar(manejador, new Request(`${ORIGEN}/geo/v1/capas/vigentes`));
+    expect(red).toHaveBeenCalledTimes(2);
+    expect(almacen.get(CACHE_CAPAS)?.mapa.size ?? 0).toBe(0);
   });
 });
 
@@ -261,17 +387,14 @@ describe('service worker · crecimiento de la caché y modo sin red', () => {
     if (!fetchSw) throw new Error('sin manejador fetch');
     // Más teselas distintas que el tope: es literalmente lo que hace arrastrar el mapa un rato.
     const cuantas = MAX_CAPAS + 50;
-    for (let i = 0; i < cuantas; i++)
-      await disparar(fetchSw, {
-        url: `${ORIGEN}/geo/v1/teselas/manzana/15/${i}/1.mvt`,
-        method: 'GET',
-      });
+    const url = (i: number) => `${ORIGEN}/geo/v1/teselas/unidad_vecinal/${NUEVA}/15/${i}/1.mvt`;
+    for (let i = 0; i < cuantas; i++) await disparar(fetchSw, { url: url(i), method: 'GET' });
 
     const cache = almacen.get(CACHE_CAPAS) as CacheFalsa;
     expect(cache.mapa.size).toBeLessThanOrEqual(MAX_CAPAS);
     // Y lo que se conserva son las últimas, no unas cualesquiera.
-    expect(cache.mapa.has(`${ORIGEN}/geo/v1/teselas/manzana/15/${cuantas - 1}/1.mvt`)).toBe(true);
-    expect(cache.mapa.has(`${ORIGEN}/geo/v1/teselas/manzana/15/0/1.mvt`)).toBe(false);
+    expect(cache.mapa.has(url(cuantas - 1))).toBe(true);
+    expect(cache.mapa.has(url(0))).toBe(false);
   });
 
   it('guarda los estáticos con huella: sin esto el shell sin red pide un JS que no tiene', async () => {
@@ -288,6 +411,24 @@ describe('service worker · crecimiento de la caché y modo sin red', () => {
     const otra = await disparar(fetchSw, { url: js, method: 'GET' });
     expect(red).toHaveBeenCalledTimes(1);
     expect(await otra?.text()).toContain('js con huella');
+  });
+
+  it('el worker de MapLibre y los glifos con ?v= también salen de la caché', async () => {
+    const { oyentes } = cargarSw(red as unknown as typeof fetch);
+    const fetchSw = oyentes.get('fetch') as Oyente;
+    const conVersion = [
+      `${ORIGEN}/maplibre/maplibre-gl-worker.mjs?v=6.9.0`,
+      `${ORIGEN}/maplibre/maplibre-gl-shared.mjs?v=6.9.0`,
+      `${ORIGEN}/glifos/NotoSans-Bold/0-255.pbf?v=81cda3120b68`,
+    ];
+    for (const url of conVersion) await disparar(fetchSw, { url, method: 'GET' });
+    for (const url of conVersion) await disparar(fetchSw, { url, method: 'GET' });
+    expect(red).toHaveBeenCalledTimes(conVersion.length);
+
+    // Sin ?v= no hay garantía de que no cambió: va a la red.
+    await disparar(fetchSw, { url: `${ORIGEN}/glifos/NotoSans-Bold/0-255.pbf`, method: 'GET' });
+    await disparar(fetchSw, { url: `${ORIGEN}/glifos/NotoSans-Bold/0-255.pbf`, method: 'GET' });
+    expect(red).toHaveBeenCalledTimes(conVersion.length + 2);
   });
 
   it('sin red, un estático ya visto se sirve de la caché', async () => {
@@ -315,15 +456,7 @@ describe('service worker · crecimiento de la caché y modo sin red', () => {
       '<html><head><link rel="stylesheet" href="/_next/static/chunks/abc123.css"/></head><body></body></html>';
     const redConHtml = vi.fn(async () => new Response(html, { status: 200 }));
     const { oyentes, almacen } = cargarSw(redConHtml as unknown as typeof fetch);
-    const instalar = oyentes.get('install');
-    if (!instalar) throw new Error('sin manejador install');
-    const pendientes: Promise<unknown>[] = [];
-    instalar({
-      request: { url: ORIGEN, method: 'GET' },
-      respondWith: () => {},
-      waitUntil: (p) => pendientes.push(p),
-    });
-    await Promise.all(pendientes);
+    await ciclo(oyentes.get('install'));
     const cache = almacen.get(CACHE_SHELL) as CacheFalsa;
     expect(cache.mapa.has(`${ORIGEN}/`)).toBe(true);
     expect(
@@ -337,15 +470,7 @@ describe('service worker · crecimiento de la caché y modo sin red', () => {
     await cachesFalso.open('curichi-v2');
     await cachesFalso.open(CACHE_SHELL);
     await cachesFalso.open(CACHE_CAPAS);
-    const activar = oyentes.get('activate');
-    if (!activar) throw new Error('sin manejador activate');
-    const pendientes: Promise<unknown>[] = [];
-    activar({
-      request: { url: ORIGEN, method: 'GET' },
-      respondWith: () => {},
-      waitUntil: (p) => pendientes.push(p),
-    });
-    await Promise.all(pendientes);
+    await ciclo(oyentes.get('activate'));
     expect(almacen.has('curichi-v2')).toBe(false);
     expect(almacen.has(CACHE_SHELL)).toBe(true);
     expect(almacen.has(CACHE_CAPAS)).toBe(true);

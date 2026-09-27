@@ -1,5 +1,8 @@
 import type { EstadoReporte, Severidad } from 'contracts';
+import { BadgeCheck, CircleCheck, Clock, EyeOff, type LucideIcon, Merge } from 'lucide-react';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
+import { ESTILO_ESTADO } from '@/lib/verificacion';
+import { IconoSinVerificar } from './IconoSinVerificar';
 
 /**
  * Severidad siempre con color + nombre escrito + barras (CLAUDE.md §14.4): quien no distingue
@@ -38,27 +41,47 @@ export function ChipSeveridad({
   );
 }
 
-/**
- * Estado del reporte con las palabras del vecino, no las del técnico: «Publicado» dice más que
- * «validado» a quien mandó el reporte y no conoce la máquina de estados.
- */
-const ESTADOS: Record<EstadoReporte, { fondo: string; texto: string; etiqueta: string }> = {
-  nuevo: { fondo: '#FBF1DC', texto: '#8A5A00', etiqueta: 'En revisión' },
-  validado: { fondo: '#E6F2EA', texto: '#1B6B38', etiqueta: 'Publicado' },
-  resuelto: { fondo: '#E3EEF5', texto: '#0A4A69', etiqueta: 'Resuelto' },
-  rechazado: { fondo: '#FBE1DC', texto: '#B3200A', etiqueta: 'No publicado' },
-  duplicado: { fondo: '#E8EDF1', texto: '#3E5468', etiqueta: 'Sumado a otro punto' },
+const ICONOS: Record<Exclude<EstadoReporte, 'nuevo'>, LucideIcon> = {
+  validado: BadgeCheck,
+  resuelto: CircleCheck,
+  rechazado: EyeOff,
+  duplicado: Merge,
 };
 
+/**
+ * Estado del reporte con texto visible, icono y contraste AA (CLAUDE.md §14.1): nunca solo color.
+ * `nuevo` dice exactamente «NO SE HA VERIFICADO» (contracts 0.11.0) en el mapa, las tarjetas, el
+ * detalle y «Mis reportes»: el autor ve su reporte con la misma etiqueta que todos. `rechazado` y
+ * `duplicado` solo aparecen en «Mis reportes».
+ */
 export function ChipEstado({ estado }: { estado: EstadoReporte }) {
-  const e = ESTADOS[estado] ?? ESTADOS.nuevo;
+  const e = ESTILO_ESTADO[estado] ?? ESTILO_ESTADO.nuevo;
+  const Icono = estado === 'nuevo' ? null : ICONOS[estado];
   return (
-    <span className="mini" style={{ background: e.fondo, color: e.texto, fontWeight: 700 }}>
+    <span
+      className="mini"
+      data-estado={estado}
+      style={{ background: e.fondo, color: e.texto, fontWeight: 700 }}
+    >
+      {Icono ? <Icono size={14} strokeWidth={2.4} aria-hidden="true" /> : <IconoSinVerificar />}
       {e.etiqueta}
     </span>
   );
 }
 
-export function etiquetaEstadoVecino(estado: EstadoReporte): string {
-  return (ESTADOS[estado] ?? ESTADOS.nuevo).etiqueta;
+/**
+ * El reporte llegó pero todavía no se ve en el mapa: espera su `publicar_en`. Solo lo ve su
+ * autor, en «Mis reportes» y en la confirmación.
+ */
+export function ChipEnEspera({ texto = 'Todavía no se publicó' }: { texto?: string }) {
+  return (
+    <span
+      className="mini"
+      data-estado="en-espera"
+      style={{ background: '#E3EEF5', color: '#0A4A69', fontWeight: 700 }}
+    >
+      <Clock size={14} strokeWidth={2.4} aria-hidden="true" />
+      {texto}
+    </span>
+  );
 }

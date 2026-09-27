@@ -31,11 +31,13 @@ import {
   vistaTruncada,
 } from '@/lib/mapa-datos';
 import { useUbicacionUsuario } from '@/lib/useUbicacionUsuario';
+import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { AvisoUbicacionAlReportar } from './AvisoUbicacionAlReportar';
 import { BarraInferior } from './BarraInferior';
 import { ErrorDeCarga } from './ErrorDeCarga';
 import { HojaDetalle } from './HojaDetalle';
+import { LeyendaMapa } from './LeyendaMapa';
 import { MapaDiferido } from './MapaDiferido';
 import { TarjetaReporte } from './TarjetaReporte';
 import { useToast } from './Toast';
@@ -99,9 +101,8 @@ export function VistaMapa() {
   const reportes = useQuery({
     queryKey: ['reportes', filtros],
     queryFn: ({ signal }) => obtenerReportes(filtros, signal),
-    // El listado por bbox es la consulta pública más cara. Sin `staleTime`, volver a la pestaña
-    // o remontar el componente la repite aunque la vista no haya cambiado.
-    staleTime: 30_000,
+    // Sin `staleTime` propio: el cliente de consultas no deja caducar ['reportes'] (S31). Volver a
+    // la pestaña o remontar el componente no repite una vista que ya se tiene.
     /**
      * Cada movimiento del mapa cambia el bbox y con él la `queryKey`. Sin esto, TanStack
      * devuelve `undefined` mientras llega la respuesta de la vista nueva: el listado volvía a
@@ -123,7 +124,6 @@ export function VistaMapa() {
   const agregados = useQuery({
     queryKey: ['agregados'],
     queryFn: ({ signal }) => obtenerAgregados(signal),
-    staleTime: 60_000,
   });
 
   const todas = reportes.data?.features ?? SIN_REPORTES;
@@ -187,11 +187,10 @@ export function VistaMapa() {
     // Valor y no función: pasada como función, TanStack la toma por la forma del dato y el tipo
     // de la consulta pasa a ser «una función que devuelve un reporte».
     placeholderData: todas.find((f) => f.properties.id === seleccionado),
-    staleTime: 30_000,
     // Sobrevive al cambio de vista aunque el componente deje de pedirlo por un momento.
     gcTime: 5 * 60_000,
-    // Un 404 es una respuesta, no un fallo de red: el reporte dejó de estar publicado y
-    // reintentar solo retrasa el aviso.
+    // Un 404 es una respuesta, no un fallo de red: el reporte salió del mapa (retirado o sumado
+    // a otro punto) y reintentar solo retrasa el aviso.
     retry: (intentos, e) => !(e instanceof ErrorApi && e.estado === 404) && intentos < 1,
   });
   /**
@@ -446,7 +445,7 @@ export function VistaMapa() {
         </h2>
         <p className="mt-2 text-[15px] text-tinta-600">
           {noExiste
-            ? 'Puede que haya dejado de estar publicado mientras lo mirabas. Los reportes en revisión no se ven en el mapa público.'
+            ? 'Puede que lo hayan retirado del mapa o sumado a otro punto mientras lo mirabas.'
             : 'El servidor no respondió. El punto sigue en el mapa; probá de nuevo en un momento.'}
         </p>
         <div className="mt-3 flex flex-wrap gap-2.5">
@@ -506,8 +505,8 @@ export function VistaMapa() {
                         ? 'Sin conexión con el servidor'
                         : `${numeroConMiles(total ?? features.length, ciudad.locale)} ${
                             (total ?? features.length) === 1
-                              ? 'punto publicado'
-                              : 'puntos publicados'
+                              ? 'punto reportado'
+                              : 'puntos reportados'
                           }`}
                   </h2>
                   <span className="text-[13.5px] text-tinta-600">
@@ -558,8 +557,10 @@ export function VistaMapa() {
                   ))
                 )}
                 <p className="ayuda mt-4">
-                  Los puntos son reportes de vecinos. El distrito y la unidad vecinal los asigna el
-                  sistema por point-in-polygon contra las capas oficiales, no los escribe el vecino.
+                  Los puntos son reportes de vecinos. Se publican sin revisión previa: los que un
+                  técnico todavía no revisó llevan la marca «{TEXTO_SIN_VERIFICAR}». El distrito y
+                  la unidad vecinal los asigna el sistema por point-in-polygon contra las capas
+                  oficiales, no los escribe el vecino.
                 </p>
               </div>
             </>
@@ -609,23 +610,31 @@ export function VistaMapa() {
             </Link>
           </div>
 
-          {/* Capas: mismo trío de opciones que el prototipo. */}
-          <fieldset
-            className={`flot bottom-[104px] left-3 flex max-w-[280px] flex-wrap gap-2 md:bottom-4 md:left-4 ${seleccionado !== null ? 'bajo-hoja' : ''}`}
+          {/* Leyenda y capas, abajo a la izquierda. La leyenda dice qué es «NO SE HA VERIFICADO» y
+              por qué hay barrios grises; las capas, mismo trío de opciones que el prototipo.
+              `pointer-events-none` en el contenedor: es un `div` flotante sin fondo propio, pero
+              su caja de layout sigue ahí y por defecto tapa el clic de cualquier pastilla del
+              mapa real que caiga debajo (la leyenda de adentro ya no lo hace, pero el contenedor
+              seguía haciéndolo). Solo el fieldset de capas necesita el clic de vuelta. */}
+          <div
+            className={`flot pointer-events-none bottom-[104px] left-3 grid max-w-[280px] gap-2 md:bottom-4 md:left-4 ${seleccionado !== null ? 'bajo-hoja' : ''}`}
           >
-            <legend className="sr-only">Capas del mapa</legend>
-            {CAPAS.map((c) => (
-              <button
-                key={c.valor}
-                type="button"
-                className="chip"
-                aria-pressed={capaVisible === c.valor}
-                onClick={() => setCapaVisible(c.valor)}
-              >
-                {c.texto}
-              </button>
-            ))}
-          </fieldset>
+            <LeyendaMapa />
+            <fieldset className="pointer-events-auto flex flex-wrap gap-2">
+              <legend className="sr-only">Capas del mapa</legend>
+              {CAPAS.map((c) => (
+                <button
+                  key={c.valor}
+                  type="button"
+                  className="chip"
+                  aria-pressed={capaVisible === c.valor}
+                  onClick={() => setCapaVisible(c.valor)}
+                >
+                  {c.texto}
+                </button>
+              ))}
+            </fieldset>
+          </div>
 
           <div
             className={`flot right-3 bottom-[104px] grid gap-2.5 md:right-4 md:bottom-4 ${seleccionado !== null ? 'sobre-hoja' : ''}`}

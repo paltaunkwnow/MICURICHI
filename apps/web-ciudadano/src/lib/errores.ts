@@ -4,6 +4,7 @@ import {
   type CodigoUbicacionDispositivo,
 } from 'contracts';
 import { ErrorApi } from './api';
+import { FOTOS_POR_DIA, TEXTO_CUPO_AGOTADO } from './cupo';
 
 const MINUTOS_POSICION = Math.round(CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S / 60);
 
@@ -56,11 +57,26 @@ export function esSesionCaducada(e: unknown): boolean {
 }
 
 /**
- * La cuenta ya envió un reporte hace poco (429 de cuota). No es el 429 por IP: ese no cambia el
- * turno de la cuenta, y este sí obliga a volver a preguntar cuándo puede reportar.
+ * La cuenta ya usó los reportes de hoy (429 de cuota). No es el 429 por IP: ese no cambia el cupo
+ * de la cuenta, y este sí obliga a volver a preguntar cuántos le quedan.
  */
 export function esCuotaAgotada(e: unknown): e is ErrorApi {
   return e instanceof ErrorApi && e.estado === 429 && e.codigo === 'CUOTA_DE_REPORTES';
+}
+
+/** El texto de un 429 que el servidor mandó, o `null` si el cuerpo no traía `mensaje`. */
+function textoDelServidor(e: ErrorApi): string | null {
+  const t = e.message.trim();
+  // `pedir` escribe «Error 429» cuando el cuerpo no trae `mensaje`: eso no le dice nada a nadie.
+  return t && t !== `Error ${e.estado}` ? t : null;
+}
+
+/**
+ * Mensaje del 429 `CUOTA_DE_REPORTES`: el del servidor, que dice cuándo vuelve a poder, o el
+ * mismo texto dicho desde acá.
+ */
+export function mensajeDeCuota(e: ErrorApi): string {
+  return textoDelServidor(e) ?? TEXTO_CUPO_AGOTADO;
 }
 
 /** El navegador se declara sin conexión. Es una pista, no una certeza: `false` no garantiza red. */
@@ -104,17 +120,15 @@ export function mensajeDeError(e: unknown): string {
  * Mensaje para la SUBIDA de una foto, que se muestra junto a las fotos y no toca el resto del
  * formulario.
  *
- * El 429 `CUOTA_DE_FOTOS` (tope de fotos por hora de la cuenta) trae su propio texto con el tiempo
- * que falta, y es ese el que hay que mostrar. Si el cuerpo no lo trajera, `pedir` deja «Error 429»
- * como mensaje, que no le dice nada a nadie: en ese caso se explica el tope con palabras.
+ * El 429 `CUOTA_DE_FOTOS` (tope diario de fotos de la cuenta) trae su propio texto, y es ese el
+ * que hay que mostrar. Si el cuerpo no lo trajera, se explica el tope con palabras.
  */
 export function mensajeDeFoto(e: unknown): string {
-  if (e instanceof ErrorApi && e.estado === 429 && e.codigo === 'CUOTA_DE_FOTOS') {
-    const delServidor = e.message.trim();
-    return delServidor && delServidor !== `Error ${e.estado}`
-      ? delServidor
-      : `Llegaste al máximo de ${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora. Probá de nuevo en un rato; lo demás del reporte sigue guardado.`;
-  }
+  if (e instanceof ErrorApi && e.estado === 429 && e.codigo === 'CUOTA_DE_FOTOS')
+    return (
+      textoDelServidor(e) ??
+      `Llegaste al máximo de ${FOTOS_POR_DIA} fotos por día. Mañana vas a poder sacar más; lo demás del reporte sigue guardado y lo podés enviar sin foto.`
+    );
   return mensajeDeError(e);
 }
 

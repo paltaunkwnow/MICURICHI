@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { fotoDeCiudad } from '@/lib/ciudad';
 import { useCiudad } from '@/lib/ciudad-contexto';
+import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { PlanoAnillos } from './PlanoAnillos';
 
 interface Lamina {
@@ -44,8 +45,7 @@ const LAMINAS: Lamina[] = [
   {
     clave: 'El resultado',
     titulo: 'La municipalidad prioriza obras con ese mapa',
-    texto:
-      'Un técnico revisa cada reporte antes de publicarlo. Cuando el municipio resuelve un punto, queda marcado como resuelto.',
+    texto: `Tu reporte aparece en el mapa a los pocos minutos, con la marca «${TEXTO_SIN_VERIFICAR}» hasta que un técnico lo revisa. Cuando el municipio resuelve un punto, queda marcado como resuelto.`,
     Icono: Hammer,
     velo: 'linear-gradient(180deg,rgba(15,45,67,.34) 0%,rgba(10,74,105,.78) 44%,rgba(27,107,56,.96) 100%)',
     conFotoDeCiudad: true,

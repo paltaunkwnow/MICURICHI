@@ -1,79 +1,96 @@
 /**
- * Seguimiento local de los reportes enviados desde ESTE dispositivo.
+ * «Mis reportes»: los reportes de la cuenta, en la vista del autor (`GET /api/v1/mis-reportes`,
+ * contracts 0.11.0). Los ve en cualquier estado: mientras esperan su publicación, sin verificar,
+ * verificados, resueltos y también si los retiraron del mapa o los sumaron a otro punto.
  *
- * Desde la Fase 5 hace falta una cuenta para reportar, pero el servidor **sigue sin publicar**
- * quién envió cada punto: `autor_id` no sale en ninguna vista pública. Esta lista no la da la
- * API: la recuerda el navegador a partir de los identificadores que le devolvió al enviar. Con
- * eso «Mis reportes» consulta el estado real de cada uno contra `GET /api/v1/reportes/:id`:
- *
- *   200 → ya está publicado (validado o resuelto) y se muestra con sus datos reales
- *   404 → sigue en revisión, o fue rechazado; la vista pública no lo expone (moderación previa)
- *
- * Si el vecino borra los datos del navegador o cambia de teléfono, pierde la lista, y así se le
- * dice en la pantalla. Ahora que existen cuentas se podría servir esta lista desde el servidor
- * —el dato está—, pero eso es una vista nueva sobre reportes sin moderar y no se ha diseñado: se
- * deja anotado como trabajo pendiente en vez de improvisarlo.
+ * Antes el navegador recordaba los identificadores enviados desde el dispositivo en
+ * `localStorage` y preguntaba uno por uno a la vista pública. Esa lista se borra: la del servidor
+ * es la de la cuenta, en cualquier teléfono, y no deja en el dispositivo rastro de qué se reportó.
  */
+import type { QueryClient } from '@tanstack/react-query';
+import type { MiReporte } from 'contracts';
 
-const CLAVE = 'curichi.mis-reportes.v1';
-/** Tope de la lista: es una ayuda de seguimiento, no un archivo histórico. */
-const MAXIMO = 50;
+/** Clave de la lista que guardaba el navegador hasta contracts 0.11.0. */
+export const CLAVE_LISTA_VIEJA = 'curichi.mis-reportes.v1';
 
-export interface ReporteLocal {
-  id: string;
-  /** ISO 8601 del momento del envío, según el reloj del dispositivo. */
-  enviado_en: string;
-  /** Lo que se mostraba al enviar, para poder pintar la tarjeta aunque la API responda 404. */
-  titulo: string;
-  unidad_vecinal: string | null;
-  distrito: string | null;
-  severidad: string;
-  tiene_foto: boolean;
-}
-
-function disponible(): boolean {
+/** Borra la lista vieja del navegador, si quedó. Sin almacenamiento disponible, no hace nada. */
+export function borrarListaVieja(): void {
   try {
-    return typeof window !== 'undefined' && !!window.localStorage;
+    if (typeof window === 'undefined') return;
+    window.localStorage?.removeItem(CLAVE_LISTA_VIEJA);
   } catch {
-    // Safari en navegación privada y los navegadores con almacenamiento bloqueado lanzan aquí.
-    return false;
+    // Navegación privada o almacenamiento bloqueado: no hay nada que borrar.
   }
 }
 
-export function leerMisReportes(): ReporteLocal[] {
-  if (!disponible()) return [];
-  try {
-    const crudo = window.localStorage.getItem(CLAVE);
-    if (!crudo) return [];
-    const datos: unknown = JSON.parse(crudo);
-    if (!Array.isArray(datos)) return [];
-    return datos.filter(
-      (r): r is ReporteLocal =>
-        typeof r === 'object' &&
-        r !== null &&
-        typeof (r as ReporteLocal).id === 'string' &&
-        typeof (r as ReporteLocal).enviado_en === 'string',
-    );
-  } catch {
-    return [];
-  }
+/** Prefijo de la consulta: `removeQueries` con él saca la lista de cualquier cuenta. */
+export const CLAVE_MIS_REPORTES = ['mis-reportes'] as const;
+
+/**
+ * La clave lleva la cuenta: si en el mismo navegador entra otra persona, su lista es otra
+ * consulta y nunca se le muestra, ni por un instante, la de quien estaba antes.
+ */
+export function claveMisReportes(usuarioId: string): readonly unknown[] {
+  return [...CLAVE_MIS_REPORTES, usuarioId];
 }
 
-export function recordarReporte(r: ReporteLocal): void {
-  if (!disponible()) return;
-  try {
-    const lista = [r, ...leerMisReportes().filter((x) => x.id !== r.id)].slice(0, MAXIMO);
-    window.localStorage.setItem(CLAVE, JSON.stringify(lista));
-  } catch {
-    // Cuota llena o almacenamiento bloqueado: el reporte ya se envió, que es lo que importa.
-  }
+/**
+ * Lo que es de la cuenta se va de la caché al perder la sesión (cerrarla o que venza). Lo público
+ * —el mapa, los detalles— se queda: no depende de quién mira.
+ */
+export function olvidarDatosDeLaCuenta(cliente: Pick<QueryClient, 'removeQueries'>): void {
+  cliente.removeQueries({ queryKey: [...CLAVE_MIS_REPORTES] });
 }
 
-export function olvidarReportes(): void {
-  if (!disponible()) return;
-  try {
-    window.localStorage.removeItem(CLAVE);
-  } catch {
-    /* nada que hacer */
+export type SituacionAutor =
+  | 'en-espera'
+  | 'sin-verificar'
+  | 'verificado'
+  | 'resuelto'
+  | 'retirado'
+  | 'sumado';
+
+type DatosDeSituacion = Pick<
+  MiReporte,
+  'estado' | 'verificado' | 'retirado' | 'segundos_para_publicar'
+>;
+
+/**
+ * En qué está el reporte para quien lo envió. `faltan` es la cuenta regresiva de la pantalla,
+ * que manda sobre `segundos_para_publicar`: ese dato es del momento de la respuesta y envejece.
+ */
+export function situacionDelAutor(p: DatosDeSituacion, faltan?: number): SituacionAutor {
+  if (p.retirado || p.estado === 'rechazado' || p.estado === 'duplicado')
+    return p.estado === 'duplicado' ? 'sumado' : 'retirado';
+  if ((faltan ?? p.segundos_para_publicar) > 0) return 'en-espera';
+  if (p.estado === 'resuelto') return 'resuelto';
+  return p.verificado || p.estado === 'validado' ? 'verificado' : 'sin-verificar';
+}
+
+export interface ResumenMisReportes {
+  todos: number;
+  enEspera: number;
+  sinVerificar: number;
+  /** Verificados y resueltos: los que revisó un técnico y siguen en el mapa. */
+  verificados: number;
+  /** Retirados del mapa y sumados a otro punto. */
+  retirados: number;
+}
+
+export function resumenDeMisReportes(lista: readonly DatosDeSituacion[]): ResumenMisReportes {
+  const r: ResumenMisReportes = {
+    todos: lista.length,
+    enEspera: 0,
+    sinVerificar: 0,
+    verificados: 0,
+    retirados: 0,
+  };
+  for (const p of lista) {
+    const s = situacionDelAutor(p);
+    if (s === 'en-espera') r.enEspera += 1;
+    else if (s === 'sin-verificar') r.sinVerificar += 1;
+    else if (s === 'verificado' || s === 'resuelto') r.verificados += 1;
+    else r.retirados += 1;
   }
+  return r;
 }

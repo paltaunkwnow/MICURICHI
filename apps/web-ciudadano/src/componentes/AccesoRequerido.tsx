@@ -20,13 +20,17 @@ import { Aviso } from './Aviso';
 export function AccesoRequerido({
   volver = '/reportar',
   motivo = 'nueva',
+  para = 'reportar',
 }: {
   /** A dónde vuelve después de entrar o crear la cuenta. */
   volver?: string;
   /** `caducada` cambia el texto: no es lo mismo no tener cuenta que haberse quedado sin sesión. */
   motivo?: 'nueva' | 'caducada';
+  /** «Mis reportes» también es de la cuenta: sin sesión no hay lista que mostrar. */
+  para?: 'reportar' | 'mis-reportes';
 }) {
   const router = useRouter();
+  if (para === 'mis-reportes') return <AccesoMisReportes volver={volver} />;
   const destino = `volver=${encodeURIComponent(volver)}`;
   return (
     <div className="flex flex-1 items-center justify-center p-5">
@@ -68,6 +72,36 @@ export function AccesoRequerido({
         <p className="ayuda mt-5">
           Ver el mapa y consultar los reportes no necesita cuenta: solo enviar uno.
         </p>
+      </section>
+    </div>
+  );
+}
+
+function AccesoMisReportes({ volver }: { volver: string }) {
+  const destino = `volver=${encodeURIComponent(volver)}`;
+  return (
+    <div className="flex flex-1 items-center justify-center p-5">
+      <section
+        className="tarjeta w-full max-w-md p-7"
+        aria-labelledby="acceso-titulo"
+        data-testid="acceso-mis-reportes"
+      >
+        <div className="mb-4 flex items-center gap-3">
+          <UserRound size={30} aria-hidden="true" />
+          <h1 className="text-2xl" id="acceso-titulo">
+            Entrá para ver tus reportes
+          </h1>
+        </div>
+        <p className="mb-5">
+          «Mis reportes» muestra los reportes de tu cuenta, desde cualquier teléfono. Para verlos
+          hace falta iniciar sesión.
+        </p>
+        <Link href={`/ingresar?${destino}`} className="btn btn-bloque no-underline">
+          Iniciar sesión
+        </Link>
+        <Link href="/" className="btn btn-fantasma btn-bloque mt-3 no-underline">
+          Volver al mapa
+        </Link>
       </section>
     </div>
   );

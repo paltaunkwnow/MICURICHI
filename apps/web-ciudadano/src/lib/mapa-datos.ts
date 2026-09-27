@@ -135,7 +135,7 @@ export function textoDelResumen(r: ResumenMapa, estado: EstadoMapa = 'ok'): stri
   if (estado === 'fallo') return 'No pudimos cargar los reportes de esta vista.';
   if (estado === 'cargando') return 'Buscando los puntos de esta vista…';
   if (r.sueltos === 0 && r.agrupaciones === 0)
-    return 'Ningún punto publicado en la vista actual del mapa.';
+    return 'Ningún punto reportado en la vista actual del mapa.';
   const partes: string[] = [];
   if (r.sueltos > 0)
     partes.push(`${r.sueltos} ${r.sueltos === 1 ? 'punto suelto' : 'puntos sueltos'}`);

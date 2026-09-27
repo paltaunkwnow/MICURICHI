@@ -1,7 +1,16 @@
+import { QueryClient } from '@tanstack/react-query';
 import type { SesionActual } from 'contracts';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorApi } from './api';
-import { CLAVE_YO, interpretarSesion, refrescarSesion } from './sesion';
+import { guardarBorrador, leerBorrador } from './borrador';
+import { claveMisReportes, olvidarDatosDeLaCuenta } from './misReportes';
+import {
+  CLAVE_YO,
+  cupoDeLaSesion,
+  interpretarSesion,
+  limpiarTrasCerrarSesion,
+  refrescarSesion,
+} from './sesion';
 
 const PERSONA: SesionActual = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -9,6 +18,8 @@ const PERSONA: SesionActual = {
   nombre: 'Vecina',
   rol: 'ciudadano',
   puede_reportar_desde: null,
+  reportes_restantes_hoy: 3,
+  demora_proximo_s: 60,
 };
 
 describe('estado de la sesión', () => {
@@ -80,5 +91,72 @@ describe('estado de la sesión', () => {
       },
     });
     expect(pedidas).toEqual([CLAVE_YO]);
+  });
+
+  it('expone cuántos reportes le quedan hoy y cuánto tardaría en publicarse el próximo', () => {
+    expect(
+      cupoDeLaSesion({ ...PERSONA, reportes_restantes_hoy: 1, demora_proximo_s: 240 }),
+    ).toEqual({ reportesRestantesHoy: 1, demoraProximoS: 240, puedeReportarDesde: null });
+    const manana = '2026-09-28T00:00:00-04:00';
+    expect(
+      cupoDeLaSesion({ ...PERSONA, reportes_restantes_hoy: 0, puede_reportar_desde: manana }),
+    ).toEqual({
+      reportesRestantesHoy: 0,
+      demoraProximoS: null,
+      puedeReportarDesde: new Date(manana),
+    });
+    expect(cupoDeLaSesion(null)).toEqual({
+      reportesRestantesHoy: null,
+      demoraProximoS: null,
+      puedeReportarDesde: null,
+    });
+  });
+});
+
+describe('cerrar sesión en una pestaña compartida', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  function instalarAlmacen() {
+    const datos = new Map<string, string>();
+    vi.stubGlobal('window', {
+      sessionStorage: {
+        getItem: (k: string) => datos.get(k) ?? null,
+        setItem: (k: string, v: string) => void datos.set(k, v),
+        removeItem: (k: string) => void datos.delete(k),
+      },
+    });
+  }
+
+  function guardarUnBorrador() {
+    guardarBorrador({
+      paso: 3,
+      ubicacion: { lat: -17.78, lon: -63.18 },
+      resuelto: { dentro_cobertura: true },
+      fotos: [],
+      valores: { descripcion: 'Se junta el agua en la esquina' },
+      clave: '11111111-1111-4111-8111-111111111111',
+    });
+  }
+
+  it('el cierre explícito olvida el borrador: quien entre después no hereda lo que había a medias', () => {
+    instalarAlmacen();
+    guardarUnBorrador();
+    expect(leerBorrador()).not.toBeNull();
+    const cliente = new QueryClient();
+    cliente.setQueryData(CLAVE_YO, PERSONA);
+    cliente.setQueryData(claveMisReportes(PERSONA.id), { type: 'FeatureCollection', features: [] });
+
+    limpiarTrasCerrarSesion(cliente);
+
+    expect(leerBorrador()).toBeNull();
+    expect(cliente.getQueryData(CLAVE_YO)).toBeUndefined();
+    expect(cliente.getQueryData(claveMisReportes(PERSONA.id))).toBeUndefined();
+  });
+
+  it('la sesión que vence sola no toca el borrador: al volver a entrar se sigue donde estaba', () => {
+    instalarAlmacen();
+    guardarUnBorrador();
+    olvidarDatosDeLaCuenta(new QueryClient());
+    expect(leerBorrador()).not.toBeNull();
   });
 });

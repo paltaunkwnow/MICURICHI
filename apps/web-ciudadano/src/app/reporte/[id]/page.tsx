@@ -42,13 +42,11 @@ export default function DetalleReporte() {
       <div className="mx-auto w-full max-w-2xl p-6">
         <div className="tarjeta space-y-3 p-6" aria-live="polite">
           <h1 className="titular text-3xl">
-            {esFaltante
-              ? 'Este reporte no existe o todavía está en revisión'
-              : 'No pudimos mostrar el reporte'}
+            {esFaltante ? 'Este reporte no está en el mapa' : 'No pudimos mostrar el reporte'}
           </h1>
           <p className="text-tinta-600">
             {esFaltante
-              ? 'Los reportes nuevos se publican recién cuando un técnico municipal los valida.'
+              ? 'Puede que lo hayan retirado del mapa o sumado a otro punto, o que el código no sea correcto. Un reporte recién enviado aparece unos minutos después.'
               : mensajeDeError(consulta.error)}
           </p>
           <Link href="/" className="btn no-underline">

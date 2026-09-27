@@ -11,11 +11,15 @@
  * El «no hay sesión» llega como 401 y es la respuesta NORMAL para la mayoría de visitantes, no un
  * error: por eso `retry: false` y por eso el componente que lo usa no pinta ningún aviso.
  */
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { SesionActual } from 'contracts';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { cerrarSesion as cerrarSesionApi, obtenerYo } from '@/lib/api';
+import { olvidarBorrador } from '@/lib/borrador';
+import { reportesRestantes } from '@/lib/cupo';
 import { esSesionCaducada } from '@/lib/errores';
+import { borrarListaVieja, olvidarDatosDeLaCuenta } from '@/lib/misReportes';
+import { demoraDelProximo } from '@/lib/publicacion';
 
 export const CLAVE_YO = ['yo'] as const;
 
@@ -31,8 +35,27 @@ export interface EstadoSesion {
   /** Se está volviendo a preguntar tras un fallo. */
   reintentando: boolean;
   reintentar: () => void;
-  /** Momento en que la cuenta vuelve a poder reportar, o null si puede ahora. */
+  /** Momento en que la cuenta vuelve a poder reportar (la medianoche), o null si puede ahora. */
   puedeReportarDesde: Date | null;
+  /** Reportes que le quedan hoy a la cuenta, de 3; null si no se sabe. */
+  reportesRestantesHoy: number | null;
+  /** Segundos que tardaría en publicarse el próximo reporte (60 o 240); null si no se sabe. */
+  demoraProximoS: number | null;
+}
+
+/** Lo que `/auth/yo` dice del cupo de la cuenta, en la forma que usa la pantalla. */
+export function cupoDeLaSesion(
+  usuario: SesionActual | null,
+): Pick<EstadoSesion, 'puedeReportarDesde' | 'reportesRestantesHoy' | 'demoraProximoS'> {
+  const reportesRestantesHoy = reportesRestantes(usuario);
+  return {
+    reportesRestantesHoy,
+    // Con el cupo agotado no hay «próximo» hoy: la demora no aplica.
+    demoraProximoS: reportesRestantesHoy === 0 ? null : demoraDelProximo(usuario),
+    puedeReportarDesde: usuario?.puede_reportar_desde
+      ? new Date(usuario.puede_reportar_desde)
+      : null,
+  };
 }
 
 /**
@@ -79,6 +102,7 @@ function useHidratado(): boolean {
 
 export function useSesion(): EstadoSesion {
   const hidratado = useHidratado();
+  const cliente = useQueryClient();
   const { data, isPending, error, isFetching, refetch } = useQuery({
     queryKey: CLAVE_YO,
     queryFn: ({ signal }) => obtenerYo(signal),
@@ -94,22 +118,31 @@ export function useSesion(): EstadoSesion {
     isPending,
     hidratado,
   });
+
+  // La lista que el navegador guardaba hasta contracts 0.11.0 ya no se usa: «Mis reportes» la da
+  // el servidor. Se borra en cualquier pantalla, sin esperar a que alguien abra esa.
+  useEffect(() => borrarListaVieja(), []);
+
+  // Sin sesión (401: nunca la hubo o venció), lo que era de la cuenta sale de la caché.
+  const sinSesion = hidratado && !isPending && esSesionCaducada(error);
+  useEffect(() => {
+    if (sinSesion) olvidarDatosDeLaCuenta(cliente);
+  }, [sinSesion, cliente]);
+
   return {
     usuario,
     cargando,
     errorDeCarga,
     reintentando: isFetching,
     reintentar: () => void refetch(),
-    puedeReportarDesde: usuario?.puede_reportar_desde
-      ? new Date(usuario.puede_reportar_desde)
-      : null,
+    ...cupoDeLaSesion(usuario),
   };
 }
 
 /**
- * Vuelve a preguntar por la sesión. Después de enviar un reporte (o de un 429 de cuota) el turno
- * de la cuenta cambió en el servidor, y sin esto `puede_reportar_desde` seguía con el valor de
- * hasta cinco minutos antes: el aviso de «ya enviaste uno hace poco» no salía.
+ * Vuelve a preguntar por la sesión. Al abrir el formulario, después de enviar un reporte y tras
+ * un 429 de cuota, el cupo de la cuenta pudo cambiar en el servidor (también desde otro
+ * teléfono), y el dato en caché podía tener cinco minutos.
  */
 export function refrescarSesion(cliente: {
   invalidateQueries: (filtros: { queryKey: readonly unknown[] }) => Promise<void>;
@@ -117,15 +150,24 @@ export function refrescarSesion(cliente: {
   return cliente.invalidateQueries({ queryKey: CLAVE_YO });
 }
 
-/** Cierra sesión y vacía la caché: puede tener datos que ya no corresponden a quien mira. */
+/**
+ * Lo que sigue a cerrar sesión a propósito: la caché puede tener datos que ya no corresponden a
+ * quien mira, y el borrador del formulario es de quien se va. Quien entre después en la misma
+ * pestaña (un teléfono prestado) no tiene que encontrarse el reporte a medias de otra persona. La
+ * sesión que vence sola no pasa por acá: ese borrador sigue siendo de quien vuelve a entrar.
+ */
+export function limpiarTrasCerrarSesion(cliente: QueryClient): void {
+  cliente.setQueryData(CLAVE_YO, undefined);
+  cliente.removeQueries({ queryKey: CLAVE_YO });
+  olvidarDatosDeLaCuenta(cliente);
+  olvidarBorrador();
+  void cliente.invalidateQueries();
+}
+
 export function useCerrarSesion() {
   const cliente = useQueryClient();
   return useMutation({
     mutationFn: cerrarSesionApi,
-    onSettled: () => {
-      cliente.setQueryData(CLAVE_YO, undefined);
-      cliente.removeQueries({ queryKey: CLAVE_YO });
-      void cliente.invalidateQueries();
-    },
+    onSettled: () => limpiarTrasCerrarSesion(cliente),
   });
 }

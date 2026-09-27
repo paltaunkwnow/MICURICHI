@@ -8,7 +8,7 @@ import {
   tituloReporte,
   urlFotoRelativa,
 } from '@/lib/formato';
-import { ChipSeveridad } from './ChipSeveridad';
+import { ChipEstado, ChipSeveridad } from './ChipSeveridad';
 
 interface Props {
   reporte: ReporteFeature;
@@ -49,7 +49,12 @@ export function TarjetaReporte({ reporte, distanciaM, seleccionado, onSelecciona
         )}
       </span>
       <span className="min-w-0">
-        <ChipSeveridad severidad={p.severidad} />
+        {/* Severidad y verificación juntas: un punto grave sin revisar no se lee como uno
+            confirmado (contracts 0.11.0). */}
+        <span className="flex flex-wrap items-center gap-1.5">
+          <ChipSeveridad severidad={p.severidad} />
+          <ChipEstado estado={p.estado} />
+        </span>
         <h3 className="titular mt-[7px] text-[15.5px]">{tituloReporte(p)}</h3>
         <span className="mt-1 block text-[13.5px] text-tinta-600">
           {subtituloReporte(p, distanciaM)}

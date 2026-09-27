@@ -16,8 +16,10 @@ import {
   tituloReporte,
   urlFotoRelativa,
 } from '@/lib/formato';
+import { estaVerificado, TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { ChipEstado, ChipSeveridad } from './ChipSeveridad';
+import { IconoSinVerificar } from './IconoSinVerificar';
 
 interface Props {
   reporte: ReporteFeature;
@@ -87,6 +89,18 @@ export function HojaDetalle({
         <span data-testid="detalle-distrito">{etiquetaDistrito(p.distrito?.codigo)}</span>
         {distanciaM != null ? ` · ${subtituloReporte(p, distanciaM).split(' · ').pop()}` : ''}
       </p>
+
+      {estaVerificado(p) ? null : (
+        <Aviso tono="alerta" icono={null} className="mt-3" data-testid="aviso-sin-verificar">
+          <span className="flex items-start gap-2">
+            <IconoSinVerificar size={16} />
+            <span>
+              <b>{TEXTO_SIN_VERIFICAR}</b>: todavía no lo revisó un técnico municipal. Lo que dice
+              el vecino, la foto y la severidad pueden tener errores.
+            </span>
+          </span>
+        </Aviso>
+      )}
 
       <p className="mt-3 text-[16px] leading-[1.55]">{p.descripcion}</p>
 

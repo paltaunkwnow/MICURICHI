@@ -22,7 +22,7 @@ petición, y cambiarlas no exige volver a construir. Ver `.env.example`.
 | `GEO_SERVICE_URL` | En cada petición (`src/proxy.ts`) | Destino de `/geo/*`. Sin valor, `http://127.0.0.1:3002` |
 | `PROXY_DE_CONFIANZA` | En cada petición (`src/proxy.ts`) | `1` solo con un proxy propio delante que reescriba `X-Forwarded-For` |
 | `HSTS` | En cada petición (`src/proxy.ts`) | `1` añade `Strict-Transport-Security`. Solo detrás de HTTPS |
-| `NODE_ENV` | Al compilar (`next.config.ts`) | Distingue `next dev` de la imagen: `'unsafe-eval'` en la CSP y el registro del service worker. No cambia entre despliegues |
+| `NODE_ENV` | En cada petición (`src/proxy.ts`) y al compilar | Distingue `next dev` de la imagen: `'unsafe-eval'` en la CSP y el registro del service worker. No cambia entre despliegues |
 
 Lo que **ya no** se configura en esta app:
 
@@ -80,7 +80,7 @@ corresponde a una pantalla suya:
 | `/` | C-01 en móvil, W-01 en escritorio | Mapa público. Buscador, filtros de severidad, capas, lista lateral en escritorio |
 | `/reporte/:id` | C-02 / W-02 | Detalle de un punto con enlace propio |
 | `/reportar` | C-07 a C-12 | Asistente de cuatro pasos, anclado a la posición del teléfono, y confirmación con código de seguimiento |
-| `/mis-reportes` | C-16 | Reportes enviados desde este dispositivo |
+| `/mis-reportes` | C-16 | Reportes de la cuenta en cualquier estado (`GET /api/v1/mis-reportes`), con la cuenta regresiva de los que esperan su publicación |
 | `/mis-reportes/:id` | C-17 | Línea de tiempo del reporte propio |
 | `/como-funciona` | C-06 | Tres pestañas: los pasos, los colores, qué no es |
 | `/inicio` | C-00 en móvil, W-00 en escritorio | Portada: láminas de bienvenida o página de inicio |
@@ -89,9 +89,12 @@ El perfil con puntos y logros del prototipo (C-15, C-19) **no** está: los perfi
 gamificación están fuera del alcance de la Misión 1 (`CLAUDE.md` §3.2), así que inventarlo habría
 sido una pantalla bonita sin nada detrás. La cuenta ciudadana existe solo para reportar (§16.4):
 alta en `/crear-cuenta`, entrada en `/ingresar` y el estado de la sesión en `/cuenta`; ver el mapa
-no la necesita. Lo que sí existe es el seguimiento:
-el navegador recuerda los identificadores que devolvió la API y «Mis reportes» consulta su estado
-real (`src/lib/misReportes.ts`).
+no la necesita. Lo que sí existe es el seguimiento: «Mis reportes» es la lista de la cuenta, que
+da el servidor (`GET /api/v1/mis-reportes`, `src/lib/misReportes.ts`), así que es la misma en
+cualquier teléfono y muestra cada reporte en cualquier estado: esperando su publicación, «NO SE HA
+VERIFICADO», verificado, resuelto, o retirado del mapa. El navegador no guarda qué se reportó: la
+lista que guardaba antes en `localStorage` se borra sola, y al perder la sesión la de la cuenta
+sale de la caché.
 
 ## El mapa
 
@@ -225,9 +228,19 @@ aparece otra referencia a un `.jpg` o `.png` propio en `src/` o `public/`.
 
 ## Cabeceras
 
-`next.config.ts` aplica CSP, `Permissions-Policy`, `nosniff`, `X-Frame-Options: DENY` y
-`Referrer-Policy`: son fijas, no dependen del despliegue. Avisos para quien las toque:
+`next.config.ts` aplica `Permissions-Policy`, `nosniff`, `X-Frame-Options: DENY` y
+`Referrer-Policy`: son fijas, no dependen del despliegue. La CSP la pone `src/proxy.ts`, con un
+nonce nuevo en cada petición. Avisos para quien las toque:
 
+- `script-src` lleva `'nonce-…'` y `'strict-dynamic'`, sin `'unsafe-inline'`: los <script> en
+  línea de Next pasan porque llevan el nonce (Next lo lee de la CSP de la petición, que el proxy
+  reescribe igual que la de la respuesta), y lo que ellos cargan después —chunks, el worker de
+  MapLibre y su `import`— pasa por `'strict-dynamic'`. Toda página tiene que renderizarse por
+  petición (lo asegura `connection()` en `src/lib/ciudad-servidor.ts`): una prerenderizada saldría
+  sin nonce y no arrancaría. Lo que va a `/api` y `/geo` lleva una CSP cerrada, sin nonce.
+  `style-src` conserva `'unsafe-inline'` sin nonce: con un nonce el navegador lo ignoraría y los
+  atributos `style` de React y MapLibre quedarían bloqueados.
+- `img-src` lleva `blob:` por la miniatura de la foto recién sacada con la cámara.
 - `Permissions-Policy` deja `geolocation` y `camera` al propio origen (`(self)`): sin
   `camera=(self)`, `getUserMedia` falla con `NotAllowedError` aunque la persona diga que sí. Las
   dos se piden solo dentro del reporte, nunca al cargar.
@@ -237,19 +250,30 @@ aparece otra referencia a un `.jpg` o `.png` propio en `src/` o `public/`.
 - `'unsafe-eval'` está **solo** en desarrollo (lo necesita el recargado en caliente de Next). En
   producción no aparece; comprobado sobre `next start`.
 - La CSP no nombra api-core ni geo-service: el navegador les habla por `/api` y `/geo` en el
-  propio origen. `src/lib/next-config.test.ts` falla si aparece un origen nuevo.
+  propio origen. `src/lib/proxy.test.ts` falla si aparece un origen nuevo, y
+  `src/lib/next-config.test.ts` si vuelve una CSP fija.
+- El worker de MapLibre (`?v=` con la versión del paquete) y los glifos (`?v=` con la huella de
+  `public/glifos/`) se sirven `public, max-age=31536000, immutable`, solo cuando la URL lleva
+  `?v=`. `scripts/copiar-worker-maplibre.mjs` escribe la misma versión en el `import` del módulo
+  compartido. Si cambian los glifos, `src/lib/recursos-mapa.test.ts` dice la huella nueva.
 - `HSTS=1` añade `Strict-Transport-Security`, y lo decide `src/proxy.ts` en cada petición (antes
   quedaba fijado al compilar). Solo detrás de HTTPS.
 
 ## PWA y service worker
 
-`public/sw.js` se registra desde `src/app/proveedores.tsx` **solo en producción**. Hace tres cosas:
+`public/sw.js` (v6) se registra desde `src/app/proveedores.tsx` **solo en producción**:
 
 | Petición | Estrategia | Por qué |
 |---|---|---|
 | Navegación | Red primero; sin red, el shell guardado | Al revés se sirve un HTML viejo que pide fragmentos de JS que ya no existen tras un despliegue, y la app queda en blanco |
-| `/geo/v1/capas/*` y `/geo/v1/teselas/*` | Copia fresca (5 min) → revalidación con `If-None-Match` → copia vieja si no hay red | geo-service publica la `version_capa` dentro del `ETag`. Guardar sin mirarlo deja al vecino con los límites viejos **para siempre** en cuanto el administrador activa una versión nueva (`CLAUDE.md` §14.5) |
+| Capas y teselas con huella (`/geo/v1/capas/{capa}/v/{huella}`, `/geo/v1/teselas/{capa}/{huella}/…`) | Caché primero; un 410 no se guarda y llega a la página | La huella es del contenido (contracts 0.12.0): lo guardado no puede quedar viejo. Las huellas que dejan de ser vigentes se borran al activarse, al pasar la lista `/geo/v1/capas` y ante un `410 CAPA_CAMBIO` (una sola petición de la lista por ráfaga) |
+| `/_next/static/…`, y `/maplibre/…` y `/glifos/…` con `?v=` | Caché primero | La URL cambia cuando cambia el contenido |
+| Lista de capas, agregados, alias sin huella y el resto del origen | Red primero; sin red, la última copia | Son `no-cache`: la revalidación con `ETag` la hace la caché HTTP del navegador |
 | `/api/*` | Nunca se cachea | Un reporte viejo es peor que ninguno |
+
+Ante un `410 CAPA_CAMBIO` el mapa vuelve a pedir `/geo/v1/capas` y apunta su fuente a la URL
+nueva sin recargar la página (`src/lib/capas-con-huella.ts`). Solo recarga si el 410 es de la
+huella que el mapa está usando: los rezagados de una ráfaga no vuelven a pedir la lista.
 
 Además, al instalarse guarda el shell **y sus hojas de estilo**, que saca leyendo el HTML. Hace
 falta: el CSS bloquea el render, el navegador lo pide en el preescaneo y, al venir marcado
@@ -263,11 +287,21 @@ service worker registra, activa, controla la página, no guarda ni una petición
 las cachés de la versión anterior al actualizar y, con el servidor apagado, devuelve el shell con
 sus estilos.
 
+## Sin tráfico automático
+
+La página pública no se refresca sola (`src/lib/consultas.ts`): ninguna consulta se vuelve a pedir
+por recuperar el foco, por volver la red ni por intervalo, y los reportes, los agregados y el
+detalle tienen `staleTime: Infinity`. Lo nuevo aparece al abrir una pantalla, al mover el mapa o
+tras enviar un reporte (invalidación explícita). `src/lib/consultas.test.ts` falla si alguna
+pantalla vuelve a poner `refetchInterval` o el refresco por foco o reconexión. Un `staleTime`
+escrito en el propio `useQuery` pisa el `Infinity`: las pantallas no deben ponerlo para esas claves.
+
 ## Pruebas end-to-end
 
 Esta app no tiene una suite Playwright propia: el recorrido que la atraviesa (ciudadano reporta →
-técnico valida → aparece en el mapa público → sale en la exportación), la accesibilidad de sus
-pantallas y los contratos de la API se cubren desde la suite transversal de `e2e/`.
+pasada la demora aparece en el mapa público con «NO SE HA VERIFICADO» → el técnico lo verifica y
+pasa a «Verificado» → sale en la exportación), la accesibilidad de sus pantallas y los contratos de
+la API se cubren desde la suite transversal de `e2e/`.
 
 ```bash
 pnpm db:local          # terminal 1

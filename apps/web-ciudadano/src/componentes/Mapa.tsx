@@ -5,6 +5,14 @@ import type { Map as MapaGl, MapMouseEvent } from 'maplibre-gl';
 // MapLibre 6 es ESM puro: no tiene export por defecto.
 import * as maplibregl from 'maplibre-gl';
 import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
+import {
+  anotarUrlDeFuente,
+  apuntarFuenteA,
+  capaCambiadaEnError,
+  urlDeFuente,
+  useRecargaDeCapas,
+} from '@/lib/capas-con-huella';
+import { URL_GLIFOS } from '@/lib/recursos-mapa';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +37,15 @@ import {
   poligonoDelCirculo,
   recortarAlCirculo,
 } from '@/lib/radio';
+import {
+  ariaPastilla,
+  type EstadoUv,
+  estadoDeUv,
+  estaVerificado,
+  etiquetaDeUv,
+  expresionColorUv,
+  ICONO_SIN_VERIFICAR_SVG,
+} from '@/lib/verificacion';
 
 /**
  * Base clara y desaturada, como en el prototipo: las teselas quedan casi en gris para que lo
@@ -48,8 +65,10 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
    * Está guardado el rango 0-255, que cubre el castellano entero (tildes, ñ, ¿, ¡, ·) y los
    * números. Si algún nombre trajera un carácter de fuera de ese rango, MapLibre lo dibuja
    * localmente, que es exactamente lo que hacía antes con TODO el texto.
+   *
+   * La URL lleva `?v=` con la huella de los archivos: se sirven immutable (`recursos-mapa.ts`).
    */
-  glyphs: '/glifos/{fontstack}/{range}.pbf',
+  glyphs: URL_GLIFOS,
   sources: {
     base: {
       type: 'raster',
@@ -308,6 +327,10 @@ export function Mapa({
   const onUbicacionRef = useRef(onUbicacion);
   const onResumenRef = useRef(onResumen);
   onResumenRef.current = onResumen;
+  /** Ante un 410 de una capa con huella vieja se vuelve a pedir la lista (`capas-con-huella.ts`). */
+  const recargarCapas = useRecargaDeCapas();
+  const recargarCapasRef = useRef(recargarCapas);
+  recargarCapasRef.current = recargarCapas;
   reportesRef.current = reportes;
   capasRef.current = capas;
   agregadosRef.current = agregados;
@@ -376,14 +399,24 @@ export function Mapa({
        * Lo que decide si caben las pastillas no es cuántos reportes hay en la ciudad, sino
        * cuántos quedaron fuera de una agrupación en esta pantalla.
        */
-      const sueltos = new Map<string, { sev: Severidad; coords: [number, number] }>();
+      const sueltos = new Map<
+        string,
+        { sev: Severidad; estado: string; verificado?: boolean; coords: [number, number] }
+      >();
       for (const f of m.queryRenderedFeatures({ layers: ['puntos-ancla'] })) {
         const id = String(f.id ?? (f.properties as { id?: string } | undefined)?.id ?? '');
         // Una feature puede venir repetida por cada tesela que la toca.
         if (!id || sueltos.has(id)) continue;
-        const p = (f.properties ?? {}) as { severidad?: Severidad };
+        const p = (f.properties ?? {}) as {
+          severidad?: Severidad;
+          estado?: string;
+          verificado?: boolean;
+        };
         sueltos.set(id, {
           sev: p.severidad ?? 'baja',
+          // Sin estado no se da por verificado: «NO SE HA VERIFICADO» es lo prudente.
+          estado: p.estado ?? 'nuevo',
+          verificado: typeof p.verificado === 'boolean' ? p.verificado : undefined,
           coords: (f.geometry as GeoJSON.Point).coordinates as [number, number],
         });
       }
@@ -410,7 +443,7 @@ export function Mapa({
 
       const vistos = new Set<string>();
       if (conPastillas)
-        for (const [id, { sev, coords }] of sueltos) {
+        for (const [id, { sev, estado, verificado, coords }] of sueltos) {
           vistos.add(id);
           let marca = vivos.get(id);
           if (!marca) {
@@ -433,12 +466,20 @@ export function Mapa({
           el.className = `pin${activo ? ' on' : ''}${destacadoRef.current === id ? ' nuevo' : ''}`;
           el.setAttribute('aria-pressed', String(activo));
           const etiqueta = etiquetaSeveridad(sev);
-          el.setAttribute('aria-label', `Punto de severidad ${etiqueta.toLowerCase()}`);
+          el.setAttribute('aria-label', ariaPastilla(sev, estado, verificado));
           el.innerHTML = '';
           const dot = document.createElement('span');
           dot.className = 'd';
           dot.style.background = colorSeveridad(sev).relleno;
           el.append(dot, document.createTextNode(etiqueta));
+          // Sin revisar: el icono de «NO SE HA VERIFICADO», el mismo de la leyenda. El nombre
+          // accesible ya lo dice; el icono es para quien mira.
+          if (!estaVerificado({ estado, verificado })) {
+            const icono = document.createElement('span');
+            icono.className = 'inline-flex';
+            icono.innerHTML = ICONO_SIN_VERIFICAR_SVG;
+            el.append(icono);
+          }
         }
       for (const [id, marca] of vivos) {
         if (!vistos.has(id)) {
@@ -612,6 +653,9 @@ export function Mapa({
         if (e.sourceId === 'reportes' && e.isSourceLoaded) sincronizarPines.current();
       });
       m.on('zoom', () => ajustarVisibilidadCapas(m, capaVisibleRef.current));
+      m.on('error', (e) => {
+        if (capaCambiadaEnError(e.error, capasRef.current)) recargarCapasRef.current();
+      });
       // `originalEvent` solo viene cuando el movimiento nace de un gesto (rueda, arrastre,
       // teclado); los `flyTo` del propio código no lo traen.
       m.on('movestart', (e) => {
@@ -914,6 +958,8 @@ const esCapaDibujada = (capa: string): capa is CapaDibujada =>
  */
 function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
   const porUv = new Map(agregados.map((a) => [a.unidad_vecinal_id, a.n_reportes]));
+  // El color de gravedad de cada UV sale solo de lo verificado (`verificacion.ts`).
+  const estadosUv = new Map(agregados.map((a) => [a.unidad_vecinal_id, estadoDeUv(a)]));
   const porDistrito = new Map<string, number>();
   for (const a of agregados) {
     if (!a.distrito_id) continue;
@@ -929,12 +975,23 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
     const capa = c.capa;
     if (!esCapaDibujada(capa)) continue;
     const id = `capa-${capa}`;
-    if (m.getSource(id)) {
-      actualizarConteos(m, c, porUv, porDistrito);
-      continue;
+    const origen = typeof window !== 'undefined' ? window.location.origin : '';
+    const existente = m.getSource(id);
+    if (existente) {
+      // Tras un 410 CAPA_CAMBIO la lista trae otra huella: la fuente pasa a la URL nueva. Si la
+      // capa cambió de GeoJSON a teselas (o al revés), se rehace más abajo.
+      const cambio = apuntarFuenteA(existente, c, origen);
+      if (cambio !== 'otro-modo') {
+        actualizarConteos(m, c, porUv, porDistrito, estadosUv);
+        if (cambio === 'cambiada')
+          void fusionarConteosEnLaCapa(m, c, porUv, porDistrito, estadosUv);
+        continue;
+      }
+      for (const sufijo of ['-relleno', '-linea', '-nombre'])
+        if (m.getLayer(`${id}${sufijo}`)) m.removeLayer(`${id}${sufijo}`);
+      m.removeSource(id);
     }
     const e = estilos[capa];
-    const origen = typeof window !== 'undefined' ? window.location.origin : '';
     if (c.modo === 'teselas')
       // `minzoom` del ORIGEN, no solo de la capa: sin él MapLibre pide teselas de zooms en los que
       // la capa no se pinta. Con las manzanas (que ya no se dibujan) eso eran 2,0 MB en z10 frente
@@ -948,6 +1005,7 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
         promoteId: 'id',
       });
     else m.addSource(id, { type: 'geojson', data: `${origen}${c.url}`, promoteId: 'id' });
+    anotarUrlDeFuente(m.getSource(id), c.url);
     const base = c.modo === 'teselas' ? { source: id, 'source-layer': c.capa } : { source: id };
 
     // El relleno sube con la cantidad de reportes, del 0,14 al 0,46 de opacidad: mismo salto
@@ -959,9 +1017,13 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
         ...base,
         minzoom: e.minzoom,
         paint: {
-          // `color` lo escribe `fusionarConteosEnLaCapa` para que cada distrito tenga el suyo,
-          // como en el prototipo; si no se pudo fusionar, todos comparten el color de la capa.
-          'fill-color': ['coalesce', ['get', 'color'], e.color],
+          // Distritos: `color` lo escribe `fusionarConteosEnLaCapa` para que cada uno tenga el
+          // suyo, como en el prototipo. Unidades vecinales: la gravedad de sus reportes
+          // verificados, y neutro sin verificados (un reporte sin revisar no pinta un barrio).
+          'fill-color':
+            c.capa === 'unidad_vecinal'
+              ? (expresionColorUv() as unknown as maplibregl.ExpressionSpecification)
+              : ['coalesce', ['get', 'color'], e.color],
           'fill-opacity': [
             'case',
             ['>', ['coalesce', ['feature-state', 'n'], 0], 0],
@@ -1009,8 +1071,8 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
       } as maplibregl.LayerSpecification,
       'clusters',
     );
-    actualizarConteos(m, c, porUv, porDistrito);
-    void fusionarConteosEnLaCapa(m, c, porUv, porDistrito);
+    actualizarConteos(m, c, porUv, porDistrito, estadosUv);
+    void fusionarConteosEnLaCapa(m, c, porUv, porDistrito, estadosUv);
   }
 }
 
@@ -1046,24 +1108,40 @@ async function fusionarConteosEnLaCapa(
   c: CapaInfo,
   porUv: Map<string, number>,
   porDistrito: Map<string, number>,
+  estadosUv: Map<string, EstadoUv>,
 ) {
   if (c.modo !== 'geojson') return;
   if ((c.bytes_web ?? Number.POSITIVE_INFINITY) > MAX_BYTES_ETIQUETA) return;
-  const tabla = c.capa === 'unidad_vecinal' ? porUv : porDistrito;
+  const esUv = c.capa === 'unidad_vecinal';
+  const tabla = esUv ? porUv : porDistrito;
   if (tabla.size === 0) return;
-  const clave = `capa-${c.capa}|${c.version}|${[...tabla.values()].reduce((a, b) => a + b, 0)}`;
+  let verificados = 0;
+  for (const e of estadosUv.values()) verificados += e.nVerificados;
+  // La URL lleva la huella del contenido: la misma versión recargada con otra geometría es otra.
+  // Los verificados también cuentan: la marca «NO SE HA VERIFICADO» de la etiqueta cambia con ellos.
+  const clave = `capa-${c.capa}|${c.url}|${[...tabla.values()].reduce((a, b) => a + b, 0)}|${esUv ? verificados : ''}`;
   if (yaFusionadas.has(clave)) return;
   yaFusionadas.add(clave);
   const fuente = m.getSource(`capa-${c.capa}`) as maplibregl.GeoJSONSource | undefined;
   if (!fuente) return;
   try {
     // El mapa ya pidió esta misma URL, así que sale de la caché del navegador.
-    const datos = (await fetch(c.url).then((r) => r.json())) as GeoJSON.FeatureCollection;
+    const r = await fetch(c.url);
+    // Un 410 CAPA_CAMBIO trae un error en JSON, no la capa: meterlo en la fuente la borraría.
+    // Ese mismo 410 le llega al mapa, que vuelve a pedir la lista de capas.
+    if (!r.ok) return;
+    const datos = (await r.json()) as GeoJSON.FeatureCollection;
+    // Mientras bajaba, la fuente pudo pasar a otra huella: no se le pisa con la vieja.
+    if (urlDeFuente(fuente) !== c.url) return;
     for (const f of datos.features ?? []) {
       const p = (f.properties ?? {}) as Record<string, unknown>;
       const n = tabla.get(String(p.id ?? '')) ?? 0;
       p.n = n;
-      p.etiqueta = n > 0 ? `${p.nombre} · ${n} ${n === 1 ? 'reporte' : 'reportes'}` : p.nombre;
+      p.etiqueta = etiquetaDeUv(String(p.nombre ?? ''), {
+        n,
+        // En distritos no se marca: la marca es de la gravedad por barrio, que es por UV.
+        nVerificados: esUv ? (estadosUv.get(String(p.id ?? ''))?.nVerificados ?? 0) : n,
+      });
       p.color = colorDeUnidad(String(p.distrito_id || p.id || ''));
       f.properties = p;
     }
@@ -1082,15 +1160,18 @@ function actualizarConteos(
   c: CapaInfo,
   porUv: Map<string, number>,
   porDistrito: Map<string, number>,
+  estadosUv: Map<string, EstadoUv>,
 ) {
-  const tabla = c.capa === 'unidad_vecinal' ? porUv : porDistrito;
+  const esUv = c.capa === 'unidad_vecinal';
+  const tabla = esUv ? porUv : porDistrito;
   if (tabla.size === 0) return;
   const fuente = `capa-${c.capa}`;
   for (const [id, n] of tabla) {
     try {
       m.setFeatureState(
         c.modo === 'teselas' ? { source: fuente, sourceLayer: c.capa, id } : { source: fuente, id },
-        { n },
+        // `sev` vacío pinta neutro (`expresionColorUv`).
+        esUv ? { n, sev: estadosUv.get(id)?.sev ?? '' } : { n },
       );
     } catch {
       // Una capa que todavía no terminó de cargar rechaza el estado; se reintenta en el

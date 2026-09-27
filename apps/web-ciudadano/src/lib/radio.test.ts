@@ -1,6 +1,12 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { CONFIG_DOMINIO, dentroDelRadio, distanciaMetros } from 'contracts';
 import { describe, expect, it } from 'vitest';
+import { ErrorApi } from './api';
+import { esUbicacionRechazada } from './errores';
+import { armarEnvio, type ValoresFormulario, valoresIniciales } from './formulario-reporte';
 import {
+  aceptarPunto,
   coordenadasEscritas,
   desplazar,
   encuadreDelPaso1,
@@ -233,6 +239,76 @@ describe('qué cuenta como elegido al volver a compartir la ubicación', () => {
       enlace: null,
     });
     expect(r.punto.lat).toBe(alNorte(90).lat);
-    expect(r.aviso).toContain('El punto que habías elegido queda a 90 m');
+    expect(r.aviso).toMatch(/^Movimos el punto/);
+    expect(r.aviso).toContain('el que habías elegido queda a 90 m');
+    // Movido: el formulario no salta a la revisión, la persona lo mira antes de seguir.
+    expect(r.movido).toBe(true);
+  });
+
+  it('conservar el punto o ponerlo por primera vez no cuenta como moverlo', () => {
+    expect(puntoInicial({ ancla: ANCLA, guardado: null, enlace: null }).movido).toBe(false);
+    expect(puntoInicial({ ancla: telefonoNuevo, guardado: alNorte(20), enlace: null }).movido).toBe(
+      false,
+    );
+    expect(puntoInicial({ ancla: ANCLA, guardado: null, enlace: alNorte(80) }).movido).toBe(false);
+  });
+});
+
+describe('al salir del paso 1 el punto deja de ser precargado (hallazgo de T2)', () => {
+  it('aceptarPunto quita la marca y conserva las coordenadas', () => {
+    const puesto = { lat: ANCLA.lat, lon: ANCLA.lon, precargada: true };
+    expect(aceptarPunto(puesto)).toEqual({ lat: ANCLA.lat, lon: ANCLA.lon });
+    const movido = alNorte(10);
+    // Sin la marca no hace falta otro objeto: la misma referencia no vuelve a resolver la UV.
+    expect(aceptarPunto(movido)).toBe(movido);
+  });
+
+  it('aceptar el punto por defecto, avanzar, 422 POSICION_VENCIDA y volver a compartir desde 40 m: se envía el original', () => {
+    // 1. Primera ubicación: la app pone el punto en la posición del teléfono.
+    const primero = puntoInicial({ ancla: ANCLA, guardado: null, enlace: null }).punto;
+    expect(primero.precargada).toBe(true);
+    // 2. «Continuar»: al salir del paso 1 queda aceptado.
+    const aceptado = aceptarPunto(primero);
+    // 3. El servidor rechaza la posición al enviar: se vuelve al paso 1 a compartirla de nuevo.
+    expect(esUbicacionRechazada(new ErrorApi('POSICION_VENCIDA', 'x', 422))).toBe(true);
+    // 4. La persona caminó 40 m y vuelve a compartir. Aunque se perdiera el paso pendiente
+    //    (`aceptado: false`), el punto ya no es precargado y no se muda en silencio.
+    const nuevaAncla = alNorte(40);
+    for (const pendiente of [true, false]) {
+      const r = puntoInicial({
+        ancla: nuevaAncla,
+        guardado: puntoYaElegido(aceptado, { aceptado: pendiente }),
+        enlace: null,
+      });
+      expect(r.punto).toBe(aceptado);
+      expect(r.aviso).toBeNull();
+      expect(r.movido).toBe(false);
+      // 5. Lo que se envía es el punto original, con la posición nueva solo como `dispositivo`.
+      const cuerpo = armarEnvio(
+        {
+          ...valoresIniciales(),
+          profundidad_estimada: 'rodilla',
+          frecuencia: 'ocasional',
+        } as ValoresFormulario,
+        r.punto,
+        [],
+        { lat: nuevaAncla.lat, lon: nuevaAncla.lon, precision_m: 8, antiguedad_s: 1 },
+      );
+      expect(cuerpo.lat).toBe(ANCLA.lat);
+      expect(cuerpo.lon).toBe(ANCLA.lon);
+    }
+  });
+
+  it('el formulario lo acepta en «Continuar» del paso 1 y, si lo mueve, no salta a la revisión', () => {
+    const fuente = readFileSync(
+      resolve(import.meta.dirname, '../componentes/FormularioReporte.tsx'),
+      'utf8',
+    );
+    const irAdelante = fuente.slice(
+      fuente.indexOf('const irAdelante'),
+      fuente.indexOf('const irAtras'),
+    );
+    expect(irAdelante).toMatch(/aceptarPunto\(/);
+    expect(fuente).toMatch(/if \(movido\) setPasoPendiente\(null\)/);
   });
 });

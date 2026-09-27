@@ -2,6 +2,8 @@ import type {
   AgregadoUv,
   CapaInfo,
   FotoSubida,
+  MiReporteFeature,
+  MisReportes,
   PuntoCritico,
   ReporteCrearEntrada,
   ReporteFeatureCollection,
@@ -166,9 +168,12 @@ export function resolverPunto(lat: number, lon: number, signal?: AbortSignal) {
  * `claveIdempotencia` hace que reintentar el mismo envío (timeout, red que se corta, doble toque)
  * devuelva el reporte ya creado en vez de crear otro. Debe ser la MISMA en todos los reintentos
  * de un mismo formulario.
+ *
+ * La respuesta es la vista del autor (contracts 0.11.0), con `segundos_para_publicar`: de ahí
+ * parte la cuenta regresiva de la confirmación.
  */
 export function crearReporte(payload: ReporteCrearEntrada, claveIdempotencia?: string) {
-  return pedir<ReporteFeature>(
+  return pedir<MiReporteFeature>(
     '/api/v1/reportes',
     {
       method: 'POST',
@@ -209,6 +214,14 @@ export function subirFoto(archivo: File) {
  * ningún sitio: solo pide que el navegador la mande (`same-origin`, y el origen es el mismo
  * porque Next reenvía `/api/*` al servicio). No hay ningún token en `localStorage` ni en la URL.
  */
+
+/**
+ * Los reportes de la cuenta, en cualquier estado (contracts 0.11.0). Es de una sola cuenta, así
+ * que va con la cookie y el servidor responde `private, no-store`.
+ */
+export function obtenerMisReportes(signal?: AbortSignal) {
+  return pedir<MisReportes>('/api/v1/mis-reportes', { signal }, PLAZOS_MS.lectura, 'same-origin');
+}
 
 /** Sesión actual, o `ErrorApi` con estado 401 si no hay ninguna. */
 export function obtenerYo(signal?: AbortSignal) {

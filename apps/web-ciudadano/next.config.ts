@@ -13,53 +13,11 @@ import type { NextConfig } from 'next';
  *  - La ciudad (centro, locale, zona horaria, nombre) llega de `GET /api/v1/configuracion`
  *    (`src/lib/ciudad-servidor.ts`).
  *
- * `NODE_ENV` sí se lee: distingue `next dev` de la imagen, no un despliegue de otro.
+ * La Content-Security-Policy tampoco va aquí: lleva un nonce distinto en cada petición y la pone
+ * `src/proxy.ts`. Una segunda CSP fija se aplicaría a la vez que esa y bloquearía los <script> de
+ * Next.
  */
-const desarrollo = process.env.NODE_ENV !== 'production';
-
-/**
- * Content-Security-Policy. Cada origen externo está aquí porque algo concreto lo necesita:
- *  - `tile.openstreetmap.org` en img-src: las teselas raster del mapa base (CLAUDE.md §14.3).
- *  - Los glifos de las etiquetas del mapa ya NO salen a internet: se sirven desde
- *    `public/glifos/` (ver `componentes/Mapa.tsx`), así que `demotiles.maplibre.org` salió de
- *    connect-src. Era el servidor de demostración de MapLibre y encima devolvía 404.
- *  - `tile.openstreetmap.org` TAMBIÉN en connect-src: MapLibre 6 pide las teselas raster con
- *    `fetch`, no con <img>. Con solo img-src, la CSP bloqueaba el mapa base entero y el mapa
- *    quedaba en negro (comprobado en el navegador: "Refused to connect" por cada tesela).
- *  - `worker-src 'self'`: MapLibre 6 carga su worker desde una URL, y acá se sirve desde
- *    `public/maplibre/` (ver `src/lib/worker-maplibre.ts`). `blob:` queda porque otras versiones
- *    y otras rutas de MapLibre sí lo crean desde un blob.
- *  - `data:`/`blob:` en img-src: miniaturas de las fotos antes de subirlas y el canvas del mapa.
- *
- * api-core y geo-service no aparecen: el navegador les habla por `/api` y `/geo` en el propio
- * origen (`'self'`) y el reenvío lo hace el servidor.
- *
- * `script-src` lleva 'unsafe-inline' porque Next inyecta en la página el payload de hidratación
- * como <script> en línea. Quitarlo exige nonces por petición. Se asume ese 'unsafe-inline' a
- * sabiendas: esta app no renderiza HTML de terceros en ningún punto (React escapa todo y no hay
- * dangerouslySetInnerHTML), así que el vector que abre es estrecho, y el resto de directivas sigue
- * acotando a dónde podría salir un dato si algo se colara.
- * En desarrollo hace falta además 'unsafe-eval' para el refresco en caliente.
- */
-const csp = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "object-src 'none'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "img-src 'self' data: blob: https://tile.openstreetmap.org",
-  "font-src 'self' data:",
-  "style-src 'self' 'unsafe-inline'",
-  `script-src 'self' 'unsafe-inline'${desarrollo ? " 'unsafe-eval'" : ''}`,
-  "worker-src 'self' blob:",
-  "connect-src 'self' https://tile.openstreetmap.org",
-  "manifest-src 'self'",
-]
-  .join('; ')
-  .concat(desarrollo ? '' : '; upgrade-insecure-requests');
-
 const cabeceras = [
-  { key: 'Content-Security-Policy', value: csp },
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'X-Frame-Options', value: 'DENY' },
@@ -71,6 +29,15 @@ const cabeceras = [
     value: 'geolocation=(self), camera=(self), microphone=(), payment=(), usb=()',
   },
 ];
+
+/**
+ * El worker de MapLibre (`public/maplibre/`) y los glifos (`public/glifos/`) se piden con `?v=`
+ * (`src/lib/worker-maplibre.ts`, `src/lib/recursos-mapa.ts`): cuando cambia el contenido, cambia la
+ * URL, así que se pueden guardar un año sin volver a preguntar. Sin `?v=` quedan con lo que pone
+ * Next a `public/` (revalidar cada vez): una copia de un año sin versión no se renovaría nunca.
+ */
+const INMUTABLE = [{ key: 'Cache-Control', value: 'public, max-age=31536000, immutable' }];
+const CON_VERSION = [{ type: 'query' as const, key: 'v' }];
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -84,7 +51,11 @@ const nextConfig: NextConfig = {
    */
   output: 'standalone',
   async headers() {
-    return [{ source: '/(.*)', headers: cabeceras }];
+    return [
+      { source: '/(.*)', headers: cabeceras },
+      { source: '/maplibre/:archivo*', has: CON_VERSION, headers: INMUTABLE },
+      { source: '/glifos/:archivo*', has: CON_VERSION, headers: INMUTABLE },
+    ];
   },
 };
 

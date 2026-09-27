@@ -4,33 +4,24 @@ import { CONFIG_DOMINIO } from 'contracts';
 import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useCiudad } from '@/lib/ciudad-contexto';
-import { horaCorta } from '@/lib/formato';
+import { FOTOS_POR_DIA, REPORTES_POR_DIA, TEXTO_CUPO_AGOTADO, textoCupo } from '@/lib/cupo';
 import { destinoDelPanelDeSesion, textoDelPanel } from '@/lib/panel';
 import { useCerrarSesion, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
 import { ErrorDeCarga } from './ErrorDeCarga';
 
 /**
- * Estado de la cuenta: quién está, cuándo vuelve a tener turno para reportar y cómo salir.
+ * Estado de la cuenta: quién está, cuántos reportes le quedan hoy y cómo salir.
  *
  * Sin sesión NO es un error ni una pantalla de bloqueo: es el estado normal de la mayoría de
  * quien entra a Mi Curichi. Esta pantalla lo dice y ofrece las dos puertas, sin esconder el mapa
  * detrás de ninguna.
  */
-function faltaPara(momento: Date): string {
-  const minutos = Math.ceil((momento.getTime() - Date.now()) / 60_000);
-  if (minutos <= 0) return 'un momento';
-  if (minutos === 1) return '1 minuto';
-  return `${minutos} minutos`;
-}
-
 export function PanelCuenta() {
   const router = useRouter();
-  const { usuario, cargando, errorDeCarga, reintentar, reintentando, puedeReportarDesde } =
+  const { usuario, cargando, errorDeCarga, reintentar, reintentando, reportesRestantesHoy } =
     useSesion();
   const salir = useCerrarSesion();
-  const ciudad = useCiudad();
   const panel = destinoDelPanelDeSesion(usuario);
 
   if (cargando)
@@ -105,18 +96,23 @@ export function PanelCuenta() {
         </div>
       )}
 
-      {puedeReportarDesde ? (
-        <Aviso tono="alerta">
-          Ya enviaste un reporte hace poco. Vas a poder enviar otro en{' '}
-          {faltaPara(puedeReportarDesde)}, a las {horaCorta(puedeReportarDesde, ciudad)}.
+      {reportesRestantesHoy === 0 ? (
+        <Aviso tono="alerta" data-testid="cupo-cuenta">
+          <b className="mb-1 block">{textoCupo(0)}</b>
+          {TEXTO_CUPO_AGOTADO}
         </Aviso>
-      ) : (
+      ) : reportesRestantesHoy === null ? (
         <Aviso tono="ok">Podés enviar un reporte ahora.</Aviso>
+      ) : (
+        <Aviso tono="ok" data-testid="cupo-cuenta">
+          {textoCupo(reportesRestantesHoy)}
+        </Aviso>
       )}
       <p className="ayuda mt-3">
-        Cada cuenta puede enviar un reporte cada {CONFIG_DOMINIO.MINUTOS_ENTRE_REPORTES_POR_CUENTA}{' '}
-        minutos. Es para que el inventario no se llene de envíos repetidos del mismo punto; si
-        necesitás reportar varios lugares, el siguiente entra pasado ese rato.
+        Cada cuenta puede enviar {REPORTES_POR_DIA} reportes por día, con hasta{' '}
+        {CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos cada uno y {FOTOS_POR_DIA} fotos por día. El
+        cupo vuelve entero a la medianoche. Es para que el inventario no se llene de envíos
+        repetidos del mismo punto.
       </p>
 
       <Link href="/reportar" className="btn btn-bloque mt-5 no-underline">

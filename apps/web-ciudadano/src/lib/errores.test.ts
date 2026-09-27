@@ -7,6 +7,7 @@ import {
   esPlazoAgotado,
   esSesionCaducada,
   esUbicacionRechazada,
+  mensajeDeCuota,
   mensajeDeEnvio,
   mensajeDeError,
   mensajeDeFoto,
@@ -93,8 +94,7 @@ describe('respuestas que cambian el flujo del formulario', () => {
   });
 
   it('el 429 de cuota de fotos muestra el mensaje del servidor junto a la foto', () => {
-    const delServidor =
-      'Llegaste al máximo de 12 fotos por hora. Vas a poder subir otra en 20 minutos.';
+    const delServidor = 'Llegaste al máximo de 12 fotos por día. Vas a poder subir otra mañana.';
     const e = new ErrorApi('CUOTA_DE_FOTOS', delServidor, 429, {
       disponible_en: '2026-09-26T15:40:00.000Z',
     });
@@ -105,7 +105,9 @@ describe('respuestas que cambian el flujo del formulario', () => {
   it('sin mensaje en el cuerpo, la cuota de fotos igual se explica (no «Error 429»)', () => {
     // `pedir` escribe «Error 429» cuando el cuerpo no trae `mensaje`.
     const m = mensajeDeFoto(new ErrorApi('CUOTA_DE_FOTOS', 'Error 429', 429));
-    expect(m).toContain(`${CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA} fotos por hora`);
+    expect(m).toContain(`${CONFIG_DOMINIO.FOTOS_POR_DIA_POR_CUENTA} fotos por día`);
+    expect(m).toContain('12 fotos por día');
+    expect(m).not.toMatch(/por hora/);
     expect(m).not.toContain('Error 429');
   });
 
@@ -116,7 +118,15 @@ describe('respuestas que cambian el flujo del formulario', () => {
     expect(mensajeDeFoto(pesada)).toBe(mensajeDeError(pesada));
   });
 
-  it('solo el 429 de cuota de la cuenta es «ya enviaste uno hace poco»', () => {
+  it('el 429 del cupo diario de reportes usa el texto del servidor o explica el cupo', () => {
+    const delServidor = 'Ya enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.';
+    expect(mensajeDeCuota(new ErrorApi('CUOTA_DE_REPORTES', delServidor, 429))).toBe(delServidor);
+    const sinCuerpo = mensajeDeCuota(new ErrorApi('CUOTA_DE_REPORTES', 'Error 429', 429));
+    expect(sinCuerpo).toBe('Ya enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.');
+    expect(sinCuerpo).not.toMatch(/minutos/);
+  });
+
+  it('solo el 429 de cuota de la cuenta es «ya usaste el cupo de hoy»', () => {
     expect(esCuotaAgotada(new ErrorApi('CUOTA_DE_REPORTES', 'x', 429))).toBe(true);
     // El 429 por IP es otra cosa: no cambia el turno de la cuenta.
     expect(esCuotaAgotada(new ErrorApi('DEMASIADAS_SOLICITUDES', 'x', 429))).toBe(false);

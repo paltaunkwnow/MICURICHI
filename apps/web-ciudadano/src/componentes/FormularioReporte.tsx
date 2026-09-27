@@ -45,12 +45,13 @@ import {
   leerBorrador,
   olvidarBorrador,
 } from '@/lib/borrador';
-import { useCiudad } from '@/lib/ciudad-contexto';
+import { estadoDelCupo, textoCupo } from '@/lib/cupo';
 import {
   detallesDeError,
   esCuotaAgotada,
   esSesionCaducada,
   esUbicacionRechazada,
+  mensajeDeCuota,
   mensajeDeEnvio,
   mensajeDeError,
   mensajeDeFoto,
@@ -59,7 +60,6 @@ import {
   contadorDescripcion,
   etiquetaDistrito,
   etiquetaUnidadVecinal,
-  horaCorta,
   urlFotoRelativa,
 } from '@/lib/formato';
 import {
@@ -85,8 +85,10 @@ import {
   valoresIniciales,
 } from '@/lib/formulario-reporte';
 import { MiniaturasLocales, motivoDeRechazoDeFoto } from '@/lib/foto';
-import { recordarReporte } from '@/lib/misReportes';
+import { CLAVE_MIS_REPORTES } from '@/lib/misReportes';
+import { textoDemora } from '@/lib/publicacion';
 import {
+  aceptarPunto,
   coordenadasEscritas,
   type Direccion,
   encuadreDelPaso1,
@@ -104,10 +106,13 @@ import {
   DispositivoCongelado,
   decidirEnvio,
 } from '@/lib/ubicacion-dispositivo';
+import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { AccesoRequerido } from './AccesoRequerido';
 import { Aviso } from './Aviso';
 import { CamaraReporte } from './CamaraReporte';
 import { ChipSeveridad } from './ChipSeveridad';
+import { CuentaRegresiva, TextoTrasEnviar } from './CuentaRegresiva';
+import { CupoAgotado } from './CupoAgotado';
 import { ErrorDeCarga } from './ErrorDeCarga';
 import { MapaDiferido } from './MapaDiferido';
 import { VistaPedirUbicacion } from './PedirUbicacion';
@@ -257,16 +262,32 @@ export function FormularioReporte() {
   const parametros = useSearchParams();
   const toast = useToast();
   const cliente = useQueryClient();
-  /** Locale y zona de las horas: los de esta instalación. */
-  const ciudad = useCiudad();
   const {
     usuario,
     cargando: comprobandoSesion,
     errorDeCarga: errorSesion,
     reintentando: reintentandoSesion,
     reintentar: reintentarSesion,
-    puedeReportarDesde,
+    reportesRestantesHoy,
+    demoraProximoS,
   } = useSesion();
+  /**
+   * Al tocar «Reportar un punto» se vuelve a preguntar a `/auth/yo`: el cupo en caché puede ser de
+   * antes de los envíos de hoy (también desde otro teléfono). Hasta que contesta no se ofrece
+   * compartir la ubicación, y con el cupo agotado se avisa antes de pedirla (S16). Es un efecto que
+   * corre al abrir esta pantalla, que es lo que hace el enlace «Reportar un punto».
+   */
+  const [cupoRevisado, setCupoRevisado] = useState(false);
+  useEffect(() => {
+    let vigente = true;
+    void refrescarSesion(cliente).finally(() => {
+      if (vigente) setCupoRevisado(true);
+    });
+    return () => {
+      vigente = false;
+    };
+  }, [cliente]);
+  const cupo = estadoDelCupo({ restantes: reportesRestantesHoy, revisado: cupoRevisado });
   /**
    * La sesión se fue a mitad del formulario. Se guarda aparte de `usuario` porque son dos cosas
    * distintas: «nunca tuviste cuenta» y «la tenías y venció mientras escribías». La segunda
@@ -306,7 +327,16 @@ export function FormularioReporte() {
   const [lonTexto, setLonTexto] = useState('');
   const [fotos, setFotos] = useState<FotoDelBorrador[]>([]);
   const [errorFoto, setErrorFoto] = useState<string | null>(null);
-  const [creado, setCreado] = useState<{ id: string } | null>(null);
+  /**
+   * El reporte creado y cuánto le falta para publicarse según el servidor (`null` si un api-core
+   * anterior no lo manda), con el momento en que llegó la respuesta: la cuenta regresiva corre
+   * desde ahí.
+   */
+  const [creado, setCreado] = useState<{
+    id: string;
+    segundos: number | null;
+    recibidoEn: number;
+  } | null>(null);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [retomado, setRetomado] = useState(false);
   /**
@@ -368,9 +398,10 @@ export function FormularioReporte() {
    * Llegó la posición del teléfono con la precisión exigida (cada «Compartir mi ubicación», no la
    * relectura al enviar): el punto arranca en lo que ya estaba elegido si sigue dentro del
    * círculo, si no en el punto del enlace si queda cerca, y si no en la posición del teléfono.
-   * Con un paso pendiente (un 422 de la posición, una posición vencida, un borrador retomado) el
-   * punto ya se aceptó con «Continuar», aunque lo haya puesto la app: no se muda en silencio a la
-   * posición nueva, que llevaría a la revisión y enviaría otro lugar.
+   * Un punto aceptado con «Continuar» ya no es precargado (`aceptarPunto` en `irAdelante`), así
+   * que no se muda en silencio a la posición nueva tras un 422 de la posición, una posición vencida
+   * o un borrador retomado. Si quedó fuera del círculo nuevo se mueve, se avisa «Movimos el
+   * punto…» y no se salta a la revisión.
    */
   const vezAnclada = estadoUbicacion.fase === 'lista' ? estadoUbicacion.vez : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: solo cuando llega una posición nueva; lo demás se lee por ref o del render que la trajo
@@ -378,13 +409,16 @@ export function FormularioReporte() {
     const e = ubicador.leer();
     if (vezAnclada === null || e.fase !== 'lista') return;
     const actual = ubicacionRef.current;
-    const { punto, aviso } = puntoInicial({
+    const { punto, aviso, movido } = puntoInicial({
       ancla: e.ancla,
       guardado: puntoYaElegido(actual, { aceptado: pasoPendiente !== null }),
       enlace: enlaceRef.current,
     });
     if (!actual || punto.lat !== actual.lat || punto.lon !== actual.lon) fijarUbicacion(punto);
     setAvisoUbicacion(aviso);
+    // El punto que la persona había elegido ya no es el mismo: que lo mire y siga paso a paso, en
+    // vez de volver de un salto a la revisión y enviar un lugar que no eligió.
+    if (movido) setPasoPendiente(null);
   }, [vezAnclada]);
 
   /**
@@ -645,22 +679,17 @@ export function FormularioReporte() {
       congelado.current.soltar();
       ubicador.detener();
       const p = f.properties;
-      recordarReporte({
-        id: p.id,
-        enviado_en: new Date().toISOString(),
-        titulo: p.unidad_vecinal?.nombre || 'Punto reportado',
-        unidad_vecinal: p.unidad_vecinal?.codigo ?? null,
-        distrito: p.distrito?.codigo ?? null,
-        severidad: p.severidad,
-        tiene_foto: p.fotos.length > 0,
-      });
       // El reporte ya está del lado del servidor: el borrador deja de tener sentido y quedarse
       // guardado significaría que el próximo reporte arrancaría con los datos de este.
       olvidarBorrador();
-      setCreado({ id: p.id });
-      // El turno de la cuenta acaba de cambiar en el servidor; sin esto, el aviso de «ya enviaste
-      // uno hace poco» no salía hasta que caducara la consulta, cinco minutos después.
+      setCreado({
+        id: p.id,
+        segundos: typeof p.segundos_para_publicar === 'number' ? p.segundos_para_publicar : null,
+        recibidoEn: Date.now(),
+      });
+      // El cupo de la cuenta acaba de cambiar en el servidor, y «Mis reportes» tiene uno más.
       void refrescarSesion(cliente);
+      void cliente.invalidateQueries({ queryKey: [...CLAVE_MIS_REPORTES] });
     },
     onError: (e) => {
       // Un «no» del servidor (4xx) es definitivo: el próximo intento vuelve a leer la posición.
@@ -682,10 +711,10 @@ export function FormularioReporte() {
         return;
       }
       // 429 de cuota: no es un fallo de red ni algo que se arregle reintentando, y el texto
-      // genérico de «probá de nuevo» sería mentira. El servidor ya manda un mensaje con el
-      // tiempo que falta; se usa ese, y se vuelve a preguntar el turno para el aviso de arriba.
+      // genérico de «probá de nuevo» sería mentira. Se muestra el del servidor y se vuelve a
+      // preguntar el cupo: con 0 restantes el formulario pasa al aviso de cupo agotado.
       if (esCuotaAgotada(e)) {
-        setErrorEnvio(e.message);
+        setErrorEnvio(mensajeDeCuota(e));
         void refrescarSesion(cliente);
         return;
       }
@@ -700,7 +729,7 @@ export function FormularioReporte() {
 
   // ---------------------------------------------------------------- confirmación
 
-  if (creado) return <Confirmacion id={creado.id} />;
+  if (creado) return <Confirmacion {...creado} />;
 
   /*
    * Puerta de acceso. Va DESPUÉS de todos los hooks —incluido el que restaura el borrador— para
@@ -735,6 +764,15 @@ export function FormularioReporte() {
       </div>
     );
   if (!usuario) return <AccesoRequerido />;
+  // Con el cupo agotado se avisa acá, antes del paso 1: ni la ubicación ni la cámara se piden
+  // para un reporte que el servidor va a rechazar. El borrador sigue guardado para mañana.
+  if (cupo === 'comprobando')
+    return (
+      <p className="ayuda p-6" role="status">
+        Comprobando cuántos reportes te quedan hoy…
+      </p>
+    );
+  if (cupo === 'agotado') return <CupoAgotado />;
 
   // ---------------------------------------------------------------- pasos
 
@@ -765,6 +803,16 @@ export function FormularioReporte() {
   const errorFecha = errores.evento_en?.message ?? problemaFechaEvento(valores.evento_en, ahora);
 
   const irAdelante = () => {
+    if (paso === 1 && ubicacion) {
+      // «Continuar» acepta el punto: deja de ser el que puso la app y ya no se muda solo cuando
+      // vuelva a llegar la posición del teléfono. Es el mismo lugar, así que la unidad vecinal
+      // resuelta sigue valiendo y no se vuelve a preguntar.
+      const aceptado = aceptarPunto(ubicacion);
+      if (aceptado !== ubicacion) {
+        if (resueltoPara.current === ubicacion) resueltoPara.current = aceptado;
+        setUbicacion(aceptado);
+      }
+    }
     if (paso === 1 && pasoPendiente) {
       setPaso(pasoPendiente);
       setPasoPendiente(null);
@@ -866,19 +914,12 @@ export function FormularioReporte() {
         Paso {paso} de {PASOS}
       </p>
 
-      {/* Aviso por adelantado de que el turno de esta cuenta todavía no está disponible. No
-          impide escribir —el turno puede llegar antes de que termine— pero evita que alguien
-          complete todas las pantallas para encontrarse un rechazo al final. El que decide sigue
-          siendo el servidor al enviar. */}
-      {puedeReportarDesde && (
-        <div className="px-5 pb-3">
-          <Aviso tono="alerta">
-            <b className="mb-1 block text-[14.5px]">Ya enviaste un reporte hace poco</b>
-            Vas a poder enviar otro a las {horaCorta(puedeReportarDesde, ciudad)}. Podés ir
-            completando este mientras tanto.
-          </Aviso>
-        </div>
-      )}
+      {/* Cuántos le quedan hoy a la cuenta. Es aviso, no control: decide el servidor al enviar. */}
+      {reportesRestantesHoy !== null ? (
+        <p className="ayuda px-5 pb-3" data-testid="cupo-reportes">
+          {textoCupo(reportesRestantesHoy)}
+        </p>
+      ) : null}
 
       {retomado ? (
         <div className="px-5 pb-3">
@@ -1561,10 +1602,14 @@ export function FormularioReporte() {
                     ? 'Subiendo foto…'
                     : 'Enviar reporte'}
             </button>
+            <Aviso tono="info" className="mt-2" data-testid="aviso-demora">
+              <b className="block">{textoDemora(demoraProximoS)}</b>
+              Aparece en el mapa como «{TEXTO_SIN_VERIFICAR}» hasta que un técnico municipal lo
+              revise.
+            </Aviso>
             <p className="ayuda mt-2 text-center">
               Al enviar volvemos a leer tu ubicación para comprobar que el punto siga a {RADIO_M} m
-              o menos de vos; no la guardamos. En el mapa nunca aparece quién reportó. Tu reporte
-              pasa por revisión municipal antes de publicarse.
+              o menos de vos; no la guardamos. En el mapa nunca aparece quién reportó.
             </p>
           </div>
         </>
@@ -1597,10 +1642,30 @@ function FilaRevision({
   );
 }
 
-/** Confirmación (C-12): lo que el vecino se lleva es el código con el que puede seguir su punto. */
-function Confirmacion({ id }: { id: string }) {
+/**
+ * Confirmación (C-12): el reporte ya llegó y se publica solo cuando llega su `publicar_en`. La
+ * cuenta regresiva parte de los segundos que calculó el servidor; al terminar, el mapa público no
+ * se entera solo (no se refresca por su cuenta), así que se dice que hay que recargarlo y el
+ * enlace al mapa lo recarga.
+ */
+function Confirmacion({
+  id,
+  segundos,
+  recibidoEn,
+}: {
+  id: string;
+  segundos: number | null;
+  recibidoEn: number;
+}) {
   const toast = useToast();
+  const cliente = useQueryClient();
   const codigo = id.slice(0, 8).toUpperCase();
+  // Volver al mapa después de enviar es pedir verlo con lo nuevo: se descarta lo que había en
+  // memoria, que el mapa guarda sin caducidad.
+  const alVolverAlMapa = () => {
+    void cliente.invalidateQueries({ queryKey: ['reportes'] });
+    void cliente.invalidateQueries({ queryKey: ['agregados'] });
+  };
   return (
     <div
       data-testid="reporte-creado"
@@ -1612,9 +1677,13 @@ function Confirmacion({ id }: { id: string }) {
           <Check size={32} aria-hidden="true" />
         </div>
         <h1 className="titular mt-4 text-[25px] text-white">Gracias, ya lo tenemos</h1>
+        {segundos !== null ? (
+          <p className="titular mt-2.5 text-[20px] text-white tabular-nums">
+            <CuentaRegresiva segundos={segundos} recibidoEn={recibidoEn} />
+          </p>
+        ) : null}
         <p className="mt-2.5 text-[15.5px] leading-[1.5] text-white">
-          Un técnico de la municipalidad va a revisarlo antes de publicarlo. Mientras tanto, tu
-          reporte está <b>en revisión</b> y no aparece en el mapa público.
+          <TextoTrasEnviar segundos={segundos} recibidoEn={recibidoEn} />
         </p>
       </div>
 
@@ -1642,15 +1711,20 @@ function Confirmacion({ id }: { id: string }) {
 
       <Aviso tono="info" className="mt-3">
         <b className="mb-1 block text-[14.5px]">¿Qué pasa ahora?</b>
-        Si el punto ya estaba reportado por otro vecino, el sistema agrupa los reportes cercanos en
-        un mismo punto crítico. Eso le da más peso cuando el municipio prioriza obras.
+        Cuando un técnico lo verifica, si el punto ya estaba reportado por otro vecino, el sistema
+        agrupa los reportes cercanos en un mismo punto crítico. Eso le da más peso cuando el
+        municipio prioriza obras. Podés seguir su estado en «Mis reportes».
       </Aviso>
 
       <div className="mt-4.5 grid gap-2.5">
         <Link href="/mis-reportes" className="btn btn-bloque no-underline">
           Ver mis reportes
         </Link>
-        <Link href="/" className="btn btn-fantasma btn-bloque no-underline">
+        <Link
+          href="/"
+          className="btn btn-fantasma btn-bloque no-underline"
+          onClick={alVolverAlMapa}
+        >
           Volver al mapa
         </Link>
       </div>
