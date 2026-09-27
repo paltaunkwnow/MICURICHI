@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SEVERIDADES, TIPOS_CAPA } from '../dominio/enums.js';
+import { SEVERIDADES, TIPOS_CAPA, type TipoCapa } from '../dominio/enums.js';
 import { CoordenadaSchema, LatSchema, LonSchema, UnidadAdministrativaSchema } from './comunes.js';
 
 export const ResolverEntradaSchema = CoordenadaSchema;
@@ -62,16 +62,60 @@ export const CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES = [
   'advertencia_diametro',
 ] as const;
 
+/**
+ * Reportes publicados por UV (`GET /geo/v1/agregados/unidades-vecinales`): los de
+ * `ESTADOS_PUBLICOS` con `publicar_en <= now()`, sin verificar incluidos. Desde 0.11.0 la coropleta
+ * pública se pinta con `severidad_max_verificada` y no con `severidad_max`: un solo reporte falso
+ * de más de 70 cm pintaría de crítica una UV entera.
+ */
 export const AgregadoUvSchema = z.object({
   unidad_vecinal_id: z.string(),
   codigo: z.string(),
   nombre: z.string(),
   distrito_id: z.string(),
-  n_reportes: z.number().int(),
-  n_puntos_criticos: z.number().int(),
-  severidad_max: z.enum(SEVERIDADES).nullable(),
+  n_reportes: z.number().int().meta({
+    description: 'Reportes publicados en la UV: nuevo (sin verificar), validado y resuelto',
+  }),
+  n_verificados: z.number().int().min(0).meta({
+    description: 'De n_reportes, los verificados (validado y resuelto)',
+  }),
+  n_puntos_criticos: z.number().int().meta({
+    description: 'Puntos críticos de la UV; se arman solo con reportes verificados',
+  }),
+  severidad_max: z.enum(SEVERIDADES).nullable().meta({
+    description: 'Severidad efectiva máxima de los reportes publicados, sin verificar incluidos',
+  }),
+  severidad_max_verificada: z.enum(SEVERIDADES).nullable().meta({
+    description:
+      'Severidad efectiva máxima de los verificados; null si la UV no tiene ninguno (la coropleta pública la pinta neutra)',
+  }),
 });
 export type AgregadoUv = z.infer<typeof AgregadoUvSchema>;
+
+/**
+ * Huella del contenido que sirve geo-service para una capa: los primeros 16 caracteres
+ * hexadecimales (64 bits) del SHA-256 del GeoJSON web en memoria, del que salen también las
+ * teselas. Va en la URL para poder cachearla un año como `immutable`: si el contenido cambia,
+ * cambia la URL. Es del contenido servido y no del nombre de la versión, así que recargar la misma
+ * versión con otra geometría también la cambia (desde 0.12.0).
+ */
+export const HuellaCapaSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}$/, 'Huella de capa: 16 caracteres hexadecimales en minúscula.');
+export type HuellaCapa = z.infer<typeof HuellaCapaSchema>;
+
+/** Código del 410 de una capa o tesela pedida con una huella que ya no es la vigente. */
+export const CODIGO_CAPA_CAMBIO = 'CAPA_CAMBIO';
+
+/** GeoJSON web de la capa con huella: la `url` de `CapaInfo` en modo `geojson`. */
+export function rutaCapaConHuella(capa: TipoCapa, huella: HuellaCapa): string {
+  return `/geo/v1/capas/${capa}/v/${huella}`;
+}
+
+/** Plantilla de teselas con huella, con `{z}/{x}/{y}` literales: la `url` en modo `teselas`. */
+export function rutaTeselasConHuella(capa: TipoCapa, huella: HuellaCapa): string {
+  return `/geo/v1/teselas/${capa}/${huella}/{z}/{x}/{y}.mvt`;
+}
 
 export const CapaInfoSchema = z.object({
   capa: z.enum(TIPOS_CAPA),
@@ -79,7 +123,10 @@ export const CapaInfoSchema = z.object({
   n_features: z.number().int(),
   bytes_web: z.number().int().nullable(),
   modo: z.enum(['geojson', 'teselas']),
-  url: z.string(),
+  url: z.string().meta({
+    description:
+      'Ruta relativa con la huella del contenido servido (desde 0.12.0): /geo/v1/capas/{capa}/v/{huella} en modo geojson, o la plantilla /geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt en modo teselas. Es la que tienen que usar los clientes: se cachea un año y, cuando la capa cambia, responde 410 CAPA_CAMBIO y hay que volver a pedir /geo/v1/capas',
+  }),
   bbox: z.tuple([z.number(), z.number(), z.number(), z.number()]).nullable(),
 });
 export type CapaInfo = z.infer<typeof CapaInfoSchema>;

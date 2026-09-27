@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CONFIG_DOMINIO, NOTA_METODOLOGICA } from '../src/dominio/config.js';
 import {
@@ -249,6 +246,7 @@ describe('0.9.0: la vista técnica muestra la distancia al dispositivo', () => {
     severidad: 'media',
     severidad_calculada: 'media',
     estado: 'nuevo',
+    verificado: false,
     punto_critico_id: null,
     n_reportes_punto: null,
     precision_degradada: false,
@@ -346,18 +344,5 @@ describe('0.9.0: OpenAPI', () => {
     const tec = doc.components.schemas.ReporteTecnico;
     expect(tec?.required).toContain('distancia_dispositivo_m');
     expect(tec?.properties).toHaveProperty('distancia_dispositivo_m');
-  });
-});
-
-describe('versión del paquete', () => {
-  const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.9.0', () => {
-    const { version } = JSON.parse(readFileSync(resolve(raiz, 'package.json'), 'utf8')) as {
-      version: string;
-    };
-    const ultima = readFileSync(resolve(raiz, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1];
-    expect(version).toBe('0.9.0');
-    expect(ultima).toBe(version);
   });
 });

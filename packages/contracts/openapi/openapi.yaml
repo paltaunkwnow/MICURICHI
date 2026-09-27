@@ -365,9 +365,15 @@ components:
               enum:
                 - nuevo
                 - validado
-                - duplicado
-                - rechazado
                 - resuelto
+              description: "Solo estados públicos: nuevo se muestra como «NO SE HA
+                VERIFICADO», validado como «Verificado» y resuelto como
+                «Resuelto» (ETIQUETAS.estado_publico). rechazado y duplicado no
+                se publican"
+            verificado:
+              type: boolean
+              description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                que se publica sin moderación previa como «NO SE HA VERIFICADO»
             punto_critico_id:
               anyOf:
                 - type: string
@@ -397,6 +403,7 @@ components:
             - severidad
             - severidad_calculada
             - estado
+            - verificado
             - punto_critico_id
             - n_reportes_punto
             - precision_degradada
@@ -544,9 +551,16 @@ components:
                     enum:
                       - nuevo
                       - validado
-                      - duplicado
-                      - rechazado
                       - resuelto
+                    description: "Solo estados públicos: nuevo se muestra como «NO SE HA
+                      VERIFICADO», validado como «Verificado» y resuelto como
+                      «Resuelto» (ETIQUETAS.estado_publico). rechazado y
+                      duplicado no se publican"
+                  verificado:
+                    type: boolean
+                    description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                      que se publica sin moderación previa como «NO SE HA
+                      VERIFICADO»
                   punto_critico_id:
                     anyOf:
                       - type: string
@@ -576,6 +590,7 @@ components:
                   - severidad
                   - severidad_calculada
                   - estado
+                  - verificado
                   - punto_critico_id
                   - n_reportes_punto
                   - precision_degradada
@@ -705,6 +720,10 @@ components:
             - duplicado
             - rechazado
             - resuelto
+        verificado:
+          type: boolean
+          description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+            que se publica sin moderación previa como «NO SE HA VERIFICADO»
         punto_critico_id:
           anyOf:
             - type: string
@@ -841,6 +860,7 @@ components:
         - severidad
         - severidad_calculada
         - estado
+        - verificado
         - punto_critico_id
         - n_reportes_punto
         - precision_degradada
@@ -997,6 +1017,10 @@ components:
                 - duplicado
                 - rechazado
                 - resuelto
+            verificado:
+              type: boolean
+              description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                que se publica sin moderación previa como «NO SE HA VERIFICADO»
             punto_critico_id:
               anyOf:
                 - type: string
@@ -1133,6 +1157,7 @@ components:
             - severidad
             - severidad_calculada
             - estado
+            - verificado
             - punto_critico_id
             - n_reportes_punto
             - precision_degradada
@@ -1302,6 +1327,11 @@ components:
                       - duplicado
                       - rechazado
                       - resuelto
+                  verificado:
+                    type: boolean
+                    description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                      que se publica sin moderación previa como «NO SE HA
+                      VERIFICADO»
                   punto_critico_id:
                     anyOf:
                       - type: string
@@ -1439,6 +1469,7 @@ components:
                   - severidad
                   - severidad_calculada
                   - estado
+                  - verificado
                   - punto_critico_id
                   - n_reportes_punto
                   - precision_degradada
@@ -1485,6 +1516,573 @@ components:
         - total
         - pagina
         - limite
+    MiReporte:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+        creado_en:
+          type: string
+          format: date-time
+          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+        evento_en:
+          anyOf:
+            - type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            - type: "null"
+        distrito:
+          anyOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+                codigo:
+                  type: string
+                nombre:
+                  type: string
+              required:
+                - id
+                - codigo
+                - nombre
+            - type: "null"
+        unidad_vecinal:
+          anyOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+                codigo:
+                  type: string
+                nombre:
+                  type: string
+              required:
+                - id
+                - codigo
+                - nombre
+            - type: "null"
+        descripcion:
+          type: string
+        fotos:
+          type: array
+          items:
+            type: string
+          description: URLs servidas por api-core, ya sin EXIF
+        profundidad_estimada:
+          type: string
+          enum:
+            - tobillo
+            - rodilla
+            - muslo
+            - mas_70
+        frecuencia:
+          type: string
+          enum:
+            - primera_vez
+            - ocasional
+            - cada_lluvia_fuerte
+            - permanente
+        causa_presunta:
+          type: string
+          enum:
+            - sumidero_tapado
+            - falta_sumidero
+            - hundimiento_pavimento
+            - contrapendiente
+            - colector_saturado
+            - desborde_cauce
+            - desconocida
+        severidad:
+          type: string
+          enum:
+            - baja
+            - media
+            - alta
+            - critica
+          description: Severidad efectiva = manual si existe, si no la calculada
+        severidad_calculada:
+          type: string
+          enum:
+            - baja
+            - media
+            - alta
+            - critica
+        estado:
+          type: string
+          enum:
+            - nuevo
+            - validado
+            - duplicado
+            - rechazado
+            - resuelto
+        verificado:
+          type: boolean
+          description: true si está validado o resuelto
+        punto_critico_id:
+          anyOf:
+            - type: string
+              format: uuid
+              pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+            - type: "null"
+        n_reportes_punto:
+          anyOf:
+            - type: integer
+              minimum: -9007199254740991
+              maximum: 9007199254740991
+            - type: "null"
+        precision_degradada:
+          type: boolean
+          description: true si la coordenada tiene jitter (vivienda o predio)
+        publicar_en:
+          type: string
+          format: date-time
+          pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+          description: "Desde cuándo lo ve el público: 60 s después de crearlo si fue el
+            1.º reporte del día de la cuenta, 240 s si fue el 2.º o el 3.º. Lo
+            fija el servidor al crear y un replay devuelve el mismo"
+        segundos_para_publicar:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Segundos que faltan para publicar_en, calculados en la base al
+            responder (0 si ya pasó). La cuenta regresiva parte de acá y no del
+            reloj del teléfono
+        retirado:
+          type: boolean
+          description: "true si lo rechazaron o lo fusionaron con otro: ya no está en el
+            mapa público"
+      required:
+        - id
+        - creado_en
+        - evento_en
+        - distrito
+        - unidad_vecinal
+        - descripcion
+        - fotos
+        - profundidad_estimada
+        - frecuencia
+        - causa_presunta
+        - severidad
+        - severidad_calculada
+        - estado
+        - verificado
+        - punto_critico_id
+        - n_reportes_punto
+        - precision_degradada
+        - publicar_en
+        - segundos_para_publicar
+        - retirado
+    MiReporteFeature:
+      type: object
+      properties:
+        type:
+          type: string
+          const: Feature
+        id:
+          type: string
+          format: uuid
+          pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+        geometry:
+          type: object
+          properties:
+            type:
+              type: string
+              const: Point
+            coordinates:
+              type: array
+              prefixItems:
+                - type: number
+                  minimum: -180
+                  maximum: 180
+                  description: Longitud WGS84 (EPSG:4326)
+                - type: number
+                  minimum: -90
+                  maximum: 90
+                  description: Latitud WGS84 (EPSG:4326)
+              items: false
+              minItems: 2
+              maxItems: 2
+          required:
+            - type
+            - coordinates
+          description: "Coordenada exacta, sin jitter: la respuesta es solo para su autor,
+            que la eligió (private, no-store)"
+        properties:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+              pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+            creado_en:
+              type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+            evento_en:
+              anyOf:
+                - type: string
+                  format: date-time
+                  pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                - type: "null"
+            distrito:
+              anyOf:
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                    codigo:
+                      type: string
+                    nombre:
+                      type: string
+                  required:
+                    - id
+                    - codigo
+                    - nombre
+                - type: "null"
+            unidad_vecinal:
+              anyOf:
+                - type: object
+                  properties:
+                    id:
+                      type: string
+                    codigo:
+                      type: string
+                    nombre:
+                      type: string
+                  required:
+                    - id
+                    - codigo
+                    - nombre
+                - type: "null"
+            descripcion:
+              type: string
+            fotos:
+              type: array
+              items:
+                type: string
+              description: URLs servidas por api-core, ya sin EXIF
+            profundidad_estimada:
+              type: string
+              enum:
+                - tobillo
+                - rodilla
+                - muslo
+                - mas_70
+            frecuencia:
+              type: string
+              enum:
+                - primera_vez
+                - ocasional
+                - cada_lluvia_fuerte
+                - permanente
+            causa_presunta:
+              type: string
+              enum:
+                - sumidero_tapado
+                - falta_sumidero
+                - hundimiento_pavimento
+                - contrapendiente
+                - colector_saturado
+                - desborde_cauce
+                - desconocida
+            severidad:
+              type: string
+              enum:
+                - baja
+                - media
+                - alta
+                - critica
+              description: Severidad efectiva = manual si existe, si no la calculada
+            severidad_calculada:
+              type: string
+              enum:
+                - baja
+                - media
+                - alta
+                - critica
+            estado:
+              type: string
+              enum:
+                - nuevo
+                - validado
+                - duplicado
+                - rechazado
+                - resuelto
+            verificado:
+              type: boolean
+              description: true si está validado o resuelto
+            punto_critico_id:
+              anyOf:
+                - type: string
+                  format: uuid
+                  pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                - type: "null"
+            n_reportes_punto:
+              anyOf:
+                - type: integer
+                  minimum: -9007199254740991
+                  maximum: 9007199254740991
+                - type: "null"
+            precision_degradada:
+              type: boolean
+              description: true si la coordenada tiene jitter (vivienda o predio)
+            publicar_en:
+              type: string
+              format: date-time
+              pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+              description: "Desde cuándo lo ve el público: 60 s después de crearlo si fue el
+                1.º reporte del día de la cuenta, 240 s si fue el 2.º o el 3.º.
+                Lo fija el servidor al crear y un replay devuelve el mismo"
+            segundos_para_publicar:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Segundos que faltan para publicar_en, calculados en la base al
+                responder (0 si ya pasó). La cuenta regresiva parte de acá y no
+                del reloj del teléfono
+            retirado:
+              type: boolean
+              description: "true si lo rechazaron o lo fusionaron con otro: ya no está en el
+                mapa público"
+          required:
+            - id
+            - creado_en
+            - evento_en
+            - distrito
+            - unidad_vecinal
+            - descripcion
+            - fotos
+            - profundidad_estimada
+            - frecuencia
+            - causa_presunta
+            - severidad
+            - severidad_calculada
+            - estado
+            - verificado
+            - punto_critico_id
+            - n_reportes_punto
+            - precision_degradada
+            - publicar_en
+            - segundos_para_publicar
+            - retirado
+      required:
+        - type
+        - id
+        - geometry
+        - properties
+    MisReportes:
+      type: object
+      properties:
+        type:
+          type: string
+          const: FeatureCollection
+        features:
+          maxItems: 50
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                const: Feature
+              id:
+                type: string
+                format: uuid
+                pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+              geometry:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    const: Point
+                  coordinates:
+                    type: array
+                    prefixItems:
+                      - type: number
+                        minimum: -180
+                        maximum: 180
+                        description: Longitud WGS84 (EPSG:4326)
+                      - type: number
+                        minimum: -90
+                        maximum: 90
+                        description: Latitud WGS84 (EPSG:4326)
+                    items: false
+                    minItems: 2
+                    maxItems: 2
+                required:
+                  - type
+                  - coordinates
+                description: "Coordenada exacta, sin jitter: la respuesta es solo para su autor,
+                  que la eligió (private, no-store)"
+              properties:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  creado_en:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                  evento_en:
+                    anyOf:
+                      - type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      - type: "null"
+                  distrito:
+                    anyOf:
+                      - type: object
+                        properties:
+                          id:
+                            type: string
+                          codigo:
+                            type: string
+                          nombre:
+                            type: string
+                        required:
+                          - id
+                          - codigo
+                          - nombre
+                      - type: "null"
+                  unidad_vecinal:
+                    anyOf:
+                      - type: object
+                        properties:
+                          id:
+                            type: string
+                          codigo:
+                            type: string
+                          nombre:
+                            type: string
+                        required:
+                          - id
+                          - codigo
+                          - nombre
+                      - type: "null"
+                  descripcion:
+                    type: string
+                  fotos:
+                    type: array
+                    items:
+                      type: string
+                    description: URLs servidas por api-core, ya sin EXIF
+                  profundidad_estimada:
+                    type: string
+                    enum:
+                      - tobillo
+                      - rodilla
+                      - muslo
+                      - mas_70
+                  frecuencia:
+                    type: string
+                    enum:
+                      - primera_vez
+                      - ocasional
+                      - cada_lluvia_fuerte
+                      - permanente
+                  causa_presunta:
+                    type: string
+                    enum:
+                      - sumidero_tapado
+                      - falta_sumidero
+                      - hundimiento_pavimento
+                      - contrapendiente
+                      - colector_saturado
+                      - desborde_cauce
+                      - desconocida
+                  severidad:
+                    type: string
+                    enum:
+                      - baja
+                      - media
+                      - alta
+                      - critica
+                    description: Severidad efectiva = manual si existe, si no la calculada
+                  severidad_calculada:
+                    type: string
+                    enum:
+                      - baja
+                      - media
+                      - alta
+                      - critica
+                  estado:
+                    type: string
+                    enum:
+                      - nuevo
+                      - validado
+                      - duplicado
+                      - rechazado
+                      - resuelto
+                  verificado:
+                    type: boolean
+                    description: true si está validado o resuelto
+                  punto_critico_id:
+                    anyOf:
+                      - type: string
+                        format: uuid
+                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                      - type: "null"
+                  n_reportes_punto:
+                    anyOf:
+                      - type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      - type: "null"
+                  precision_degradada:
+                    type: boolean
+                    description: true si la coordenada tiene jitter (vivienda o predio)
+                  publicar_en:
+                    type: string
+                    format: date-time
+                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                    description: "Desde cuándo lo ve el público: 60 s después de crearlo si fue el
+                      1.º reporte del día de la cuenta, 240 s si fue el 2.º o el
+                      3.º. Lo fija el servidor al crear y un replay devuelve el
+                      mismo"
+                  segundos_para_publicar:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                    description: Segundos que faltan para publicar_en, calculados en la base al
+                      responder (0 si ya pasó). La cuenta regresiva parte de acá
+                      y no del reloj del teléfono
+                  retirado:
+                    type: boolean
+                    description: "true si lo rechazaron o lo fusionaron con otro: ya no está en el
+                      mapa público"
+                required:
+                  - id
+                  - creado_en
+                  - evento_en
+                  - distrito
+                  - unidad_vecinal
+                  - descripcion
+                  - fotos
+                  - profundidad_estimada
+                  - frecuencia
+                  - causa_presunta
+                  - severidad
+                  - severidad_calculada
+                  - estado
+                  - verificado
+                  - punto_critico_id
+                  - n_reportes_punto
+                  - precision_degradada
+                  - publicar_en
+                  - segundos_para_publicar
+                  - retirado
+            required:
+              - type
+              - id
+              - geometry
+              - properties
+      required:
+        - type
+        - features
     ReporteCambiarEstado:
       type: object
       properties:
@@ -1653,6 +2251,23 @@ components:
               format: date-time
               pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
             - type: "null"
+          description: null si la cuenta puede reportar ahora; si ya usó los reportes de
+            hoy, la próxima medianoche en la zona horaria de la ciudad (ISO 8601
+            con desfase)
+        reportes_restantes_hoy:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: Reportes que le quedan hoy a la cuenta, de 3 por día calendario en
+            la zona horaria de la ciudad
+        demora_proximo_s:
+          type: integer
+          minimum: 0
+          maximum: 3600
+          description: "Segundos que tardaría en publicarse el próximo reporte si se
+            enviara ahora: 60 si la cuenta todavía no envió ninguno hoy, 240 si
+            ya envió alguno. Con el cupo agotado no se usa: puede_reportar_desde
+            dice cuándo vuelve a poder"
         panel_url:
           description: URL base del panel (http/https). Solo para tecnico, admin y
             ejecutivo; null si el despliegue no la configuró. Ausente para
@@ -1667,6 +2282,8 @@ components:
         - nombre
         - rol
         - puede_reportar_desde
+        - reportes_restantes_hoy
+        - demora_proximo_s
     ConfiguracionPublica:
       type: object
       properties:
@@ -2022,6 +2639,11 @@ components:
                       - duplicado
                       - rechazado
                       - resuelto
+                  verificado:
+                    type: boolean
+                    description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                      que se publica sin moderación previa como «NO SE HA
+                      VERIFICADO»
                   punto_critico_id:
                     anyOf:
                       - type: string
@@ -2159,6 +2781,7 @@ components:
                   - severidad
                   - severidad_calculada
                   - estado
+                  - verificado
                   - punto_critico_id
                   - n_reportes_punto
                   - precision_degradada
@@ -2634,6 +3257,12 @@ components:
             - teselas
         url:
           type: string
+          description: "Ruta relativa con la huella del contenido servido (desde 0.12.0):
+            /geo/v1/capas/{capa}/v/{huella} en modo geojson, o la plantilla
+            /geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt en modo teselas. Es
+            la que tienen que usar los clientes: se cachea un año y, cuando la
+            capa cambia, responde 410 CAPA_CAMBIO y hay que volver a pedir
+            /geo/v1/capas"
         bbox:
           anyOf:
             - type: array
@@ -2728,10 +3357,18 @@ components:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+          description: "Reportes publicados en la UV: nuevo (sin verificar), validado y
+            resuelto"
+        n_verificados:
+          type: integer
+          minimum: 0
+          maximum: 9007199254740991
+          description: De n_reportes, los verificados (validado y resuelto)
         n_puntos_criticos:
           type: integer
           minimum: -9007199254740991
           maximum: 9007199254740991
+          description: Puntos críticos de la UV; se arman solo con reportes verificados
         severidad_max:
           anyOf:
             - type: string
@@ -2741,14 +3378,61 @@ components:
                 - alta
                 - critica
             - type: "null"
+          description: Severidad efectiva máxima de los reportes publicados, sin verificar
+            incluidos
+        severidad_max_verificada:
+          anyOf:
+            - type: string
+              enum:
+                - baja
+                - media
+                - alta
+                - critica
+            - type: "null"
+          description: Severidad efectiva máxima de los verificados; null si la UV no
+            tiene ninguno (la coropleta pública la pinta neutra)
       required:
         - unidad_vecinal_id
         - codigo
         - nombre
         - distrito_id
         - n_reportes
+        - n_verificados
         - n_puntos_criticos
         - severidad_max
+        - severidad_max_verificada
+    ReadyApiCore:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          description: false solo si falla la base de datos (503)
+        db:
+          type: string
+          enum:
+            - ok
+            - error
+        geo:
+          type: string
+          description: "Estado del /health de geo-service: 'ok', 'error' o 'HTTP <código>'"
+        fotos:
+          type: string
+          enum:
+            - ok
+            - error
+            - poco_espacio
+          description: "'ok'; 'error' si el almacén no responde o no se puede escribir;
+            'poco_espacio' si, con fotos en disco, queda menos que
+            FOTOS_MIN_LIBRE_BYTES"
+        degradado:
+          type: boolean
+          description: "true si geo o fotos no están en ok: la réplica sigue atendiendo"
+      required:
+        - ok
+        - db
+        - geo
+        - fotos
+        - degradado
   securitySchemes:
     cookieSesion:
       type: apiKey
@@ -2764,7 +3448,13 @@ paths:
         guarda, no se registra en logs ni en auditoría y no entra en la huella
         de idempotencia: queda solo la distancia redondeada. ubicacion_metodo y
         precision_gps_m los deriva el servidor. Además del rate limit por IP,
-        cada cuenta solo puede crear un reporte cada 60 minutos."
+        cada cuenta puede crear 3 reportes por día calendario en la zona horaria
+        de la ciudad, contados en la base. El reporte queda en nuevo y se
+        publica sin moderación previa, como «NO SE HA VERIFICADO», cuando llega
+        su publicar_en: 60 s después de crearlo si es el 1.º del día de la
+        cuenta, 240 s si es el 2.º o el 3.º. Lo fija el servidor al crear y
+        ningún cliente lo puede adelantar; mientras espera no lo ve nadie más
+        que su autor, técnicos incluidos."
       tags:
         - reportes
       security: &a1
@@ -2776,12 +3466,22 @@ paths:
             schema:
               $ref: "#/components/schemas/ReporteCrear"
       responses:
-        "201":
-          description: Reporte creado en estado nuevo
+        "200":
+          description: "Replay de un envío con la misma Idempotency-Key de la misma cuenta
+            (cabecera Idempotent-Replay: true): el reporte ya creado, con el
+            mismo publicar_en y los segundos que le quedan ahora. No gasta cupo"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ReporteFeature"
+                $ref: "#/components/schemas/MiReporteFeature"
+        "201":
+          description: "Reporte creado en estado nuevo, en la vista del autor: publicar_en
+            y segundos_para_publicar, calculados en la base (la cuenta regresiva
+            de la interfaz parte de acá)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MiReporteFeature"
         "400":
           description: "PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera
             de sus rangos físicos (precision_m de 0 a 10 000, antiguedad_s ≥ 0),
@@ -2813,17 +3513,23 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "429":
-          description: CUOTA_DE_REPORTES (un reporte por cuenta cada 60 min, con
-            Retry-After) o rate limit por IP
+          description: "CUOTA_DE_REPORTES: la cuenta ya creó sus 3 reportes de hoy (día
+            calendario en la zona horaria de la ciudad), con el mensaje «Ya
+            enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.» y
+            Retry-After con los segundos que faltan hasta la próxima medianoche
+            local. O rate limit por IP, también con Retry-After"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
     get:
-      summary: "Listar reportes publicados (SIEMPRE vista pública: validados y
-        resueltos, con la ubicación degradada que corresponda). La
-        representación no cambia aunque la petición traiga cookie de sesión;
-        para la vista técnica está /api/v1/tecnico/reportes."
+      summary: "Listar reportes publicados (SIEMPRE vista pública: nuevo como «NO SE
+        HA VERIFICADO», validado como «Verificado» y resuelto como «Resuelto»,
+        solo con publicar_en <= now(); rechazado y duplicado no se publican; con
+        la ubicación degradada que corresponda y sin autor). La representación
+        no cambia aunque la petición traiga cookie de sesión; para la vista
+        técnica está /api/v1/tecnico/reportes, y para los propios,
+        /api/v1/mis-reportes."
       tags:
         - reportes
       parameters:
@@ -2932,9 +3638,11 @@ paths:
                 $ref: "#/components/schemas/ReporteFeatureCollection"
   /api/v1/reportes/{id}:
     get:
-      summary: "Detalle público de un reporte. Devuelve 404 si aún no está publicado,
-        también para técnicos: la vista técnica vive en
-        /api/v1/tecnico/reportes/{id}."
+      summary: "Detalle público de un reporte (nuevo como «NO SE HA VERIFICADO»,
+        validado como «Verificado» y resuelto como «Resuelto», solo con
+        publicar_en <= now(); rechazado y duplicado no se publican). Devuelve
+        404 si no está publicado, también para técnicos: la vista técnica vive
+        en /api/v1/tecnico/reportes/{id}."
       tags:
         - reportes
       parameters:
@@ -2952,7 +3660,41 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReporteFeature"
         "404":
-          description: No existe o no está publicado
+          description: "NO_EXISTE: no existe, todavía espera su publicar_en, o está
+            rechazado o duplicado (retirado del mapa o sumado a otro punto)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+  /api/v1/mis-reportes:
+    get:
+      summary: "Los reportes de la cuenta de la sesión, 50 como máximo y los más
+        recientes primero, en cualquier estado: también mientras esperan su
+        publicar_en y si los rechazaron o fusionaron (retirado). Es la vista
+        pública más estado, verificado, publicar_en, segundos_para_publicar y
+        retirado, sin autor ni campos de moderación. Filtra por el autor de la
+        sesión: nunca devuelve reportes de otra cuenta."
+      tags:
+        - reportes
+      security: *a1
+      responses:
+        "200":
+          description: Reportes de la cuenta
+          headers:
+            Cache-Control:
+              description: "private, no-store: es de una sola cuenta"
+              schema:
+                type: string
+            Vary:
+              description: Cookie
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MisReportes"
+        "401":
+          description: SIN_SESION
           content:
             application/json:
               schema:
@@ -2960,9 +3702,11 @@ paths:
   /api/v1/tecnico/reportes:
     get:
       summary: "Listar reportes con la vista técnica: coordenada exacta, todos los
-        estados y las propiedades de moderación. Exige rol tecnico o admin; la
-        intención va en la ruta para que ninguna caché ni ninguna cookie
-        residual pueda producir esta representación desde una URL pública."
+        estados y las propiedades de moderación, solo de los reportes ya
+        publicados (publicar_en <= now(); los que esperan no aparecen). Exige
+        rol tecnico o admin; la intención va en la ruta para que ninguna caché
+        ni ninguna cookie residual pueda producir esta representación desde una
+        URL pública."
       tags:
         - reportes
       security: *a1
@@ -3084,7 +3828,7 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/tecnico/reportes/{id}:
     get:
-      summary: Detalle técnico de un reporte, en cualquier estado
+      summary: Detalle técnico de un reporte publicado, en cualquier estado
       tags:
         - reportes
       security: *a1
@@ -3115,7 +3859,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "404":
-          description: No existe
+          description: "NO_EXISTE: no existe o todavía espera su publicar_en"
           content:
             application/json:
               schema:
@@ -3123,7 +3867,10 @@ paths:
   /api/v1/reportes/{id}/estado:
     patch:
       summary: Cambiar estado (máquina de estados §7.3). Rechazar, fusionar, resolver
-        y reabrir (volver a nuevo) exigen estado_motivo.
+        y reabrir (volver a nuevo) exigen estado_motivo. Rechazar o fusionar
+        retira el reporte del mapa público. validado → rechazado (retirar un
+        verificado) es solo de admin. Nadie modera un reporte antes de su
+        publicar_en.
       tags:
         - reportes
       security: *a1
@@ -3160,19 +3907,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "403":
-          description: SIN_PERMISO
+          description: "SIN_PERMISO: el rol no puede moderar, o la transición existe pero
+            no para su rol (transicionExiste y no transicionPermitida): validado
+            → rechazado y rechazado → nuevo son solo de admin"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "404":
-          description: NO_EXISTE
+          description: "NO_EXISTE: no existe o todavía espera su publicar_en"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "409":
-          description: TRANSICION_NO_PERMITIDA
+          description: "TRANSICION_NO_PERMITIDA: la transición no existe desde el estado
+            actual"
           content:
             application/json:
               schema:
@@ -3340,17 +4090,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "429":
-          description: "Demasiadas subidas: límite por IP y por cuenta (12 fotos por hora)"
+          description: "CUOTA_DE_FOTOS: 12 fotos por cuenta y por día calendario en la
+            zona horaria de la ciudad, reservadas antes de procesar y devueltas
+            si el procesamiento falla; Retry-After hasta la próxima medianoche
+            local. O límite por IP"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "507":
+          description: "SIN_ESPACIO: con las fotos en disco, queda menos que
+            FOTOS_MIN_LIBRE_BYTES libre. Se responde antes de procesar la imagen
+            y sin gastar cupo; /ready queda degradado (fotos: poco_espacio). Las
+            fotos comparten disco con PostgreSQL en la VPS"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/fotos/{key}:
     get:
-      summary: "Servir una foto ya sanitizada. Quién la ve: la de un reporte
-        publicado, cualquiera; la de un reporte sin publicar, técnico y admin;
-        una foto sin reporte solo la ve quien la subió, técnicos incluidos
-        afuera. A cualquier otro se le responde 404, igual que si no existiera."
+      summary: "Servir una foto ya sanitizada. Quién la ve: la de un reporte publicado
+        (nuevo como «NO SE HA VERIFICADO», validado como «Verificado» y resuelto
+        como «Resuelto», solo con publicar_en <= now(); rechazado y duplicado no
+        se publican), cualquiera, con public, no-cache y ETag, y la visibilidad
+        se comprueba antes de responder 304; las fotos de reportes sin verificar
+        se ven en público junto con el reporte. El autor del reporte ve las
+        suyas en cualquier estado (esperando su publicar_en, rechazado o
+        duplicado), con private, no-store. Técnico y admin ven, con private,
+        no-store, las fotos de un reporte ya publicado que después se rechazó o
+        se fusionó (rechazado o duplicado), para moderarlo; una foto sin reporte
+        solo la ve quien la subió, técnicos incluidos afuera, y la de un reporte
+        que todavía espera su publicar_en no la ve nadie más que el autor,
+        tampoco técnicos ni admin. A cualquier otro se le responde 404 con
+        no-store, igual que si no existiera."
       tags:
         - fotos
       security:
@@ -3371,9 +4143,18 @@ paths:
             las fotos anteriores a 0.8.0, que no se reconvierten"
           headers:
             Cache-Control:
-              description: public, max-age=3600 si el reporte está publicado; private,
-                no-store en cualquier otro caso, para que una caché compartida
-                no la sirva a quien no puede verla.
+              description: "public, no-cache si el reporte está publicado: cualquier caché la
+                guarda pero la revalida con ETag en cada uso, así que retirar el
+                reporte la retira también de las cachés compartidas (con max-age
+                la seguirían sirviendo). private, no-store en los tres casos
+                privados: el autor, con sus fotos en cualquier estado; técnico y
+                admin, con la foto de un reporte publicado que después quedó
+                rechazado o duplicado; y el dueño de una foto sin reporte."
+              schema:
+                type: string
+            ETag:
+              description: Solo en las fotos de reportes publicados; If-None-Match con el
+                mismo valor da 304 si la foto sigue visible
               schema:
                 type: string
             X-Content-Type-Options:
@@ -3389,8 +4170,12 @@ paths:
               schema:
                 type: string
                 format: binary
+        "304":
+          description: La foto no cambió (If-None-Match) y sigue visible. Una foto de un
+            reporte retirado da 404, no 304
         "404":
-          description: "NO_EXISTE: la foto no existe o quien pregunta no puede verla"
+          description: "NO_EXISTE: la foto no existe o quien pregunta no puede verla
+            (Cache-Control: no-store)"
           content:
             application/json:
               schema:
@@ -3403,10 +4188,10 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/exportar:
     get:
-      summary: Exportar CSV o GeoJSON con nota metodológica, en la vista técnica.
-        Hasta 50000 filas por archivo (limite); si la selección tiene más, la
-        respuesta lo declara con total, exportados y truncado en vez de recortar
-        en silencio.
+      summary: Exportar CSV o GeoJSON con nota metodológica, en la vista técnica, solo
+        con reportes ya publicados (publicar_en <= now()). Hasta 50000 filas por
+        archivo (limite); si la selección tiene más, la respuesta lo declara con
+        total, exportados y truncado en vez de recortar en silencio.
       tags:
         - admin
       security: *a1
@@ -3546,7 +4331,8 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/indicadores:
     get:
-      summary: Indicadores básicos
+      summary: Indicadores básicos, solo con reportes ya publicados (publicar_en <=
+        now())
       tags:
         - admin
       security: *a1
@@ -3564,7 +4350,8 @@ paths:
         (verificadas), con su severidad efectiva; los resueltos cuentan aparte
         (resueltas, por_estado) como trabajo hecho. Por distrito,
         en_capa_vigente separa los que solo existen en una capa anterior.
-        ultimo_reporte_en va truncado al minuto.
+        ultimo_reporte_en va truncado al minuto. Solo cuenta reportes ya
+        publicados (publicar_en <= now()).
       tags:
         - ejecutivo
       security: *a1
@@ -3627,7 +4414,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "429":
-          description: "DEMASIADAS_CUENTAS: demasiadas altas desde la misma IP"
+          description: "DEMASIADAS_CUENTAS: demasiadas altas desde la misma IP, por hora o
+            por el tope de 10 altas por día calendario (ALTAS_POR_DIA_POR_IP),
+            contado en la base"
           content:
             application/json:
               schema:
@@ -3690,12 +4479,15 @@ paths:
                 $ref: "#/components/schemas/ConfiguracionPublica"
   /api/v1/auth/yo:
     get:
-      summary: "Usuario de la sesión, más `puede_reportar_desde` (ISO 8601 o null):
-        cuándo vuelve a tener turno de reporte esta cuenta. Es información para
-        la interfaz; la cuota la aplica el servidor al crear. Para tecnico,
-        admin y ejecutivo lleva además `panel_url`: la URL base del panel, o
-        null si el despliegue no la configuró. Al ciudadano no se le manda
-        nunca."
+      summary: "Usuario de la sesión, más reportes_restantes_hoy (de 3 por día
+        calendario en la zona horaria de la ciudad) y puede_reportar_desde: null
+        si puede reportar ahora, o la próxima medianoche local si ya no le
+        quedan reportes hoy. Además demora_proximo_s: cuánto tardaría en
+        publicarse el próximo reporte (60 s si es el 1.º del día, 240 s si no),
+        para avisarlo antes de enviar. Es información para la interfaz; el cupo
+        lo aplica el servidor al crear. Para tecnico, admin y ejecutivo lleva
+        además panel_url: la URL base del panel, o null si el despliegue no la
+        configuró. Al ciudadano no se le manda nunca."
       tags:
         - auth
       security: *a1
@@ -3773,27 +4565,102 @@ paths:
       responses:
         "200":
           description: Mapa capa → versión
+          headers:
+            Cache-Control:
+              description: "public, no-cache: se guarda, pero se revalida en cada uso"
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/CapasVigentes"
   /geo/v1/capas:
     get:
-      summary: Información de las capas vigentes (modo GeoJSON o teselas)
+      summary: "Información de las capas vigentes (modo GeoJSON o teselas), con la url
+        que tienen que usar los clientes: lleva la huella del contenido servido"
       tags:
         - geo
       responses:
         "200":
           description: Lista
+          headers:
+            Cache-Control:
+              description: "public, no-cache: se guarda, pero se revalida en cada uso. Es la
+                que dice cuál es la huella vigente: el cliente la vuelve a pedir
+                ante un 410 CAPA_CAMBIO"
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: "#/components/schemas/CapaInfo"
+  /geo/v1/capas/{capa}/v/{huella}:
+    get:
+      summary: GeoJSON web de la capa vigente, en la URL con huella que da
+        CapaInfo.url (desde 0.12.0). Si la huella no es la vigente responde 410
+        y el cliente vuelve a pedir /geo/v1/capas
+      tags:
+        - geo
+      parameters:
+        - name: capa
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - distrito_municipal
+              - unidad_vecinal
+              - manzana
+        - name: huella
+          in: path
+          required: true
+          description: Primeros 16 caracteres hexadecimales del SHA-256 del GeoJSON web
+            servido (HuellaCapaSchema)
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{16}$
+      responses:
+        "200":
+          description: FeatureCollection (application/geo+json)
+          headers:
+            Cache-Control:
+              description: "public, max-age=31536000, immutable: la URL lleva la huella del
+                contenido, así que no cambia mientras exista"
+              schema:
+                type: string
+            ETag:
+              description: Del contenido servido
+              schema:
+                type: string
+        "304":
+          description: No cambió (If-None-Match)
+        "404":
+          description: Capa desconocida o sin versión vigente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "410":
+          description: "CAPA_CAMBIO: la huella ya no es la vigente (la capa se activó o se
+            recargó). Va con Cache-Control: no-store; el cliente vuelve a pedir
+            /geo/v1/capas y usa la url nueva"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "413":
+          description: "USAR_TESELAS: la capa supera UMBRAL_TESELAS_BYTES y se consume por
+            teselas"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /geo/v1/capas/{capa}:
     get:
-      summary: GeoJSON web de la capa vigente (413 si debe consumirse por teselas)
+      summary: "Alias sin huella de /geo/v1/capas/{capa}/v/{huella}: la capa vigente,
+        sin cachear de más. Los clientes usan CapaInfo.url"
       tags:
         - geo
       parameters:
@@ -3808,16 +4675,35 @@ paths:
               - manzana
       responses:
         "200":
-          description: FeatureCollection
-        "413":
-          description: Usar teselas
+          description: FeatureCollection (application/geo+json)
+          headers:
+            Cache-Control:
+              description: "public, no-cache: se guarda, pero se revalida en cada uso"
+              schema:
+                type: string
+            ETag:
+              description: Del contenido servido
+              schema:
+                type: string
+        "304":
+          description: No cambió (If-None-Match)
+        "404":
+          description: Capa desconocida o sin versión vigente
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
-  /geo/v1/teselas/{capa}/{z}/{x}/{y}.mvt:
+        "413":
+          description: USAR_TESELAS
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+  /geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt:
     get:
-      summary: Teselas vectoriales generadas al vuelo desde la capa vigente
+      summary: "Teselas vectoriales generadas al vuelo desde la capa vigente, en la
+        plantilla con huella que da CapaInfo.url en modo teselas (desde 0.12.0).
+        La huella es la de la capa: la del GeoJSON del que salen las teselas"
       tags:
         - geo
       parameters:
@@ -3826,6 +4712,18 @@ paths:
           required: true
           schema:
             type: string
+            enum:
+              - distrito_municipal
+              - unidad_vecinal
+              - manzana
+        - name: huella
+          in: path
+          required: true
+          description: Primeros 16 caracteres hexadecimales del SHA-256 del GeoJSON web
+            servido (HuellaCapaSchema)
+          schema:
+            type: string
+            pattern: ^[0-9a-f]{16}$
         - name: z
           in: path
           required: true
@@ -3844,16 +4742,121 @@ paths:
       responses:
         "200":
           description: application/vnd.mapbox-vector-tile
+          headers:
+            Cache-Control:
+              description: "public, max-age=31536000, immutable: la URL lleva la huella del
+                contenido, así que no cambia mientras exista"
+              schema:
+                type: string
+            ETag:
+              description: Del contenido servido
+              schema:
+                type: string
         "204":
           description: Tesela vacía
+        "304":
+          description: No cambió (If-None-Match)
+        "400":
+          description: Tesela inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "404":
+          description: Capa desconocida o sin versión vigente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "410":
+          description: "CAPA_CAMBIO: la huella ya no es la vigente (la capa se activó o se
+            recargó). Va con Cache-Control: no-store; el cliente vuelve a pedir
+            /geo/v1/capas y usa la url nueva"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+  /geo/v1/teselas/{capa}/{z}/{x}/{y}.mvt:
+    get:
+      summary: "Alias sin huella de /geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt:
+        teselas de la capa vigente, sin cachear de más. Los clientes usan
+        CapaInfo.url"
+      tags:
+        - geo
+      parameters:
+        - name: capa
+          in: path
+          required: true
+          schema:
+            type: string
+            enum:
+              - distrito_municipal
+              - unidad_vecinal
+              - manzana
+        - name: z
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: x
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: y
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: application/vnd.mapbox-vector-tile
+          headers:
+            Cache-Control:
+              description: "public, no-cache: se guarda, pero se revalida en cada uso"
+              schema:
+                type: string
+            ETag:
+              description: Del contenido servido
+              schema:
+                type: string
+        "204":
+          description: Tesela vacía
+        "304":
+          description: No cambió (If-None-Match)
+        "400":
+          description: Tesela inválida
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
+        "404":
+          description: Capa desconocida o sin versión vigente
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /geo/v1/agregados/unidades-vecinales:
     get:
-      summary: Reportes validados por UV
+      summary: "Reportes publicados por UV (nuevo como «NO SE HA VERIFICADO», validado
+        como «Verificado» y resuelto como «Resuelto», solo con publicar_en <=
+        now(); rechazado y duplicado no se publican), con n_verificados y
+        severidad_max_verificada, que solo cuentan validado y resuelto: la
+        coropleta pública usa severidad_max_verificada y pinta neutra la UV que
+        solo tiene reportes sin verificar. Los puntos críticos se arman solo con
+        verificados."
       tags:
         - geo
       responses:
         "200":
           description: Lista
+          headers:
+            Cache-Control:
+              description: public, no-cache. geo-service las calcula como mucho cada 100 s
+                (GEO_CACHE_AGREGADOS_MS) y nunca sirve cifras de más de 120 s
+                (GEO_CACHE_AGREGADOS_EDAD_MAX_MS)
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -3862,7 +4865,7 @@ paths:
                   $ref: "#/components/schemas/AgregadoUv"
   /geo/v1/puntos-criticos:
     get:
-      summary: Puntos críticos (§9.2)
+      summary: Puntos críticos (§9.2), armados solo con reportes verificados
       tags:
         - geo
       parameters:
@@ -3875,6 +4878,13 @@ paths:
       responses:
         "200":
           description: Lista
+          headers:
+            Cache-Control:
+              description: public, no-cache. geo-service las calcula como mucho cada 100 s
+                (GEO_CACHE_AGREGADOS_MS) y nunca sirve cifras de más de 120 s
+                (GEO_CACHE_AGREGADOS_EDAD_MAX_MS)
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -3891,11 +4901,23 @@ paths:
           description: ok
   /ready:
     get:
-      summary: Readiness (base de datos y dependencias)
+      summary: "Readiness de api-core: la base, el /health de geo-service y el almacén
+        de fotos (con S3, que responda; en disco, que se pueda escribir y que
+        quede espacio por encima de FOTOS_MIN_LIBRE_BYTES). geo-service tiene su
+        propio /ready, que solo mira PostGIS."
       tags:
         - admin
       responses:
         "200":
-          description: listo
+          description: "Lista para atender. Con geo-service caído o las fotos en 'error' o
+            'poco_espacio', degradado: true, pero sigue en rotación"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyApiCore"
         "503":
-          description: no listo
+          description: "Sin base de datos: la réplica sale de rotación"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyApiCore"

@@ -49,6 +49,7 @@ const tecnicoValido = {
   severidad: 'media',
   severidad_calculada: 'media',
   estado: 'validado',
+  verificado: true,
   punto_critico_id: null,
   n_reportes_punto: null,
   precision_degradada: false,

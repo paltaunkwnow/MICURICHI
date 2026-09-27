@@ -1,3 +1,5 @@
+import { ETIQUETAS } from './enums.js';
+
 /** Se declara aparte porque la usan dos entradas: la zona suelta y la de la ciudad por defecto. */
 const ZONA_HORARIA_POR_DEFECTO = 'America/La_Paz';
 
@@ -59,22 +61,38 @@ export const CONFIG_DOMINIO = {
    */
   FOTO_ANCHO_MAX_PX: 1600,
   FOTO_ALTO_MAX_PX: 1600,
-  /**
-   * Fotos que una CUENTA puede subir por hora (§13), además del límite por IP. Con un reporte por
-   * hora y hasta 3 fotos cada uno, 12 deja margen para reintentos y reemplazos sin que la subida
-   * sirva de almacenamiento gratuito.
-   */
-  FOTOS_POR_HORA_POR_CUENTA: 12,
   RATE_LIMIT_REPORTES_POR_HORA: 10,
   /**
-   * Minutos que una CUENTA debe esperar entre dos reportes aceptados (§13, antiabuso).
-   *
-   * Es una ventana deslizante desde el último reporte aceptado, no una ventana horaria de reloj:
-   * con ventanas de reloj, quien envía a las 10:59 puede volver a enviar a las 11:00 y sacar dos
-   * reportes en un minuto. El límite por IP de arriba sigue existiendo y es independiente: uno
-   * acota a la persona y el otro a la conexión, y ninguno sustituye al otro.
+   * Reportes que una CUENTA puede crear por día calendario en `ZONA_HORARIA` (§13), además del
+   * límite por IP: uno acota a la persona y el otro a la conexión. El día se cuenta en la zona de
+   * la ciudad y no en UTC, para que «hoy» sea el mismo para el vecino y para el servidor, y el
+   * cupo vuelve entero a la medianoche local. Lo cuenta la base, así que vale igual con varias
+   * réplicas <a confirmar con el municipio>.
    */
-  MINUTOS_ENTRE_REPORTES_POR_CUENTA: 60,
+  REPORTES_POR_DIA_POR_CUENTA: 3,
+  /**
+   * Fotos que una CUENTA puede subir por día calendario en `ZONA_HORARIA`. Con 3 reportes de hasta
+   * 3 fotos, 12 deja margen para repetir alguna sin que la subida sirva de almacenamiento gratuito
+   * <a confirmar con el municipio>.
+   */
+  FOTOS_POR_DIA_POR_CUENTA: 12,
+  /**
+   * Cuentas nuevas que se pueden crear desde una misma IP por día calendario, además del límite por
+   * hora. El cupo es por cuenta, así que crear cuentas lo multiplicaría; este tope lo encarece, a
+   * costa de poder frenar a un barrio que sale por la misma IP <a confirmar con el municipio>.
+   */
+  ALTAS_POR_DIA_POR_IP: 10,
+  /**
+   * Segundos entre que el reporte llega al servidor y que se hace visible, para el 1.º reporte del
+   * día de la cuenta y para el 2.º y el 3.º (§7.3). Los fija api-core en `publicar_en` al crear, con
+   * el número que devuelve el contador del cupo diario: ningún cliente los puede adelantar. Las
+   * variables `REPORTE_DEMORA_PRIMERO_S` y `REPORTE_DEMORA_SIGUIENTES_S` de api-core existen solo
+   * para las pruebas <a confirmar con el municipio>.
+   */
+  DEMORA_PUBLICACION_PRIMERO_S: 60,
+  DEMORA_PUBLICACION_SIGUIENTES_S: 240,
+  /** Reportes que devuelve `GET /api/v1/mis-reportes`, los más recientes primero. */
+  MIS_REPORTES_MAX: 50,
   /**
    * Longitud mínima de una contraseña nueva. OWASP pide 8 como mínimo absoluto; se piden 10
    * porque el coste para quien se registra es nulo y el espacio de búsqueda crece mucho.
@@ -127,5 +145,6 @@ export const NOTA_METODOLOGICA =
   'del GPS del celular o de la mano del usuario. No es un modelo hidráulico ni un estudio de drenaje. ' +
   'Cualquier decisión de inversión requiere estudio técnico formal. La ausencia de reportes en una zona ' +
   'no significa ausencia de anegamiento. ' +
+  `Los reportes marcados «${ETIQUETAS.estado_publico.nuevo}» no fueron revisados por un técnico y pueden ser erróneos. ` +
   `El radio de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m no prueba que el vecino estuviera en el lugar: ` +
   'el GPS del teléfono se puede falsear.';

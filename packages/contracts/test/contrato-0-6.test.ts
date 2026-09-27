@@ -156,6 +156,7 @@ const tecnico = {
   severidad: 'media',
   severidad_calculada: 'media',
   estado: 'rechazado',
+  verificado: false,
   punto_critico_id: null,
   n_reportes_punto: null,
   precision_degradada: false,
@@ -187,19 +188,30 @@ const featureTecnica = {
   properties: tecnico,
 };
 
+/** La misma, en un estado público: desde 0.11.0 la Feature pública no acepta un rechazado. */
+const featureTecnicaPublicada = {
+  ...featureTecnica,
+  properties: {
+    ...tecnico,
+    estado: 'validado',
+    verificado: true,
+    estado_motivo: 'Confirmado en campo',
+  },
+};
+
 describe('0.6.0: la Feature técnica es parte del contrato', () => {
   it('ReporteTecnicoFeatureSchema conserva lo que la Feature pública descarta', () => {
     const t = ReporteTecnicoFeatureSchema.parse(featureTecnica);
     expect(t.properties.estado_motivo).toBe('Fuera del municipio');
     expect(t.properties.autor_id).toBe(tecnico.autor_id);
     expect(t.geometry.coordinates).toEqual([-63.1812345, -17.7812345]);
-    const publica = ReporteFeatureSchema.parse(featureTecnica);
+    const publica = ReporteFeatureSchema.parse(featureTecnicaPublicada);
     expect('estado_motivo' in publica.properties).toBe(false);
     expect('autor_id' in publica.properties).toBe(false);
   });
 
   it('una Feature con solo las propiedades públicas no pasa por técnica', () => {
-    const publica = ReporteFeatureSchema.parse(featureTecnica);
+    const publica = ReporteFeatureSchema.parse(featureTecnicaPublicada);
     expect(ReporteTecnicoFeatureSchema.safeParse(publica).success).toBe(false);
   });
 
@@ -291,10 +303,6 @@ describe('0.6.0: la exportación no recorta en silencio', () => {
 });
 
 describe('0.6.0: parámetros de cuota y de despliegue', () => {
-  it('cuota de fotos por cuenta: 12 por hora', () => {
-    expect(CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA).toBe(12);
-  });
-
   it('zona horaria por defecto del despliegue: America/La_Paz, válida para Intl', () => {
     expect(CONFIG_DOMINIO.ZONA_HORARIA_POR_DEFECTO).toBe('America/La_Paz');
     const formato = new Intl.DateTimeFormat('es', {

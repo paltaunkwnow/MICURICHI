@@ -1,5 +1,251 @@
 # Changelog — contracts
 
+## 0.15.0 — 2026-09-27
+
+**Con ruptura en los tipos, no en el cable: los tres campos transitorios pasan a obligatorios.**
+Tanda T8 del plan de producción (paso S37, segunda mitad).
+
+| Campo | Desde | Ahora |
+|---|---|---|
+| `SesionActual.reportes_restantes_hoy` | 0.10.0 | obligatorio |
+| `SesionActual.demora_proximo_s` | 0.11.0 | obligatorio |
+| `ReportePublico.verificado` (y por herencia `ReporteTecnico` y la Feature pública) | 0.11.0 | obligatorio |
+
+api-core ya los mandaba siempre, así que ninguna respuesta cambia. En el OpenAPI entran en
+`required` de `SesionActual`, `ReporteTecnico` y las `properties` de `ReporteFeature`, y sus
+descripciones dejan de decir «el esquema lo exige desde 0.15.0».
+
+**Consumidores:** api-core, geo-service, panel-admin y e2e compilan sin tocarlos. web-ciudadano:
+las cuatro pruebas que armaban sesiones y Features sin estos campos ahora los incluyen
+(`src/lib/cupo.test.ts`, `publicacion.test.ts`, `sesion.test.ts` y `verificacion.test.ts`). La app
+sigue tolerando su ausencia (una respuesta de un api-core anterior): sin `verificado` vale el
+estado, y sin los del cupo no inventa minutos ni turnos.
+
+## 0.14.0 — 2026-09-27
+
+**Con ruptura, sin consumidores: se quitan las dos constantes deprecadas.** Tanda T8 del plan de
+producción (paso S37).
+
+| Se quita | Reemplazo (desde 0.10.0) |
+|---|---|
+| `CONFIG_DOMINIO.MINUTOS_ENTRE_REPORTES_POR_CUENTA` (60) | `REPORTES_POR_DIA_POR_CUENTA` (3): ya no hay espera entre reportes |
+| `CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA` (12) | `FOTOS_POR_DIA_POR_CUENTA` (12): el cupo es diario |
+
+Tampoco están en `dist/dominio.json`. Antes de quitarlas se buscó en `services/`, `apps/`, `e2e/` y
+`pipelines/`: nadie las usa (la única mención es la prueba de web-ciudadano que comprueba que no se
+usen). No queda nada marcado `@deprecated`.
+
+### Transitorios hasta 0.15.0
+
+api-core ya manda siempre los tres campos (`/auth/yo` con `SesionActualSchema.parse`, y `verificado`
+en la vista base de las tres vistas de reporte), pero el esquema los sigue aceptando ausentes:
+volverlos obligatorios rompe la compilación de web-ciudadano, que arma sesiones y Features sin ellos
+en cuatro pruebas. Pasan a obligatorios en 0.15.0, cuando esas pruebas los incluyan.
+
+| Campo | Desde | Prueba de web-ciudadano que lo omite |
+|---|---|---|
+| `SesionActual.reportes_restantes_hoy` | 0.10.0 | `src/lib/cupo.test.ts`, `publicacion.test.ts` y `sesion.test.ts` (la constante `PERSONA`) |
+| `SesionActual.demora_proximo_s` | 0.11.0 | ídem |
+| `ReportePublico.verificado` (y por herencia `ReporteTecnico`) | 0.11.0 | `src/lib/verificacion.test.ts` (la función `reporte`, con `as ReporteFeature`) |
+
+En el OpenAPI, la descripción de cada uno dice «api-core lo manda siempre; el esquema lo exige desde
+0.15.0» en lugar de «Opcional hasta 0.14.0».
+
+### OpenAPI: `GET /api/v1/fotos/{key}` y la moderación
+
+Solo documentación: describe lo que api-core ya hace (`modoDeFoto` en `rutas/fotos.ts`).
+
+- Técnico y admin ven, con `private, no-store`, las fotos de un reporte ya publicado que después se
+  rechazó o se fusionó (`rechazado` o `duplicado`), para moderarlo.
+- La foto de un reporte que todavía espera su `publicar_en` no la ve nadie más que el autor,
+  tampoco técnicos ni admin.
+- La descripción de `Cache-Control` nombra los tres casos de `private, no-store`: el autor (sus
+  fotos en cualquier estado), técnico y admin con un reporte publicado y después rechazado o
+  duplicado, y el dueño de una foto sin reporte.
+
+**Consumidores:** ninguno cambia. api-core, geo-service, web-ciudadano, panel-admin y e2e compilan
+con 0.14.0 sin tocarlos.
+
+## 0.13.0 — 2026-09-27
+
+**Sin ruptura: `507 SIN_ESPACIO` en `POST /api/v1/fotos` y `fotos: 'poco_espacio'` en `/ready`.**
+Tanda T7 del plan de producción (paso S34): las fotos comparten el disco de la VPS con PostgreSQL.
+
+- `POST /api/v1/fotos` → `507 SIN_ESPACIO` si, con las fotos en disco, queda menos que
+  `FOTOS_MIN_LIBRE_BYTES` (variable de api-core, propuesta 2 GiB). Se responde **antes de
+  procesar** la imagen y **sin gastar cupo**.
+- `GET /ready` de api-core tiene esquema: `ReadyApiCoreSchema` (componente `ReadyApiCore`),
+  `{ ok, db: 'ok' | 'error', geo: string, fotos: 'ok' | 'error' | 'poco_espacio', degradado }`.
+  `ESTADOS_FOTOS_READY` lista los tres valores de `fotos`. Con `poco_espacio`, `200` y
+  `degradado: true`: la réplica sigue en rotación. Solo la base da `503`.
+
+**Consumidores:** api-core (S35): `AlmacenDisco.espacioLibre()`, el 507 antes de sharp y sin
+reservar `fotos_n`, y `fotos: 'poco_espacio'` en `/ready`. web-ciudadano puede mostrar un texto
+propio para el 507 (hoy cae en el genérico).
+
+### Transitorios hasta 0.14.0 (vale para 0.10.0 a 0.13.0; en 0.14.0 se corrió a 0.15.0, ver arriba)
+
+Para no romper a api-core a mitad de las tandas T3 a T7, estos campos nuevos son **opcionales**
+hasta 0.14.0 (paso S37), que los vuelve obligatorios junto con quitar lo marcado `@deprecated`:
+
+| Campo | Desde | Por qué opcional |
+|---|---|---|
+| `SesionActual.reportes_restantes_hoy` | 0.10.0 | api-core valida su respuesta de `/auth/yo` con el esquema: obligatorio antes de que lo mande, `/auth/yo` daría 500 |
+| `SesionActual.demora_proximo_s` | 0.11.0 | ídem |
+| `ReportePublico.verificado` (y por herencia `ReporteTecnico`) | 0.11.0 | api-core tipa su vista con `ReportePublico`: obligatorio rompería su compilación. Sin el campo, vale `ESTADOS_VERIFICADOS.includes(estado)` |
+
+Deprecados, se quitan en 0.14.0: `CONFIG_DOMINIO.MINUTOS_ENTRE_REPORTES_POR_CUENTA` y
+`CONFIG_DOMINIO.FOTOS_POR_HORA_POR_CUENTA`.
+
+## 0.12.0 — 2026-09-27
+
+**Sin ruptura: capas y teselas con la huella del contenido en la URL.** Tanda T6 (paso S29).
+
+- `HuellaCapaSchema`: 16 caracteres hexadecimales en minúscula, los primeros 64 bits del SHA-256
+  del GeoJSON web que geo-service tiene en memoria (del que salen también las teselas). Es del
+  contenido servido: recargar la misma versión con otra geometría la cambia.
+- `rutaCapaConHuella(capa, huella)` → `/geo/v1/capas/{capa}/v/{huella}` y
+  `rutaTeselasConHuella(capa, huella)` → `/geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt`
+  (con `{z}/{x}/{y}` literales). Son las que geo-service pone en `CapaInfo.url`.
+- `CODIGO_CAPA_CAMBIO = 'CAPA_CAMBIO'`: el `410` de una huella que ya no es la vigente, con
+  `Cache-Control: no-store`. El cliente vuelve a pedir `/geo/v1/capas` y usa la url nueva.
+- `CapaInfo` no cambia de forma: la huella viaja en `url`, que ahora está descrita.
+
+### OpenAPI
+
+| Ruta | Cache-Control |
+|---|---|
+| `GET /geo/v1/capas/{capa}/v/{huella}` (nueva) | con la huella vigente, `public, max-age=31536000, immutable` y `ETag`; con una vieja, `410 CAPA_CAMBIO` y `no-store`; `413 USAR_TESELAS` igual que antes |
+| `GET /geo/v1/teselas/{capa}/{huella}/{z}/{x}/{y}.mvt` (nueva) | ídem; `204` si la tesela está vacía |
+| `GET /geo/v1/capas/{capa}` y `GET /geo/v1/teselas/{capa}/{z}/{x}/{y}.mvt` | **alias** sin huella, `public, no-cache` |
+| `GET /geo/v1/capas` y `GET /geo/v1/capas/vigentes` | `public, no-cache` |
+| `GET /geo/v1/agregados/unidades-vecinales` y `GET /geo/v1/puntos-criticos` | `public, no-cache`; cifras con 120 s de antigüedad como máximo (TTL 100 s, `GEO_CACHE_AGREGADOS_MS`; edad máxima 120 s, `GEO_CACHE_AGREGADOS_EDAD_MAX_MS`) |
+
+**Consumidores:** geo-service (S30): la huella, las rutas nuevas, el 410 y las cabeceras.
+web-ciudadano (S31): capas y teselas solo por `CapaInfo.url`; el service worker reconoce la huella
+en la ruta. panel-admin (S32): la URL escrita a mano en `api.ts` pasa a `CapaInfo.url`.
+
+## 0.11.0 — 2026-09-27
+
+**Publicación sin moderación previa.** Tanda T4 (paso S18, ADR 0006). Un reporte `nuevo` se
+publica solo cuando llega su `publicar_en`, con la etiqueta exacta «NO SE HA VERIFICADO».
+Cambios con ruptura en `ESTADOS_PUBLICOS`, `ReportePublicoSchema.estado`, `AgregadoUvSchema`,
+la respuesta de `POST /api/v1/reportes` y la forma de `TRANSICIONES`.
+
+### Visibilidad (`src/dominio/enums.ts`)
+
+| Constante | 0.10.0 | 0.11.0 |
+|---|---|---|
+| `ESTADOS_PUBLICOS` | `validado`, `resuelto` | `nuevo`, `validado`, `resuelto` (type `EstadoPublico`) |
+| `ESTADOS_VERIFICADOS` | — | `validado`, `resuelto`: `verificado = true`; los únicos que arman puntos críticos y el color público por UV |
+| `ESTADOS_RETIRADOS` | — | `rechazado`, `duplicado`: rechazar o fusionar saca el reporte del mapa |
+| `ETIQUETAS.estado_publico` | — | `nuevo` «NO SE HA VERIFICADO», `validado` «Verificado», `resuelto` «Resuelto». `ETIQUETAS.estado` (rótulos del panel) no cambia |
+
+La vista pública es siempre `estado ∈ ESTADOS_PUBLICOS` **y** `publicar_en <= now()`. api-core y
+geo-service arman el literal SQL desde `ESTADOS_PUBLICOS` (no `ANY($n)`), para que PostgreSQL use
+los índices parciales de la migración 0015. `dist/dominio.json` suma `enums.estado_publico`,
+`enums.estado_verificado` y `enums.estado_retirado`.
+
+### Esquemas
+
+- `ReportePublicoSchema.estado` pasa a `z.enum(ESTADOS_PUBLICOS)`: **rechaza** `rechazado` y
+  `duplicado`, también en `ReporteFeatureSchema` y `ReporteFeatureCollectionSchema`.
+  `ReporteTecnicoSchema.estado` sigue aceptando todos los estados.
+- `ReportePublicoSchema.verificado: boolean`, **opcional hasta 0.14.0** (arriba).
+- `MiReporteSchema` (nuevo): la vista pública, en cualquier estado, más `verificado`,
+  `publicar_en`, `segundos_para_publicar` (entero ≥ 0, calculado en la base; 0 si ya pasó) y
+  `retirado`. Sin autor ni campos de moderación. `MiReporteFeatureSchema` lleva la coordenada
+  **exacta**: es solo para su autor, igual que el 201 de siempre. `MisReportesSchema`:
+  `FeatureCollection` de hasta `MIS_REPORTES_MAX` (50).
+- `AgregadoUvSchema` suma, **obligatorios**, `n_verificados` (entero ≥ 0) y
+  `severidad_max_verificada` (severidad o `null`), solo con `validado` y `resuelto`. `n_reportes`
+  y `severidad_max` pasan a contar también los `nuevo` publicados. La coropleta pública usa
+  `severidad_max_verificada` y pinta neutra la UV sin verificados.
+- `SesionActualSchema.demora_proximo_s`: entero de 0 a 3600, **opcional hasta 0.14.0**. 60 si la
+  cuenta todavía no envió ningún reporte hoy, 240 si ya envió alguno. El tope es el de las
+  variables de api-core (las pruebas corren con 0).
+
+### Parámetros (`CONFIG_DOMINIO`, también en `dist/dominio.json`)
+
+| Constante | Valor | Qué es |
+|---|---|---|
+| `DEMORA_PUBLICACION_PRIMERO_S` | `60` | Demora del 1.º reporte del día de la cuenta `<a confirmar con el municipio>` |
+| `DEMORA_PUBLICACION_SIGUIENTES_S` | `240` | Demora del 2.º y el 3.º |
+| `MIS_REPORTES_MAX` | `50` | Reportes que devuelve `GET /mis-reportes` |
+
+`NOTA_METODOLOGICA` suma «Los reportes marcados «NO SE HA VERIFICADO» no fueron revisados por un
+técnico y pueden ser erróneos.» (§9.5), antes de la frase del radio. Sigue en una línea.
+
+### Máquina de estados
+
+- Nueva transición `validado → rechazado`, **solo admin** y con `estado_motivo` (ya lo exigía
+  `ReporteCambiarEstadoSchema` para `rechazado`): retira del mapa un verificado inapropiado.
+- `TRANSICIONES` cambia de forma: de `{ [desde]: { a, rol } }` a `{ [desde]: { [hacia]: roles } }`,
+  porque los roles ahora dependen de la transición y no del estado de origen. Nadie fuera de
+  contracts lo leía directamente; `transicionPermitida(desde, hacia, rol)` no cambia de firma.
+- `transicionExiste(desde, hacia)` (nueva): permite responder `403 SIN_PERMISO` a un técnico que
+  intenta `validado → rechazado`, y `409 TRANSICION_NO_PERMITIDA` solo cuando la transición no
+  existe.
+
+### OpenAPI
+
+- `POST /api/v1/reportes`: el `201` y el replay (`200`, `Idempotent-Replay: true`) devuelven
+  `MiReporteFeature`, con `publicar_en` y `segundos_para_publicar`. El replay devuelve el mismo
+  `publicar_en`. El resumen explica la demora de 60 y 240 s.
+- `GET /api/v1/mis-reportes` (nueva): con sesión, `MisReportes`, `private, no-store` y
+  `Vary: Cookie`; `401` sin sesión.
+- `GET /reportes` y `/reportes/{id}`: la vista pública con `nuevo`; el `404` del detalle cubre el
+  reporte en espera, rechazado o duplicado.
+- `GET /fotos/{key}`: las publicadas con `public, no-cache` y `ETag` (antes `max-age=3600`), la
+  visibilidad se comprueba antes del `304`; el autor ve las suyas en cualquier estado con
+  `private, no-store`; una foto sin reporte, solo quien la subió; el resto `404` con `no-store`.
+- `PATCH /reportes/{id}/estado`: `403` para la transición que existe pero no para el rol, `404`
+  mientras el reporte espera su `publicar_en`.
+- Técnica, exportación, indicadores y resumen ejecutivo: solo reportes ya publicados.
+- `/auth/yo` menciona `demora_proximo_s`; `AgregadoUv` requiere los dos campos nuevos.
+
+**Consumidores:** api-core (S20), geo-service (S21), web-ciudadano (S22: `ETIQUETAS.estado_publico`,
+`MiReporte`, sin «solo vos»), panel-admin (S23: «Retirar del mapa» con `transicionPermitida`), e2e
+(S24).
+
+## 0.10.0 — 2026-09-27
+
+**Cupo diario por cuenta y tope diario de altas por IP.** Tanda T3 (paso S13). Se quita la espera
+de 60 min entre reportes.
+
+### Parámetros (`CONFIG_DOMINIO`, también en `dist/dominio.json`)
+
+| Constante | Valor | Qué es |
+|---|---|---|
+| `REPORTES_POR_DIA_POR_CUENTA` | `3` | Nueva. Reportes por cuenta y por día calendario en `ZONA_HORARIA`, contados en la base (`cuota_reporte_diaria`, migración 0014) `<a confirmar con el municipio>` |
+| `FOTOS_POR_DIA_POR_CUENTA` | `12` | Nueva. Fotos por cuenta y por día calendario |
+| `ALTAS_POR_DIA_POR_IP` | `10` | Nueva. Cuentas nuevas desde una misma IP por día calendario, además del límite por hora |
+| `MINUTOS_ENTRE_REPORTES_POR_CUENTA` | `60` | **`@deprecated`**: ya no hay espera entre reportes. Se quita en 0.14.0 |
+| `FOTOS_POR_HORA_POR_CUENTA` | `12` | **`@deprecated`**: el cupo es diario. Se quita en 0.14.0 |
+
+El día se cuenta en la zona horaria de la ciudad y no en UTC, y el cupo vuelve entero a la
+medianoche local.
+
+### `SesionActualSchema` (`GET /api/v1/auth/yo`)
+
+- `reportes_restantes_hoy`: entero ≥ 0, **opcional hasta 0.14.0** (arriba).
+- `puede_reportar_desde` no cambia de tipo, pero ahora es `null` o **la próxima medianoche
+  local** (ISO 8601 con desfase) cuando no quedan reportes hoy.
+
+### OpenAPI
+
+- `POST /reportes` `429 CUOTA_DE_REPORTES`: «Ya enviaste los 3 reportes de hoy. Vas a poder
+  enviar otro mañana.», con `Retry-After` hasta la medianoche local. Ya no menciona 60 min.
+- `POST /fotos` `429 CUOTA_DE_FOTOS`: 12 fotos por cuenta y por día, reservadas antes de
+  procesar y devueltas si el procesamiento falla.
+- `POST /auth/registro` `429 DEMASIADAS_CUENTAS`: por hora o por el tope de 10 altas por día.
+- `/auth/yo` describe `reportes_restantes_hoy` y la medianoche.
+
+**Consumidores:** db (S14: `cuota_reporte_diaria`), api-core (S15: contador atómico, idempotencia
+por cuenta, altas por IP, `reportes_restantes_hoy`), web-ciudadano (S16: «Te quedan N de 3
+reportes hoy»; `errores.ts` y `PanelCuenta.tsx` todavía usan las dos constantes deprecadas), e2e
+(S17).
+
 ## 0.9.0 — 2026-09-26
 
 **Cambio con ruptura en `POST /api/v1/reportes`: la posición del dispositivo pasa a ser

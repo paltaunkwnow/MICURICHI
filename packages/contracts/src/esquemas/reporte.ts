@@ -2,10 +2,12 @@ import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import {
   CAUSAS_PRESUNTAS,
+  ESTADOS_PUBLICOS,
   ESTADOS_REPORTE,
   type EstadoReporte,
   FRECUENCIAS,
   PROFUNDIDADES,
+  type Rol,
   SEVERIDADES,
   SUMIDERO_CERCANO,
   SUMIDERO_ESTADOS,
@@ -163,7 +165,14 @@ export const ReportePublicoSchema = z.object({
     .enum(SEVERIDADES)
     .meta({ description: 'Severidad efectiva = manual si existe, si no la calculada' }),
   severidad_calculada: z.enum(SEVERIDADES),
-  estado: z.enum(ESTADOS_REPORTE),
+  estado: z.enum(ESTADOS_PUBLICOS).meta({
+    description:
+      'Solo estados públicos: nuevo se muestra como «NO SE HA VERIFICADO», validado como «Verificado» y resuelto como «Resuelto» (ETIQUETAS.estado_publico). rechazado y duplicado no se publican',
+  }),
+  verificado: z.boolean().meta({
+    description:
+      'true si un técnico lo revisó (validado o resuelto); false en nuevo, que se publica sin moderación previa como «NO SE HA VERIFICADO»',
+  }),
   punto_critico_id: z.uuid().nullable(),
   n_reportes_punto: z.number().int().nullable(),
   precision_degradada: z
@@ -174,6 +183,7 @@ export type ReportePublico = z.infer<typeof ReportePublicoSchema>;
 
 /** Vista del técnico: todo lo público más campos de moderación y coordenada exacta. */
 export const ReporteTecnicoSchema = ReportePublicoSchema.extend({
+  estado: z.enum(ESTADOS_REPORTE),
   ubicacion_metodo: z.enum(UBICACION_METODOS).meta({
     description:
       'Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro del margen de error del dispositivo (a dispositivo.precision_m o menos de su posición al enviar, y con 2 m como margen mínimo), manual si quedó más lejos, siempre dentro del radio. El margen existe porque dos lecturas del GPS difieren varios metros aunque nadie mueva el punto',
@@ -245,6 +255,44 @@ export const ReporteTecnicoFeatureCollectionSchema = ReporteFeatureCollectionSch
 export type ReporteTecnicoFeatureCollection = z.infer<typeof ReporteTecnicoFeatureCollectionSchema>;
 
 /**
+ * Un reporte visto por su AUTOR: la respuesta de `POST /api/v1/reportes` (201 y replay) y cada
+ * elemento de `GET /api/v1/mis-reportes`. Es la vista pública más lo que solo le importa a quien lo
+ * envió, en cualquier estado: también mientras espera su `publicar_en` y si lo rechazaron o
+ * fusionaron. Nunca lleva el autor ni campos de moderación, y solo sale con `private, no-store`.
+ */
+export const MiReporteSchema = ReportePublicoSchema.extend({
+  estado: z.enum(ESTADOS_REPORTE),
+  verificado: z.boolean().meta({ description: 'true si está validado o resuelto' }),
+  publicar_en: z.iso.datetime({ offset: true }).meta({
+    description: `Desde cuándo lo ve el público: ${CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S} s después de crearlo si fue el 1.º reporte del día de la cuenta, ${CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S} s si fue el 2.º o el 3.º. Lo fija el servidor al crear y un replay devuelve el mismo`,
+  }),
+  segundos_para_publicar: z.number().int().min(0).meta({
+    description:
+      'Segundos que faltan para publicar_en, calculados en la base al responder (0 si ya pasó). La cuenta regresiva parte de acá y no del reloj del teléfono',
+  }),
+  retirado: z.boolean().meta({
+    description: 'true si lo rechazaron o lo fusionaron con otro: ya no está en el mapa público',
+  }),
+});
+export type MiReporte = z.infer<typeof MiReporteSchema>;
+
+export const MiReporteFeatureSchema = ReporteFeatureSchema.extend({
+  geometry: PuntoGeoJsonSchema.meta({
+    description:
+      'Coordenada exacta, sin jitter: la respuesta es solo para su autor, que la eligió (private, no-store)',
+  }),
+  properties: MiReporteSchema,
+});
+export type MiReporteFeature = z.infer<typeof MiReporteFeatureSchema>;
+
+/** `GET /api/v1/mis-reportes`: los reportes de la cuenta, los más recientes primero. */
+export const MisReportesSchema = z.object({
+  type: z.literal('FeatureCollection'),
+  features: z.array(MiReporteFeatureSchema).max(CONFIG_DOMINIO.MIS_REPORTES_MAX),
+});
+export type MisReportes = z.infer<typeof MisReportesSchema>;
+
+/**
  * Estados a los que solo se llega diciendo por qué. `nuevo` está porque la única transición que
  * lo alcanza es reabrir un rechazado (§7.3): sin motivo, la auditoría registraba la reapertura
  * pero no su porqué.
@@ -284,18 +332,40 @@ export const ReporteCambiarEstadoSchema = z
   });
 export type ReporteCambiarEstado = z.infer<typeof ReporteCambiarEstadoSchema>;
 
-export const TRANSICIONES: Record<string, { a: readonly string[]; rol: readonly string[] }> = {
-  nuevo: { a: ['validado', 'rechazado', 'duplicado'], rol: ['tecnico', 'admin'] },
-  validado: { a: ['resuelto', 'duplicado'], rol: ['tecnico', 'admin'] },
-  rechazado: { a: ['nuevo'], rol: ['admin'] },
-  duplicado: { a: [], rol: [] },
-  resuelto: { a: [], rol: [] },
-};
+const MODERACION = ['tecnico', 'admin'] as const satisfies readonly Rol[];
+
+/**
+ * Transiciones de la máquina de estados (CLAUDE.md §7.3): para cada estado, a cuáles se puede
+ * pasar y con qué roles. Desde 0.11.0 los roles van por transición y no por estado de origen,
+ * porque `validado → rechazado` (retirar del mapa un verificado) es solo de admin y el resto de
+ * las salidas de `validado` no.
+ */
+export const TRANSICIONES = {
+  nuevo: { validado: MODERACION, rechazado: MODERACION, duplicado: MODERACION },
+  validado: { resuelto: MODERACION, duplicado: MODERACION, rechazado: ['admin'] },
+  rechazado: { nuevo: ['admin'] },
+  duplicado: {},
+  resuelto: {},
+} as const satisfies Record<EstadoReporte, Partial<Record<EstadoReporte, readonly Rol[]>>>;
+
+function esEstado(v: string): v is EstadoReporte {
+  return (ESTADOS_REPORTE as readonly string[]).includes(v);
+}
+
+function rolesDeTransicion(desde: string, hacia: string): readonly string[] | undefined {
+  // Se comprueba contra la lista y no con `in`: `'toString' in {}` es true.
+  if (!esEstado(desde) || !esEstado(hacia)) return undefined;
+  const destinos: Partial<Record<EstadoReporte, readonly string[]>> = TRANSICIONES[desde];
+  return destinos[hacia];
+}
+
+/** Si la transición existe para algún rol. Sirve para responder 403 (rol) y no 409 (no existe). */
+export function transicionExiste(desde: string, hacia: string): boolean {
+  return rolesDeTransicion(desde, hacia) !== undefined;
+}
 
 export function transicionPermitida(desde: string, hacia: string, rol: string): boolean {
-  const t = TRANSICIONES[desde];
-  if (!t) return false;
-  return t.a.includes(hacia) && t.rol.includes(rol);
+  return rolesDeTransicion(desde, hacia)?.includes(rol) ?? false;
 }
 
 export const ReporteReclasificarSchema = z

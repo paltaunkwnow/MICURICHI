@@ -58,12 +58,15 @@ export const UsuarioSchema = z.object({
 export type Usuario = z.infer<typeof UsuarioSchema>;
 
 /**
- * Lo que devuelve `GET /api/v1/auth/yo`: el usuario y, además, cuándo vuelve a tener turno para
- * reportar (null = ahora mismo).
+ * Lo que devuelve `GET /api/v1/auth/yo`: el usuario y, además, cuántos reportes le quedan hoy y
+ * cuándo vuelve a tener turno para reportar (null = ahora mismo).
  *
  * Existe para que la interfaz pueda avisar ANTES de que alguien rellene cinco pantallas y se
- * encuentre un 429 al final. No es el control: el control es el UPDATE atómico del servidor al
- * crear, y este campo no lo sustituye ni lo relaja.
+ * encuentre un 429 al final. No es el control: el control es el contador atómico del servidor al
+ * crear, y estos campos no lo sustituyen ni lo relajan.
+ *
+ * `reportes_restantes_hoy` (desde 0.10.0) y `demora_proximo_s` (desde 0.11.0) son obligatorios
+ * desde 0.15.0.
  *
  * `panel_url` (desde 0.7.0) es la dirección del panel, y solo existe para `ROLES_DEL_PANEL`.
  * Antes viajaba fijada en el JavaScript público de la app ciudadana, a la vista de cualquiera.
@@ -72,7 +75,27 @@ export type Usuario = z.infer<typeof UsuarioSchema>;
  * sea null.
  */
 export const SesionActualSchema = UsuarioSchema.extend({
-  puede_reportar_desde: z.iso.datetime({ offset: true }).nullable(),
+  puede_reportar_desde: z.iso.datetime({ offset: true }).nullable().meta({
+    description:
+      'null si la cuenta puede reportar ahora; si ya usó los reportes de hoy, la próxima medianoche en la zona horaria de la ciudad (ISO 8601 con desfase)',
+  }),
+  reportes_restantes_hoy: z
+    .number()
+    .int()
+    .min(0)
+    .meta({
+      description: `Reportes que le quedan hoy a la cuenta, de ${CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA} por día calendario en la zona horaria de la ciudad`,
+    }),
+  demora_proximo_s: z
+    .number()
+    .int()
+    .min(0)
+    // El tope es el de las variables de api-core (0 a 3600): las pruebas corren con 0, y el CHECK
+    // de la base no deja que publicar_en pase de creado_en + 1 h.
+    .max(3600)
+    .meta({
+      description: `Segundos que tardaría en publicarse el próximo reporte si se enviara ahora: ${CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S} si la cuenta todavía no envió ninguno hoy, ${CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S} si ya envió alguno. Con el cupo agotado no se usa: puede_reportar_desde dice cuándo vuelve a poder`,
+    }),
   panel_url: z
     // `abort`: con una URL que no se puede leer, la comprobación de credenciales no llega a correr.
     .url({ protocol: /^https?$/, abort: true, message: 'URL absoluta http o https.' })

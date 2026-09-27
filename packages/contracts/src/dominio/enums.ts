@@ -31,11 +31,34 @@ export type Severidad = (typeof SEVERIDADES)[number];
 export const ESTADOS_REPORTE = ['nuevo', 'validado', 'duplicado', 'rechazado', 'resuelto'] as const;
 export type EstadoReporte = (typeof ESTADOS_REPORTE)[number];
 
-/** Estados visibles en el mapa público (moderación previa, CLAUDE.md §7.3). */
+/**
+ * Estados de la vista pública (CLAUDE.md §7.3), siempre con `publicar_en <= now()`. Desde 0.11.0 no
+ * hay moderación previa: `nuevo` se publica con la etiqueta «NO SE HA VERIFICADO». Es la única
+ * lista de visibilidad: api-core y geo-service arman con ella el literal SQL de sus consultas.
+ */
 export const ESTADOS_PUBLICOS = [
+  'nuevo',
   'validado',
   'resuelto',
 ] as const satisfies readonly EstadoReporte[];
+export type EstadoPublico = (typeof ESTADOS_PUBLICOS)[number];
+
+/**
+ * Estados que revisó un técnico (`verificado = true`). Solo estos arman los puntos críticos y
+ * el color público de gravedad por UV (§9.2): un reporte sin revisar no fabrica recurrencia.
+ */
+export const ESTADOS_VERIFICADOS = [
+  'validado',
+  'resuelto',
+] as const satisfies readonly EstadoPublico[];
+export type EstadoVerificado = (typeof ESTADOS_VERIFICADOS)[number];
+
+/** Estados que sacan un reporte del mapa: rechazar o fusionar lo retira (`retirado = true`). */
+export const ESTADOS_RETIRADOS = [
+  'rechazado',
+  'duplicado',
+] as const satisfies readonly EstadoReporte[];
+export type EstadoRetirado = (typeof ESTADOS_RETIRADOS)[number];
 
 export const ROLES = ['ciudadano', 'tecnico', 'admin', 'ejecutivo'] as const;
 export type Rol = (typeof ROLES)[number];
@@ -107,6 +130,16 @@ export const ETIQUETAS = {
     rechazado: 'Rechazado',
     resuelto: 'Resuelto',
   },
+  /**
+   * Cómo ve el público el estado (mapa, tarjetas, detalle y leyenda). `nuevo` lleva el texto
+   * EXACTO «NO SE HA VERIFICADO», decisión del usuario: no se traduce ni se abrevia. `estado`, de
+   * arriba, es el rótulo del panel.
+   */
+  estado_publico: {
+    nuevo: 'NO SE HA VERIFICADO',
+    validado: 'Verificado',
+    resuelto: 'Resuelto',
+  } satisfies Record<EstadoPublico, string>,
   ubicacion_tipo: {
     via_publica: 'Vía pública',
     vivienda_o_predio: 'Vivienda o predio',

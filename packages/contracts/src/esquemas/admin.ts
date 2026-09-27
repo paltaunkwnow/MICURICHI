@@ -74,3 +74,30 @@ export const IndicadoresSchema = z.object({
   capas_vigentes: z.record(z.string(), z.string().nullable()),
 });
 export type Indicadores = z.infer<typeof IndicadoresSchema>;
+
+/**
+ * Estado del almacén de fotos en `/ready` de api-core. `poco_espacio` (desde 0.13.0): con fotos en
+ * disco, queda menos que `FOTOS_MIN_LIBRE_BYTES`; api-core responde 507 SIN_ESPACIO a las subidas.
+ */
+export const ESTADOS_FOTOS_READY = ['ok', 'error', 'poco_espacio'] as const;
+export type EstadoFotosReady = (typeof ESTADOS_FOTOS_READY)[number];
+
+/**
+ * Respuesta de `GET /ready` de api-core. Solo la base saca a la réplica de rotación (503): geo-service
+ * y las fotos son compartidos por todas las réplicas, y sacarlas a todas no arreglaría nada.
+ */
+export const ReadyApiCoreSchema = z.object({
+  ok: z.boolean().meta({ description: 'false solo si falla la base de datos (503)' }),
+  db: z.enum(['ok', 'error']),
+  geo: z.string().meta({
+    description: "Estado del /health de geo-service: 'ok', 'error' o 'HTTP <código>'",
+  }),
+  fotos: z.enum(ESTADOS_FOTOS_READY).meta({
+    description:
+      "'ok'; 'error' si el almacén no responde o no se puede escribir; 'poco_espacio' si, con fotos en disco, queda menos que FOTOS_MIN_LIBRE_BYTES",
+  }),
+  degradado: z.boolean().meta({
+    description: 'true si geo o fotos no están en ok: la réplica sigue atendiendo',
+  }),
+});
+export type ReadyApiCore = z.infer<typeof ReadyApiCoreSchema>;

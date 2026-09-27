@@ -154,6 +154,8 @@ const usuario = {
   email: 'tecnica@example.com',
   nombre: 'Técnica',
   puede_reportar_desde: null,
+  reportes_restantes_hoy: 3,
+  demora_proximo_s: 60,
 };
 const PANEL = 'https://panel.micurichi.example/';
 const sesion = (rol: string, extra: Record<string, unknown> = {}) =>
