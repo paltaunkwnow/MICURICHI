@@ -11,6 +11,32 @@ function noVacia(v: string | undefined): string | undefined {
   return v === '' ? undefined : v;
 }
 
+/**
+ * Tope de GEO_CACHE_AGREGADOS_EDAD_MAX_MS: el contrato promete cifras públicas de 120 s como
+ * máximo (`packages/contracts/CHANGELOG.md`, `docs/operaciones/produccion.md`).
+ */
+export const EDAD_MAX_CIFRAS_TOPE_MS = 120_000;
+
+/**
+ * Milisegundos de una variable: un número finito ≥ 0 (y ≤ `tope`), o el arranque se rechaza.
+ * Antes `-1` o `2 min` (NaN) llegaban tal cual a la caché: con NaN ninguna comparación de edad
+ * da verdadera y cada petición recalculaba la cifra.
+ */
+function milisegundos(
+  env: NodeJS.ProcessEnv,
+  variable: string,
+  porDefecto: number,
+  tope = Number.POSITIVE_INFINITY,
+): number {
+  const crudo = noVacia(env[variable]?.trim());
+  if (crudo === undefined) return porDefecto;
+  const n = Number(crudo);
+  if (!Number.isFinite(n) || n < 0)
+    throw new Error(`${variable} tiene que ser un número de milisegundos ≥ 0 (vale «${crudo}»)`);
+  if (n > tope) throw new Error(`${variable} no puede pasar de ${tope} ms (vale ${n})`);
+  return n;
+}
+
 export interface ConfigGeo {
   puerto: number;
   host: string;
@@ -44,8 +70,16 @@ export interface ConfigGeo {
    * trabajo real en PostGIS, a diferencia de una tesela, que sale de la caché en memoria.
    */
   rateLimitConsultasPorMinuto: number;
-  /** Vida de la caché de agregados por UV, en ms. */
+  /**
+   * Cifras públicas (agregados por UV y puntos críticos): a partir de esta edad, en ms, la copia
+   * se recalcula (por detrás, mientras se sigue sirviendo la vieja).
+   */
   cacheAgregadosMs: number;
+  /**
+   * Edad máxima de una cifra pública servida, en ms. Pasado este tiempo sin recálculo, quien pide
+   * espera al valor nuevo: nadie ve cifras más viejas que esto.
+   */
+  cacheAgregadosEdadMaxMs: number;
   /**
    * `statement_timeout` propio de este servicio, en ms. El pool de `packages/db` por defecto usa
    * 30 s (pensado para escrituras largas de api-core); api-core en cambio abandona la resolución
@@ -82,7 +116,13 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigGeo {
     confiarEnProxy: leerConfianzaProxy(env.TRUST_PROXY),
     rateLimitPorMinuto: Number(env.GEO_RATE_LIMIT_POR_MINUTO ?? 600),
     rateLimitConsultasPorMinuto: Number(env.GEO_RATE_LIMIT_CONSULTAS_POR_MINUTO ?? 120),
-    cacheAgregadosMs: Number(env.GEO_CACHE_AGREGADOS_MS ?? 30_000),
+    cacheAgregadosMs: milisegundos(env, 'GEO_CACHE_AGREGADOS_MS', 100_000),
+    cacheAgregadosEdadMaxMs: milisegundos(
+      env,
+      'GEO_CACHE_AGREGADOS_EDAD_MAX_MS',
+      120_000,
+      EDAD_MAX_CIFRAS_TOPE_MS,
+    ),
     rutaMetricas: env.METRICAS_RUTA ?? '/metrics',
     tokenMetricas: noVacia(env.METRICAS_TOKEN) ?? '',
     dbStatementTimeoutMs: Number(env.GEO_DB_STATEMENT_TIMEOUT_MS ?? 5000),

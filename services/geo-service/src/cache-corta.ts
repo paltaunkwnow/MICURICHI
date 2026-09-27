@@ -1,10 +1,10 @@
 /**
  * Caché de un único valor con vida corta, protección contra estampida y refresco en segundo plano.
  *
- * Se usa para los agregados por unidad vecinal: la consulta recorre todos los reportes publicables
- * y la piden el panel y el mapa público en cada carga. Sin caché, N pestañas abiertas son N
- * pasadas completas; con `enVuelo` además se evita que N peticiones simultáneas lancen N consultas
- * para calcular exactamente lo mismo.
+ * Se usa para las cifras públicas (agregados por unidad vecinal y puntos críticos): la consulta
+ * recorre todos los reportes publicados y la piden el panel y el mapa público en cada carga. Sin
+ * caché, N pestañas abiertas son N pasadas completas; con `enVuelo` además se evita que N
+ * peticiones simultáneas lancen N consultas para calcular exactamente lo mismo.
  *
  * El refresco en segundo plano se añadió en la Fase 4 por una razón medida: con un millón de
  * reportes esa consulta tarda 264 ms (721 ms antes del índice de la migración 0007), y la caché
@@ -45,16 +45,23 @@ export class CacheCorta<T> {
     return Date.now() - this.en < this.edadMaximaMs ? this.valor : null;
   }
 
-  guardar(valor: T): void {
+  /**
+   * @param desde Momento al que corresponden los datos. Un recálculo pasa la hora en que EMPEZÓ:
+   *   la consulta ve la base de ese instante, y marcarla al terminar le sumaba lo que tardó a la
+   *   vida de la copia (una cifra de 120 s servida como de 100 s si la consulta tardó 20).
+   */
+  guardar(valor: T, desde = Date.now()): void {
     this.valor = valor;
-    this.en = Date.now();
+    this.en = desde;
   }
 
   /** Lanza el recálculo si no hay ya uno en curso, y devuelve la promesa. */
   private recalcular(fn: () => Promise<T>): Promise<T> {
-    this.enVuelo ??= fn()
+    if (this.enVuelo) return this.enVuelo;
+    const inicio = Date.now();
+    this.enVuelo = fn()
       .then((v) => {
-        this.guardar(v);
+        this.guardar(v, inicio);
         return v;
       })
       .finally(() => {

@@ -2,11 +2,16 @@
  * Caché de capas vigentes: GeoJSON web (para render) + índice geojson-vt (teselas al vuelo).
  * Prefiere data/processed/<version>/<capa>/<capa>.web.geojson generado por el ETL; si no existe,
  * simplifica en PostGIS con ST_SimplifyPreserveTopology.
+ *
+ * Cada capa en memoria lleva su huella (contrato 0.12.0): los primeros 16 hex del SHA-256 del
+ * GeoJSON que se sirve, del que salen también las teselas. Va en la URL que da CapaInfo.url, así
+ * que esa URL se puede cachear un año: si el contenido cambia, cambia la URL.
  */
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CapaInfo, TipoCapa } from 'contracts';
-import { TIPOS_CAPA } from 'contracts';
+import type { CapaInfo, HuellaCapa, TipoCapa } from 'contracts';
+import { rutaCapaConHuella, rutaTeselasConHuella, TIPOS_CAPA } from 'contracts';
 import type { FeatureCollection } from 'geojson';
 import geojsonvt, { type Indice } from 'geojson-vt';
 import type pg from 'pg';
@@ -14,8 +19,17 @@ import { fromGeojsonVt } from 'vt-pbf';
 import type { ConfigGeo } from './config.js';
 import type { MetricasGeo } from './observabilidad.js';
 
-interface CapaEnCache {
+/** Versión vigente de una capa y cuándo se cargó: el ETL puede recargar la misma versión. */
+interface CapaVigente {
   version: string;
+  cargadoEn: string;
+}
+
+export interface CapaEnCache {
+  version: string;
+  /** Versión y carga de las que salió: si el ETL recarga la misma versión, cambia y se reconstruye. */
+  clave: string;
+  huella: HuellaCapa;
   geojson: FeatureCollection;
   texto: string;
   bytes: number;
@@ -25,13 +39,14 @@ interface CapaEnCache {
 
 export class CacheCapas {
   private cache = new Map<TipoCapa, CapaEnCache>();
-  private vigentes: { valor: Record<TipoCapa, string | null>; en: number } | null = null;
+  private vigentes: { valor: Record<TipoCapa, CapaVigente | null>; en: number } | null = null;
   /**
-   * Cargas en vuelo. Sin esto, N peticiones simultáneas de una capa fría lanzan N cargas
-   * completas a la vez (la de manzanas son ~27 MB de GeoJSON más su índice de teselas):
-   * memoria multiplicada por N y N consultas pesadas a PostGIS para el mismo resultado.
+   * Cargas en vuelo, por capa y con la clave que están cargando. Sin esto, N peticiones
+   * simultáneas de una capa fría lanzan N cargas completas a la vez (la de manzanas son ~27 MB de
+   * GeoJSON más su índice de teselas): memoria multiplicada por N y N consultas pesadas a PostGIS
+   * para el mismo resultado.
    */
-  private cargando = new Map<TipoCapa, Promise<CapaEnCache>>();
+  private cargando = new Map<TipoCapa, { clave: string; promesa: Promise<CapaEnCache> }>();
 
   constructor(
     private pool: pg.Pool,
@@ -50,15 +65,29 @@ export class CacheCapas {
   }
 
   async versionesVigentes(): Promise<Record<TipoCapa, string | null>> {
-    if (this.vigentes && Date.now() - this.vigentes.en < 10_000) return this.vigentes.valor;
-    const r = await this.pool.query<{ capa: TipoCapa; version: string }>(
-      'SELECT capa, version FROM geo.capa_version WHERE vigente',
-    );
-    const valor = Object.fromEntries(TIPOS_CAPA.map((c) => [c, null])) as Record<
+    const vigentes = await this.vigentesConCarga();
+    return Object.fromEntries(TIPOS_CAPA.map((c) => [c, vigentes[c]?.version ?? null])) as Record<
       TipoCapa,
       string | null
     >;
-    for (const f of r.rows) valor[f.capa] = f.version;
+  }
+
+  /**
+   * Versión vigente y `cargado_en` de cada capa. El ETL recarga una versión ya cargada con
+   * `cargado_en = now()`: sin mirarlo, la caché seguía sirviendo la geometría anterior con la
+   * misma versión. Se consulta como mucho cada 10 s.
+   */
+  private async vigentesConCarga(): Promise<Record<TipoCapa, CapaVigente | null>> {
+    if (this.vigentes && Date.now() - this.vigentes.en < 10_000) return this.vigentes.valor;
+    // En texto y no como Date: el Date de JavaScript pierde los microsegundos.
+    const r = await this.pool.query<{ capa: TipoCapa; version: string; cargado_en: string }>(
+      'SELECT capa, version, cargado_en::text AS cargado_en FROM geo.capa_version WHERE vigente',
+    );
+    const valor = Object.fromEntries(TIPOS_CAPA.map((c) => [c, null])) as Record<
+      TipoCapa,
+      CapaVigente | null
+    >;
+    for (const f of r.rows) valor[f.capa] = { version: f.version, cargadoEn: f.cargado_en };
     this.vigentes = { valor, en: Date.now() };
     return valor;
   }
@@ -70,10 +99,11 @@ export class CacheCapas {
   }
 
   async obtener(capa: TipoCapa): Promise<CapaEnCache | null> {
-    const version = (await this.versionesVigentes())[capa];
-    if (!version) return null;
+    const vigente = (await this.vigentesConCarga())[capa];
+    if (!vigente) return null;
+    const clave = `${vigente.version}|${vigente.cargadoEn}`;
     const c = this.cache.get(capa);
-    if (c && c.version === version) {
+    if (c && c.clave === clave) {
       this.metricas?.contar('curichi_geo_cache_aciertos_total', { cache: 'capas' });
       return c;
     }
@@ -81,16 +111,21 @@ export class CacheCapas {
     // índice de teselas. Si este contador no es prácticamente plano, algo está invalidando de más.
     this.metricas?.contar('curichi_geo_cache_fallos_total', { cache: 'capas' });
     const enVuelo = this.cargando.get(capa);
-    if (enVuelo) {
+    if (enVuelo && enVuelo.clave === clave) {
       this.metricas?.contar('curichi_geo_cache_en_vuelo_total', { cache: 'capas' });
-      return enVuelo;
+      return enVuelo.promesa;
     }
-    const promesa = this.construir(capa, version).finally(() => this.cargando.delete(capa));
-    this.cargando.set(capa, promesa);
+    const promesa: Promise<CapaEnCache> = this.construir(capa, vigente.version, clave).finally(
+      () => {
+        // Solo si sigue siendo la carga en curso: una recarga más nueva pudo reemplazarla.
+        if (this.cargando.get(capa)?.promesa === promesa) this.cargando.delete(capa);
+      },
+    );
+    this.cargando.set(capa, { clave, promesa });
     return promesa;
   }
 
-  private async construir(capa: TipoCapa, version: string): Promise<CapaEnCache> {
+  private async construir(capa: TipoCapa, version: string, clave: string): Promise<CapaEnCache> {
     const inicio = process.hrtime.bigint();
     const geojson = await this.cargar(capa, version);
     const texto = JSON.stringify(geojson);
@@ -104,8 +139,18 @@ export class CacheCapas {
       promoteId: 'id',
     });
     const bbox = calcularBbox(geojson);
-    const nuevo = { version, geojson, texto, bytes: Buffer.byteLength(texto), indice, bbox };
-    this.cache.set(capa, nuevo);
+    const nuevo: CapaEnCache = {
+      version,
+      clave,
+      huella: createHash('sha256').update(texto).digest('hex').slice(0, 16),
+      geojson,
+      texto,
+      bytes: Buffer.byteLength(texto),
+      indice,
+      bbox,
+    };
+    // Una carga vieja que termina tarde no pisa a una más nueva ni revive lo invalidado.
+    if (this.cargando.get(capa)?.clave === clave) this.cache.set(capa, nuevo);
     this.metricas?.observar(
       'curichi_geo_cache_construccion_segundos',
       { capa },
@@ -169,7 +214,7 @@ export class CacheCapas {
         n_features: c.geojson.features.length,
         bytes_web: c.bytes,
         modo: teselas ? 'teselas' : 'geojson',
-        url: teselas ? `/geo/v1/teselas/${capa}/{z}/{x}/{y}.mvt` : `/geo/v1/capas/${capa}`,
+        url: teselas ? rutaTeselasConHuella(capa, c.huella) : rutaCapaConHuella(capa, c.huella),
         bbox: c.bbox,
       });
     }

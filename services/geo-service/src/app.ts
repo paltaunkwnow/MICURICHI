@@ -5,21 +5,25 @@ import sensible from '@fastify/sensible';
 import {
   type AgregadoUv,
   BboxSchema,
+  CODIGO_CAPA_CAMBIO,
+  HuellaCapaSchema,
   type PuntoCritico,
   ResolverEntradaSchema,
+  rutaTeselasConHuella,
   TIPOS_CAPA,
   type TipoCapa,
 } from 'contracts';
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
 import { CacheCorta } from './cache-corta.js';
-import { CacheCapas } from './capas.js';
+import { CacheCapas, type CapaEnCache } from './capas.js';
 import { igualEnTiempoConstante } from './comparar.js';
 import type { ConfigGeo } from './config.js';
 import { instalarObservabilidad, instrumentarPool, MetricasGeo } from './observabilidad.js';
 import { opcionFastify } from './proxy.js';
 import { resolverPunto } from './resolver.js';
+import { SQL_AGREGADOS_UV } from './visibilidad.js';
 
 export interface DependenciasGeo {
   pool: pg.Pool;
@@ -30,15 +34,31 @@ export interface DependenciasGeo {
 }
 
 const CapaParam = z.object({ capa: z.enum(TIPOS_CAPA) });
+const CapaHuellaParams = CapaParam.extend({ huella: HuellaCapaSchema });
 const TeselaParams = z.object({
   capa: z.enum(TIPOS_CAPA),
   z: z.coerce.number().int().min(0).max(22),
   x: z.coerce.number().int().min(0),
   y: z.string().regex(/^\d+(\.mvt)?$/),
 });
+const TeselaHuellaParams = TeselaParams.extend({ huella: HuellaCapaSchema });
 
 /** Cota dura de la respuesta de /puntos-criticos; el mapa pide por bbox. */
 const MAX_PUNTOS_CRITICOS = 5000;
+/**
+ * Puntos críticos que se guardan en memoria para filtrar por bbox. Se arman solo con reportes
+ * verificados (§9.2), así que en una ciudad son miles; el tope evita que un error en el
+ * recálculo llene la memoria del proceso.
+ */
+const MAX_PUNTOS_CRITICOS_EN_MEMORIA = 100_000;
+
+/**
+ * Cache-Control (contrato 0.12.0). La URL con huella cambia cuando cambia el contenido, así que
+ * se cachea un año. Todo lo demás se puede guardar pero se revalida en cada uso: las cifras
+ * cambian con cada reporte y una capa sin huella puede cambiar en cualquier momento.
+ */
+const INMUTABLE = 'public, max-age=31536000, immutable';
+const SIN_CACHE_VIEJA = 'public, no-cache';
 
 /** Direcciones de la propia máquina: por ahí llega api-core en el modo local sin proxy. */
 function esLoopback(ip: string | undefined): boolean {
@@ -154,11 +174,112 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   });
   const capas = new CacheCapas(dep.pool, dep.cfg, metricas);
   app.decorate('capas', capas);
-  // Los agregados por UV recorren todos los reportes; los consultan el panel y el mapa público
-  // en cada carga. Unos segundos de caché quitan la mayor parte de esas pasadas sin que el dato
-  // deje de ser útil: es un conteo para colorear un mapa, no un saldo bancario.
-  const agregados = new CacheCorta<AgregadoUv[]>(dep.cfg.cacheAgregadosMs);
+  // Las cifras públicas (agregados por UV y puntos críticos) las consultan el panel y el mapa
+  // público en cada carga. Con caché, la consulta corre como mucho una vez cada
+  // GEO_CACHE_AGREGADOS_MS y nadie ve una cifra de más de GEO_CACHE_AGREGADOS_EDAD_MAX_MS: es un
+  // conteo para colorear un mapa, no un saldo bancario. El TTL nunca pasa de la edad máxima.
+  const ttlCifras = Math.min(dep.cfg.cacheAgregadosMs, dep.cfg.cacheAgregadosEdadMaxMs);
+  const agregados = new CacheCorta<AgregadoUv[]>(ttlCifras, dep.cfg.cacheAgregadosEdadMaxMs);
   app.decorate('agregados', agregados);
+  const puntosCriticos = new CacheCorta<PuntoCritico[]>(ttlCifras, dep.cfg.cacheAgregadosEdadMaxMs);
+  app.decorate('puntosCriticos', puntosCriticos);
+
+  /** Sirve una cifra pública desde su caché, con `X-Cache` y las métricas de acierto y fallo. */
+  async function servirCifra<T>(
+    cache: CacheCorta<T>,
+    nombre: string,
+    res: FastifyReply,
+    calcular: () => Promise<T>,
+  ): Promise<T> {
+    res.header('Cache-Control', SIN_CACHE_VIEJA);
+    const cacheado = cache.vigente();
+    if (cacheado !== null) {
+      res.header('X-Cache', 'hit');
+      metricas.contar('curichi_geo_cache_aciertos_total', { cache: nombre });
+      return cacheado;
+    }
+    // Caducado pero servible: se responde con la copia vieja y el recálculo va por detrás. Sin
+    // esto, una petición de cada TTL pagaba la consulta entera (264 ms con un millón de reportes)
+    // mientras el resto veía 2 ms.
+    const viejo = cache.revalidable();
+    res.header('X-Cache', viejo ? 'stale' : 'miss');
+    metricas.contar(
+      viejo ? 'curichi_geo_cache_revalidaciones_total' : 'curichi_geo_cache_fallos_total',
+      { cache: nombre },
+    );
+    return cache.obtener(calcular);
+  }
+
+  /**
+   * Capa vigente para una ruta con o sin huella. Con una huella que ya no es la vigente responde
+   * 410 y devuelve null: esa URL se cacheó un año y el cliente tiene que pedir /geo/v1/capas.
+   */
+  async function capaPedida(
+    res: FastifyReply,
+    capa: TipoCapa,
+    huella: string | null,
+  ): Promise<CapaEnCache | null> {
+    const c = await capas.obtener(capa);
+    if (!c) {
+      res.notFound(`No hay versión vigente de ${capa}`);
+      return null;
+    }
+    if (huella !== null && huella !== c.huella) {
+      res.header('Cache-Control', 'no-store');
+      res.status(410).send({
+        codigo: CODIGO_CAPA_CAMBIO,
+        mensaje: `La capa ${capa} cambió. Volvé a pedir /geo/v1/capas y usá la url nueva.`,
+      });
+      return null;
+    }
+    res.header('Cache-Control', huella === null ? SIN_CACHE_VIEJA : INMUTABLE);
+    return c;
+  }
+
+  async function servirCapa(
+    req: FastifyRequest,
+    res: FastifyReply,
+    capa: TipoCapa,
+    huella: string | null,
+  ) {
+    const c = await capaPedida(res, capa, huella);
+    if (!c) return res;
+    if (c.bytes > dep.cfg.umbralTeselasBytes) {
+      res.removeHeader('Cache-Control');
+      res.status(413);
+      return {
+        codigo: 'USAR_TESELAS',
+        mensaje: `La capa pesa ${c.bytes} bytes; consumila por teselas`,
+        url: rutaTeselasConHuella(capa, c.huella),
+      };
+    }
+    // Del contenido: el alias y la URL con huella de un mismo contenido comparten ETag.
+    const etag = `"${capa}-${c.huella}"`;
+    res.header('ETag', etag);
+    // Con ETag pero sin comparar If-None-Match, cada recarga del mapa reenviaba la capa entera
+    // (varios MB de GeoJSON) aunque el navegador ya la tuviera igual.
+    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
+    res.header('Content-Type', 'application/geo+json; charset=utf-8');
+    return c.texto;
+  }
+
+  async function servirTesela(
+    req: FastifyRequest,
+    res: FastifyReply,
+    p: z.infer<typeof TeselaParams>,
+    huella: string | null,
+  ) {
+    const c = await capaPedida(res, p.capa, huella);
+    if (!c) return res;
+    const y = Number(p.y.replace(/\.mvt$/, ''));
+    const buf = capas.tesela(c, p.capa, p.z, p.x, y);
+    const etag = `"${p.capa}-${c.huella}-${p.z}-${p.x}-${y}"`;
+    res.header('ETag', etag);
+    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
+    if (!buf) return res.status(204).send();
+    res.header('Content-Type', 'application/vnd.mapbox-vector-tile');
+    return res.send(Buffer.from(buf));
+  }
 
   app.get('/health', async () => ({ ok: true, servicio: 'geo-service' }));
   app.get('/ready', async (req, res) => {
@@ -179,8 +300,15 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     return resolverPunto(dep.pool, p.data.lat, p.data.lon);
   });
 
-  app.get('/geo/v1/capas/vigentes', async () => capas.versionesVigentes());
-  app.get('/geo/v1/capas', async () => capas.info());
+  // Las dos dicen cuál es la huella vigente: el cliente las vuelve a pedir ante un 410.
+  app.get('/geo/v1/capas/vigentes', async (_req, res) => {
+    res.header('Cache-Control', SIN_CACHE_VIEJA);
+    return capas.versionesVigentes();
+  });
+  app.get('/geo/v1/capas', async (_req, res) => {
+    res.header('Cache-Control', SIN_CACHE_VIEJA);
+    return capas.info();
+  });
   /**
    * Ruta interna: la llama api-core al activar una versión de capa. Era pública, y cada
    * invalidación obliga a releer la capa entera de PostGIS (decenas de MB) y a reconstruir
@@ -192,87 +320,77 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     return { ok: true };
   });
 
+  // La que dan los clientes (CapaInfo.url): con la huella vigente se cachea un año.
+  app.get('/geo/v1/capas/:capa/v/:huella', async (req, res) => {
+    const p = CapaHuellaParams.safeParse(req.params);
+    if (!p.success) return res.notFound('Capa desconocida');
+    return servirCapa(req, res, p.data.capa, p.data.huella);
+  });
+  // Alias sin huella: la capa vigente, revalidada en cada uso.
   app.get('/geo/v1/capas/:capa', async (req, res) => {
     const p = CapaParam.safeParse(req.params);
     if (!p.success) return res.notFound('Capa desconocida');
-    const c = await capas.obtener(p.data.capa);
-    if (!c) return res.notFound(`No hay versión vigente de ${p.data.capa}`);
-    if (c.bytes > dep.cfg.umbralTeselasBytes) {
-      res.status(413);
-      return {
-        codigo: 'USAR_TESELAS',
-        mensaje: `La capa pesa ${c.bytes} bytes; consumila por teselas`,
-        url: `/geo/v1/teselas/${p.data.capa}/{z}/{x}/{y}.mvt`,
-      };
-    }
-    const etag = `"${p.data.capa}-${c.version}"`;
-    res.header('Cache-Control', 'public, max-age=300');
-    res.header('ETag', etag);
-    // Con ETag pero sin comparar If-None-Match, cada recarga del mapa reenviaba la capa entera
-    // (varios MB de GeoJSON) aunque el navegador ya la tuviera igual.
-    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
-    res.header('Content-Type', 'application/geo+json; charset=utf-8');
-    return c.texto;
+    return servirCapa(req, res, p.data.capa, null);
   });
 
+  app.get('/geo/v1/teselas/:capa/:huella/:z/:x/:y', async (req, res) => {
+    const p = TeselaHuellaParams.safeParse(req.params);
+    if (!p.success) return res.badRequest('Tesela inválida');
+    return servirTesela(req, res, p.data, p.data.huella);
+  });
   app.get('/geo/v1/teselas/:capa/:z/:x/:y', async (req, res) => {
     const p = TeselaParams.safeParse(req.params);
     if (!p.success) return res.badRequest('Tesela inválida');
-    const c = await capas.obtener(p.data.capa);
-    if (!c) return res.notFound(`No hay versión vigente de ${p.data.capa}`);
-    const y = Number(p.data.y.replace(/\.mvt$/, ''));
-    const buf = capas.tesela(c, p.data.capa, p.data.z, p.data.x, y);
-    const etag = `"${p.data.capa}-${c.version}-${p.data.z}-${p.data.x}-${y}"`;
-    res.header('Cache-Control', 'public, max-age=300');
-    res.header('ETag', etag);
-    if (etagCoincide(req.headers['if-none-match'], etag)) return res.status(304).send();
-    if (!buf) return res.status(204).send();
-    res.header('Content-Type', 'application/vnd.mapbox-vector-tile');
-    return res.send(Buffer.from(buf));
+    return servirTesela(req, res, p.data, null);
   });
 
   app.get(
     '/geo/v1/agregados/unidades-vecinales',
     limiteConsulta,
-    async (_req, res): Promise<AgregadoUv[]> => {
-      const cacheado = agregados.vigente();
-      if (cacheado) {
-        res.header('X-Cache', 'hit');
-        metricas.contar('curichi_geo_cache_aciertos_total', { cache: 'agregados' });
-        return cacheado;
-      }
-      // Caducado pero servible: se responde con la copia vieja y el recálculo va por detrás.
-      // Sin esto, una petición de cada treinta segundos pagaba la consulta entera (264 ms con un
-      // millón de reportes) mientras el resto veía 2 ms.
-      const viejo = agregados.revalidable();
-      res.header('X-Cache', viejo ? 'stale' : 'miss');
-      metricas.contar(
-        viejo ? 'curichi_geo_cache_revalidaciones_total' : 'curichi_geo_cache_fallos_total',
-        { cache: 'agregados' },
-      );
-      return agregados.obtener(async () => {
-        // Una sola pasada: antes había una subconsulta correlacionada por CADA unidad vecinal
-        // (576 con las capas reales) solo para sacar la severidad máxima. Ahora sale del mismo
-        // GROUP BY con un max() sobre el orden de severidad, y se traduce de vuelta a texto.
-        const r = await dep.pool.query<AgregadoUv>(
-          `SELECT u.id AS unidad_vecinal_id, u.codigo, u.nombre, u.distrito_id,
-                count(r.id)::int AS n_reportes,
-                count(DISTINCT r.punto_critico_id)::int AS n_puntos_criticos,
-                CASE max(CASE COALESCE(r.severidad_manual, r.severidad_calculada)
-                           WHEN 'critica' THEN 4 WHEN 'alta' THEN 3
-                           WHEN 'media' THEN 2 WHEN 'baja' THEN 1 END)
-                  WHEN 4 THEN 'critica' WHEN 3 THEN 'alta'
-                  WHEN 2 THEN 'media' WHEN 1 THEN 'baja' END AS severidad_max
-         FROM geo.unidad_vecinal_vigente u
-         LEFT JOIN reporte_inundacion r
-           ON r.unidad_vecinal_id = u.id AND r.estado IN ('validado', 'resuelto')
-         GROUP BY u.id, u.codigo, u.nombre, u.distrito_id
-         ORDER BY n_reportes DESC, u.id`,
-        );
+    async (_req, res): Promise<AgregadoUv[]> =>
+      servirCifra(agregados, 'agregados', res, async () => {
+        const r = await dep.pool.query<AgregadoUv>(SQL_AGREGADOS_UV);
         return r.rows;
-      });
-    },
+      }),
   );
+
+  /**
+   * Todos los puntos críticos publicables, en el orden de la respuesta. Se guardan en memoria y
+   * el bbox se filtra aquí: el mapa pide por bbox y cada vista es distinta, así que una caché por
+   * bbox casi nunca acertaría.
+   */
+  async function cargarPuntosCriticos(): Promise<PuntoCritico[]> {
+    type FilaPc = Omit<PuntoCritico, 'primer_reporte_en' | 'ultimo_reporte_en' | 'calculado_en'> & {
+      primer_reporte_en: Date;
+      ultimo_reporte_en: Date;
+      calculado_en: Date;
+    };
+    // Esta ruta es pública (la consume el mapa ciudadano), así que trabaja SIEMPRE sobre
+    // `geom_publico`. El centroide exacto no puede salir: con minpoints = 1 un reporte sin
+    // vecinos forma su propio punto crítico y su centroide es su coordenada exacta, con lo
+    // que el jitter de la vista pública quedaba anulado (§13). Sin punto publicable no se
+    // publica: es preferible un punto de menos a revelar una vivienda.
+    // Se seleccionan las columnas UNA A UNA y no con `*`. `radio_m`, `diametro_m` y
+    // `advertencia_diametro` se calculan sobre las coordenadas EXACTAS de los miembros del
+    // grupo (`diametro_m` es la distancia entre los dos más separados, a 0,1 m), mientras que
+    // lo que se publica aquí es el centroide ya degradado. Publicar las dos cosas juntas da una
+    // medida exacta sobre posiciones que se están ocultando a propósito. Ningún cliente las
+    // usaba; quedan en la tabla para el análisis del técnico (§9.2).
+    const r = await dep.pool.query<FilaPc>(
+      `SELECT id, ST_Y(geom_publico) AS lat, ST_X(geom_publico) AS lon, n_reportes,
+              primer_reporte_en, ultimo_reporte_en, severidad_max, distrito_id, unidad_vecinal_id,
+              calculado_en
+       FROM punto_critico WHERE geom_publico IS NOT NULL
+       ORDER BY n_reportes DESC, ultimo_reporte_en DESC, id
+       LIMIT ${MAX_PUNTOS_CRITICOS_EN_MEMORIA}`,
+    );
+    return r.rows.map((f) => ({
+      ...f,
+      primer_reporte_en: new Date(f.primer_reporte_en).toISOString(),
+      ultimo_reporte_en: new Date(f.ultimo_reporte_en).toISOString(),
+      calculado_en: new Date(f.calculado_en).toISOString(),
+    }));
+  }
 
   app.get(
     '/geo/v1/puntos-criticos',
@@ -280,45 +398,16 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     async (req, res): Promise<PuntoCritico[] | undefined> => {
       const q = z.object({ bbox: BboxSchema.optional() }).safeParse(req.query);
       if (!q.success) return res.badRequest(q.error.issues.map((i) => i.message).join('; '));
-      // Esta ruta es pública (la consume el mapa ciudadano), así que trabaja SIEMPRE sobre
-      // `geom_publico`. El centroide exacto no puede salir: con minpoints = 1 un reporte sin
-      // vecinos forma su propio punto crítico y su centroide es su coordenada exacta, con lo
-      // que el jitter de la vista pública quedaba anulado (§13). Sin punto publicable no se
-      // publica: es preferible un punto de menos a revelar una vivienda.
-      const filtro = q.data.bbox
-        ? 'WHERE geom_publico IS NOT NULL AND geom_publico && ST_MakeEnvelope($1, $2, $3, $4, 4326)'
-        : 'WHERE geom_publico IS NOT NULL';
-      const params: unknown[] = q.data.bbox ? [...q.data.bbox] : [];
-      type FilaPc = Omit<
-        PuntoCritico,
-        'primer_reporte_en' | 'ultimo_reporte_en' | 'calculado_en'
-      > & {
-        primer_reporte_en: Date;
-        ultimo_reporte_en: Date;
-        calculado_en: Date;
-      };
-      // Con cota: sin LIMIT la respuesta crece con la ciudad y un solo GET podía traer
-      // decenas de miles de puntos. El mapa consume por bbox.
-      // Se seleccionan las columnas UNA A UNA y no con `*`. `radio_m`, `diametro_m` y
-      // `advertencia_diametro` se calculan sobre las coordenadas EXACTAS de los miembros del
-      // grupo (`diametro_m` es la distancia entre los dos más separados, a 0,1 m), mientras que
-      // lo que se publica aquí es el centroide ya degradado. Publicar las dos cosas juntas da una
-      // medida exacta sobre posiciones que se están ocultando a propósito. Ningún cliente las
-      // usaba; quedan en la tabla para el análisis del técnico (§9.2).
-      const r = await dep.pool.query<FilaPc>(
-        `SELECT id, ST_Y(geom_publico) AS lat, ST_X(geom_publico) AS lon, n_reportes,
-              primer_reporte_en, ultimo_reporte_en, severidad_max, distrito_id, unidad_vecinal_id,
-              calculado_en
-       FROM punto_critico ${filtro} ORDER BY n_reportes DESC, ultimo_reporte_en DESC
-       LIMIT ${MAX_PUNTOS_CRITICOS}`,
-        params,
-      );
-      return r.rows.map((f) => ({
-        ...f,
-        primer_reporte_en: new Date(f.primer_reporte_en).toISOString(),
-        ultimo_reporte_en: new Date(f.ultimo_reporte_en).toISOString(),
-        calculado_en: new Date(f.calculado_en).toISOString(),
-      }));
+      const todos = await servirCifra(puntosCriticos, 'puntos_criticos', res, cargarPuntosCriticos);
+      const bbox = q.data.bbox;
+      const elegidos = bbox
+        ? todos.filter(
+            (p) => p.lon >= bbox[0] && p.lat >= bbox[1] && p.lon <= bbox[2] && p.lat <= bbox[3],
+          )
+        : todos;
+      // Con cota: sin ella la respuesta crece con la ciudad y un solo GET podía traer decenas de
+      // miles de puntos. El mapa consume por bbox.
+      return elegidos.slice(0, MAX_PUNTOS_CRITICOS);
     },
   );
 
@@ -329,6 +418,7 @@ declare module 'fastify' {
   interface FastifyInstance {
     capas: CacheCapas;
     agregados: CacheCorta<AgregadoUv[]>;
+    puntosCriticos: CacheCorta<PuntoCritico[]>;
     metricas: MetricasGeo;
   }
 }

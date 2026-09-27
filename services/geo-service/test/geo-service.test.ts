@@ -1,4 +1,4 @@
-import { CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES } from 'contracts';
+import { type AgregadoUv, AgregadoUvSchema, CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES } from 'contracts';
 import { ejecutorPg, recalcularPuntosCriticos } from 'db';
 import {
   type BaseEfimera,
@@ -9,6 +9,7 @@ import {
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
 
@@ -93,7 +94,7 @@ describe('capas, teselas y agregados', () => {
     expect(v.json().unidad_vecinal).toBe('test');
     const c = await app.inject({ method: 'GET', url: '/geo/v1/capas/unidad_vecinal' });
     expect(c.statusCode).toBe(200);
-    expect(c.headers.etag).toBe('"unidad_vecinal-test"');
+    expect(c.headers.etag).toMatch(/^"unidad_vecinal-[0-9a-f]{16}"$/);
     expect(c.json().features).toHaveLength(3);
     const info = await app.inject({ method: 'GET', url: '/geo/v1/capas' });
     expect(info.json().map((x: { capa: string }) => x.capa)).toEqual([
@@ -123,7 +124,7 @@ describe('capas, teselas y agregados', () => {
     });
     expect(vacia.statusCode).toBe(204);
   });
-  it('agrega reportes validados por UV y lista puntos críticos', async () => {
+  it('agrega los reportes publicados por UV y lista puntos críticos solo con verificados', async () => {
     const ex = ejecutorPg(pool);
     await insertarReporte(ex, -63.195, -17.79, 'validado', 'alta');
     await insertarReporte(ex, -63.19502, -17.79001, 'validado', 'baja');
@@ -133,8 +134,10 @@ describe('capas, teselas y agregados', () => {
     const uvA = a
       .json()
       .find((u: { unidad_vecinal_id: string }) => u.unidad_vecinal_id === 'unidad_vecinal:A');
-    expect(uvA.n_reportes).toBe(2);
-    expect(uvA.severidad_max).toBe('alta');
+    expect(uvA.n_reportes).toBe(3);
+    expect(uvA.n_verificados).toBe(2);
+    expect(uvA.severidad_max).toBe('critica');
+    expect(uvA.severidad_max_verificada).toBe('alta');
     const pc = await app.inject({
       method: 'GET',
       url: '/geo/v1/puntos-criticos?bbox=-63.3,-17.9,-63.1,-17.7',
@@ -183,6 +186,99 @@ describe('capas, teselas y agregados', () => {
       'calculado_en',
     ])
       expect(p).toHaveProperty(campo);
+  });
+});
+
+/**
+ * S21 (contrato 0.11.0): la coropleta cuenta lo publicado (nuevo, validado y resuelto con
+ * publicar_en <= now()), pero el color público sale solo de lo verificado. Cada prueba mira la
+ * diferencia antes/después en una UV, para no depender del orden ni de los datos de otras pruebas.
+ */
+describe('agregados por UV: publicados con y sin verificar (S21)', () => {
+  const coordenadas = {
+    'unidad_vecinal:B': [-63.185, -17.79],
+    'unidad_vecinal:C': [-63.175, -17.79],
+  };
+
+  async function reporteEn(
+    uv: keyof typeof coordenadas,
+    estado: string,
+    severidad: string,
+    { enEspera = false } = {},
+  ) {
+    const [lon, lat] = coordenadas[uv];
+    const id = await insertarReporte(ejecutorPg(pool), lon!, lat!, estado, severidad);
+    // insertarReporte deja todo en la UV A; publicar_en cae por defecto en now() (ya publicado).
+    await pool.query(
+      `UPDATE reporte_inundacion SET unidad_vecinal_id = $2
+         ${enEspera ? ", publicar_en = creado_en + interval '10 minutes'" : ''}
+       WHERE id = $1`,
+      [id, uv],
+    );
+  }
+
+  async function agregadoDe(uv: string): Promise<AgregadoUv> {
+    app.agregados.invalidar();
+    const r = await app.inject({ method: 'GET', url: '/geo/v1/agregados/unidades-vecinales' });
+    expect(r.statusCode).toBe(200);
+    const lista = z.array(AgregadoUvSchema).parse(r.json());
+    const fila = lista.find((u) => u.unidad_vecinal_id === uv);
+    expect(fila, `falta ${uv} en los agregados`).toBeDefined();
+    return fila!;
+  }
+
+  it('la respuesta cumple AgregadoUvSchema y una UV sin reportes da ceros y null', async () => {
+    const c = await agregadoDe('unidad_vecinal:C');
+    expect(c).toMatchObject({
+      n_reportes: 0,
+      n_verificados: 0,
+      n_puntos_criticos: 0,
+      severidad_max: null,
+      severidad_max_verificada: null,
+    });
+  });
+
+  it('un nuevo publicado suma a n_reportes y no a n_verificados', async () => {
+    const antes = await agregadoDe('unidad_vecinal:C');
+    await reporteEn('unidad_vecinal:C', 'nuevo', 'media');
+    const despues = await agregadoDe('unidad_vecinal:C');
+    expect(despues.n_reportes - antes.n_reportes).toBe(1);
+    expect(despues.n_verificados).toBe(antes.n_verificados);
+  });
+
+  it('un nuevo de más de 70 cm pinta severidad_max pero no severidad_max_verificada', async () => {
+    await reporteEn('unidad_vecinal:B', 'validado', 'baja');
+    await reporteEn('unidad_vecinal:B', 'nuevo', 'critica');
+    const b = await agregadoDe('unidad_vecinal:B');
+    expect(b.n_reportes).toBe(2);
+    expect(b.n_verificados).toBe(1);
+    expect(b.severidad_max).toBe('critica');
+    expect(b.severidad_max_verificada).toBe('baja');
+  });
+
+  it('un reporte que todavía espera su publicar_en no suma', async () => {
+    const antes = await agregadoDe('unidad_vecinal:C');
+    await reporteEn('unidad_vecinal:C', 'nuevo', 'critica', { enEspera: true });
+    await reporteEn('unidad_vecinal:C', 'validado', 'critica', { enEspera: true });
+    const despues = await agregadoDe('unidad_vecinal:C');
+    expect(despues).toEqual(antes);
+  });
+
+  it('rechazado y duplicado no suman', async () => {
+    const antes = await agregadoDe('unidad_vecinal:C');
+    await reporteEn('unidad_vecinal:C', 'rechazado', 'critica');
+    await reporteEn('unidad_vecinal:C', 'duplicado', 'critica');
+    const despues = await agregadoDe('unidad_vecinal:C');
+    expect(despues).toEqual(antes);
+  });
+
+  it('resuelto cuenta como verificado', async () => {
+    const antes = await agregadoDe('unidad_vecinal:C');
+    await reporteEn('unidad_vecinal:C', 'resuelto', 'alta');
+    const despues = await agregadoDe('unidad_vecinal:C');
+    expect(despues.n_reportes - antes.n_reportes).toBe(1);
+    expect(despues.n_verificados - antes.n_verificados).toBe(1);
+    expect(despues.severidad_max_verificada).toBe('alta');
   });
 });
 
@@ -279,7 +375,7 @@ describe('ETag / If-None-Match: 304 sin cuerpo (hallazgo 3)', () => {
     expect(segundo.statusCode).toBe(304);
     expect(segundo.body).toBe('');
     expect(segundo.headers.etag).toBe(etag);
-    expect(segundo.headers['cache-control']).toBe('public, max-age=300');
+    expect(segundo.headers['cache-control']).toBe('public, no-cache');
   });
 
   it('una tesela responde 304 sin cuerpo cuando If-None-Match coincide', async () => {
