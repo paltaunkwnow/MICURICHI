@@ -1,5 +1,5 @@
 /**
- * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0012) para consultas en api-core y geo-service.
+ * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0013) para consultas en api-core y geo-service.
  * La fuente de verdad del DDL son las migraciones SQL; este archivo no genera DDL.
  *
  * Una migración que añade o cambia columnas tiene que actualizar este archivo en el mismo cambio:
@@ -20,6 +20,7 @@ import {
   pgSchema,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uuid,
@@ -181,6 +182,11 @@ export const reporteInundacion = pgTable(
     resolucionFlags: jsonb('resolucion_flags').notNull().default({}),
     ubicacionMetodo: ubicacionMetodoEnum('ubicacion_metodo').notNull(),
     precisionGpsM: numeric('precision_gps_m'),
+    /**
+     * Metros entre el punto y el dispositivo al enviar (migración 0013, CHECK de 0 a 1000). NULL en
+     * los reportes anteriores. La posición del dispositivo no se guarda.
+     */
+    distanciaDispositivoM: smallint('distancia_dispositivo_m'),
     ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
     descripcion: text('descripcion').notNull(),
     profundidadEstimada: profundidadEnum('profundidad_estimada').notNull(),
