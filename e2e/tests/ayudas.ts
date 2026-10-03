@@ -90,12 +90,12 @@ export function dispositivoEn(
 
 export const CREDENCIALES_TECNICO = {
   email: process.env.E2E_TECNICO_EMAIL ?? 'tecnico@curichi.local',
-  password: process.env.E2E_TECNICO_PASSWORD ?? 'curichi-tecnico-local',
+  password: process.env.E2E_TECNICO_PASSWORD ?? 'tecnico',
 };
 
 export const CREDENCIALES_ADMIN = {
   email: process.env.E2E_ADMIN_EMAIL ?? 'admin@curichi.local',
-  password: process.env.E2E_ADMIN_PASSWORD ?? 'curichi-admin-local',
+  password: process.env.E2E_ADMIN_PASSWORD ?? 'admin',
 };
 
 /**
@@ -105,13 +105,13 @@ export const CREDENCIALES_ADMIN = {
  */
 export const CREDENCIALES_EJECUTIVO = {
   email: process.env.E2E_EJECUTIVO_EMAIL ?? 'ejecutivo@curichi.local',
-  password: process.env.E2E_EJECUTIVO_PASSWORD ?? 'curichi-ejecutivo-local',
+  password: process.env.E2E_EJECUTIVO_PASSWORD ?? 'ejecutivo',
 };
 
 /** Cuenta ciudadana del seed. Desde la Fase 5, crear un reporte exige sesión. */
 export const CREDENCIALES_VECINA = {
   email: process.env.E2E_VECINA_EMAIL ?? 'vecina@curichi.local',
-  password: process.env.E2E_VECINA_PASSWORD ?? 'curichi-vecina-local',
+  password: process.env.E2E_VECINA_PASSWORD ?? 'vecina',
 };
 
 /**

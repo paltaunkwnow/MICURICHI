@@ -16,7 +16,7 @@ import {
  * Corrida SDD `2026-09-25-quitar-campos-del-reporte`, criterios CA-W1…CA-W8 de la app pública.
  *
  * El reporte deja de tener `manzana_id`, `direccion_aprox`, `duracion_estimada` y `afectacion`,
- * y la severidad pasa a la fórmula v2 (`puntaje = 2 × profundidad + frecuencia`, rango 3–12).
+ * y la severidad pasa a la fórmula v2 (`puntaje = 2 × profundidad + frecuencia`, rango 3–13).
  *
  * El número de pasos del formulario todavía puede ser 4 o 5 (pregunta P-4 de la spec), así que
  * el recorrido no los enumera: en cada paso contesta lo que haya y sigue. Así la prueba describe
@@ -298,7 +298,7 @@ test.describe('quitar campos del reporte · app pública', () => {
       { rango: [3, 4], banda: 'Baja' },
       { rango: [5, 7], banda: 'Media' },
       { rango: [8, 10], banda: 'Alta' },
-      { rango: [11, 12], banda: 'Crítica' },
+      { rango: [11, 13], banda: 'Crítica' },
     ]);
     await expect(panel).not.toContainText(/duración|afectación/i);
   });

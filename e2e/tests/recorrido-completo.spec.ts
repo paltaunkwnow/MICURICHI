@@ -70,9 +70,9 @@ test.describe('recorrido completo ciudadano → técnico → mapa público → e
     if ((await page.locator('input[name="frecuencia"]').count()) === 0)
       await page.getByTestId('boton-siguiente').click();
     await page.locator('input[name="frecuencia"][value="cada_lluvia_fuerte"]').check();
-    // Severidad v2: 2×2 (rodilla) + 3 (cada lluvia fuerte) = 7 de 12 → media.
+    // Severidad v2: 2×2 (rodilla) + 3 (cada lluvia fuerte) = 7 de 13 → media.
     await expect(page.getByText('Severidad media')).toBeVisible();
-    await expect(page.getByText('7/12')).toBeVisible();
+    await expect(page.getByText('7/13')).toBeVisible();
     // El máximo ya no es 20: ningún «N/20» de la fórmula v1 puede quedar en pantalla.
     await expect(page.getByText(/\d+\/20\b/)).toHaveCount(0);
     await page.getByTestId('boton-siguiente').click();

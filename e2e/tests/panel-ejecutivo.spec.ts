@@ -24,17 +24,21 @@ import {
  * su propio conteo; la cifra grande no cambia al elegir una.
  *
  * Pantalla limpia (plan 2026-09-26, S27): la cifra grande con «N verificadas · M en revisión», las
- * pestañas, las dos gráficas por distrito y la nota en una línea. Sin mapa, sin selector de
- * período (siempre el histórico, `ventana=todo`), sin «actualizado hace…» ni «Último reporte». Los
- * distritos de una capa anterior se listan en Indicadores. El refresco de cada 10 s y el de volver
- * a la pestaña, con `x-curichi-sondeo: 1`, están en `panel-al-dia.spec.ts`.
+ * pestañas, las dos gráficas por distrito y la nota en una línea. Conserva el mapa de distritos y
+ * UV (decisión del usuario, 2026-10-03), sin selector de período (siempre el histórico,
+ * `ventana=todo`), sin «actualizado hace…» ni «Último reporte», y sin botones de exportar: el
+ * ejecutivo mira, no exporta. Los distritos de una capa anterior se listan en Indicadores. El
+ * refresco de cada 10 s y el de volver a la pestaña, con `x-curichi-sondeo: 1`, están en
+ * `panel-al-dia.spec.ts`.
  */
 
 const RESUMEN = `${API}/api/v1/ejecutivo/resumen`;
 
-/** Lo que salió de la pantalla ejecutiva en S27: ninguno puede volver. */
+/**
+ * Lo que salió de la pantalla ejecutiva en S27 y no vuelve. El mapa de distritos y UV sí volvió
+ * (decisión del usuario, 2026-10-03): la pantalla lo conserva, por eso ya no está en esta lista.
+ */
 const QUITADOS_DEL_EJECUTIVO = [
-  'ejecutivo-mapa',
   'ejecutivo-ventana',
   'ejecutivo-cargando-periodo',
   'ejecutivo-capa-anterior',
@@ -219,14 +223,12 @@ test.describe('panel ejecutivo · API', () => {
 
   test('el ejecutivo no abre ninguna puerta técnica', async ({ request }) => {
     await loginEjecutivo(request);
-    for (const ruta of [
-      '/api/v1/tecnico/reportes',
-      '/api/v1/exportar?formato=csv',
-      '/api/v1/indicadores',
-    ]) {
+    for (const ruta of ['/api/v1/tecnico/reportes', '/api/v1/indicadores']) {
       const r = await request.get(`${API}${ruta}`);
       expect(r.status(), ruta).toBe(403);
     }
+    const exp = await request.get(`${API}/api/v1/exportar?formato=csv`);
+    expect(exp.status(), 'el ejecutivo no exporta: /exportar es solo de técnico y admin').toBe(403);
   });
 });
 
@@ -264,21 +266,20 @@ test.describe('panel ejecutivo · interfaz', () => {
     }
     await expect(page.getByTestId('ejecutivo-nota')).toBeVisible();
 
-    // Lo que salió de la pantalla (S27).
+    // Lo que salió de la pantalla (S27) y no vuelve.
     for (const testId of QUITADOS_DEL_EJECUTIVO) {
       await expect(page.getByTestId(testId), `sin «${testId}»`).toHaveCount(0);
     }
-    await expect(page.locator('.maplibregl-map'), 'sin mapa').toHaveCount(0);
+    // El ejecutivo mira, no exporta: la pantalla no tiene botones de exportar (decisión del usuario).
+    for (const exportar of ['ejecutivo-exportar-csv', 'ejecutivo-exportar-geojson']) {
+      await expect(page.getByTestId(exportar), `sin «${exportar}»`).toHaveCount(0);
+    }
     await expect(page.getByText(/actualizado hace/i)).toHaveCount(0);
     await expect(page.getByText(/último reporte/i)).toHaveCount(0);
 
-    // Sin mapa no se pide ninguna capa, y el resumen es siempre el histórico entero.
+    // El resumen es siempre el histórico entero (`ventana=todo`), conserve o no el mapa la pantalla.
     await esperarRedQuieta(red, () => true);
     const pedidas = red.pedidas.map((u) => new URL(u));
-    expect(
-      pedidas.filter((u) => u.pathname.startsWith('/geo/')).map((u) => u.pathname),
-      'sin mapa, ninguna capa ni tesela',
-    ).toEqual([]);
     const resumenes = pedidas.filter((u) => u.pathname.endsWith('/api/v1/ejecutivo/resumen'));
     expect(resumenes.length, 'la pantalla pidió el resumen').toBeGreaterThan(0);
     for (const u of resumenes) expect(u.searchParams.get('ventana'), u.href).toBe('todo');

@@ -96,18 +96,68 @@ La primera vez hace falta el navegador:
 pnpm --filter e2e exec playwright install chromium
 ```
 
-Lo más simple es dejar que Playwright levante las apps: solo hay que tener la base en marcha.
+### Forma recomendada: el runner local
+
+En esta máquina `pnpm dev` no sirve para la E2E: arranca Next con Turbopack (que se cae acá) y
+escribiría en la base «curichi» del usuario. El runner `scripts/correr-local.mjs` levanta la pila a
+mano —api-core, geo-service y las dos apps con `next dev --webpack`— contra una base **aparte**, con
+el entorno de prueba de `playwright.config.ts`, y corre la suite de a grupos. Es también lo que hace
+la **opción 8 del lanzador `Mi-Curichi.exe`**.
 
 ```bash
-pnpm db:local           # terminal 1: PostGIS local sin Docker (127.0.0.1:5433)
+node e2e/scripts/correr-local.mjs                  # grupo G1 (por defecto)
+node e2e/scripts/correr-local.mjs --grupo G3
+node e2e/scripts/correr-local.mjs --grupo todos
+node e2e/scripts/correr-local.mjs --solo-preparar  # solo deja la base lista, no corre pruebas
+node e2e/scripts/correr-local.mjs --ayuda
 ```
 
-```bash
-pnpm db:seed:samples && pnpm test:e2e    # terminal 2
-```
+Antes de levantar comprueba que los puertos 3000/3001/3002/3100 estén libres (y dice quién los ocupa
+si no), que haya RAM suficiente (≥ 2500 MB, salteable con `--forzar`) y que Docker y el contenedor
+`curichi-postgis` estén saludables. Después levanta los cuatro servicios, espera a que respondan
+(`/ready`, `/health`, `/` y `/login`) y recién ahí corre Playwright, que **reutiliza** esa pila
+(`reuseExistingServer`) en vez de arrancar `pnpm dev`. Al terminar —o con Ctrl+C— cierra los procesos
+y confirma los puertos libres. Los logs de cada servicio van a `%TEMP%\curichi-e2e\`.
 
-`webServer` arranca `pnpm dev` por su cuenta (hasta 5 minutos la primera vez, por la compilación
-de Next) con el entorno de prueba de `playwright.config.ts`:
+#### La base «curichi_e2e» (nunca «curichi»)
+
+El runner corre contra una base **aparte**, `curichi_e2e`, en el **mismo** PostgreSQL de Docker que
+usa el usuario (contenedor `curichi-postgis`); **no** sobre `pnpm db:local`. Deriva las tres URLs del
+`.env` (dueño, api-core y geo-service) cambiando solo el nombre de base, y se las pasa a los
+servicios por el entorno: como el entorno del proceso gana sobre el `--env-file` de cada servicio,
+api-core y geo-service se conectan a `curichi_e2e` aunque el `.env` siga apuntando a `curichi`. El
+runner **no** hace `docker compose down`, ni recrea PostGIS, ni borra volúmenes, ni toca `curichi`.
+
+La primera vez (o con `--resembrar`) crea la base con `createdb` dentro del contenedor, la migra con
+el rol dueño (los `GRANT` por tabla a `curichi_api`/`curichi_geo` los da la migración 0008), carga
+las capas de `DM_UV_MZ_2025` con el ETL (si no está `data/raw/DM_UV_MZ_2025`, usa las capas
+sintéticas del seed y lo avisa) y siembra los usuarios y reportes sintéticos con las contraseñas que
+la suite espera (`SEED_*_PASSWORD` = `curichi-<rol>-local`). En corridas siguientes reaprovecha lo
+que ya está en `curichi_e2e`.
+
+#### Grupos
+
+La suite se reparte en cinco grupos para no quedarse sin RAM (esta máquina tiene poca). El proyecto
+`chromium` corre todos los specs del grupo; el proyecto `movil` (Pixel 7) corre **además**
+`mapa-publico`, `mapa-seleccion`, `camara-foto` y `ubicacion-obligatoria`.
+
+| Grupo | Specs |
+|---|---|
+| G1 | api-contratos · separacion-publica-tecnica · cuenta-ciudadana · acceso-panel · publicacion-diferida |
+| G2 | mapa-publico · mapa-seleccion · trafico-publico · datos-reales · navegacion |
+| G3 | formulario-reporte · formulario-sumidero-y-fotos · ubicacion-obligatoria · camara-foto · resiliencia-interfaz · quitar-campos-web |
+| G4 | recorrido-completo · panel-tecnico · panel-al-dia · panel-ejecutivo · quitar-campos-panel |
+| G5 | accesibilidad · responsive · csp |
+
+Con `--grupo todos` corre uno por vez y corta si la RAM baja de 1500 MB. Al final imprime un resumen
+por spec (✓/✗) leído del JSON de Playwright.
+
+### El entorno de prueba (lo que fija el runner)
+
+El runner le pasa a api-core y geo-service el mismo entorno que `playwright.config.ts` le pasaría a
+`webServer` —por eso Playwright puede reutilizar la pila sin arrancar `pnpm dev`—. `global-setup.ts`
+lo comprueba antes de empezar (con una cuenta nueva, `/auth/yo` tiene que decir `demora_proximo_s:
+2` y `reportes_restantes_hoy: 3`) y, si no, corta con el motivo.
 
 | Variable | Valor | Por qué |
 |---|---|---|
@@ -119,13 +169,12 @@ de Next) con el entorno de prueba de `playwright.config.ts`:
 | `COOKIE_SEGURA` | `0` | Con `1` la cookie sale `Secure` y el cliente HTTP de Playwright (`request`, `page.request`) no la manda sobre http: las rutas con sesión dan 401 |
 | `PANEL_ADMIN_URL` | `http://localhost:3100` (o la de la variable) | api-core la manda en `panel_url` de `/auth/yo`; sin ella el botón «Panel técnico/ejecutivo» no aparece y fallan `acceso-panel.spec.ts` y `panel-tecnico.spec.ts` |
 
-> **Si ya tenés `pnpm dev` corriendo**, Playwright lo reutiliza (`reuseExistingServer`) y **no**
-> puede pasarle ese entorno. La suite crea muchos reportes y cuentas desde la misma IP y los
-> límites de producción la cortan a los pocos casos; con la demora de producción (60 s) cada
-> prueba que modera un reporte recién creado se queda esperándolo. Una pila con `COOKIE_SEGURA=1`
-> (como la del Compose) tampoco sirve. `global-setup.ts` lo comprueba antes de empezar (con una
-> cuenta nueva, `/auth/yo` tiene que decir `demora_proximo_s: 2` y `reportes_restantes_hoy: 3`) y,
-> si no, corta con el motivo. Arrancá ese `pnpm dev` al menos así:
+> **Sin el runner**, si corrés `pnpm test:e2e` con tu propio `pnpm dev` ya levantado (en una
+> máquina donde Turbopack no se caiga y contra una base de descarte, no la del usuario), Playwright
+> lo reutiliza (`reuseExistingServer`) pero **no** puede pasarle este entorno: arrancá ese `pnpm
+> dev` vos con las variables de la tabla. Una pila con `COOKIE_SEGURA=1` (como la del Compose) o con
+> la demora y el cupo de producción no sirve: la suite crea muchos reportes y cuentas desde la misma
+> IP y los límites la cortan, y cada prueba que modera un reporte recién creado se queda esperándolo.
 >
 > ```bash
 > RATE_LIMIT_REPORTES_POR_HORA=1000 COOKIE_SEGURA=0 PANEL_ADMIN_URL=http://localhost:3100 \
@@ -134,8 +183,8 @@ de Next) con el entorno de prueba de `playwright.config.ts`:
 >   pnpm dev
 > ```
 >
-> (en PowerShell, cada una con `$env:NOMBRE='valor';` antes de `pnpm dev`), o simplemente cerralo
-> y dejá que Playwright lo levante.
+> (en PowerShell, cada una con `$env:NOMBRE='valor';` antes de `pnpm dev`). En esta máquina es más
+> simple usar el runner, que levanta la pila con `next dev --webpack` y contra `curichi_e2e`.
 
 Las pruebas que solo necesitan una sesión la ponen por API (`cuentaNuevaEnElNavegador`,
 `sesionDelPanelEnElNavegador`), que comparte cookies con el navegador; entrar por la pantalla ya lo
@@ -158,8 +207,8 @@ La contraseña del ejecutivo la fija el seed con `SEED_EJECUTIVO_PASSWORD` (por 
 |---|---|---|
 | `page.goto: net::ERR_NETWORK_IO_SUSPENDED` y, en el reintento, `Test timeout of 90000ms exceeded` esperando un elemento | La máquina entró en **modo de espera moderno** (*connected standby*) a mitad de la corrida y Windows cortó la red por directiva. Chromium aborta las peticiones en vuelo con ese código | No es intermitencia de la suite. Comprobalo en el registro de eventos (`Kernel-Power` 506/507 y 172 `Disconnected. Motivo: Policy Setting`) y volvé a correrla con la máquina despierta |
 | Tres fallos seguidos en `recorrido-completo.spec.ts` a partir de «el técnico lo valida desde el panel» | Ese archivo es un **recorrido en serie**: si la validación no ocurre, los dos casos siguientes comprueban un reporte que sigue en `nuevo` | Mirar solo el primer fallo; los otros dos son consecuencia |
-| `No respondió http://localhost:3000/ en 300 s` en la preparación, con los servicios arriba | `webServer` solo vigila `127.0.0.1:3001/health`. Si quedó un `api-core` suelto en ese puerto, `reuseExistingServer` da la pila por levantada y **no arranca `pnpm dev`**: las apps de Next nunca escuchan | Cerrar lo que haya en 3000, 3001, 3002 y 3100 y volver a correr, o levantar `pnpm dev` entero a mano con los límites de prueba |
-| `dentro_cobertura: false` donde antes daba `true`, o `ECONNREFUSED 127.0.0.1:3001` a mitad de la corrida | La base local (PGlite sobre `pglite-socket`) lleva horas en marcha y se degradó: el socket empieza a cortar conexiones (`ECONNRESET`) y api-core se cae detrás. Visto tras un ciclo de suspensión de la máquina | Reiniciar `pnpm db:local` (los datos persisten en `infra/.pglite`) y volver a correr. Es un límite del modo local, no del código: ver [ADR 0003](../docs/decisiones/0003-pglite-solo-en-local-y-pruebas.md) |
+| `No respondió http://localhost:3000/ en 300 s` en la preparación, con los servicios arriba | `webServer` solo vigila `127.0.0.1:3001/health`. Si quedó un `api-core` suelto en ese puerto, `reuseExistingServer` da la pila por levantada y **no arranca `pnpm dev`**: las apps de Next nunca escuchan | Usar el runner (`scripts/correr-local.mjs`): comprueba los cuatro puertos, dice quién los ocupa y espera a que respondan los cuatro. Si corrés a mano, cerrá lo que haya en 3000, 3001, 3002 y 3100 |
+| `ECONNREFUSED 127.0.0.1:3001` o `ECONNRESET` a mitad de la corrida con la pila del runner | El contenedor `curichi-postgis` se reinició o quedó sin salud (p. ej. tras suspender la máquina), y api-core se cae detrás | Comprobar `docker inspect -f '{{.State.Health.Status}}' curichi-postgis` (el runner ya lo hace al arrancar) y volver a correr. En el modo viejo sin Docker (`pnpm db:local`, PGlite sobre `pglite-socket`) el socket se degrada igual tras horas o un ciclo de suspensión: ver [ADR 0003](../docs/decisiones/0003-pglite-solo-en-local-y-pruebas.md) |
 | `429` en `POST /api/v1/reportes` o en `/auth/login` | Un `pnpm dev` previo sin los límites de prueba, o un banco de carga que dejó filas en `intento_login` | Ver el aviso de arriba sobre `reuseExistingServer`; para el login, `DELETE FROM intento_login` |
 | `api-core no corre con el entorno de prueba` en la preparación, o `el reporte … tiene que publicarse` en muchas pruebas | La pila corre con la demora o el cupo de producción: un `pnpm dev` previo sin `REPORTE_DEMORA_*_S=2/4` | Ver el aviso de arriba sobre `reuseExistingServer` |
 | `la respuesta volvió cuando el reporte ya podía estar publicado` en `publicacion-diferida.spec.ts` | La máquina está tan cargada que unas consultas locales tardaron más que la demora de prueba (2 s) | No es un defecto del código: repetir con la máquina menos cargada |

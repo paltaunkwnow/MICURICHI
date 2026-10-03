@@ -17,12 +17,12 @@ import {
  * Corrida `2026-09-25-quitar-campos-del-reporte`, criterios del panel técnico (CA-P1, CA-P2, CA-P4).
  *
  * El reporte dejó de tener manzana, dirección aproximada, duración y afectación, y la severidad
- * pasó a la v2 (`puntaje = 2·P + F`, sobre 12). El detalle del panel no debe mostrar esos cuatro
+ * pasó a la v2 (`puntaje = 2·P + F`, sobre 13). El detalle del panel no debe mostrar esos cuatro
  * datos, pero sí conserva «En el mapa público se ve» (decisión del usuario). El mapa del panel deja
  * de dibujar las manzanas aunque la capa se siga sirviendo.
  */
 
-/** Crea un reporte `nuevo` con P = muslo y F = permanente (10 de 12 puntos en la v2). */
+/** Crea un reporte `nuevo` con P = muslo y F = permanente (10 de 13 puntos en la v2). */
 async function crearReporteMusloPermanente(request: APIRequestContext, marca: string) {
   await cuentaNuevaConSesion(request, 'panel-');
   const r = await request.post(`${API}/api/v1/reportes`, {
@@ -83,14 +83,14 @@ test.describe('panel técnico sin manzana, dirección, duración ni afectación'
     await expect(publico).toHaveText('En su sitio, redondeado a 5 decimales');
   });
 
-  test('CA-P2: el desglose de la severidad v2 tiene dos filas, 10 de 12 puntos y la fórmula nueva', async ({
+  test('CA-P2: el desglose de la severidad v2 tiene dos filas, 10 de 13 puntos y la fórmula nueva', async ({
     page,
   }) => {
     await entrarAlPanel(page);
     await page.goto(`${PANEL}/reportes/${idReporte}`);
 
     const titulo = page.getByRole('heading', { name: /^Cómo se llegó a/ });
-    await expect(titulo).toHaveText('Cómo se llegó a 10 de 12 puntos', { timeout: 60_000 });
+    await expect(titulo).toHaveText('Cómo se llegó a 10 de 13 puntos', { timeout: 60_000 });
     const desglose = titulo.locator('xpath=..');
     const filas = desglose.locator('dl > div > dt');
     await expect(filas).toHaveCount(2);
