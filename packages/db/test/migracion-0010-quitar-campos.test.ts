@@ -74,18 +74,22 @@ const SEVERIDAD_V2: Record<string, { puntaje: number; banda: Banda }> = {
   'tobillo|ocasional': { puntaje: 4, banda: 'baja' },
   'tobillo|cada_lluvia_fuerte': { puntaje: 5, banda: 'media' },
   'tobillo|permanente': { puntaje: 6, banda: 'media' },
+  'tobillo|agua_estancada': { puntaje: 7, banda: 'media' },
   'rodilla|primera_vez': { puntaje: 5, banda: 'media' },
   'rodilla|ocasional': { puntaje: 6, banda: 'media' },
   'rodilla|cada_lluvia_fuerte': { puntaje: 7, banda: 'media' },
   'rodilla|permanente': { puntaje: 8, banda: 'alta' },
+  'rodilla|agua_estancada': { puntaje: 9, banda: 'alta' },
   'muslo|primera_vez': { puntaje: 7, banda: 'media' },
   'muslo|ocasional': { puntaje: 8, banda: 'alta' },
   'muslo|cada_lluvia_fuerte': { puntaje: 9, banda: 'alta' },
   'muslo|permanente': { puntaje: 10, banda: 'alta' },
+  'muslo|agua_estancada': { puntaje: 11, banda: 'critica' },
   'mas_70|primera_vez': { puntaje: 9, banda: 'critica' },
   'mas_70|ocasional': { puntaje: 10, banda: 'critica' },
   'mas_70|cada_lluvia_fuerte': { puntaje: 11, banda: 'critica' },
   'mas_70|permanente': { puntaje: 12, banda: 'critica' },
+  'mas_70|agua_estancada': { puntaje: 13, banda: 'critica' },
 };
 
 const DURACIONES_V1 = ['menos_30min', '30min_2h', '2h_12h', 'mas_12h'] as const;

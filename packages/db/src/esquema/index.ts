@@ -44,6 +44,7 @@ export const frecuenciaEnum = pgEnum('frecuencia', [
   'ocasional',
   'cada_lluvia_fuerte',
   'permanente',
+  'agua_estancada',
 ]);
 export const causaEnum = pgEnum('causa_presunta', [
   'sumidero_tapado',

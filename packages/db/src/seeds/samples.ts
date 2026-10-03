@@ -85,7 +85,13 @@ function rng(semilla: number) {
 }
 
 const PROFUNDIDADES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
-const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
+const FRECUENCIAS = [
+  'primera_vez',
+  'ocasional',
+  'cada_lluvia_fuerte',
+  'permanente',
+  'agua_estancada',
+] as const;
 const CAUSAS = [
   'sumidero_tapado',
   'falta_sumidero',
@@ -147,18 +153,17 @@ export async function sembrarSamples(
     capas[capa] = fc.features.length;
   }
 
-  // Usuarios de desarrollo (SOLO LOCAL). Contraseñas por variable de entorno o valor por defecto documentado.
-  const passwordAdmin =
-    opciones.passwordAdmin ?? process.env.SEED_ADMIN_PASSWORD ?? 'curichi-admin-local';
+  // Usuarios de desarrollo (SOLO LOCAL: el seed se niega a correr con NODE_ENV=production). Contraseña
+  // por variable de entorno o, por defecto, el nombre del rol: corta a propósito, para probar rápido.
+  const passwordAdmin = opciones.passwordAdmin ?? process.env.SEED_ADMIN_PASSWORD ?? 'admin';
   const passwordTecnico =
-    opciones.passwordTecnico ?? process.env.SEED_TECNICO_PASSWORD ?? 'curichi-tecnico-local';
+    opciones.passwordTecnico ?? process.env.SEED_TECNICO_PASSWORD ?? 'tecnico';
   // Cuenta ciudadana de desarrollo: desde la migración 0009, crear un reporte exige sesión, así
   // que sin una cuenta así no se puede probar el recorrido del vecino recién clonado el repo.
-  const passwordVecina =
-    opciones.passwordVecina ?? process.env.SEED_VECINA_PASSWORD ?? 'curichi-vecina-local';
+  const passwordVecina = opciones.passwordVecina ?? process.env.SEED_VECINA_PASSWORD ?? 'vecina';
   // Cuenta ejecutiva de desarrollo (contrato 0.5.0): ve el resumen ejecutivo y no modera.
   const passwordEjecutivo =
-    opciones.passwordEjecutivo ?? process.env.SEED_EJECUTIVO_PASSWORD ?? 'curichi-ejecutivo-local';
+    opciones.passwordEjecutivo ?? process.env.SEED_EJECUTIVO_PASSWORD ?? 'ejecutivo';
   await ex.consultar(
     `DELETE FROM usuario WHERE email IN ('admin@curichi.local', 'tecnico@curichi.local', 'vecina@curichi.local', 'ejecutivo@curichi.local')`,
   );

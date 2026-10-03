@@ -23,10 +23,10 @@ lo activa). Llamando al script directo también vale la bandera: `pnpm --filter 
 
 | Email | Rol | Contraseña por defecto | Variable para cambiarla |
 |---|---|---|---|
-| `admin@curichi.local` | admin | `curichi-admin-local` | `SEED_ADMIN_PASSWORD` |
-| `tecnico@curichi.local` | técnico | `curichi-tecnico-local` | `SEED_TECNICO_PASSWORD` |
-| `vecina@curichi.local` | ciudadano | `curichi-vecina-local` | `SEED_VECINA_PASSWORD` |
-| `ejecutivo@curichi.local` | ejecutivo | `curichi-ejecutivo-local` | `SEED_EJECUTIVO_PASSWORD` |
+| `admin@curichi.local` | admin | `admin` | `SEED_ADMIN_PASSWORD` |
+| `tecnico@curichi.local` | técnico | `tecnico` | `SEED_TECNICO_PASSWORD` |
+| `vecina@curichi.local` | ciudadano | `vecina` | `SEED_VECINA_PASSWORD` |
+| `ejecutivo@curichi.local` | ejecutivo | `ejecutivo` | `SEED_EJECUTIVO_PASSWORD` |
 
 La cuenta ciudadana existe porque desde la migración 0009 **crear un reporte exige sesión**. Ver
 el mapa no: eso sigue siendo público. Estas contraseñas están escritas en el repositorio a
