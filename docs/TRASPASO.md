@@ -124,7 +124,7 @@ pnpm --filter panel-admin dev    # http://localhost:3100
 
 `pnpm dev` (Turborepo) arranca los cuatro servicios juntos y **ya no** intenta levantar la base: `packages/db` dejó de tener script `dev` y la base se levanta solo con `pnpm db:local` (§3.6, corregido).
 
-**Usuarios locales** creados por el seed, solo para desarrollo: `tecnico@curichi.local` / `curichi-tecnico-local` y `admin@curichi.local` / `curichi-admin-local` (se cambian con `SEED_TECNICO_PASSWORD` y `SEED_ADMIN_PASSWORD`).
+**Usuarios locales** creados por el seed, solo para desarrollo: `tecnico@curichi.local` / `tecnico` y `admin@curichi.local` / `admin` (se cambian con `SEED_TECNICO_PASSWORD` y `SEED_ADMIN_PASSWORD`).
 
 ---
 
@@ -1392,7 +1392,7 @@ Qué cambió, por dónde empezar a leer:
 | Pruebas | `api-core/test/cuentas-y-cuota.test.ts`, `cuota-concurrencia-pg.test.ts` (PostgreSQL real), `e2e/tests/cuenta-ciudadana.spec.ts` |
 | Documentación para el PR | `README.md` reescrito, `SECURITY.md`, `CONTRIBUTING.md`, `docs/PR_CHECKLIST.md`, `.env.example` |
 
-Cuenta de desarrollo nueva: `vecina@curichi.local` / `curichi-vecina-local` (la crea el seed).
+Cuenta de desarrollo nueva: `vecina@curichi.local` / `vecina` (la crea el seed).
 
 Dos cosas que sorprenden la primera vez:
 

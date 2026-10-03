@@ -75,9 +75,9 @@ pnpm dev             # api-core 3001, geo-service 3002, app pública 3000, panel
 (peticiones colgadas o cortadas) y hay que cerrar `pnpm db:local` y abrirlo otra vez; los datos
 siguen en `infra/.pglite`. Es de una sola conexión, así que tampoco sirve para probar concurrencia.
 
-Usuarios de desarrollo: `tecnico@curichi.local` / `curichi-tecnico-local`,
-`admin@curichi.local` / `curichi-admin-local` y `vecina@curichi.local` /
-`curichi-vecina-local`.
+Usuarios de desarrollo: `tecnico@curichi.local` / `tecnico`,
+`admin@curichi.local` / `admin` y `vecina@curichi.local` /
+`vecina`.
 
 La cuenta ciudadana hace falta desde la migración 0009: **crear un reporte exige sesión** (ver el
 mapa no). Lo que conviene saber al probar (ADR 0006):
