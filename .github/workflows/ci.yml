@@ -387,7 +387,7 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Construir ${{ matrix.imagen }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.contexto }}
           file: ${{ matrix.archivo }}
@@ -513,7 +513,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Imagen del trabajo de respaldos
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: infra
           file: infra/docker/respaldo.Dockerfile
@@ -587,7 +587,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Construir ${{ matrix.imagen }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.contexto }}
           file: ${{ matrix.archivo }}
@@ -629,7 +629,7 @@ jobs:
       # Mismo contexto y misma caché que el paso de construcción: BuildKit reutiliza todas las
       # capas y solo añade el SBOM y la procedencia como atestaciones de la imagen en el registro.
       - name: Publicar ${{ env.IMAGEN }}
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: ${{ matrix.contexto }}
           file: ${{ matrix.archivo }}
