@@ -253,8 +253,8 @@ importers:
         specifier: 4.3.3
         version: 4.3.3
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -320,8 +320,8 @@ importers:
         specifier: 4.3.3
         version: 4.3.3
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -335,8 +335,8 @@ importers:
         specifier: 24.13.4
         version: 24.13.4
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
 
   packages/contracts:
     dependencies:
@@ -351,8 +351,8 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -397,8 +397,8 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -443,8 +443,8 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -519,8 +519,8 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -577,8 +577,8 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
       typescript:
-        specifier: 5.9.3
-        version: 5.9.3
+        specifier: 7.0.2
+        version: 7.0.2
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@24.13.4)(vite@8.3.0(@types/node@24.13.4))
@@ -4039,11 +4039,6 @@ packages:
 
   typedarray@0.0.6:
     resolution: {integrity: sha512-/aCDEGatGvZ2BIk+HmLf4ifCJFwvKFNb9/JeZPMulfgFracn9QFcAf5GO8B/mweUjSoblS5In0cWhqpfs/5PQA==}
-
-  typescript@5.9.3:
-    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
-    engines: {node: '>=14.17'}
-    hasBin: true
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -8149,8 +8144,6 @@ snapshots:
       mime-types: 3.0.2
 
   typedarray@0.0.6: {}
-
-  typescript@5.9.3: {}
 
   typescript@7.0.2:
     optionalDependencies:
