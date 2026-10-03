@@ -247,6 +247,22 @@ describe('fusión en cadena: X→B y después B→C', () => {
       despues: { fusionado_en_id: c },
     });
   });
+
+  it('fusionar con ID corto de 8 caracteres resuelve el UUID canónico correctamente', async () => {
+    const sitio = sitioNuevo();
+    const can = await validado(sitio);
+    const dup = await validado({ lon: sitio.lon + 0.00005, lat: sitio.lat });
+    const corto = can.slice(0, 8);
+    const r = await app.inject({
+      method: 'POST',
+      url: `/api/v1/reportes/${dup}/fusionar`,
+      payload: { canonico_id: corto, motivo: 'Duplicado con ID corto' },
+      cookies: sesion(cookieTecnico),
+    });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().properties.estado).toBe('duplicado');
+    expect(r.json().properties.fusionado_en_id).toBe(can);
+  });
 });
 
 describe('si el recálculo de puntos críticos falla, la moderación no', () => {

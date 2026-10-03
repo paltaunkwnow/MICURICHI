@@ -3,7 +3,7 @@
  * límite por IP del plugin: un ataque distribuido podía probar contraseñas contra una cuenta
  * concreta sin tope, y una cookie robada valía siete días aunque nadie la usara.
  */
-import { ejecutorPg } from 'db';
+import { ejecutorPg, hashPassword } from 'db';
 import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
@@ -324,5 +324,51 @@ describe('privacidad de la IP', () => {
     const otroDia = ipHashDiario('203.0.113.7', 'sal', new Date('2026-09-16T10:00:00Z'));
     expect(mismoDia).toBe(a);
     expect(otroDia).not.toBe(a);
+  });
+});
+
+/**
+ * El login NO tiene puerta trasera. Hubo un atajo que aceptaba contraseñas fijas
+ * (`admin`/`admin`, `curichi-admin-local`…) para ciertas cuentas aunque el hash no coincidiera:
+ * se quitó. La contraseña solo entra si `verificarPassword` da verdadero contra el hash guardado.
+ *
+ * Se conserva, aparte, que el `LoginSchema` complete un usuario sin `@` a `…@curichi.local`: eso
+ * es comodidad del formulario y es legítimo, siempre que la contraseña siga teniendo que ser la
+ * real.
+ */
+describe('el login no tiene atajos de contraseña', { timeout: TIMEOUT_ARGON2 }, () => {
+  const EMAIL = 'admin@curichi.local';
+  const REAL = 'la-contrasena-real-del-admin-987';
+
+  async function sembrarAdmin() {
+    await pool.query(
+      `INSERT INTO usuario (email, nombre, rol, password_hash)
+       VALUES ($1, 'Admin', 'admin', $2)
+       ON CONFLICT (lower(email))
+       DO UPDATE SET password_hash = EXCLUDED.password_hash, activo = true`,
+      [EMAIL, await hashPassword(REAL)],
+    );
+  }
+
+  it('un usuario sin @ (admin → admin@curichi.local) entra con su contraseña real', async () => {
+    const a = await app();
+    await sembrarAdmin();
+    // El LoginSchema completa "admin" a "admin@curichi.local"; la contraseña es la verdadera.
+    const r = await login(a, 'admin', REAL);
+    expect(r.statusCode).toBe(200);
+    expect(r.json().email).toBe(EMAIL);
+    expect(r.json().rol).toBe('admin');
+    await a.close();
+  });
+
+  it('las contraseñas de atajo ("admin", "curichi-admin-local") ya no entran: 401', async () => {
+    const a = await app();
+    await sembrarAdmin();
+    for (const pass of ['admin', 'curichi-admin-local']) {
+      const r = await login(a, 'admin', pass);
+      expect(r.statusCode, `la contraseña de atajo "${pass}" no debe entrar`).toBe(401);
+      expect(r.json().codigo).toBe('CREDENCIALES_INVALIDAS');
+    }
+    await a.close();
   });
 });

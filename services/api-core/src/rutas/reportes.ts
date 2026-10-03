@@ -24,7 +24,18 @@ import { ipHashDiario } from '../privacidad.js';
 import { revisarDispositivo } from '../ubicacion-dispositivo.js';
 import { aFeature, vistaMiReporte, vistaPublica, vistaTecnica } from '../vistas.js';
 
-const IdParam = z.object({ id: z.uuid() });
+const IdParam = z.object({
+  id: z
+    .string()
+    .trim()
+    .refine(
+      (s) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ||
+        /^[0-9a-f]{8}$/i.test(s),
+      { message: 'El id debe ser un UUID o un ID corto de 8 caracteres hexadecimales' },
+    )
+    .transform((s) => s.toLowerCase()),
+});
 
 /** Ventana en la que una `objeto_key` recién subida puede asociarse a un reporte. */
 export const HORAS_VALIDEZ_FOTO = 24;
@@ -401,12 +412,27 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     };
   });
 
+  async function resolverUuid(id: string): Promise<string | null> {
+    if (id.length === 8) {
+      const r = await dep.pool.query<{ id: string }>(
+        `SELECT id FROM reporte_inundacion WHERE id::text LIKE $1 LIMIT 2`,
+        [`${id.toLowerCase()}%`],
+      );
+      if (r.rows.length === 1 && r.rows[0]) return r.rows[0].id;
+      return null;
+    }
+    return id;
+  }
+
   app.get('/api/v1/reportes/:id', limiteLectura, async (req, res) => {
     const p = IdParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
+    const uuid = await resolverUuid(p.data.id);
+    if (!uuid)
+      return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
     // En espera, rechazado o duplicado: el mismo 404 que si no existiera.
-    const fila = await obtenerReporte(dep.pool, p.data.id, 'publico');
+    const fila = await obtenerReporte(dep.pool, uuid, 'publico');
     if (!fila)
       return res
         .status(404)
@@ -454,8 +480,11 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     const p = IdParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
+    const uuid = await resolverUuid(p.data.id);
+    if (!uuid)
+      return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
     // Mientras espera su publicar_en tampoco lo ve el técnico (ADR 0006).
-    const fila = await obtenerReporte(dep.pool, p.data.id, 'publicado');
+    const fila = await obtenerReporte(dep.pool, uuid, 'publicado');
     if (!fila)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
     return aFeature(vistaTecnica(fila, dep.cfg.urlPublica));

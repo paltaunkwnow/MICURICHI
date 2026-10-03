@@ -21,13 +21,23 @@ import { invalidarAgregadosEnVuelo } from './admin.js';
  * MAYÚSCULAS>` con el canónico en minúsculas pasaba la comprobación de «distinto» y el reporte
  * quedaba duplicado de sí mismo, y el historial de un reporte se repartía entre dos claves.
  */
-const Uuid = z.uuid().transform((s) => s.toLowerCase());
-const IdParam = z.object({ id: Uuid });
+const IdParam = z.object({
+  id: z
+    .string()
+    .trim()
+    .refine(
+      (s) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ||
+        /^[0-9a-f]{8}$/i.test(s),
+      { message: 'El id debe ser un UUID o un ID corto de 8 caracteres hexadecimales' },
+    )
+    .transform((s) => s.toLowerCase()),
+});
 const AFECTA_PUNTOS = new Set(['validado', 'resuelto']);
 
 export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
   type ResultadoCambio =
-    | { ok: false; error: 403 | 404 | 409; codigo: string; mensaje: string }
+    | { ok: false; error: 400 | 403 | 404 | 409; codigo: string; mensaje: string }
     | { ok: true; fila: FilaReporte };
 
   const noPermitida = (mensaje: string): ResultadoCambio => ({
@@ -50,7 +60,35 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     fusionadoEnCrudo: string | undefined,
     actor: { id: string; rol: string },
   ): Promise<ResultadoCambio> {
-    const fusionadoEn = nuevo === 'duplicado' ? fusionadoEnCrudo?.toLowerCase() : undefined;
+    let fusionadoEn =
+      nuevo === 'duplicado' ? fusionadoEnCrudo?.trim().replace(/^#/, '').toLowerCase() : undefined;
+
+    if (nuevo === 'duplicado' && fusionadoEn) {
+      if (fusionadoEn.length === 8) {
+        const rCorto = await dep.pool.query<{ id: string; estado: string }>(
+          `SELECT id::text, estado::text FROM reporte_inundacion WHERE id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
+          [fusionadoEn],
+        );
+        if (rCorto.rows.length === 0) {
+          return {
+            ok: false,
+            error: 404,
+            codigo: 'NO_EXISTE',
+            mensaje: `No se encontró ningún reporte publicado con el ID corto "${fusionadoEn}".`,
+          };
+        }
+        if (rCorto.rows.length > 1) {
+          return {
+            ok: false,
+            error: 400,
+            codigo: 'ID_AMBIGUO',
+            mensaje: `El ID corto "${fusionadoEn}" coincide con más de un reporte. Usá el UUID completo.`,
+          };
+        }
+        fusionadoEn = rCorto.rows[0]!.id;
+      }
+    }
+
     if (fusionadoEn === id)
       return {
         ok: false,
@@ -99,12 +137,18 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       }
       // Se mira después del bloqueo: si otra fusión lo acaba de convertir en duplicado, aquí ya
       // se ve. Solo `validado` (§7.3): un resuelto o un duplicado no pueden ser canónicos.
-      if (
-        nuevo === 'duplicado' &&
-        (!fusionadoEn || porId.get(fusionadoEn)?.estado !== 'validado')
-      ) {
-        await cliente.query('ROLLBACK');
-        return noPermitida('El reporte canónico debe existir, ser distinto y estar validado.');
+      if (nuevo === 'duplicado') {
+        const canonicoFila = fusionadoEn ? porId.get(fusionadoEn) : undefined;
+        if (!canonicoFila) {
+          await cliente.query('ROLLBACK');
+          return noPermitida('El reporte canónico no existe o no está publicado.');
+        }
+        if (canonicoFila.estado !== 'validado') {
+          await cliente.query('ROLLBACK');
+          return noPermitida(
+            `El reporte canónico debe estar en estado 'validado' (actualmente está '${canonicoFila.estado}'). Validalo primero para poder fusionar en él.`,
+          );
+        }
       }
       await cliente.query(
         `UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = $3, fusionado_en_id = $4, actualizado_en = now(),
@@ -215,6 +259,18 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     }
   }
 
+  async function resolverId(id: string): Promise<string | null> {
+    if (id.length === 8) {
+      const r = await dep.pool.query<{ id: string }>(
+        `SELECT id::text FROM reporte_inundacion WHERE id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
+        [id],
+      );
+      if (r.rows.length === 1 && r.rows[0]) return r.rows[0].id;
+      return null;
+    }
+    return id;
+  }
+
   app.patch(
     '/api/v1/reportes/:id/estado',
     { preHandler: requerirRol('tecnico', 'admin') },
@@ -223,13 +279,16 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       const b = ReporteCambiarEstadoSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
+      const targetId = await resolverId(p.data.id);
+      if (!targetId)
+        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)
         return res.status(400).send({
           codigo: 'PAYLOAD_INVALIDO',
           mensaje: b.error.issues.map((i) => i.message).join('; '),
         });
       const r = await cambiarEstado(
-        p.data.id,
+        targetId,
         b.data.estado,
         b.data.estado_motivo,
         b.data.fusionado_en_id,
@@ -248,13 +307,16 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       const b = ReporteFusionarSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
+      const targetId = await resolverId(p.data.id);
+      if (!targetId)
+        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)
         return res.status(400).send({
           codigo: 'PAYLOAD_INVALIDO',
           mensaje: b.error.issues.map((i) => i.message).join('; '),
         });
       const r = await cambiarEstado(
-        p.data.id,
+        targetId,
         'duplicado',
         b.data.motivo,
         b.data.canonico_id,
@@ -273,6 +335,9 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       const b = ReporteReclasificarSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
+      const targetId = await resolverId(p.data.id);
+      if (!targetId)
+        return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)
         return res.status(400).send({
           codigo: 'PAYLOAD_INVALIDO',
@@ -287,7 +352,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         const bloqueado = await cliente.query<{ estado: string; severidad_manual: string | null }>(
           `SELECT estado::text, severidad_manual::text FROM reporte_inundacion
             WHERE id = $1 AND ${condicionPublicado('')} FOR UPDATE`,
-          [p.data.id],
+          [targetId],
         );
         const actual = bloqueado.rows[0];
         if (!actual) {
@@ -298,7 +363,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         await cliente.query(
           'UPDATE reporte_inundacion SET severidad_manual = $2::severidad, severidad_motivo = $3, actualizado_en = now() WHERE id = $1',
           [
-            p.data.id,
+            targetId,
             b.data.severidad_manual,
             b.data.severidad_manual === null ? null : b.data.severidad_motivo,
           ],
@@ -307,7 +372,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
           'INSERT INTO auditoria (entidad, entidad_id, accion, actor_id, antes, despues) VALUES ($1, $2, $3, $4, $5, $6)',
           [
             'reporte',
-            p.data.id,
+            targetId,
             'severidad:reclasificar',
             req.usuario!.id,
             JSON.stringify({ severidad_manual: actual.severidad_manual }),
@@ -322,9 +387,9 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         cliente.release();
       }
       // La severidad no mueve el punto, pero sí puede cambiar su `severidad_max`.
-      if (AFECTA_PUNTOS.has(estadoActual)) await recalcularPuntosDelEntorno(p.data.id);
+      if (AFECTA_PUNTOS.has(estadoActual)) await recalcularPuntosDelEntorno(targetId);
       invalidarAgregadosEnVuelo(app);
-      const fila = await obtenerReporte(dep.pool, p.data.id, 'publicado');
+      const fila = await obtenerReporte(dep.pool, targetId, 'publicado');
       return aFeature(vistaTecnica(fila!, dep.cfg.urlPublica));
     },
   );
