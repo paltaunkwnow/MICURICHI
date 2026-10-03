@@ -48,3 +48,6 @@ overrides:
   image-size: '>=2.0.4'
   fflate: '>=0.8.3'
   file-type: '>=21.3.1'
+  # brace-expansion < 5.0.11: DoS por recursión (2026-10). Llega por @fastify/swagger-ui y
+  # @fastify/static de api-core (glob → minimatch). Misma línea 5.x, sin cambio de API.
+  brace-expansion: '^5.0.11'
