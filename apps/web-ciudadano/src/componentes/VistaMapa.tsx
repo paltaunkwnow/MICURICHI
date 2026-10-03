@@ -72,6 +72,9 @@ export function VistaMapa() {
   const [severidad, setSeveridad] = useState<string | null>(null);
   const [puntoCritico, setPuntoCritico] = useState<string | null>(null);
   const [unidadVecinal, setUnidadVecinal] = useState<{ id: string; codigo: string } | null>(null);
+  const [distrito, setDistrito] = useState<{ id: string; codigo: string; nombre: string } | null>(
+    null,
+  );
   const [seleccionado, setSeleccionado] = useState<string | null>(null);
   const [capaVisible, setCapaVisible] = useState<CapaVisible>('auto');
   const [texto, setTexto] = useState('');
@@ -85,15 +88,16 @@ export function VistaMapa() {
 
   const filtros = useMemo(
     () => ({
-      // Un filtro explícito (punto crítico o unidad vecinal) manda sobre la vista: si no, mover
+      // Un filtro explícito (punto crítico, unidad vecinal o distrito) manda sobre la vista: si no, mover
       // el mapa un pixel borraría la selección que el vecino acaba de hacer.
-      bbox: puntoCritico || unidadVecinal ? undefined : (bbox ?? undefined),
+      bbox: puntoCritico || unidadVecinal || distrito ? undefined : (bbox ?? undefined),
       severidad: severidad ?? undefined,
       punto_critico_id: puntoCritico ?? undefined,
       unidad_vecinal_id: unidadVecinal?.id,
+      distrito_id: distrito?.id,
       limite: '300',
     }),
-    [bbox, severidad, puntoCritico, unidadVecinal],
+    [bbox, severidad, puntoCritico, unidadVecinal, distrito],
   );
 
   // `signal` viene de TanStack Query: al cambiar la vista, aborta la petición de la vista
@@ -207,7 +211,8 @@ export function VistaMapa() {
       ? reporteElegido.error.estado === 404
       : false;
   const elegido = seleccionado !== null && !noExiste ? (reporteElegido.data ?? null) : null;
-  const hayFiltros = severidad !== null || puntoCritico !== null || unidadVecinal !== null;
+  const hayFiltros =
+    severidad !== null || puntoCritico !== null || unidadVecinal !== null || distrito !== null;
 
   /** Lo que se dibuja en el mapa incluye siempre el punto elegido, esté o no en la vista. */
   const featuresMapa = useMemo(() => conSeleccionado(features, elegido), [features, elegido]);
@@ -289,7 +294,28 @@ export function VistaMapa() {
     setSeveridad(null);
     setPuntoCritico(null);
     setUnidadVecinal(null);
+    setDistrito(null);
   };
+
+  const alSeleccionarDistrito = useCallback(
+    (d: { id: string; codigo: string; nombre: string }) => {
+      setDistrito(d);
+      setUnidadVecinal(null);
+      setPuntoCritico(null);
+      toast(`Mostrando reportes de ${d.nombre || `Distrito ${d.codigo}`}`);
+    },
+    [toast],
+  );
+
+  const alSeleccionarUv = useCallback(
+    (u: { id: string; codigo: string }) => {
+      setUnidadVecinal(u);
+      setDistrito(null);
+      setPuntoCritico(null);
+      toast(`Mostrando la ${etiquetaUnidadVecinal(u.codigo)}`);
+    },
+    [toast],
+  );
 
   /**
    * El mapa se mueve a la ubicación del vecino SOLO cuando él lo pide, y ni siquiera entonces se
@@ -337,7 +363,11 @@ export function VistaMapa() {
 
   const chipCapa = elegido
     ? textoCapaOficial(elegido.properties.distrito, elegido.properties.unidad_vecinal)
-    : `${features.length} ${features.length === 1 ? 'punto' : 'puntos'} en esta vista · capa oficial vigente`;
+    : distrito
+      ? `${distrito.nombre || `Distrito ${distrito.codigo}`} · ${features.length} ${features.length === 1 ? 'punto' : 'puntos'}`
+      : unidadVecinal
+        ? `${etiquetaUnidadVecinal(unidadVecinal.codigo)} · ${features.length} ${features.length === 1 ? 'punto' : 'puntos'}`
+        : `${features.length} ${features.length === 1 ? 'punto' : 'puntos'} en esta vista · capa oficial vigente`;
 
   const buscador = (
     <div>
@@ -529,6 +559,7 @@ export function VistaMapa() {
                     onClick={limpiarFiltros}
                   >
                     Quitar filtros
+                    {distrito ? ` · ${distrito.nombre || `Distrito ${distrito.codigo}`}` : ''}
                     {unidadVecinal ? ` · ${etiquetaUnidadVecinal(unidadVecinal.codigo)}` : ''}
                   </button>
                 ) : null}
@@ -578,6 +609,8 @@ export function VistaMapa() {
             encuadrarACapas
             seleccionado={seleccionado}
             onSeleccionar={setSeleccionado}
+            onSeleccionarDistrito={alSeleccionarDistrito}
+            onSeleccionarUv={alSeleccionarUv}
             onMover={alMover}
             onResumen={alResumen}
             alListo={(m) => {

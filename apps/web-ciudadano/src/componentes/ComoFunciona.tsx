@@ -229,7 +229,7 @@ export function ComoFunciona() {
 
             <h2 className="glbl">De dónde sale el número</h2>
             <p className="text-[15.5px] leading-[1.55] text-tinta-600">
-              Cada respuesta vale de 1 a 4 puntos y la profundidad pesa doble, porque es lo que más
+              Cada respuesta vale de 1 a 5 puntos y la profundidad pesa doble, porque es lo que más
               riesgo trae para personas y vehículos.
             </p>
             <p className="mt-2.5 rounded-2xl bg-tinta-100 p-4 text-center font-semibold">

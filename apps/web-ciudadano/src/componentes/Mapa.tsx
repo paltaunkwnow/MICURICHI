@@ -155,8 +155,43 @@ export interface PropsMapa {
    * página. Con esto, `VistaMapa` la anuncia en una región viva.
    */
   onResumen?: (resumen: ResumenMapa) => void;
+  /** Callback al hacer clic en un distrito administrativo */
+  onSeleccionarDistrito?: (distrito: { id: string; codigo: string; nombre: string }) => void;
+  /** Callback al hacer clic en una unidad vecinal */
+  onSeleccionarUv?: (uv: { id: string; codigo: string; nombre: string }) => void;
   /** Expone la instancia para los controles externos (+ / − / mi ubicación). */
   alListo?: (mapa: MapaGl) => void;
+}
+
+function calcularBboxFeature(
+  f: GeoJSON.Feature | maplibregl.MapGeoJSONFeature,
+): [number, number, number, number] | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  function recorrer(coords: unknown) {
+    if (!Array.isArray(coords)) return;
+    if (typeof coords[0] === 'number' && typeof coords[1] === 'number') {
+      const x = coords[0] as number;
+      const y = coords[1] as number;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    } else {
+      for (const item of coords) recorrer(item);
+    }
+  }
+
+  if (f.geometry && 'coordinates' in f.geometry) {
+    recorrer((f.geometry as unknown as { coordinates: unknown }).coordinates);
+    if (minX !== Infinity && minY !== Infinity) {
+      return [minX, minY, maxX, maxY];
+    }
+  }
+  return null;
 }
 
 function coloresPorSeveridad(): maplibregl.ExpressionSpecification {
@@ -283,6 +318,8 @@ export function Mapa({
   fijo = false,
   encuadrarACapas = false,
   onResumen,
+  onSeleccionarDistrito,
+  onSeleccionarUv,
   alListo,
 }: PropsMapa) {
   /** Centro, zoom y locale de la instalación: el mapa se crea una vez y los toma al nacer. */
@@ -342,6 +379,10 @@ export function Mapa({
   onSeleccionarRef.current = onSeleccionar;
   onMoverRef.current = onMover;
   onUbicacionRef.current = onUbicacion;
+  const onSeleccionarDistritoRef = useRef(onSeleccionarDistrito);
+  const onSeleccionarUvRef = useRef(onSeleccionarUv);
+  onSeleccionarDistritoRef.current = onSeleccionarDistrito;
+  onSeleccionarUvRef.current = onSeleccionarUv;
 
   /** Avisa el punto elegido, recortado al círculo si lo hay. */
   const avisarUbicacion = useRef((lat: number, lon: number) => {
@@ -616,7 +657,66 @@ export function Mapa({
         const f = m.queryRenderedFeatures(e.point, { layers: ['puntos-ancla'] })[0];
         if (f) onSeleccionarRef.current?.(String(f.id ?? f.properties?.id));
       });
-      for (const capa of ['puntos-ancla', 'clusters']) {
+      m.on('click', 'capa-distrito_municipal-relleno', (e: MapMouseEvent) => {
+        if (m.queryRenderedFeatures(e.point, { layers: ['puntos-ancla', 'clusters'] }).length)
+          return;
+        const features = m.queryRenderedFeatures(e.point, {
+          layers: ['capa-distrito_municipal-relleno'],
+        });
+        const f = features[0];
+        if (!f) return;
+        const id = String(f.properties?.id ?? f.id ?? '');
+        const codigo = String(f.properties?.codigo ?? id.split(':').pop() ?? '');
+        const nombre = String(f.properties?.nombre ?? `Distrito ${codigo}`);
+        const bbox = calcularBboxFeature(f);
+        if (bbox) {
+          m.fitBounds(
+            [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]],
+            ],
+            {
+              padding: 48,
+              maxZoom: 15,
+              duration: 750,
+            },
+          );
+        }
+        onSeleccionarDistritoRef.current?.({ id, codigo, nombre });
+      });
+      m.on('click', 'capa-unidad_vecinal-relleno', (e: MapMouseEvent) => {
+        if (m.queryRenderedFeatures(e.point, { layers: ['puntos-ancla', 'clusters'] }).length)
+          return;
+        const features = m.queryRenderedFeatures(e.point, {
+          layers: ['capa-unidad_vecinal-relleno'],
+        });
+        const f = features[0];
+        if (!f) return;
+        const id = String(f.properties?.id ?? f.id ?? '');
+        const codigo = String(f.properties?.codigo ?? id.split(':').pop() ?? '');
+        const nombre = String(f.properties?.nombre ?? `UV ${codigo}`);
+        const bbox = calcularBboxFeature(f);
+        if (bbox) {
+          m.fitBounds(
+            [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]],
+            ],
+            {
+              padding: 48,
+              maxZoom: 16,
+              duration: 750,
+            },
+          );
+        }
+        onSeleccionarUvRef.current?.({ id, codigo, nombre });
+      });
+      for (const capa of [
+        'puntos-ancla',
+        'clusters',
+        'capa-distrito_municipal-relleno',
+        'capa-unidad_vecinal-relleno',
+      ]) {
         m.on('mouseenter', capa, () => {
           m.getCanvas().style.cursor = 'pointer';
         });
@@ -627,7 +727,16 @@ export function Mapa({
       m.on('click', (e: MapMouseEvent) => {
         if (onUbicacionRef.current && seleccionUbicacionRef.current !== undefined)
           avisarUbicacion.current(e.lngLat.lat, e.lngLat.lng);
-        else if (!m.queryRenderedFeatures(e.point, { layers: ['puntos-ancla', 'clusters'] }).length)
+        else if (
+          !m.queryRenderedFeatures(e.point, {
+            layers: [
+              'puntos-ancla',
+              'clusters',
+              'capa-distrito_municipal-relleno',
+              'capa-unidad_vecinal-relleno',
+            ],
+          }).length
+        )
           onSeleccionarRef.current?.(null);
       });
 

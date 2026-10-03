@@ -1,7 +1,7 @@
 'use client';
 
 import { ETIQUETAS } from 'contracts';
-import { X } from 'lucide-react';
+import { Shield, X } from 'lucide-react';
 import Link from 'next/link';
 import type { ReporteFeature } from '@/lib/api';
 import { useCiudad } from '@/lib/ciudad-contexto';
@@ -16,6 +16,8 @@ import {
   tituloReporte,
   urlFotoRelativa,
 } from '@/lib/formato';
+import { destinoDelPanelDeSesion } from '@/lib/panel';
+import { useSesionOpcional } from '@/lib/sesion';
 import { estaVerificado, TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { ChipEstado, ChipSeveridad } from './ChipSeveridad';
@@ -51,7 +53,16 @@ export function HojaDetalle({
 }: Props) {
   const p = reporte.properties;
   const ciudad = useCiudad();
+  const sesion = useSesionOpcional();
+  const usuario = sesion?.usuario;
   const [lon, lat] = reporte.geometry.coordinates;
+  const esStaff = usuario?.rol === 'tecnico' || usuario?.rol === 'admin';
+  const panelUrl = destinoDelPanelDeSesion(usuario);
+  const urlPanelBase = panelUrl
+    ? panelUrl.replace(/\/$/, '')
+    : typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? 'https://panel.localhost'
+      : 'http://localhost:3100';
   return (
     <section data-testid={testId} aria-label={`Detalle del reporte en ${tituloReporte(p)}`}>
       <div className="asa" aria-hidden="true" />
@@ -152,6 +163,18 @@ export function HojaDetalle({
             Ver detalle
           </Link>
         ) : null}
+        {esStaff && (
+          <a
+            href={`${urlPanelBase}/reportes/${p.id}`}
+            className="btn btn-primario btn-sm w-full no-underline flex items-center justify-center gap-1.5"
+            target="_blank"
+            rel="noreferrer"
+            title="Abrir este reporte en el panel técnico para moderarlo"
+          >
+            <Shield size={16} aria-hidden="true" />
+            Moderar en Panel Técnico
+          </a>
+        )}
       </div>
 
       {p.punto_critico_id && p.n_reportes_punto && p.n_reportes_punto > 1 && onVerPunto ? (

@@ -42,14 +42,28 @@ export interface Ancla extends PuntoLatLon {
 const DISPOSITIVO_DE_RELLENO: Dispositivo = { lat: 0, lon: 0, precision_m: 0, antiguedad_s: 0 };
 const validarContrato = zodResolver(ReporteCrearSchema);
 
+/** Contexto opcional pasado por useForm con la ubicación actual elegida. */
+export interface ContextoFormulario {
+  ubicacion?: Ubicacion | null;
+}
+
 /** El resolver de react-hook-form: el contrato entero menos `dispositivo`. */
-export const resolverFormulario: Resolver<ValoresFormulario> = async (
+export const resolverFormulario: Resolver<ValoresFormulario, ContextoFormulario> = async (
   valores,
   contexto,
   opciones,
 ) => {
+  const u = contexto?.ubicacion;
+  const sumidero = respuestasSumidero(valores.sumidero_cercano ?? null, valores);
+  const datosCompletos = {
+    ...valores,
+    ...sumidero,
+    lat: typeof valores.lat === 'number' ? valores.lat : (u?.lat ?? 0),
+    lon: typeof valores.lon === 'number' ? valores.lon : (u?.lon ?? 0),
+    dispositivo: DISPOSITIVO_DE_RELLENO,
+  };
   const r = await validarContrato(
-    { ...valores, dispositivo: DISPOSITIVO_DE_RELLENO },
+    datosCompletos,
     contexto,
     opciones as unknown as Parameters<typeof validarContrato>[2],
   );

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { AvisoPuntoResuelto } from '@/componentes/AvisoPuntoResuelto';
 import { BarraSuperior } from '@/componentes/BarraSuperior';
 import { obtenerCiudad } from '@/lib/ciudad-servidor';
 import { Proveedores } from './proveedores';
@@ -54,6 +55,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
             <main id="contenido" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {children}
             </main>
+            <AvisoPuntoResuelto />
           </div>
         </Proveedores>
       </body>

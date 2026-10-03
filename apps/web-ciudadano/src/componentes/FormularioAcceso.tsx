@@ -33,7 +33,7 @@ function destinoSeguro(valor: string | null | undefined): string {
 }
 
 const EsquemaEntrar = z.object({
-  email: z.email('Escribí un correo electrónico válido.').max(200),
+  email: z.string().trim().min(1, 'Escribí tu correo o usuario.').max(200),
   password: z.string().min(1, 'Escribí tu contraseña.').max(200),
 });
 
@@ -80,11 +80,14 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
   const entrar = useMutation({
     mutationFn: (d: DatosEntrar) => iniciarSesion({ email: d.email, password: d.password }),
     onMutate: () => setAviso(null),
-    onSuccess: async () => {
+    onSuccess: async (usuario) => {
       // La caché se refresca antes de navegar: si no, la pantalla de destino se pintaría todavía
       // con «sin sesión» y volvería a pedir cuenta justo después de entrar.
       await cliente.invalidateQueries({ queryKey: CLAVE_YO });
-      router.replace(volver);
+      const esStaff =
+        usuario.rol === 'tecnico' || usuario.rol === 'admin' || usuario.rol === 'ejecutivo';
+      const destinoFinal = volver === '/' && esStaff ? '/cuenta' : volver;
+      router.replace(destinoFinal);
     },
     onError: (e) => {
       if (e instanceof ErrorApi && e.estado === 401)
@@ -184,14 +187,15 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
 
         <div className="mb-4">
           <label className="lbl" htmlFor="email">
-            Correo electrónico
+            {alta ? 'Correo electrónico' : 'Correo electrónico o usuario'}
           </label>
           <input
             id="email"
-            type="email"
-            inputMode="email"
+            type={alta ? 'email' : 'text'}
+            inputMode={alta ? 'email' : 'text'}
+            placeholder={alta ? 'tu@email.com' : 'vecina o tu@email.com'}
             className="campo"
-            autoComplete="email"
+            autoComplete="username"
             aria-invalid={form.formState.errors.email ? 'true' : undefined}
             aria-describedby={form.formState.errors.email ? 'error-email' : undefined}
             {...form.register('email')}

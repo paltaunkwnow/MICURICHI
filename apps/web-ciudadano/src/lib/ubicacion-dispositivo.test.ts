@@ -315,6 +315,15 @@ describe('la antigüedad de la posición', () => {
     expect(lecturaDe(posicion({ lat: Number.NaN, lon: 1 }, 5), T0)).toBeNull();
   });
 
+  it('un timestamp viejo de la caché del SO o en segundos usa la hora de recepción', () => {
+    const vieja = lecturaDe(posicion(ANCLA, 10, T0 - 700_000), T0);
+    expect(vieja?.tomadaEn).toBe(T0);
+    const enSegundos = lecturaDe(posicion(ANCLA, 10, Math.floor((T0 - 5_000) / 1000)), T0);
+    expect(enSegundos?.tomadaEn).toBe(T0 - 5_000);
+    const futura = lecturaDe(posicion(ANCLA, 10, T0 + 10_000), T0);
+    expect(futura?.tomadaEn).toBe(T0);
+  });
+
   it('lo que viaja es posición, precisión y antigüedad', () => {
     expect(dispositivoDe(lectura(ANCLA, 12.5, T0 - 4_000), T0)).toEqual({
       lat: ANCLA.lat,

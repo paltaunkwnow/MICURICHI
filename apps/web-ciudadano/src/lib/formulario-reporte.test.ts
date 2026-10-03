@@ -370,4 +370,41 @@ describe('la validación del formulario', () => {
     expect(Object.keys(r.errors)).toContain('descripcion');
     expect(Object.keys(r.errors)).not.toContain('dispositivo');
   });
+
+  it('toma lat y lon de contexto.ubicacion si los valores no los traen', async () => {
+    const r = await resolverFormulario(
+      {
+        ...valoresIniciales(),
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+      } as ValoresFormulario,
+      { ubicacion: { lat: -17.78, lon: -63.18 } },
+      opciones,
+    );
+    expect(r.errors).toEqual({});
+    expect(r.values.lat).toBe(-17.78);
+    expect(r.values.lon).toBe(-63.18);
+  });
+
+  it('normaliza sumidero_cercano=no para evitar conflictos de validación', async () => {
+    const r = await resolverFormulario(
+      {
+        ...valoresIniciales(),
+        lat: -17.78,
+        lon: -63.18,
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+        sumidero_cercano: 'no',
+        sumidero_estado: 'tapado',
+        agua_brota_sumidero: true,
+      } as ValoresFormulario,
+      undefined,
+      opciones,
+    );
+    expect(r.errors).toEqual({});
+    expect(r.values.sumidero_estado).toBeNull();
+    expect(r.values.agua_brota_sumidero).toBeNull();
+  });
 });

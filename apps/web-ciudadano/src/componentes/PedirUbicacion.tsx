@@ -22,10 +22,12 @@ const VIVIENDA = ETIQUETAS.ubicacion_tipo.vivienda_o_predio;
 export function VistaPedirUbicacion({
   estado,
   alCompartir,
+  alSimular,
   aviso = null,
 }: {
   estado: EstadoUbicacionDispositivo;
   alCompartir: () => void;
+  alSimular?: () => void;
   /** Por qué se vuelve a pedir: un borrador retomado, una posición vencida, un 422. */
   aviso?: string | null;
 }) {
@@ -65,7 +67,7 @@ export function VistaPedirUbicacion({
         </div>
       </div>
       <div className="pie">
-        <Accion estado={estado} alCompartir={alCompartir} />
+        <Accion estado={estado} alCompartir={alCompartir} alSimular={alSimular} />
       </div>
     </>
   );
@@ -143,56 +145,85 @@ function Detalle({ estado }: { estado: EstadoUbicacionDispositivo }) {
 function Accion({
   estado,
   alCompartir,
+  alSimular,
 }: {
   estado: EstadoUbicacionDispositivo;
   alCompartir: () => void;
+  alSimular?: () => void;
 }) {
+  const botonSimular = alSimular ? (
+    <button
+      type="button"
+      className="btn btn-secundario btn-bloque text-sm mt-2"
+      data-testid="boton-simular-ubicacion"
+      onClick={alSimular}
+      title="Ubicación de prueba en Santa Cruz de la Sierra (para computadoras sin GPS)"
+    >
+      📍 Usar ubicación de prueba (Santa Cruz)
+    </button>
+  ) : null;
+
   switch (estado.fase) {
     case 'inactiva':
       return (
-        <button
-          type="button"
-          className="btn btn-bloque"
-          data-testid="boton-compartir-ubicacion"
-          onClick={alCompartir}
-        >
-          <LocateFixed size={18} aria-hidden="true" />
-          Compartir mi ubicación
-        </button>
+        <div className="w-full flex flex-col">
+          <button
+            type="button"
+            className="btn btn-bloque"
+            data-testid="boton-compartir-ubicacion"
+            onClick={alCompartir}
+          >
+            <LocateFixed size={18} aria-hidden="true" />
+            Compartir mi ubicación
+          </button>
+          {botonSimular}
+        </div>
       );
     case 'buscando':
       return (
-        <button type="button" className="btn btn-bloque" disabled>
-          Buscando tu ubicación…
-        </button>
+        <div className="w-full flex flex-col">
+          <button type="button" className="btn btn-bloque" disabled>
+            Buscando tu ubicación…
+          </button>
+          {botonSimular}
+        </div>
       );
     case 'imprecisa':
       return (
-        <button
-          type="button"
-          className="btn btn-bloque"
-          data-testid="boton-reintentar-ubicacion"
-          onClick={alCompartir}
-        >
-          Reintentar
-        </button>
+        <div className="w-full flex flex-col">
+          <button
+            type="button"
+            className="btn btn-bloque"
+            data-testid="boton-reintentar-ubicacion"
+            onClick={alCompartir}
+          >
+            Reintentar
+          </button>
+          {botonSimular}
+        </div>
       );
     case 'denegada':
       return (
-        <button
-          type="button"
-          className="btn btn-fantasma btn-bloque"
-          data-testid="boton-reintentar-ubicacion"
-          onClick={alCompartir}
-        >
-          Probar de nuevo
-        </button>
+        <div className="w-full flex flex-col">
+          <button
+            type="button"
+            className="btn btn-fantasma btn-bloque"
+            data-testid="boton-reintentar-ubicacion"
+            onClick={alCompartir}
+          >
+            Probar de nuevo
+          </button>
+          {botonSimular}
+        </div>
       );
     default:
       return (
-        <Link href="/" className="btn btn-fantasma btn-bloque no-underline">
-          Volver al mapa
-        </Link>
+        <div className="w-full flex flex-col">
+          <Link href="/" className="btn btn-fantasma btn-bloque no-underline">
+            Volver al mapa
+          </Link>
+          {botonSimular}
+        </div>
       );
   }
 }

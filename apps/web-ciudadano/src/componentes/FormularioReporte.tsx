@@ -118,7 +118,13 @@ import { MapaDiferido } from './MapaDiferido';
 import { VistaPedirUbicacion } from './PedirUbicacion';
 import { useToast } from './Toast';
 
-const FRECUENCIAS = ['primera_vez', 'ocasional', 'cada_lluvia_fuerte', 'permanente'] as const;
+const FRECUENCIAS = [
+  'primera_vez',
+  'ocasional',
+  'cada_lluvia_fuerte',
+  'permanente',
+  'agua_estancada',
+] as const;
 const CAUSAS = [
   'desconocida',
   'sumidero_tapado',
@@ -364,10 +370,20 @@ export function FormularioReporte() {
 
   const form = useForm<ValoresFormulario>({
     resolver: resolverFormulario,
+    context: { ubicacion },
     mode: 'onSubmit',
     defaultValues: valoresIniciales(),
   });
   const valores = form.watch();
+
+  // Asegura que lat y lon en el formulario nunca queden desincronizados respecto al estado ubicacion
+  useEffect(() => {
+    if (ubicacion) {
+      form.setValue('lat', ubicacion.lat, { shouldValidate: false });
+      form.setValue('lon', ubicacion.lon, { shouldValidate: false });
+      form.clearErrors(['lat', 'lon']);
+    }
+  }, [ubicacion, form]);
 
   /** Ubicación para la que vale `resuelto` (la misma referencia): esa no se vuelve a preguntar. */
   const resueltoPara = useRef<Ubicacion | null>(null);
@@ -445,6 +461,8 @@ export function FormularioReporte() {
       if (b.ubicacion && b.resuelto) {
         resueltoPara.current = b.ubicacion;
         setUbicacion(b.ubicacion);
+        form.setValue('lat', b.ubicacion.lat, { shouldValidate: false });
+        form.setValue('lon', b.ubicacion.lon, { shouldValidate: false });
         setResuelto(b.resuelto as ResolverRespuesta);
       } else if (b.ubicacion) {
         // Se guardó mientras se resolvía: se vuelve a preguntar en vez de dejar «Continuar» trabado.
@@ -690,6 +708,8 @@ export function FormularioReporte() {
       // El cupo de la cuenta acaba de cambiar en el servidor, y «Mis reportes» tiene uno más.
       void refrescarSesion(cliente);
       void cliente.invalidateQueries({ queryKey: [...CLAVE_MIS_REPORTES] });
+      void cliente.invalidateQueries({ queryKey: ['reportes'] });
+      void cliente.invalidateQueries({ queryKey: ['agregados'] });
     },
     onError: (e) => {
       // Un «no» del servidor (4xx) es definitivo: el próximo intento vuelve a leer la posición.
@@ -803,6 +823,18 @@ export function FormularioReporte() {
   const errorFecha = errores.evento_en?.message ?? problemaFechaEvento(valores.evento_en, ahora);
 
   const irAdelante = () => {
+    if (paso === 1 && mostrarCoordenadas && latTexto.trim() && lonTexto.trim()) {
+      if (ancla) {
+        const r = coordenadasEscritas(latTexto, lonTexto, ancla);
+        if (r.tipo === 'ok') {
+          mapa.current?.jumpTo({ center: [r.punto.lon, r.punto.lat] });
+          fijarUbicacion({ lat: r.punto.lat, lon: r.punto.lon });
+        } else {
+          setErrorCoordenadas(r.mensaje);
+          return;
+        }
+      }
+    }
     if (paso === 1 && ubicacion) {
       // «Continuar» acepta el punto: deja de ser el que puso la app y ya no se muda solo cuando
       // vuelva a llegar la posición del teléfono. Es el mismo lugar, así que la unidad vecinal
@@ -886,59 +918,73 @@ export function FormularioReporte() {
   );
 
   return (
-    <form className="flex min-h-0 flex-1 flex-col" onSubmit={enviarFormulario} noValidate>
-      <div className="cab">
-        {paso === 1 ? (
-          <Link href="/" className="atras no-underline" aria-label="Salir del reporte">
-            <X size={19} aria-hidden="true" />
-          </Link>
-        ) : (
-          <button
-            type="button"
-            className="atras"
-            onClick={irAtras}
-            aria-label="Volver al paso anterior"
-          >
-            <ChevronLeft size={19} aria-hidden="true" />
-          </button>
-        )}
-        <h1 className="titular text-xl">Reportar un punto</h1>
-      </div>
-
-      <div className="pasos px-5 pb-3">
-        {Array.from({ length: PASOS }, (_, k) => k + 1).map((i) => (
-          <i key={i} className={i <= paso ? 'on' : ''} />
-        ))}
-      </div>
-      <p className="sr-only" aria-live="polite">
-        Paso {paso} de {PASOS}
-      </p>
-
-      {/* Cuántos le quedan hoy a la cuenta. Es aviso, no control: decide el servidor al enviar. */}
-      {reportesRestantesHoy !== null ? (
-        <p className="ayuda px-5 pb-3" data-testid="cupo-reportes">
-          {textoCupo(reportesRestantesHoy)}
-        </p>
-      ) : null}
-
-      {retomado ? (
-        <div className="px-5 pb-3">
-          <Aviso tono="info" data-testid="borrador-retomado">
-            <b className="mb-1 block text-[14.5px]">Retomamos lo que habías empezado</b>
-            {ancla
-              ? 'Seguimos desde donde lo dejaste.'
-              : 'Para seguir desde donde lo dejaste, volvé a compartir tu ubicación: no la guardamos.'}{' '}
-            Nada de esto se envió todavía.
+    <form
+      className="flex min-h-0 flex-1 flex-col"
+      onSubmit={enviarFormulario}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && paso < PASOS && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          if (puedeAvanzar(paso, estadoAvance)) {
+            irAdelante();
+          }
+        }
+      }}
+      noValidate
+    >
+      <div className="flex-shrink-0 bg-[var(--color-crema)] z-10">
+        <div className="cab">
+          {paso === 1 ? (
+            <Link href="/" className="atras no-underline" aria-label="Salir del reporte">
+              <X size={19} aria-hidden="true" />
+            </Link>
+          ) : (
             <button
               type="button"
-              className="btn btn-fantasma btn-sm mt-2.5"
-              onClick={empezarDeCero}
+              className="atras"
+              onClick={irAtras}
+              aria-label="Volver al paso anterior"
             >
-              Empezar de nuevo
+              <ChevronLeft size={19} aria-hidden="true" />
             </button>
-          </Aviso>
+          )}
+          <h1 className="titular text-xl">Reportar un punto</h1>
         </div>
-      ) : null}
+
+        <div className="pasos px-5 pb-3">
+          {Array.from({ length: PASOS }, (_, k) => k + 1).map((i) => (
+            <i key={i} className={i <= paso ? 'on' : ''} />
+          ))}
+        </div>
+        <p className="sr-only" aria-live="polite">
+          Paso {paso} de {PASOS}
+        </p>
+
+        {/* Cuántos le quedan hoy a la cuenta. Es aviso, no control: decide el servidor al enviar. */}
+        {reportesRestantesHoy !== null ? (
+          <p className="ayuda px-5 pb-3" data-testid="cupo-reportes">
+            {textoCupo(reportesRestantesHoy)}
+          </p>
+        ) : null}
+
+        {retomado ? (
+          <div className="px-5 pb-3">
+            <Aviso tono="info" data-testid="borrador-retomado">
+              <b className="mb-1 block text-[14.5px]">Retomamos lo que habías empezado</b>
+              {ancla
+                ? 'Seguimos desde donde lo dejaste.'
+                : 'Para seguir desde donde lo dejaste, volvé a compartir tu ubicación: no la guardamos.'}{' '}
+              Nada de esto se envió todavía.
+              <button
+                type="button"
+                className="btn btn-fantasma btn-sm mt-2.5"
+                onClick={empezarDeCero}
+              >
+                Empezar de nuevo
+              </button>
+            </Aviso>
+          </div>
+        ) : null}
+      </div>
 
       {/* ---------------------------------------------------------------- paso 1 */}
       {paso === 1 ? (
@@ -953,6 +999,7 @@ export function FormularioReporte() {
             <VistaPedirUbicacion
               estado={estadoUbicacion}
               alCompartir={() => ubicador.compartir()}
+              alSimular={() => ubicador.simular()}
               aviso={avisoUbicacion}
             />
           ) : (
@@ -1045,7 +1092,16 @@ export function FormularioReporte() {
                           inputMode="decimal"
                           className="campo"
                           value={latTexto}
-                          onChange={(e) => setLatTexto(e.target.value)}
+                          onChange={(e) => {
+                            setLatTexto(e.target.value);
+                            setErrorCoordenadas(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              confirmarCoordenadas();
+                            }
+                          }}
                           placeholder={ancla.lat.toFixed(6)}
                           aria-describedby={errorCoordenadas ? 'error-coordenadas' : undefined}
                         />
@@ -1059,7 +1115,16 @@ export function FormularioReporte() {
                           inputMode="decimal"
                           className="campo"
                           value={lonTexto}
-                          onChange={(e) => setLonTexto(e.target.value)}
+                          onChange={(e) => {
+                            setLonTexto(e.target.value);
+                            setErrorCoordenadas(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              confirmarCoordenadas();
+                            }
+                          }}
                           placeholder={ancla.lon.toFixed(6)}
                           aria-describedby={errorCoordenadas ? 'error-coordenadas' : undefined}
                         />

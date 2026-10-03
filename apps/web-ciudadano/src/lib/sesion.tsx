@@ -11,9 +11,15 @@
  * El «no hay sesión» llega como 401 y es la respuesta NORMAL para la mayoría de visitantes, no un
  * error: por eso `retry: false` y por eso el componente que lo usa no pinta ningún aviso.
  */
-import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  QueryClient,
+  QueryClientContext,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import type { SesionActual } from 'contracts';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useContext, useEffect, useSyncExternalStore } from 'react';
 import { cerrarSesion as cerrarSesionApi, obtenerYo } from '@/lib/api';
 import { olvidarBorrador } from '@/lib/borrador';
 import { reportesRestantes } from '@/lib/cupo';
@@ -170,4 +176,35 @@ export function useCerrarSesion() {
     mutationFn: cerrarSesionApi,
     onSettled: () => limpiarTrasCerrarSesion(cliente),
   });
+}
+
+/** Cliente vacío para pintar fuera de un `QueryClientProvider`: con `enabled: false` no consulta. */
+let clienteSinProveedor: QueryClient | null = null;
+function clienteDeRespaldo(): QueryClient {
+  clienteSinProveedor ??= new QueryClient();
+  return clienteSinProveedor;
+}
+
+/**
+ * La sesión para componentes que también se pintan fuera de un `QueryClientProvider`, como
+ * `HojaDetalle` en las pruebas con `renderToStaticMarkup`. Llama siempre los mismos hooks, en el
+ * mismo orden (la regla de los hooks): sin proveedor usa un cliente vacío, no consulta y devuelve
+ * null; con proveedor lee la misma consulta de `/auth/yo` que `useSesion`, sin sus efectos.
+ */
+export function useSesionOpcional(): Pick<EstadoSesion, 'usuario'> | null {
+  const cliente = useContext(QueryClientContext);
+  const hidratado = useHidratado();
+  const { data, error, isPending } = useQuery(
+    {
+      queryKey: CLAVE_YO,
+      queryFn: ({ signal }) => obtenerYo(signal),
+      retry: false,
+      staleTime: 5 * 60_000,
+      refetchOnWindowFocus: false,
+      enabled: cliente !== undefined,
+    },
+    cliente ?? clienteDeRespaldo(),
+  );
+  if (!cliente) return null;
+  return { usuario: interpretarSesion({ data, error, isPending, hidratado }).usuario };
 }

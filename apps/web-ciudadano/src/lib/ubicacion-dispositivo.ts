@@ -69,11 +69,20 @@ export function entornoDelNavegador(): EntornoUbicacion {
 export function lecturaDe(pos: GeolocationPosition, ahora: number): LecturaDispositivo | null {
   const { latitude, longitude, accuracy } = pos.coords;
   if (![latitude, longitude, accuracy].every(Number.isFinite) || accuracy < 0) return null;
+  const rawTs = pos.timestamp;
+  const tsMs =
+    typeof rawTs === 'number' && Number.isFinite(rawTs)
+      ? rawTs < 1e11 && rawTs > 1e8
+        ? rawTs * 1000
+        : rawTs
+      : ahora;
+  const tomadaEn =
+    !Number.isFinite(tsMs) || tsMs > ahora || ahora - tsMs > ANTIGUEDAD_MAX_S * 1000 ? ahora : tsMs;
   return {
     lat: latitude,
     lon: longitude,
     precisionM: accuracy,
-    tomadaEn: Number.isFinite(pos.timestamp) ? pos.timestamp : ahora,
+    tomadaEn,
   };
 }
 
@@ -172,12 +181,28 @@ export class ControladorUbicacion {
   /** Cada `compartir()` y cada `detener()` cambia el turno: lo que llega tarde ya no vale. */
   private turno = 0;
   private veces = 0;
+  private simulado = false;
   private vigilancia: { geo: EntornoUbicacion['geolocalizacion']; id: number } | null = null;
   private plazo: ReturnType<typeof setTimeout> | null = null;
   private permiso: { estado: PermissionStatus; alCambiar: () => void } | null = null;
 
   constructor(deps: Partial<DependenciasUbicacion> = {}) {
     this.deps = { entorno: entornoDelNavegador, ahora: () => Date.now(), ...deps };
+  }
+
+  /** Simula una posición precisa (Santa Cruz de la Sierra) para pruebas en entornos sin GPS. */
+  simular(lat = -17.7833, lon = -63.1821): void {
+    this.apagar();
+    this.turno += 1;
+    this.veces += 1;
+    this.simulado = true;
+    const ancla: LecturaDispositivo = {
+      lat,
+      lon,
+      precisionM: 5,
+      tomadaEn: this.deps.ahora(),
+    };
+    this.poner({ fase: 'lista', ancla, vez: this.veces });
   }
 
   /** Para `useSyncExternalStore`: devuelve siempre el mismo objeto mientras no cambie. */
@@ -271,6 +296,14 @@ export class ControladorUbicacion {
    * esa; si no llega a tiempo, falla o es imprecisa, devuelve `null` y el ancla queda como estaba.
    */
   releer(): Promise<LecturaDispositivo | null> {
+    if (this.simulado && this.estado.fase === 'lista') {
+      return Promise.resolve({
+        lat: this.estado.ancla.lat,
+        lon: this.estado.ancla.lon,
+        precisionM: 5,
+        tomadaEn: this.deps.ahora(),
+      });
+    }
     const geo = this.deps.entorno().geolocalizacion;
     if (typeof geo?.getCurrentPosition !== 'function') return Promise.resolve(null);
     const turno = this.turno;
@@ -301,6 +334,7 @@ export class ControladorUbicacion {
 
   /** Vuelve a la pantalla de «Compartir mi ubicación» (un 422 del servidor, una posición vencida). */
   reiniciar(): void {
+    this.simulado = false;
     this.turno += 1;
     this.apagar();
     this.poner({ fase: 'inactiva' });
