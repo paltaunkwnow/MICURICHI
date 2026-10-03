@@ -27,18 +27,43 @@ y fases— está en **[CLAUDE.md](CLAUDE.md)**. Leelo antes de tocar nada.
 
 ---
 
+## Arrancar con un clic
+
+La forma más rápida de levantar todo el proyecto en esta máquina: **doble clic en
+`Mi-Curichi.exe`** (en la raíz del repositorio). Levanta la pila completa en Docker (perfiles
+`servicios` y `minio`), espera a que todos los servicios estén sanos y abre el navegador en
+<https://localhost>. Después ofrece un menú para abrir el panel técnico (<https://panel.localhost>),
+ver el estado, ver los últimos registros, actualizar con los últimos cambios del código, compartir
+con amigos por un túnel, correr las pruebas o detener todo. Nunca borra datos ni toca un `.env` que
+ya exista.
+
+Si `Mi-Curichi.exe` todavía no está (el binario no se versiona), generalo una vez:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\lanzador\compilar.ps1
+```
+
+No hace falta instalar nada para compilarlo: usa el compilador de C# que ya viene con Windows.
+Detalle completo en [`scripts/lanzador/README.md`](scripts/lanzador/README.md). Si preferís el
+arranque manual paso a paso, está más abajo en [Instalación desde cero](#instalación-desde-cero).
+
+---
+
 ## Cuentas para probar
 
 Después de levantar el proyecto ([Instalación desde cero](#instalación-desde-cero)),
-`pnpm db:seed:samples` crea estas tres cuentas. Sirven para probar **las dos partes**: la app
-pública como vecino y el panel técnico como administrador.
+`pnpm db:seed:samples` crea estas cuatro cuentas. Sirven para probar **las dos partes**: la app
+pública como vecino y el panel técnico como administrador. La contraseña es el nombre del rol (corta
+a propósito: son cuentas solo de desarrollo; el seed no corre en producción) y se puede entrar
+escribiendo solo el usuario, sin `@curichi.local`. Con `Mi-Curichi.exe` las direcciones son
+<https://localhost> (app pública) y <https://panel.localhost> (panel); con `pnpm dev`, las de la tabla.
 
-| Para probar | Dónde entrar | Correo | Contraseña | Rol |
+| Para probar | Dónde entrar | Usuario | Contraseña | Rol |
 |---|---|---|---|---|
-| **Usuario normal** (reportar un punto) | App pública · <http://localhost:3000/ingresar> | `vecina@curichi.local` | `curichi-vecina-local` | ciudadano |
-| **Administrador** (moderar, exportar, activar capas) | Panel técnico · <http://localhost:3100> | `admin@curichi.local` | `curichi-admin-local` | admin |
-| Técnico (moderar y exportar, sin administración) | Panel técnico · <http://localhost:3100> | `tecnico@curichi.local` | `curichi-tecnico-local` | técnico |
-| Ejecutivo (solo el resumen, sin moderar ni exportar) | Panel ejecutivo · <http://localhost:3100/ejecutivo> | `ejecutivo@curichi.local` | `curichi-ejecutivo-local` | ejecutivo |
+| **Usuario normal** (reportar un punto) | App pública · <http://localhost:3000/ingresar> | `vecina` (`vecina@curichi.local`) | `vecina` | ciudadano |
+| **Administrador** (moderar, exportar, activar capas) | Panel técnico · <http://localhost:3100> | `admin` (`admin@curichi.local`) | `admin` | admin |
+| Técnico (moderar y exportar, sin administración) | Panel técnico · <http://localhost:3100> | `tecnico` (`tecnico@curichi.local`) | `tecnico` | técnico |
+| Ejecutivo (resumen y mapa, sin moderar ni exportar) | Panel ejecutivo · <http://localhost:3100/ejecutivo> | `ejecutivo` (`ejecutivo@curichi.local`) | `ejecutivo` | ejecutivo |
 
 - **El mapa se ve sin entrar.** La cuenta solo hace falta para **enviar** un reporte.
 - Desde la app pública también se puede **crear una cuenta nueva** en «Crear cuenta»; siempre
@@ -371,7 +396,7 @@ Y entonces:
 6. Enviá dos más. El 4.º del día sale **429** con `CUOTA_DE_REPORTES`: **3 reportes por cuenta y
    por día**; al día siguiente vuelve a empezar.
 7. Entrá al panel en <http://localhost:3100> con `tecnico@curichi.local` /
-   `curichi-tecnico-local` (la bandeja se actualiza sola cada 10 s), buscá el reporte y validalo.
+   `tecnico` (la bandeja se actualiza sola cada 10 s), buscá el reporte y validalo.
 8. Recargá el mapa público: ahora dice «Verificado».
 
 ---

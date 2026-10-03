@@ -86,8 +86,8 @@ declara que el sistema sea seguro: se declara qué se probó y qué no.
   descripciones, jamás valores reales.
 - Las sales (`IP_HASH_SAL`, `JITTER_SAL`) tienen longitud mínima obligatoria y el servicio **no
   arranca en producción** con los valores de ejemplo.
-- Las contraseñas que aparecen escritas en el repositorio (`curichi-admin-local`,
-  `curichi-tecnico-local`, `curichi-vecina-local`) son de desarrollo, están ahí a propósito y los
+- Las contraseñas que aparecen escritas en el repositorio (`admin`,
+  `tecnico`, `vecina`) son de desarrollo, están ahí a propósito y los
   seeds se niegan a ejecutarse con `NODE_ENV=production`.
 
 ## Antes de cualquier despliegue real

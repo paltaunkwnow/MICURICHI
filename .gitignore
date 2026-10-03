@@ -46,3 +46,6 @@ infra/.storage/
 
 # Carpeta de shapefiles entregada por el municipio en la raíz: NUNCA al repo (va a data/raw/, inmutable)
 /DM_UV_MZ_2025/
+
+# Lanzador: el binario se regenera con scripts/lanzador/compilar.ps1 (no se versiona)
+/Mi-Curichi.exe

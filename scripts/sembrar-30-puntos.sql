@@ -1,0 +1,628 @@
+BEGIN;
+
+-- Insertar 30 reportes esparcidos por toda la ciudad, con Distrito 1 teniendo 5 puntos críticos.
+INSERT INTO reporte_inundacion (
+  geom,
+  geom_publico,
+  creado_en,
+  actualizado_en,
+  publicar_en,
+  evento_en,
+  distrito_id,
+  unidad_vecinal_id,
+  version_capa,
+  resolucion_flags,
+  ubicacion_metodo,
+  precision_gps_m,
+  ubicacion_tipo,
+  descripcion,
+  profundidad_estimada,
+  frecuencia,
+  causa_presunta,
+  sumidero_cercano,
+  sumidero_estado,
+  agua_brota_sumidero,
+  severidad_calculada,
+  severidad_puntaje,
+  severidad_version,
+  estado,
+  validado_por,
+  validado_en
+) VALUES
+  -- =========================================================================
+  -- DISTRITO 1: 5 PUNTOS CRÍTICOS (Severidad Crítica)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.199742, -17.789610), 4326),
+    ST_SetSRID(ST_MakePoint(-63.199742, -17.789610), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:1',
+    'unidad_vecinal:30',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps',
+    6,
+    'via_publica',
+    'Punto crítico 1: desborde de canal pluvial en avenida principal, agua sobrepasa los 75 cm impidiendo el paso vehicular.',
+    'mas_70',
+    'permanente',
+    'colector_saturado',
+    'si',
+    'tapado',
+    true,
+    'critica',
+    12,
+    2,
+    'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3',
+    now() - interval '2 days' + interval '15 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.189383, -17.766424), 4326),
+    ST_SetSRID(ST_MakePoint(-63.189383, -17.766424), 4326),
+    now() - interval '2 days' + interval '3 hours',
+    now() - interval '2 days' + interval '3 hours',
+    now() - interval '2 days' + interval '3 hours',
+    now() - interval '2 days' + interval '1 hour',
+    'distrito_municipal:1',
+    'unidad_vecinal:35',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps',
+    8,
+    'via_publica',
+    'Punto crítico 2: anegamiento severo en intersección crítica, acumulación profunda de agua que ingresa a inmuebles.',
+    'mas_70',
+    'cada_lluvia_fuerte',
+    'falta_sumidero',
+    'no',
+    NULL,
+    false,
+    'critica',
+    11,
+    2,
+    'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3',
+    now() - interval '2 days' + interval '3 hours' + interval '10 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.211217, -17.793948), 4326),
+    ST_SetSRID(ST_MakePoint(-63.211217, -17.793948), 4326),
+    now() - interval '1 day' + interval '5 hours',
+    now() - interval '1 day' + interval '5 hours',
+    now() - interval '1 day' + interval '5 hours',
+    now() - interval '1 day' + interval '3 hours',
+    'distrito_municipal:1',
+    'unidad_vecinal:53',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps',
+    5,
+    'via_publica',
+    'Punto crítico 3: colapso de sumidero pluvial y retorno de aguas con nivel crítico superior a los 70 cm.',
+    'mas_70',
+    'permanente',
+    'sumidero_tapado',
+    'si',
+    'tapado',
+    true,
+    'critica',
+    12,
+    2,
+    'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3',
+    now() - interval '1 day' + interval '5 hours' + interval '20 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.205842, -17.768803), 4326),
+    ST_SetSRID(ST_MakePoint(-63.205842, -17.768803), 4326),
+    now() - interval '1 day' + interval '8 hours',
+    now() - interval '1 day' + interval '8 hours',
+    now() - interval '1 day' + interval '8 hours',
+    now() - interval '1 day' + interval '6 hours',
+    'distrito_municipal:1',
+    'unidad_vecinal:57',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps',
+    7,
+    'via_publica',
+    'Punto crítico 4: estancamiento crítico de agua profunda frente a posta médica vecinal y zona escolar.',
+    'mas_70',
+    'agua_estancada',
+    'colector_saturado',
+    'si',
+    'tapado',
+    false,
+    'critica',
+    13,
+    2,
+    'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3',
+    now() - interval '1 day' + interval '8 hours' + interval '12 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.189099, -17.755434), 4326),
+    ST_SetSRID(ST_MakePoint(-63.189099, -17.755434), 4326),
+    now() - interval '18 hours',
+    now() - interval '18 hours',
+    now() - interval '18 hours',
+    now() - interval '20 hours',
+    'distrito_municipal:1',
+    'unidad_vecinal:60',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps',
+    6,
+    'via_publica',
+    'Punto crítico 5: socavación de calzada bajo agua profunda recurrente en cruce barrial estratégico.',
+    'mas_70',
+    'cada_lluvia_fuerte',
+    'falta_sumidero',
+    'no',
+    NULL,
+    false,
+    'critica',
+    11,
+    2,
+    'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3',
+    now() - interval '18 hours' + interval '25 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 2 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.178860, -17.765000), 4326),
+    ST_SetSRID(ST_MakePoint(-63.178860, -17.765000), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '1 hour',
+    'distrito_municipal:2',
+    'unidad_vecinal:15',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 10, 'via_publica',
+    'Acumulación de agua moderada a nivel de rodilla sobre la calzada tras lluvia intensa.',
+    'rodilla', 'ocasional', 'sumidero_tapado', 'si', 'tapado', false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '20 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.165878, -17.766173), 4326),
+    ST_SetSRID(ST_MakePoint(-63.165878, -17.766173), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:2',
+    'unidad_vecinal:17',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 12, 'via_publica',
+    'Charco superficial en cuneta que drena lentamente sin obstaculizar el paso vehicular.',
+    'tobillo', 'primera_vez', 'desconocida', 'no', NULL, false, 'baja', 3, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '10 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 3 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.164114, -17.791008), 4326),
+    ST_SetSRID(ST_MakePoint(-63.164114, -17.791008), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '3 hours',
+    'distrito_municipal:3',
+    'unidad_vecinal:23',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 8, 'via_publica',
+    'Nivel de agua elevado a la altura del muslo en bajada de calle asfaltada hacia el canal.',
+    'muslo', 'cada_lluvia_fuerte', 'falta_sumidero', 'no', NULL, false, 'alta', 9, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '15 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.170485, -17.802315), 4326),
+    ST_SetSRID(ST_MakePoint(-63.170485, -17.802315), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '1 hour',
+    'distrito_municipal:3',
+    'unidad_vecinal:25',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 9, 'via_publica',
+    'Retención de agua en esquina de plaza de barrio por desnivel en la calzada.',
+    'rodilla', 'ocasional', 'contrapendiente', 'si', 'no_tapado', false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '30 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 4 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.185164, -17.806231), 4326),
+    ST_SetSRID(ST_MakePoint(-63.185164, -17.806231), 4326),
+    now() - interval '4 days',
+    now() - interval '4 days',
+    now() - interval '4 days',
+    now() - interval '4 days' - interval '2 hours',
+    'distrito_municipal:4',
+    'unidad_vecinal:27',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 11, 'via_publica',
+    'Anegamiento leve en boca de tormenta secundaria; peatones cruzan con precaución.',
+    'tobillo', 'ocasional', 'desconocida', 'si', 'no_tapado', false, 'baja', 4, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '4 days' + interval '12 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.198294, -17.797106), 4326),
+    ST_SetSRID(ST_MakePoint(-63.198294, -17.797106), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '1 hour',
+    'distrito_municipal:4',
+    'unidad_vecinal:29',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 7, 'via_publica',
+    'Corte temporal de paso peatonal por acumulación de agua hasta la rodilla en bocacalle.',
+    'rodilla', 'cada_lluvia_fuerte', 'falta_sumidero', 'no', NULL, false, 'media', 7, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '20 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 5 (3 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.170986, -17.747246), 4326),
+    ST_SetSRID(ST_MakePoint(-63.170986, -17.747246), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:5',
+    'unidad_vecinal:65',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 6, 'via_publica',
+    'Agua a nivel del muslo sobre carril derecho de avenida con tráfico denso.',
+    'muslo', 'cada_lluvia_fuerte', 'colector_saturado', 'si', 'tapado', false, 'alta', 9, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '18 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.155465, -17.750504), 4326),
+    ST_SetSRID(ST_MakePoint(-63.155465, -17.750504), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '3 hours',
+    'distrito_municipal:5',
+    'unidad_vecinal:67',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 8, 'via_publica',
+    'Sumidero colmatado con sedimento y residuos que retiene agua a nivel de rodilla.',
+    'rodilla', 'ocasional', 'sumidero_tapado', 'si', 'tapado', false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '22 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.156267, -17.715417), 4326),
+    ST_SetSRID(ST_MakePoint(-63.156267, -17.715417), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '4 hours',
+    'distrito_municipal:5',
+    'unidad_vecinal:193',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 14, 'via_publica',
+    'Charco aislado en carril lateral de vía urbana sin afectación mayor.',
+    'tobillo', 'primera_vez', 'desconocida', 'no', NULL, false, 'baja', 3, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '40 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 6 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.134292, -17.785469), 4326),
+    ST_SetSRID(ST_MakePoint(-63.134292, -17.785469), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:6',
+    'unidad_vecinal:140',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 9, 'via_publica',
+    'Retención hídrica prolongada a nivel de muslo en calle barrial de alto flujo.',
+    'muslo', 'ocasional', 'falta_sumidero', 'no', NULL, false, 'alta', 8, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '14 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.124134, -17.775973), 4326),
+    ST_SetSRID(ST_MakePoint(-63.124134, -17.775973), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '1 hour',
+    'distrito_municipal:6',
+    'unidad_vecinal:141',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 10, 'via_publica',
+    'Acumulación en bocacalle vecinal tras chubasco; vehículos reducen velocidad.',
+    'rodilla', 'ocasional', 'desconocida', 'si', 'no_tapado', false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '19 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 7 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.114281, -17.810830), 4326),
+    ST_SetSRID(ST_MakePoint(-63.114281, -17.810830), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '2 hours',
+    'distrito_municipal:7',
+    'unidad_vecinal:100',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 8, 'via_publica',
+    'Anegamiento en calzada de avenida periférica que cubre la vereda.',
+    'rodilla', 'cada_lluvia_fuerte', 'falta_sumidero', 'no', NULL, false, 'media', 7, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '25 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.103477, -17.815244), 4326),
+    ST_SetSRID(ST_MakePoint(-63.103477, -17.815244), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '3 hours',
+    'distrito_municipal:7',
+    'unidad_vecinal:156',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 12, 'via_publica',
+    'Acumulación superficial al borde de la calzada sin daño a inmuebles.',
+    'tobillo', 'ocasional', 'desconocida', 'no', NULL, false, 'baja', 4, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '15 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 8 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.116658, -17.816381), 4326),
+    ST_SetSRID(ST_MakePoint(-63.116658, -17.816381), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:8',
+    'unidad_vecinal:102',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 7, 'via_publica',
+    'Cuneta desbordada hacia el pavimento en zona comercial, agua a nivel del muslo.',
+    'muslo', 'cada_lluvia_fuerte', 'colector_saturado', 'si', 'tapado', false, 'alta', 9, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '35 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.114041, -17.819241), 4326),
+    ST_SetSRID(ST_MakePoint(-63.114041, -17.819241), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '2 hours',
+    'distrito_municipal:8',
+    'unidad_vecinal:143',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 9, 'via_publica',
+    'Charco persistente frente a parada de transporte público barrial.',
+    'rodilla', 'ocasional', 'falta_sumidero', 'no', NULL, false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '14 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 9 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.180762, -17.827597), 4326),
+    ST_SetSRID(ST_MakePoint(-63.180762, -17.827597), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '1 hour',
+    'distrito_municipal:9',
+    'unidad_vecinal:107',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 8, 'via_publica',
+    'Acumulación en sector bajo de la calzada que cubre de acera a acera.',
+    'rodilla', 'cada_lluvia_fuerte', 'contrapendiente', 'si', 'no_tapado', false, 'media', 7, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '20 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.177531, -17.838528), 4326),
+    ST_SetSRID(ST_MakePoint(-63.177531, -17.838528), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:9',
+    'unidad_vecinal:115',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 10, 'via_publica',
+    'Pequeño encharcamiento en esquina residencial sin corte de tránsito.',
+    'tobillo', 'primera_vez', 'desconocida', 'no', NULL, false, 'baja', 3, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '11 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 10 (2 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.203881, -17.822535), 4326),
+    ST_SetSRID(ST_MakePoint(-63.203881, -17.822535), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '3 hours',
+    'distrito_municipal:10',
+    'unidad_vecinal:108',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 7, 'via_publica',
+    'Nivel de agua a media rueda de vehículos livianos tras tormenta.',
+    'muslo', 'ocasional', 'falta_sumidero', 'no', NULL, false, 'alta', 8, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '16 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.209043, -17.818232), 4326),
+    ST_SetSRID(ST_MakePoint(-63.209043, -17.818232), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '2 hours',
+    'distrito_municipal:10',
+    'unidad_vecinal:109',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 9, 'via_publica',
+    'Falta de rejilla pluvial provoca acumulación de agua hasta la rodilla en cuneta.',
+    'rodilla', 'ocasional', 'sumidero_tapado', 'si', 'tapado', false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '24 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 11 - CENTRO HISTÓRICO (3 puntos)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.177585, -17.771902), 4326),
+    ST_SetSRID(ST_MakePoint(-63.177585, -17.771902), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '1 hour',
+    'distrito_municipal:11',
+    'unidad_vecinal:1',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 6, 'via_publica',
+    'Acumulación importante en esquina de calle céntrica histórica con agua al muslo.',
+    'muslo', 'cada_lluvia_fuerte', 'colector_saturado', 'si', 'no_tapado', true, 'alta', 9, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '20 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.170434, -17.774021), 4326),
+    ST_SetSRID(ST_MakePoint(-63.170434, -17.774021), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '2 hours',
+    'distrito_municipal:11',
+    'unidad_vecinal:2',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 8, 'via_publica',
+    'Agua acumulada sobre vereda en zona comercial que tarda horas en bajar.',
+    'rodilla', 'ocasional', 'falta_sumidero', 'no', NULL, false, 'media', 6, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '15 minutes'
+  ),
+  (
+    ST_SetSRID(ST_MakePoint(-63.168942, -17.778532), 4326),
+    ST_SetSRID(ST_MakePoint(-63.168942, -17.778532), 4326),
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days',
+    now() - interval '3 days' - interval '3 hours',
+    'distrito_municipal:11',
+    'unidad_vecinal:3',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 10, 'via_publica',
+    'Charco en cuneta de calle adoquinada con agua al tobillo.',
+    'tobillo', 'ocasional', 'desconocida', 'si', 'no_tapado', false, 'baja', 4, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '30 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 12 (1 punto)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.158894, -17.830043), 4326),
+    ST_SetSRID(ST_MakePoint(-63.158894, -17.830043), 4326),
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days',
+    now() - interval '2 days' - interval '2 hours',
+    'distrito_municipal:12',
+    'unidad_vecinal:166',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 9, 'via_publica',
+    'Anegamiento en vía de conexión distrital; vehículos pesados levantan olas.',
+    'rodilla', 'cada_lluvia_fuerte', 'falta_sumidero', 'no', NULL, false, 'media', 7, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '22 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO 13 (1 punto)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.101074, -17.896190), 4326),
+    ST_SetSRID(ST_MakePoint(-63.101074, -17.896190), 4326),
+    now() - interval '4 days',
+    now() - interval '4 days',
+    now() - interval '4 days',
+    now() - interval '4 days' - interval '2 hours',
+    'distrito_municipal:13',
+    'unidad_vecinal:0',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 12, 'via_publica',
+    'Escurrimiento lento en zanja pluvial de barrio sin ingreso a viviendas.',
+    'tobillo', 'primera_vez', 'desconocida', 'no', NULL, false, 'baja', 3, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '4 days' + interval '10 minutes'
+  ),
+
+  -- =========================================================================
+  -- DISTRITO PARQUE INDUSTRIAL (1 punto)
+  -- =========================================================================
+  (
+    ST_SetSRID(ST_MakePoint(-63.142701, -17.755296), 4326),
+    ST_SetSRID(ST_MakePoint(-63.142701, -17.755296), 4326),
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day',
+    now() - interval '1 day' - interval '2 hours',
+    'distrito_municipal:PI',
+    'unidad_vecinal:Parque Industrial',
+    'DM_UV_MZ_2025',
+    '{"en_limite": false, "distrito_discrepante": false}'::jsonb,
+    'gps', 7, 'via_publica',
+    'Retención de agua en acceso a manzana industrial por sumidero bloqueado.',
+    'rodilla', 'cada_lluvia_fuerte', 'sumidero_tapado', 'si', 'tapado', false, 'media', 7, 2, 'validado',
+    '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '18 minutes'
+  );
+
+COMMIT;
