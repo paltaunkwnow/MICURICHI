@@ -54,11 +54,22 @@ const TABLA_V2: readonly Caso[] = [
     banda: 'critica',
   },
   { t: 'mas_70', f: 'permanente', puntaje: 12, base: 'critica', reglas: ['E1'], banda: 'critica' },
+  { t: 'tobillo', f: 'agua_estancada', puntaje: 7, base: 'media', reglas: [], banda: 'media' },
+  { t: 'rodilla', f: 'agua_estancada', puntaje: 9, base: 'alta', reglas: [], banda: 'alta' },
+  { t: 'muslo', f: 'agua_estancada', puntaje: 11, base: 'critica', reglas: [], banda: 'critica' },
+  {
+    t: 'mas_70',
+    f: 'agua_estancada',
+    puntaje: 13,
+    base: 'critica',
+    reglas: ['E1'],
+    banda: 'critica',
+  },
 ];
 
 describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
-  it('CA-C5: la tabla de la spec cubre las 16 combinaciones T × F', () => {
-    expect(TABLA_V2).toHaveLength(16);
+  it('CA-C5: la tabla de la spec cubre las 20 combinaciones T × F', () => {
+    expect(TABLA_V2).toHaveLength(20);
     const claves = new Set(TABLA_V2.map((c) => `${c.t}/${c.f}`));
     for (const t of PROFUNDIDADES)
       for (const f of FRECUENCIAS) expect(claves.has(`${t}/${f}`)).toBe(true);
@@ -90,55 +101,74 @@ describe('matriz de severidad v2 (CLAUDE.md §9.1)', () => {
       ocasional: 2,
       cada_lluvia_fuerte: 3,
       permanente: 4,
+      agua_estancada: 5,
     });
   });
 
-  it('CA-C6: BANDAS es baja 3–4, media 5–7, alta 8–10, critica 11–12, contiguas y sin huecos', () => {
+  it('CA-C6: BANDAS es baja 3–4, media 5–7, alta 8–10, critica 11–13, contiguas y sin huecos', () => {
     expect(BANDAS).toStrictEqual([
       { banda: 'baja', min: 3, max: 4 },
       { banda: 'media', min: 5, max: 7 },
       { banda: 'alta', min: 8, max: 10 },
-      { banda: 'critica', min: 11, max: 12 },
+      { banda: 'critica', min: 11, max: 13 },
     ]);
     expect(BANDAS[0]?.min).toBe(3);
-    expect(BANDAS[BANDAS.length - 1]?.max).toBe(12);
+    expect(BANDAS[BANDAS.length - 1]?.max).toBe(13);
     for (let i = 1; i < BANDAS.length; i++) {
       expect(BANDAS[i]?.min).toBe((BANDAS[i - 1]?.max ?? Number.NaN) + 1);
     }
-    for (let p = 3; p <= 12; p++) {
+    for (let p = 3; p <= 13; p++) {
       expect(BANDAS.filter((b) => p >= b.min && p <= b.max)).toHaveLength(1);
     }
   });
 
-  it('CA-C7: ninguna combinación aplica E2 ni E3; critica ⇔ T = 4; banda nunca baja de banda_base', () => {
+  it('CA-C7: ninguna combinación aplica E2 ni E3; critica ⇔ T = 4 o puntaje >= 11; banda nunca baja de banda_base', () => {
     let n = 0;
     for (const t of PROFUNDIDADES)
       for (const f of FRECUENCIAS) {
         const r = calcularSeveridad({ profundidad_estimada: t, frecuencia: f });
         expect(r.reglas).not.toContain('E2');
         expect(r.reglas).not.toContain('E3');
-        expect(r.banda === 'critica').toBe(t === 'mas_70');
+        expect(r.banda === 'critica').toBe(t === 'mas_70' || r.puntaje >= 11);
         expect(compararSeveridad(r.banda, r.banda_base)).toBeGreaterThanOrEqual(0);
         expect(r.puntaje).toBeGreaterThanOrEqual(3);
-        expect(r.puntaje).toBeLessThanOrEqual(12);
+        expect(r.puntaje).toBeLessThanOrEqual(13);
         expect(r.version).toBe(2);
         n++;
       }
-    expect(n).toBe(16);
+    expect(n).toBe(20);
   });
 
-  it('CA-C7: es monótona: subir profundidad o frecuencia nunca baja la banda', () => {
+  it('CA-C7: agua_estancada sube un punto de severidad sobre cada lluvia (permanente)', () => {
+    for (const t of PROFUNDIDADES) {
+      const rAgua = calcularSeveridad({ profundidad_estimada: t, frecuencia: 'agua_estancada' });
+      const rPermanente = calcularSeveridad({ profundidad_estimada: t, frecuencia: 'permanente' });
+      const p = PUNTOS.profundidad[t];
+      expect(rAgua.puntaje).toBe(PESOS.profundidad * p + 5);
+      expect(rAgua.puntaje).toBe(rPermanente.puntaje + 1);
+      expect(compararSeveridad(rAgua.banda, rPermanente.banda)).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('CA-C7: es monótona: subir profundidad o puntos de frecuencia nunca baja la banda', () => {
+    const ordenadas: Frecuencia[] = [
+      'primera_vez',
+      'ocasional',
+      'cada_lluvia_fuerte',
+      'permanente',
+      'agua_estancada',
+    ];
     for (let it = 0; it < PROFUNDIDADES.length; it++)
-      for (let iff = 0; iff < FRECUENCIAS.length; iff++) {
+      for (let iff = 0; iff < ordenadas.length; iff++) {
         const t = PROFUNDIDADES[it] as Profundidad;
-        const f = FRECUENCIAS[iff] as Frecuencia;
+        const f = ordenadas[iff] as Frecuencia;
         const base = calcularSeveridad({ profundidad_estimada: t, frecuencia: f }).banda;
         const vecinos = [
           it < 3
             ? { profundidad_estimada: PROFUNDIDADES[it + 1] as Profundidad, frecuencia: f }
             : null,
-          iff < 3
-            ? { profundidad_estimada: t, frecuencia: FRECUENCIAS[iff + 1] as Frecuencia }
+          iff < 4
+            ? { profundidad_estimada: t, frecuencia: ordenadas[iff + 1] as Frecuencia }
             : null,
         ];
         for (const v of vecinos) {

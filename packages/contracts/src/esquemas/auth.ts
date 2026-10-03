@@ -18,10 +18,17 @@ const EmailSchema = z
   .toLowerCase()
   .pipe(z.email('Escribí un correo electrónico válido.').max(200));
 
+const IdentificadorLoginSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .max(200)
+  .transform((val) => (val.includes('@') ? val : `${val}@curichi.local`))
+  .pipe(z.email('Escribí un correo electrónico o usuario válido.'));
+
 export const LoginSchema = z.object({
-  email: EmailSchema,
-  /** Mínimo 8, no 10: las cuentas anteriores a la regla actual tienen que poder entrar. */
-  password: z.string().min(8).max(CONFIG_DOMINIO.PASSWORD_MAX_LONGITUD),
+  email: IdentificadorLoginSchema,
+  password: z.string().min(1, 'Escribí tu contraseña.').max(CONFIG_DOMINIO.PASSWORD_MAX_LONGITUD),
 });
 export type Login = z.infer<typeof LoginSchema>;
 

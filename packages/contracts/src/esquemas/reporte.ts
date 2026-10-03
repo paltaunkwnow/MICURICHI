@@ -385,7 +385,13 @@ export const ReporteReclasificarSchema = z
 export type ReporteReclasificar = z.infer<typeof ReporteReclasificarSchema>;
 
 export const ReporteFusionarSchema = z.object({
-  canonico_id: z.uuid(),
+  canonico_id: z
+    .string()
+    .trim()
+    .regex(
+      /^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i,
+      'El identificador del reporte canónico debe ser un UUID o un ID corto de 8 caracteres.',
+    ),
   motivo: z.string().trim().min(3).max(1000).default('Duplicado del mismo punto'),
 });
 export type ReporteFusionar = z.infer<typeof ReporteFusionarSchema>;

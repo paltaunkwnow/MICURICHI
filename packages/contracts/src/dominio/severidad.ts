@@ -2,7 +2,7 @@ import type { Frecuencia, Profundidad, Severidad } from './enums.js';
 
 /**
  * Matriz de severidad v2 (CLAUDE.md §9.1). Función pura y reproducible.
- * puntaje = 2·P + F (P = profundidad) (rango 3..12) → banda base → reglas de escalamiento (solo suben).
+ * puntaje = 2·P + F (P = profundidad) (rango 3..13) → banda base → reglas de escalamiento (solo suben).
  * La v1 (2·T + D + F + A, con la regla E2) desapareció al quitar duración y afectación del reporte.
  * El «tirante» (T) de v1 y v2 se llama profundidad desde contracts 0.5.0; los números no cambian.
  */
@@ -10,7 +10,13 @@ export const SEVERIDAD_VERSION = 2;
 
 export const PUNTOS = {
   profundidad: { tobillo: 1, rodilla: 2, muslo: 3, mas_70: 4 },
-  frecuencia: { primera_vez: 1, ocasional: 2, cada_lluvia_fuerte: 3, permanente: 4 },
+  frecuencia: {
+    primera_vez: 1,
+    ocasional: 2,
+    cada_lluvia_fuerte: 3,
+    permanente: 4,
+    agua_estancada: 5,
+  },
 } as const satisfies {
   profundidad: Record<Profundidad, number>;
   frecuencia: Record<Frecuencia, number>;
@@ -23,7 +29,7 @@ export const BANDAS: ReadonlyArray<{ banda: Severidad; min: number; max: number 
   { banda: 'baja', min: 3, max: 4 },
   { banda: 'media', min: 5, max: 7 },
   { banda: 'alta', min: 8, max: 10 },
-  { banda: 'critica', min: 11, max: 12 },
+  { banda: 'critica', min: 11, max: 13 },
 ];
 
 const ORDEN: Record<Severidad, number> = { baja: 0, media: 1, alta: 2, critica: 3 };
@@ -65,9 +71,9 @@ export function calcularSeveridad(e: EntradaSeveridad): ResultadoSeveridad {
     banda = 'critica';
     reglas.push('E1');
   }
-  // E3: frecuencia permanente → mínimo media. Con las bandas v2 no se dispara (F = 4 da
+  // E3: frecuencia permanente o agua_estancada → mínimo media. Con las bandas v2 no se dispara (F = 4 o 5 da
   // puntaje ≥ 6, ya media); se conserva como guarda por decisión del usuario (spec, P-7).
-  if (f === 4 && ORDEN[banda] < ORDEN.media) {
+  if ((f === 4 || f === 5) && ORDEN[banda] < ORDEN.media) {
     banda = 'media';
     reglas.push('E3');
   }

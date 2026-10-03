@@ -11,6 +11,7 @@ export const FRECUENCIAS = [
   'ocasional',
   'cada_lluvia_fuerte',
   'permanente',
+  'agua_estancada',
 ] as const;
 export type Frecuencia = (typeof FRECUENCIAS)[number];
 
@@ -105,8 +106,9 @@ export const ETIQUETAS = {
   frecuencia: {
     primera_vez: 'Primera vez',
     ocasional: 'Ocasional',
-    cada_lluvia_fuerte: 'Cada lluvia fuerte',
-    permanente: 'Permanente',
+    cada_lluvia_fuerte: 'Solo cuando llueve fuerte',
+    permanente: 'Cada lluvia',
+    agua_estancada: 'Agua estancada',
   },
   causa_presunta: {
     sumidero_tapado: 'Sumidero tapado',
