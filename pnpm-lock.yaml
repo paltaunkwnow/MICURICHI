@@ -549,8 +549,8 @@ importers:
         specifier: 5.12.4
         version: 5.12.4
       geojson-vt:
-        specifier: 4.0.3
-        version: 4.0.3
+        specifier: 5.0.2
+        version: 5.0.2
       pg:
         specifier: 8.23.0
         version: 8.23.0
@@ -2997,8 +2997,8 @@ packages:
   geojson-stream@0.1.0:
     resolution: {integrity: sha512-svSg5fFXPaTiqzEBGXScA+nISaeC9rLvku2PH+wM5LToATUw2bLIrvls43ymnT9Xnp51nBPVyK9m4Af40KpJ7w==}
 
-  geojson-vt@4.0.3:
-    resolution: {integrity: sha512-jR1MwkLaZGa8Zftct9ZFruyWFrdl9ZyD2OliXNy9Qq5bBPeg5wHVpBQF9p5GjnicSDQqvBVpysxTPKmWdsfWMA==}
+  geojson-vt@5.0.2:
+    resolution: {integrity: sha512-X0IlqCZV+FMJ9/YGmGHXK6OP20xIEHSJxcXKEffe5XOLsXyxrdLbZjs5qFGWWXG4x68f2aWoLOHQ9BhxU3VX0w==}
 
   geotiff-geokeys-to-proj4@2024.4.13:
     resolution: {integrity: sha512-Jgtm/lcPkgB44wCqQHaVQx5/fyhmiVDRUKQcI/vMolsED8/GRWBnn5qkQo/CgutQg9xkGzig21DY9Px9mFRdvg==}
@@ -7092,7 +7092,9 @@ snapshots:
       JSONStream: 1.3.5
       through: 2.3.8
 
-  geojson-vt@4.0.3: {}
+  geojson-vt@5.0.2:
+    dependencies:
+      '@types/geojson': 7946.0.16
 
   geotiff-geokeys-to-proj4@2024.4.13: {}
 
