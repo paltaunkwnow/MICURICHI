@@ -58,7 +58,8 @@ Sin excepciones. El plan dice a qué parte pertenece la tarea, qué carpeta toca
 contrato.
 
 Con Claude Code, ese ciclo se ejecuta con el comando `/sdd <descripción>`: clasifica el cambio,
-escribe la spec que aprobás, las pruebas que fallan, el código y la verificación con subagentes.
+mide la línea base, escribe la spec que aprobás, las pruebas que fallan, el código (probando antes y
+después de cada edición) y la verificación con subagentes, también en tu pila Docker.
 Detalle en [`docs/proceso/sdd.md`](docs/proceso/sdd.md).
 
 ---

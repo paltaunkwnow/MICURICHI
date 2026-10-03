@@ -150,7 +150,8 @@ Reglas:
 ### F4 — Verificar (tres agentes en paralelo, todos de solo lectura sobre el código)
 
 Se lanzan en una sola llamada. Ninguno edita archivos de las partes; solo el verificador escribe
-`verificacion.md`. Cada uno recibe la spec, el diff (`git diff main...HEAD`) y las banderas.
+`verificacion.md`. Cada uno recibe la spec, el diff de la corrida (`git diff refs/sdd/<slug>` sobre los archivos de
+`archivos.txt`, más los nuevos; ver §13) y las banderas.
 
 `sdd-revisor`: revisa el diff contra la spec, no contra su gusto. Comprueba, con archivo:línea:
 cada criterio cubierto por código y por test; nada implementado que la spec no pida; convenciones
@@ -199,7 +200,7 @@ Todos en `.claude/agents/`. Frontmatter común: `name`, `description` (cuándo u
 | `sdd-implementador` | inherit | todas | carpeta designada (+ contracts si anunciado) |
 | `sdd-revisor` | opus | Read, Grep, Glob, Bash (solo lectura) | nada |
 | `sdd-auditor` | opus | Read, Grep, Glob, Bash | nada (devuelve la tabla en su respuesta) |
-| `sdd-verificador` | sonnet | Bash, Read, Write, navegador integrado | `docs/sdd/<corrida>/verificacion.md` |
+| `sdd-verificador` | sonnet | Bash, Read, Write, navegador integrado | `docs/sdd/<corrida>/linea-base.md` y `verificacion.md` |
 
 Separación de contexto deliberada: el redactor de pruebas y el implementador son agentes distintos
 y ninguno recibe la descripción original, solo la spec. Así ninguno «interpreta» al usuario por su
@@ -261,8 +262,9 @@ se considera igualmente válida como prueba del proceso y se descarta la rama.
 
 ## 11. Criterios de aceptación de este diseño
 
-1. Dado el repo limpio, cuando se invoca `/sdd "..."`, entonces F0 produce parte, carpeta y
-   banderas y crea rama y carpeta de corrida, sin escribir código.
+1. Dado el repo, limpio o con cambios ajenos declarados por el usuario, cuando se invoca
+   `/sdd "..."`, entonces F0 produce parte, carpeta y banderas, toma la foto `refs/sdd/<slug>` y
+   crea rama y carpeta de corrida, sin escribir código.
 2. Dada una spec sin aprobar, cuando se intenta F2, entonces la skill se niega y pide la aprobación.
 3. Dada una spec aprobada con N criterios, cuando termina F2, entonces `pruebas.md` tiene N filas
    como mínimo y cada una con salida en rojo literal.
@@ -285,3 +287,42 @@ se considera igualmente válida como prueba del proceso y se descarta la rama.
 - Separación de contexto entre redactor de pruebas e implementador, y ninguno ve la descripción
   original: la spec es la única fuente, que es lo que «spec-driven» significa.
 - Modelo `sonnet` para el verificador: su trabajo es ejecutar y transcribir, no razonar.
+
+## 13. Enmienda del 2026-10-03: probar antes de tocar
+
+Pedido del usuario: que los subagentes prueben todo antes de añadir o cambiar código, y que corran
+en Opus 4.8. Cambios, ya aplicados en la skill, la matriz, las plantillas y los seis agentes:
+
+- **Fase FB (línea base)**, en paralelo con F1: el verificador corre sobre el árbol sin tocar los
+  mismos comandos, con el mismo alcance y las mismas opciones que F4, y escribe `linea-base.md`.
+  Sus rojos van a la puerta 1 y nadie los arregla de pasada.
+- **Regresión = BLOQUEANTE**: lo verde en la línea base que queda rojo después, comparado por nombre
+  de test, archivo de Biome o error de tsc.
+- **Preflight obligatorio** del redactor y del implementador: estado del árbol y suite del paquete
+  antes de la primera edición, y la suite otra vez después de cada criterio (`implementacion.md`).
+- **Árbol con cambios ajenos**: F0 pregunta qué hacer con ellos y toma la foto `refs/sdd/<slug>`
+  (`git stash create`, que no toca el árbol). Como no hay commits hasta F5, el diff de la corrida
+  es el árbol contra esa foto, limitado a `archivos.txt`, y el commit lleva solo esos archivos.
+- **F4b en vivo**: con `ui`, `api` o `infra` y permiso de la puerta 1, se reconstruyen y
+  reemplazan en la pila Docker del usuario solo los servicios tocados, guardando la imagen anterior
+  para volver atrás; humo por `https://localhost` y navegador. **Modo túnel** (bandera
+  `compartir`) sin mandar credenciales por el túnel.
+- **Ventana E2E** en una base aparte (`curichi_e2e`), parando solo web y panel de la pila y
+  restaurándolos siempre; nunca la suite entera.
+- **Un solo ejecutor pesado a la vez** por la memoria de la máquina; base local en Docker (ADR
+  0005), no PGlite. Banderas nuevas: `api`, `compartir` y `lanzadores`.
+- **Modelo**: los seis agentes pasan a `claude-opus-4-8` (la tabla de §6 queda como historia).
+
+Criterios nuevos:
+
+9. Dado un cambio con banderas B, cuando termina FB, entonces `linea-base.md` tiene los mismos
+   comandos que correrá F4, con su veredicto y la lista exacta de rojos.
+10. Dada una línea base con rojos, cuando llega la puerta 1, entonces el usuario decide y nadie los
+    toca sin una spec que lo pida.
+11. Dado un test verde en la línea base que queda rojo en F4, entonces el informe lo marca
+    REGRESIÓN y no hay puerta 2 hasta resolverlo.
+12. Dado un redactor o un implementador, cuando hace su primera edición, entonces su artefacto ya
+    tiene el preflight con la salida pegada, igual a la línea base.
+13. Dada una bandera `ui`, `api` o `infra` con permiso, cuando cierra F4, entonces la imagen del
+    servicio tocado es posterior al último archivo editado y el humo por `https://localhost` está
+    pegado.
