@@ -47,13 +47,15 @@ describe('FactoresSeveridad (severidad v2)', () => {
     expect(nombres).toHaveLength(2);
     expect(nombres[0]).toMatch(/^Profundidad\s*×2$/);
     expect(nombres[1]).toBe('Frecuencia');
-    // Puntos de cada variable sobre 4: muslo = 3, permanente = 4.
-    const valores = [...html.matchAll(/(\d+)(?:<!--.*?-->)?\/(?:<!--.*?-->)?4/g)].map((m) => m[1]);
-    expect(valores).toEqual(['3', '4']);
+    // Puntos de cada variable: muslo = 3/4, permanente = 4/5.
+    const valores = [...html.matchAll(/(\d+)(?:<!--.*?-->)?\/(?:<!--.*?-->)?(\d+)/g)].map(
+      (m) => `${m[1]}/${m[2]}`,
+    );
+    expect(valores).toEqual(['3/4', '4/5']);
   });
 
-  it('CA-P2: el título dice «Cómo se llegó a 10 de 12 puntos»', () => {
-    expect(texto(html)).toContain('Cómo se llegó a 10 de 12 puntos');
+  it('CA-P2: el título dice «Cómo se llegó a 10 de 13 puntos»', () => {
+    expect(texto(html)).toContain('Cómo se llegó a 10 de 13 puntos');
   });
 
   it('CA-P2: la fórmula es «puntaje = 2 × profundidad + frecuencia» y no nombra duración ni afectación', () => {

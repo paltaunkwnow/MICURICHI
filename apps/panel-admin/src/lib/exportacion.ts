@@ -22,3 +22,13 @@ export function mensajeErrorExportacion(e: unknown): string {
   // Un fallo de red llega como TypeError o DOMException, con texto de la plataforma en inglés.
   return 'No pudimos conectar con el servidor para exportar.';
 }
+
+export function descargar(texto: string, nombre: string, tipo: string) {
+  const blob = new Blob([texto], { type: tipo });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nombre;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

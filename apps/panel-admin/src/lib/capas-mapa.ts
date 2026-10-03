@@ -104,14 +104,60 @@ export type MapaConCapas = Pick<
  * panel dejó de pintarla (corrida 2026-09-25-quitar-campos-del-reporte): no volver a darle un
  * estilo por defecto, porque eso la haría pedir sus teselas otra vez.
  */
-const ESTILOS: Record<string, { color: string; ancho: number; minzoom: number; opacidad: number }> =
+export const ESTILOS: Record<
+  string,
   {
-    distrito_municipal: { color: '#0A4A69', ancho: 2.5, minzoom: 9, opacidad: 0.85 },
-    unidad_vecinal: { color: '#0D6189', ancho: 1.2, minzoom: 11, opacidad: 0.75 },
-  };
+    color: string;
+    ancho: number;
+    minzoom: number;
+    opacidad: number;
+    colorRelleno: string;
+    opacidadRelleno: number;
+    guiones?: number[];
+  }
+> = {
+  distrito_municipal: {
+    color: '#0A4A69',
+    ancho: 2.2,
+    minzoom: 0,
+    opacidad: 0.85,
+    colorRelleno: '#0A4A69',
+    opacidadRelleno: 0.08,
+  },
+  unidad_vecinal: {
+    color: '#0D6189',
+    ancho: 1.2,
+    minzoom: 0,
+    opacidad: 0.75,
+    colorRelleno: '#0D6189',
+    opacidadRelleno: 0.05,
+    guiones: [4, 2],
+  },
+};
 
 /** Capa de puntos por debajo de la cual van los contornos y nombres de las capas. */
 const CAPA_DE_PUNTOS = 'puntos-halo';
+
+export type CapaVisible = 'ambas' | 'distritos' | 'uv' | 'ninguna';
+
+export function ajustarVisibilidadCapas(
+  m: Pick<MapaGl, 'getLayer' | 'setLayoutProperty'>,
+  capaVisible: CapaVisible,
+): void {
+  const verDistritos = capaVisible === 'ambas' || capaVisible === 'distritos';
+  const verUv = capaVisible === 'ambas' || capaVisible === 'uv';
+
+  for (const sufijo of ['-relleno', '-linea', '-nombre']) {
+    const idDm = `capa-distrito_municipal${sufijo}`;
+    if (m.getLayer(idDm)) {
+      m.setLayoutProperty(idDm, 'visibility', verDistritos ? 'visible' : 'none');
+    }
+    const idUv = `capa-unidad_vecinal${sufijo}`;
+    if (m.getLayer(idUv)) {
+      m.setLayoutProperty(idUv, 'visibility', verUv ? 'visible' : 'none');
+    }
+  }
+}
 
 /**
  * Agrega las capas administrativas al mapa o, si ya están, las apunta a la URL vigente: tras un
@@ -126,7 +172,7 @@ export function aplicarCapas(m: MapaConCapas, capas: readonly CapaInfo[], origen
     const existente = m.getSource(id);
     if (existente) {
       if (apuntarFuenteA(existente as Fuente, c, origen) !== 'otro-modo') continue;
-      for (const sufijo of ['-linea', '-nombre'])
+      for (const sufijo of ['-relleno', '-linea', '-nombre'])
         if (m.getLayer(`${id}${sufijo}`)) m.removeLayer(`${id}${sufijo}`);
       m.removeSource(id);
     }
@@ -146,11 +192,29 @@ export function aplicarCapas(m: MapaConCapas, capas: readonly CapaInfo[], origen
     const base = c.modo === 'teselas' ? { source: id, 'source-layer': c.capa } : { source: id };
     m.addLayer(
       {
+        id: `${id}-relleno`,
+        type: 'fill',
+        ...base,
+        minzoom: e.minzoom,
+        paint: {
+          'fill-color': e.colorRelleno,
+          'fill-opacity': e.opacidadRelleno,
+        },
+      } as LayerSpecification,
+      CAPA_DE_PUNTOS,
+    );
+    m.addLayer(
+      {
         id: `${id}-linea`,
         type: 'line',
         ...base,
         minzoom: e.minzoom,
-        paint: { 'line-color': e.color, 'line-width': e.ancho, 'line-opacity': e.opacidad },
+        paint: {
+          'line-color': e.color,
+          'line-width': e.ancho,
+          'line-opacity': e.opacidad,
+          ...(e.guiones ? { 'line-dasharray': e.guiones } : {}),
+        },
       } as LayerSpecification,
       CAPA_DE_PUNTOS,
     );
@@ -159,9 +223,12 @@ export function aplicarCapas(m: MapaConCapas, capas: readonly CapaInfo[], origen
         id: `${id}-nombre`,
         type: 'symbol',
         ...base,
-        minzoom: c.capa === 'distrito_municipal' ? 10 : 13,
+        minzoom: c.capa === 'distrito_municipal' ? 9 : 11,
         layout: {
-          'text-field': ['get', 'nombre'],
+          'text-field':
+            c.capa === 'distrito_municipal'
+              ? ['get', 'nombre']
+              : ['coalesce', ['get', 'codigo'], ['get', 'nombre']],
           'text-font': ['NotoSans-Bold'],
           'text-size': c.capa === 'distrito_municipal' ? 13 : 11,
           'symbol-placement': 'point',

@@ -12,10 +12,10 @@ import { ErrorApi, iniciarSesion } from '@/lib/api';
 import { destinoDesdeLogin, rutaInicial } from '@/lib/roles';
 import { CLAVE_YO, useUsuario } from '@/lib/sesion';
 
-// Mismas reglas que LoginSchema de contracts, con mensajes en español para la interfaz.
+// Acepta tanto usuario simple (admin, tecnico) como email completo.
 const EsquemaLogin = z.object({
-  email: z.email('Ingresá un email válido.').max(200),
-  password: z.string().min(8, 'La contraseña tiene al menos 8 caracteres.').max(200),
+  email: z.string().trim().min(1, 'Ingresá tu usuario o email.').max(200),
+  password: z.string().min(1, 'Ingresá tu contraseña.').max(200),
 });
 type DatosLogin = z.infer<typeof EsquemaLogin>;
 
@@ -88,12 +88,13 @@ export function FormularioLogin() {
         >
           <div>
             <label htmlFor="email" className="mb-1 block font-semibold">
-              Email
+              Usuario o Email
             </label>
             <input
               id="email"
-              type="email"
+              type="text"
               autoComplete="username"
+              placeholder="admin, tecnico o email"
               className="campo"
               aria-invalid={errors.email ? 'true' : undefined}
               aria-describedby={errors.email ? 'email-error' : undefined}

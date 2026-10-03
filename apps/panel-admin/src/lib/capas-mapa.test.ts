@@ -190,8 +190,10 @@ describe('aplicarCapas: el mapa del panel sigue a la capa vigente', () => {
       'capa-unidad_vecinal',
     ]);
     expect([...capas.keys()]).toEqual([
+      'capa-distrito_municipal-relleno',
       'capa-distrito_municipal-linea',
       'capa-distrito_municipal-nombre',
+      'capa-unidad_vecinal-relleno',
       'capa-unidad_vecinal-linea',
       'capa-unidad_vecinal-nombre',
     ]);
@@ -229,11 +231,16 @@ describe('aplicarCapas: el mapa del panel sigue a la capa vigente', () => {
     aplicarCapas(mapa, [capa('unidad_vecinal', 'teselas', NUEVA)], ORIGEN);
 
     expect(m.removeLayer.mock.calls.map((c) => c[0])).toEqual([
+      'capa-unidad_vecinal-relleno',
       'capa-unidad_vecinal-linea',
       'capa-unidad_vecinal-nombre',
     ]);
     expect(m.removeSource).toHaveBeenCalledWith('capa-unidad_vecinal');
     expect(fuentes.get('capa-unidad_vecinal')?.type).toBe('vector');
-    expect([...capas.keys()]).toEqual(['capa-unidad_vecinal-linea', 'capa-unidad_vecinal-nombre']);
+    expect([...capas.keys()]).toEqual([
+      'capa-unidad_vecinal-relleno',
+      'capa-unidad_vecinal-linea',
+      'capa-unidad_vecinal-nombre',
+    ]);
   });
 });

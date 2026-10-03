@@ -1152,3 +1152,65 @@ a.fila:hover {
   font-size: 32px;
   line-height: 36px;
 }
+
+/* ============================ ESTILOS DE IMPRESIÓN (REPORTE UNITARIO) ============================ */
+
+@media print {
+  body {
+    background: #fff;
+    color: #111;
+    font-size: 11pt;
+  }
+
+  .no-imprimir,
+  .barra-lateral,
+  .topnav,
+  header,
+  nav,
+  aside,
+  .mapa-panel,
+  button:not(.imprimir-solo) {
+    display: none;
+  }
+
+  [role="dialog"] {
+    position: static;
+    inset: auto;
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: none;
+    box-shadow: none;
+    display: block;
+  }
+
+  [role="dialog"] > div {
+    max-height: none;
+    width: 100%;
+    max-width: 100%;
+    box-shadow: none;
+    border: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ficha-unitaria {
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .ficha-seccion {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    margin-bottom: 12pt;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

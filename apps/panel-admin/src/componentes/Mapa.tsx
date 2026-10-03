@@ -8,41 +8,26 @@ import * as maplibregl from 'maplibre-gl';
 import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { useEffect, useRef } from 'react';
-import { aplicarCapas, detectorDeCapaCambiada, recargarCapasMapa } from '@/lib/capas-mapa';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ajustarVisibilidadCapas,
+  aplicarCapas,
+  type CapaVisible,
+  detectorDeCapaCambiada,
+  recargarCapasMapa,
+} from '@/lib/capas-mapa';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { vistaInicialDelPanel } from '@/lib/encuadre';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
-
-/**
- * Tope de pastillas HTML a la vez. La tabla pagina de a 50, así que en la práctica siempre se
- * dibujan; el tope está para que una vista sin paginar no llene el DOM de nodos.
- */
-const MAX_PASTILLAS = 60;
 
 // Base clara y desaturada, como en el prototipo: el técnico necesita leer las calles debajo de
 // los puntos. Fase 2: base vectorial propia <a confirmar> (CLAUDE.md §14.3).
 const ESTILO_BASE: maplibregl.StyleSpecification = {
   version: 8,
-  /**
-   * Glifos servidos por la propia app (`public/glifos/`), no por un servidor ajeno.
-   *
-   * Antes esto apuntaba a `demotiles.maplibre.org`, que es el servidor de DEMOSTRACIÓN de
-   * MapLibre —sin compromiso de servicio y sin permiso para producción—, y encima pedía una
-   * tipografía que ahí no existe: cada etiqueta del mapa provocaba un 404 contra un tercero y
-   * las letras acababan dibujadas por el navegador como último recurso. Se comprobó pidiendo
-   * el archivo a mano: `Open Sans Bold` devuelve 404 y `Noto Sans Bold`, 200.
-   *
-   * Está guardado el rango 0-255, que cubre el castellano entero (tildes, ñ, ¿, ¡, ·) y los
-   * números. Si algún nombre trajera un carácter de fuera de ese rango, MapLibre lo dibuja
-   * localmente, que es exactamente lo que hacía antes con TODO el texto.
-   */
   glyphs: '/glifos/{fontstack}/{range}.pbf',
   sources: {
     base: {
       type: 'raster',
-      // OpenStreetMap estándar: sin clave ni cuota, SOLO para desarrollo local (CLAUDE.md §14.3).
-      // Su política de uso no permite producción: en Fase 2 se reemplaza por una base propia.
       tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
       tileSize: 256,
       attribution:
@@ -51,13 +36,11 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
     },
   },
   layers: [
-    // El fondo mantiene la identidad del mapa aunque las teselas tarden o fallen.
     { id: 'fondo', type: 'background', paint: { 'background-color': '#EEF2EF' } },
     {
       id: 'base',
       type: 'raster',
       source: 'base',
-      // La base se desatura para que lo único con color sea la severidad de los puntos.
       paint: {
         'raster-opacity': 0.95,
         'raster-saturation': -0.97,
@@ -69,10 +52,18 @@ const ESTILO_BASE: maplibregl.StyleSpecification = {
   ],
 };
 
+export type FeaturePuntoReporte = {
+  type: 'Feature';
+  geometry: { type: 'Point'; coordinates: [number, number] };
+  properties: { id?: string; severidad: Severidad; [k: string]: unknown };
+};
+
 export interface PropsMapa {
-  reportes?: ReporteTecnicoFeature[];
+  reportes?: (ReporteTecnicoFeature | FeaturePuntoReporte)[];
   capas?: CapaInfo[];
   onSeleccionar?: (id: string) => void;
+  onSeleccionarDistrito?: (d: { id: string; codigo: string; nombre: string }) => void;
+  onSeleccionarUv?: (u: { id: string; codigo: string; nombre: string }) => void;
   /** Reporte resaltado desde la tabla: su pastilla se pinta en tinta, como en el prototipo. */
   seleccionado?: string | null;
   /** Encuadra los reportes cada vez que cambian (tabla) o el punto único (detalle). */
@@ -85,6 +76,9 @@ export interface PropsMapa {
   zoom?: number;
   className?: string;
   ariaLabel?: string;
+  capaVisible?: CapaVisible;
+  onCambiarCapaVisible?: (c: CapaVisible) => void;
+  mostrarControlesCapas?: boolean;
 }
 
 function coloresPorSeveridad(): maplibregl.ExpressionSpecification {
@@ -100,16 +94,59 @@ function coloresPorSeveridad(): maplibregl.ExpressionSpecification {
   ] as unknown as maplibregl.ExpressionSpecification;
 }
 
+function calcularBboxFeature(geometry: unknown): [number, number, number, number] | null {
+  if (!geometry || typeof geometry !== 'object') return null;
+  const geom = geometry as { type: string; coordinates: unknown };
+  let minLon = Number.POSITIVE_INFINITY;
+  let minLat = Number.POSITIVE_INFINITY;
+  let maxLon = Number.NEGATIVE_INFINITY;
+  let maxLat = Number.NEGATIVE_INFINITY;
+
+  const procesarCoord = (coord: unknown) => {
+    if (Array.isArray(coord) && typeof coord[0] === 'number' && typeof coord[1] === 'number') {
+      const [lon, lat] = coord;
+      if (lon < minLon) minLon = lon;
+      if (lat < minLat) minLat = lat;
+      if (lon > maxLon) maxLon = lon;
+      if (lat > maxLat) maxLat = lat;
+    }
+  };
+
+  const recorrer = (coords: unknown) => {
+    if (!Array.isArray(coords)) return;
+    if (coords.length > 0 && typeof coords[0] === 'number') {
+      procesarCoord(coords);
+    } else {
+      for (const item of coords) recorrer(item);
+    }
+  };
+
+  recorrer(geom.coordinates);
+  if (!Number.isFinite(minLon) || !Number.isFinite(minLat)) return null;
+  return [minLon, minLat, maxLon, maxLat];
+}
+
+const OPCIONES_CAPAS: Array<{ valor: CapaVisible; texto: string }> = [
+  { valor: 'ambas', texto: 'Distritos y UV' },
+  { valor: 'distritos', texto: 'Solo Distritos' },
+  { valor: 'uv', texto: 'Solo UV' },
+];
+
 export function Mapa({
   reportes = [],
   capas = [],
   onSeleccionar,
+  onSeleccionarDistrito,
+  onSeleccionarUv,
   seleccionado = null,
   ajustarAPuntos = false,
   centro,
   zoom,
   className = '',
   ariaLabel = 'Mapa de reportes de inundación',
+  capaVisible: capaVisibleProp,
+  onCambiarCapaVisible,
+  mostrarControlesCapas = true,
 }: PropsMapa) {
   const cliente = useQueryClient();
   const vistaCiudad = vistaInicialDelPanel(useCiudad());
@@ -118,28 +155,30 @@ export function Mapa({
   const contenedor = useRef<HTMLDivElement>(null);
   const mapa = useRef<MapaGl | null>(null);
   const listo = useRef(false);
-  const pines = useRef(new Map<string, maplibregl.Marker>());
+
+  const [modoCapaInterno, setModoCapaInterno] = useState<CapaVisible>(capaVisibleProp ?? 'ambas');
+  const modoCapa = capaVisibleProp ?? modoCapaInterno;
+  const modoCapaRef = useRef<CapaVisible>(modoCapa);
+  modoCapaRef.current = modoCapa;
 
   // Los datos y callbacks se leen por ref para que el mapa se inicialice una sola vez.
   const reportesRef = useRef(reportes);
   const capasRef = useRef(capas);
   const seleccionarRef = useRef(onSeleccionar);
+  const seleccionarDistritoRef = useRef(onSeleccionarDistrito);
+  const seleccionarUvRef = useRef(onSeleccionarUv);
   const ajustarRef = useRef(ajustarAPuntos);
   const seleccionRef = useRef(seleccionado);
   const clienteRef = useRef(cliente);
+
   reportesRef.current = reportes;
   capasRef.current = capas;
   seleccionarRef.current = onSeleccionar;
+  seleccionarDistritoRef.current = onSeleccionarDistrito;
+  seleccionarUvRef.current = onSeleccionarUv;
   ajustarRef.current = ajustarAPuntos;
   seleccionRef.current = seleccionado;
   clienteRef.current = cliente;
-
-  /**
-   * Marcadores en pastilla, iguales a los del mapa público: punto de color y nombre de la
-   * severidad escrito. Se dibujan mientras la vista traiga pocos puntos (la tabla pagina de a 50);
-   * por encima manda el círculo, que no cuesta nodos.
-   */
-  const sincronizarPines = useRef<() => void>(() => {});
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: el mapa se crea una sola vez; centro y zoom son solo la vista inicial
   useEffect(() => {
@@ -153,69 +192,16 @@ export function Mapa({
       attributionControl: { compact: true },
     });
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
-    // Los botones de MapLibre vienen en inglés y alguno sin nombre accesible (WCAG 4.1.2).
     etiquetarControlesDelMapa(m);
-    // Una tesela o capa con huella vieja responde 410 CAPA_CAMBIO: otra versión de la capa se
-    // activó con la pantalla abierta. Se vuelve a pedir la lista y el efecto de `capas` apunta
-    // las fuentes a la URL nueva (`capas-mapa.ts`).
+
     const capaCambiada = detectorDeCapaCambiada();
     m.on('error', (e) => {
-      if (capaCambiada(e.error, capasRef.current)) void recargarCapasMapa(clienteRef.current);
-      // Con un oyente de `error`, MapLibre deja de escribir los errores en la consola: se sigue
-      // haciendo para no esconder los demás.
-      else console.error(e.error);
+      if (clienteRef.current && capaCambiada(e.error, capasRef.current)) {
+        void recargarCapasMapa(clienteRef.current);
+      } else {
+        console.error(e.error);
+      }
     });
-
-    const vivos = new Map<string, maplibregl.Marker>();
-    pines.current = vivos;
-    sincronizarPines.current = () => {
-      if (!m.getLayer('puntos')) return;
-      const lista = reportesRef.current;
-      const conPastillas = lista.length > 0 && lista.length <= MAX_PASTILLAS;
-      for (const capa of ['puntos', 'puntos-halo', 'puntos-etiqueta']) {
-        if (m.getLayer(capa))
-          m.setLayoutProperty(capa, 'visibility', conPastillas ? 'none' : 'visible');
-      }
-      const vistos = new Set<string>();
-      if (conPastillas)
-        for (const f of lista) {
-          const id = f.properties.id;
-          if (!id || vistos.has(id)) continue;
-          vistos.add(id);
-          const sev = f.properties.severidad;
-          let marca = vivos.get(id);
-          if (!marca) {
-            const el = document.createElement('button');
-            el.type = 'button';
-            el.className = 'pin';
-            el.addEventListener('click', (ev) => {
-              ev.stopPropagation();
-              seleccionarRef.current?.(id);
-            });
-            marca = new maplibregl.Marker({ element: el, anchor: 'left' })
-              .setLngLat(f.geometry.coordinates)
-              .addTo(m);
-            vivos.set(id, marca);
-          } else marca.setLngLat(f.geometry.coordinates);
-          const el = marca.getElement();
-          const activo = seleccionRef.current === id;
-          el.className = `pin${activo ? ' on' : ''}`;
-          el.setAttribute('aria-pressed', String(activo));
-          const etiqueta = etiquetaSeveridad(sev);
-          el.setAttribute('aria-label', `Abrir el reporte de severidad ${etiqueta.toLowerCase()}`);
-          el.innerHTML = '';
-          const dot = document.createElement('span');
-          dot.className = 'd';
-          dot.style.background = colorSeveridad(sev).relleno;
-          el.append(dot, document.createTextNode(etiqueta));
-        }
-      for (const [id, marca] of vivos) {
-        if (!vistos.has(id)) {
-          marca.remove();
-          vivos.delete(id);
-        }
-      }
-    };
 
     m.on('load', () => {
       m.addSource('reportes', {
@@ -241,6 +227,18 @@ export function Mapa({
         },
       });
       m.addLayer({
+        id: 'puntos-seleccionado',
+        type: 'circle',
+        source: 'reportes',
+        filter: ['==', ['get', 'id'], seleccionRef.current ?? ''],
+        paint: {
+          'circle-radius': 12,
+          'circle-color': 'rgba(15, 45, 67, 0.2)',
+          'circle-stroke-color': '#0F2D43',
+          'circle-stroke-width': 2.5,
+        },
+      });
+      m.addLayer({
         id: 'puntos-etiqueta',
         type: 'symbol',
         source: 'reportes',
@@ -255,27 +253,92 @@ export function Mapa({
         },
         paint: { 'text-color': '#0F2D43', 'text-halo-color': '#fff', 'text-halo-width': 2.5 },
       });
-      m.on('click', 'puntos', (e) => {
-        const f = m.queryRenderedFeatures(e.point, { layers: ['puntos'] })[0];
+
+      const capasPuntos = ['puntos', 'puntos-halo', 'puntos-etiqueta'];
+      for (const capaId of capasPuntos) {
+        m.on('click', capaId, (e) => {
+          const f = m.queryRenderedFeatures(e.point, { layers: capasPuntos })[0];
+          if (!f) return;
+          const id = f.id ?? (f.properties as { id?: string } | null)?.id;
+          if (id !== undefined && id !== null) seleccionarRef.current?.(String(id));
+        });
+        m.on('mouseenter', capaId, () => {
+          m.getCanvas().style.cursor = 'pointer';
+        });
+        m.on('mouseleave', capaId, () => {
+          m.getCanvas().style.cursor = '';
+        });
+      }
+
+      // Clics y puntero en distritos y UV
+      m.on('click', 'capa-unidad_vecinal-relleno', (e) => {
+        const f = m.queryRenderedFeatures(e.point, { layers: ['capa-unidad_vecinal-relleno'] })[0];
         if (!f) return;
-        const id = f.id ?? (f.properties as { id?: string } | null)?.id;
-        if (id !== undefined && id !== null) seleccionarRef.current?.(String(id));
+        const p = f.properties as { id?: string; codigo?: string; nombre?: string } | null;
+        const id = String(f.id ?? p?.id ?? '');
+        const codigo = String(p?.codigo ?? id.split(':').pop() ?? id);
+        const nombre = String(p?.nombre ?? `UV ${codigo}`);
+        const bbox = calcularBboxFeature(f.geometry);
+        if (bbox) {
+          m.fitBounds(
+            [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]],
+            ],
+            { padding: 36, maxZoom: 16, duration: 600 },
+          );
+        }
+        seleccionarUvRef.current?.({ id, codigo, nombre });
       });
-      m.on('mouseenter', 'puntos', () => {
-        m.getCanvas().style.cursor = 'pointer';
+
+      m.on('click', 'capa-distrito_municipal-relleno', (e) => {
+        const uvFeature = m.queryRenderedFeatures(e.point, {
+          layers: ['capa-unidad_vecinal-relleno'],
+        })[0];
+        if (uvFeature && modoCapaRef.current !== 'distritos') {
+          return;
+        }
+        const f = m.queryRenderedFeatures(e.point, {
+          layers: ['capa-distrito_municipal-relleno'],
+        })[0];
+        if (!f) return;
+        const p = f.properties as { id?: string; codigo?: string; nombre?: string } | null;
+        const id = String(f.id ?? p?.id ?? '');
+        const codigo = String(p?.codigo ?? id.split(':').pop() ?? id);
+        const nombre = String(p?.nombre ?? `Distrito ${codigo}`);
+        const bbox = calcularBboxFeature(f.geometry);
+        if (bbox) {
+          m.fitBounds(
+            [
+              [bbox[0], bbox[1]],
+              [bbox[2], bbox[3]],
+            ],
+            { padding: 48, maxZoom: 15, duration: 600 },
+          );
+        }
+        seleccionarDistritoRef.current?.({ id, codigo, nombre });
       });
-      m.on('mouseleave', 'puntos', () => {
-        m.getCanvas().style.cursor = '';
-      });
+
+      for (const capa of ['capa-distrito_municipal-relleno', 'capa-unidad_vecinal-relleno']) {
+        m.on('mouseenter', capa, () => {
+          m.getCanvas().style.cursor = 'pointer';
+        });
+        m.on('mouseleave', capa, () => {
+          m.getCanvas().style.cursor = '';
+        });
+      }
+
       listo.current = true;
       aplicarCapas(m, capasRef.current, origenDeLaPagina());
+      ajustarVisibilidadCapas(m, modoCapaRef.current);
       aplicarReportes(m, reportesRef.current, ajustarRef.current);
-      sincronizarPines.current();
+      if (m.getLayer('puntos-seleccionado')) {
+        m.setFilter('puntos-seleccionado', ['==', ['get', 'id'], seleccionRef.current ?? '']);
+      }
     });
+
     mapa.current = m;
     return () => {
-      for (const marca of vivos.values()) marca.remove();
-      vivos.clear();
       m.remove();
       mapa.current = null;
       listo.current = false;
@@ -285,31 +348,71 @@ export function Mapa({
   useEffect(() => {
     if (mapa.current && listo.current) {
       aplicarReportes(mapa.current, reportes, ajustarAPuntos);
-      sincronizarPines.current();
     }
   }, [reportes, ajustarAPuntos]);
 
-  // `seleccionado` se lee por ref dentro de `sincronizarPines`, así que Biome no ve la lectura;
-  // es justo el cambio que tiene que repintar la pastilla elegida desde la tabla.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: se lee por ref, ver arriba
   useEffect(() => {
-    if (mapa.current && listo.current) sincronizarPines.current();
+    if (mapa.current && listo.current && mapa.current.getLayer('puntos-seleccionado')) {
+      mapa.current.setFilter('puntos-seleccionado', ['==', ['get', 'id'], seleccionado ?? '']);
+    }
   }, [seleccionado]);
 
   useEffect(() => {
-    if (mapa.current && listo.current) aplicarCapas(mapa.current, capas, origenDeLaPagina());
-  }, [capas]);
+    if (mapa.current && listo.current) {
+      aplicarCapas(mapa.current, capas, origenDeLaPagina());
+      ajustarVisibilidadCapas(mapa.current, modoCapa);
+    }
+  }, [capas, modoCapa]);
 
-  return <section ref={contenedor} className={className} aria-label={ariaLabel} />;
+  useEffect(() => {
+    if (mapa.current && listo.current) {
+      ajustarVisibilidadCapas(mapa.current, modoCapa);
+    }
+  }, [modoCapa]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <section ref={contenedor} className="h-full w-full" aria-label={ariaLabel} />
+      {mostrarControlesCapas && (
+        <fieldset className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-1 rounded-md bg-white/95 p-1 shadow-sm border border-slate-200 text-xs">
+          <legend className="sr-only">Capas del mapa</legend>
+          {OPCIONES_CAPAS.map((op) => (
+            <button
+              key={op.valor}
+              type="button"
+              className={`rounded px-2.5 py-1 font-medium transition-colors ${
+                modoCapa === op.valor
+                  ? 'bg-tinta-900 text-white'
+                  : 'text-tinta-700 hover:bg-slate-100'
+              }`}
+              aria-pressed={modoCapa === op.valor}
+              onClick={() => {
+                setModoCapaInterno(op.valor);
+                onCambiarCapaVisible?.(op.valor);
+              }}
+            >
+              {op.texto}
+            </button>
+          ))}
+        </fieldset>
+      )}
+    </div>
+  );
 }
 
-function aplicarReportes(m: MapaGl, reportes: ReporteTecnicoFeature[], ajustar: boolean) {
+function aplicarReportes(
+  m: MapaGl,
+  reportes: (ReporteTecnicoFeature | FeaturePuntoReporte)[],
+  ajustar: boolean,
+) {
   const src = m.getSource('reportes') as maplibregl.GeoJSONSource | undefined;
   if (!src) return;
   src.setData({
     type: 'FeatureCollection',
     features: reportes.map((f) => ({
-      ...f,
+      type: 'Feature',
+      id: f.properties.id,
+      geometry: f.geometry,
       properties: { ...f.properties, etiqueta: etiquetaSeveridad(f.properties.severidad) },
     })),
   });

@@ -2,10 +2,10 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { ETIQUETAS } from 'contracts';
-import { ArrowLeft, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Check, Copy, FileText, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { Dato } from '@/componentes/Dato';
@@ -13,6 +13,7 @@ import { DatosUbicacion } from '@/componentes/DatosUbicacion';
 import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
+import { ReporteUnitarioModal } from '@/componentes/ReporteUnitarioModal';
 import { VisibilidadPublica } from '@/componentes/VisibilidadPublica';
 import { ErrorApi } from '@/lib/api';
 import { useFormato } from '@/lib/ciudad-contexto';
@@ -30,6 +31,30 @@ import {
 } from '@/lib/formato';
 import { useUsuarioActual } from '@/lib/sesion';
 
+function BotonCopiar({ texto, etiqueta = 'Copiar' }: { texto: string; etiqueta?: string }) {
+  const [copiado, setCopiado] = useState(false);
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(texto);
+      setCopiado(true);
+      setTimeout(() => setCopiado(false), 2000);
+    } catch {
+      // Ignorar si el navegador bloquea portapapeles
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={copiar}
+      className="btn btn-sm btn-secundario inline-flex items-center gap-1 text-xs py-0.5 px-2 font-normal"
+      title={`Copiar ${texto}`}
+    >
+      {copiado ? <Check size={14} className="text-verde-600" /> : <Copy size={14} />}
+      <span>{copiado ? '¡Copiado!' : etiqueta}</span>
+    </button>
+  );
+}
+
 function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <section className="tarjeta p-5" aria-label={titulo}>
@@ -43,6 +68,7 @@ export default function PaginaDetalleReporte() {
   const { id } = useParams<{ id: string }>();
   const usuario = useUsuarioActual();
   const { fechaHora, numero } = useFormato();
+  const [mostrarUnitario, setMostrarUnitario] = useState(false);
   // Se refresca solo cada 10 s: si otro técnico lo modera, el estado se ve sin recargar.
   const reporte = useQuery(consultaReporte(id));
   const capas = useQuery(consultaCapasMapa());
@@ -97,12 +123,24 @@ export default function PaginaDetalleReporte() {
       </Aviso>
 
       <header className="flex flex-wrap items-center gap-3">
-        <h1 className="text-3xl">
+        <h1 className="text-3xl flex items-center gap-2">
           Reporte <span className="font-mono text-2xl">{idCorto(p.id)}</span>
+          <BotonCopiar texto={p.id} etiqueta="Copiar ID" />
         </h1>
         <ChipSeveridad severidad={p.severidad} grande />
         <ChipEstado estado={p.estado} grande data-testid="estado-actual" />
         <p className="text-tinta-600">Creado el {fechaHora(p.creado_en)}</p>
+
+        <button
+          type="button"
+          onClick={() => setMostrarUnitario(true)}
+          className="btn btn-primario ml-auto flex items-center gap-2"
+          data-testid="btn-abrir-reporte-unitario"
+          title="Generar e imprimir o descargar ficha técnica unitaria"
+        >
+          <FileText size={18} aria-hidden="true" />
+          <span>Reporte unitario</span>
+        </button>
       </header>
 
       <VisibilidadPublica estado={p.estado} />
@@ -196,7 +234,10 @@ export default function PaginaDetalleReporte() {
               <Dato etiqueta="Actualizado el">{fechaHora(p.actualizado_en)}</Dato>
               <Dato etiqueta="Autor">{p.autor_id ?? 'Anónimo'}</Dato>
               <Dato etiqueta="Identificador completo">
-                <span className="font-mono">{p.id}</span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm">{p.id}</span>
+                  <BotonCopiar texto={p.id} etiqueta="Copiar UUID" />
+                </div>
               </Dato>
             </dl>
             <FactoresSeveridad reporte={p} />
@@ -217,6 +258,10 @@ export default function PaginaDetalleReporte() {
           <PanelAcciones reporte={f} rol={usuario.rol} />
         </div>
       </div>
+
+      {mostrarUnitario && (
+        <ReporteUnitarioModal reporte={f} onCerrar={() => setMostrarUnitario(false)} />
+      )}
     </div>
   );
 }

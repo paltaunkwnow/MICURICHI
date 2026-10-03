@@ -1,8 +1,10 @@
 'use client';
 
-import type { ResumenEjecutivo } from 'contracts';
-import { useMemo } from 'react';
+import type { AgregadoUv, CapaInfo, ResumenEjecutivo } from 'contracts';
+import { Filter, X } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
+import { type FeaturePuntoReporte, Mapa } from '@/componentes/Mapa';
 import { useFormato } from '@/lib/ciudad-contexto';
 import {
   barrasInundaciones,
@@ -24,6 +26,34 @@ function rotulo(p: PestanaEjecutiva): string {
   return p === 'todas' ? 'todas las severidades' : definicionPestana(p).descripcion.toLowerCase();
 }
 
+export function coincideUv(
+  repUv: { id?: string; codigo?: string } | null | undefined,
+  sel: { id?: string; codigo?: string } | null | undefined,
+): boolean {
+  if (!repUv || !sel) return false;
+  if (repUv.id && sel.id) {
+    if (repUv.id === sel.id) return true;
+    const cleanId1 = repUv.id
+      .replace(/^unidad_vecinal:/i, '')
+      .trim()
+      .toLowerCase();
+    const cleanId2 = sel.id
+      .replace(/^unidad_vecinal:/i, '')
+      .trim()
+      .toLowerCase();
+    if (cleanId1 && cleanId2 && cleanId1 === cleanId2) return true;
+  }
+  if (repUv.codigo && sel.codigo) {
+    const c1 = repUv.codigo.trim().toLowerCase();
+    const c2 = sel.codigo.trim().toLowerCase();
+    if (c1 === c2) return true;
+    const num1 = c1.replace(/^uv[-\s]*/i, '');
+    const num2 = c2.replace(/^uv[-\s]*/i, '');
+    if (num1 && num2 && num1 === num2) return true;
+  }
+  return false;
+}
+
 export interface PropsPanelEjecutivo {
   /** `undefined` mientras carga o si la primera carga falló: nunca se muestran ceros inventados. */
   resumen: ResumenEjecutivo | undefined;
@@ -33,7 +63,50 @@ export interface PropsPanelEjecutivo {
   onReintentar: () => void;
   pestana: PestanaEjecutiva;
   onCambiarPestana: (p: PestanaEjecutiva) => void;
+  capas?: CapaInfo[];
+  reportes?: FeaturePuntoReporte[];
+  agregadosUv?: AgregadoUv[];
+  uvSeleccionada?: { id: string; codigo: string; nombre: string } | null;
+  onSeleccionarUv?: (uv: { id: string; codigo: string; nombre: string } | null) => void;
 }
+
+const CRITERIOS_SEVERIDAD = [
+  {
+    id: 'critica' as const,
+    etiqueta: 'Crítica (y Alta)',
+    colorDot: '#B3200A',
+    prioridad: 'Prioridad 1 · Emergencia',
+    bordeActivo: 'border-red-500 bg-red-50/60 ring-2 ring-red-500/20 shadow-sm',
+    profundidad: 'Superior a 40 cm (al muslo o cintura / >70 cm) o recurrente a la rodilla',
+    impacto:
+      'Peligro para personas, corte total del tránsito vehicular y riesgo inminente de anegamiento en viviendas o predios.',
+    accion:
+      'Despacho prioritario de cuadrillas de emergencia, motobombas y auxilio municipal inmediato.',
+  },
+  {
+    id: 'media' as const,
+    etiqueta: 'Media',
+    colorDot: '#C98A0E',
+    prioridad: 'Prioridad 2 · Precaución',
+    bordeActivo: 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-500/20 shadow-sm',
+    profundidad: '10 a 40 cm (nivel de la rodilla) o constante al tobillo',
+    impacto:
+      'Circulación vehicular con dificultad o desvíos, anegamiento en calzada y cruces, sumideros tapados o saturación temporal.',
+    accion:
+      'Programación de cuadrillas de desobstrucción, limpieza de sumideros y monitoreo técnico.',
+  },
+  {
+    id: 'baja' as const,
+    etiqueta: 'Baja',
+    colorDot: '#28934D',
+    prioridad: 'Prioridad 3 · Ordinaria',
+    bordeActivo: 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-500/20 shadow-sm',
+    profundidad: 'Menor a 10 cm (nivel del tobillo) de ocurrencia aislada',
+    impacto:
+      'Anegamiento superficial y charcos en cunetas o vías secundarias sin ingreso a inmuebles ni interrupción sustancial del tránsito.',
+    accion: 'Inspección rutinaria y mantenimiento preventivo en planes ordinarios de drenaje.',
+  },
+];
 
 /**
  * Pantalla del rol ejecutivo: la cifra grande, las pestañas de severidad y dos gráficas por
@@ -42,9 +115,17 @@ export interface PropsPanelEjecutivo {
 export function PanelEjecutivo(props: PropsPanelEjecutivo) {
   const { resumen } = props;
   const formato = useFormato();
+  const [uvInterna, setUvInterna] = useState<{ id: string; codigo: string; nombre: string } | null>(
+    props.uvSeleccionada ?? null,
+  );
+  const uvSeleccionada = props.uvSeleccionada !== undefined ? props.uvSeleccionada : uvInterna;
+  const setUvSeleccionada = props.onSeleccionarUv ?? setUvInterna;
+
   return (
     <div className="space-y-6">
-      <h1 className="titular text-3xl">Panel ejecutivo</h1>
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="titular text-3xl">Panel ejecutivo</h1>
+      </header>
 
       {/*
         Regiones vivas, siempre montadas: la primera habla solo cuando cambian las cifras (un
@@ -62,7 +143,12 @@ export function PanelEjecutivo(props: PropsPanelEjecutivo) {
 
       {resumen ? (
         <div className="space-y-6" data-testid="ejecutivo-contenido">
-          <Contenido {...props} resumen={resumen} />
+          <Contenido
+            {...props}
+            resumen={resumen}
+            uvSeleccionada={uvSeleccionada}
+            setUvSeleccionada={setUvSeleccionada}
+          />
         </div>
       ) : props.cargando ? (
         <p className="text-tinta-600" role="status">
@@ -90,12 +176,38 @@ export function PanelEjecutivo(props: PropsPanelEjecutivo) {
   );
 }
 
-function Contenido(props: PropsPanelEjecutivo & { resumen: ResumenEjecutivo }) {
-  const { resumen, pestana } = props;
+function Contenido(
+  props: PropsPanelEjecutivo & {
+    resumen: ResumenEjecutivo;
+    uvSeleccionada: { id: string; codigo: string; nombre: string } | null;
+    setUvSeleccionada: (uv: { id: string; codigo: string; nombre: string } | null) => void;
+  },
+) {
+  const { resumen, pestana, uvSeleccionada, setUvSeleccionada } = props;
   const formato = useFormato();
   const conteos = conteosPorPestana(resumen.activas.por_severidad);
   const inundaciones = useMemo(() => barrasInundaciones(resumen, pestana), [resumen, pestana]);
   const trabajo = useMemo(() => barrasTrabajo(resumen), [resumen]);
+  const [mostrarTodasUvs, setMostrarTodasUvs] = useState(false);
+
+  const uvsAfectadas = useMemo(
+    () => (props.agregadosUv ?? []).filter((u) => u.n_reportes > 0),
+    [props.agregadosUv],
+  );
+
+  const reportesVisibles = useMemo(() => {
+    let lista = props.reportes ?? [];
+    if (uvSeleccionada) {
+      lista = lista.filter((f) => {
+        const uv = (f.properties as { unidad_vecinal?: { id?: string; codigo?: string } })
+          .unidad_vecinal;
+        return coincideUv(uv, uvSeleccionada);
+      });
+    }
+    return lista;
+  }, [props.reportes, uvSeleccionada]);
+
+  const uvsAMostrar = mostrarTodasUvs ? uvsAfectadas : uvsAfectadas.slice(0, 8);
 
   return (
     <>
@@ -121,6 +233,73 @@ function Contenido(props: PropsPanelEjecutivo & { resumen: ResumenEjecutivo }) {
         />
       </section>
 
+      {/* Explicación y significado de los niveles de severidad */}
+      <section className="tarjeta p-5 space-y-4" aria-labelledby="ej-titulo-criterios">
+        <div className="border-b border-slate-100 pb-3">
+          <h2 id="ej-titulo-criterios" className="titular text-xl">
+            Significado de los niveles de severidad
+          </h2>
+          <p className="text-sm text-tinta-600 mt-1">
+            Criterios técnicos de profundidad del agua, afectación en vía pública y tipo de
+            respuesta municipal.
+          </p>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-3">
+          {CRITERIOS_SEVERIDAD.map((c) => {
+            const destacada = pestana === c.id;
+            const seleccionada = pestana === 'todas' || destacada;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => props.onCambiarPestana(c.id)}
+                className={`text-left rounded-xl border p-4 transition-all duration-200 cursor-pointer ${
+                  destacada
+                    ? c.bordeActivo
+                    : seleccionada
+                      ? 'border-slate-200 bg-slate-50/40 hover:border-slate-300'
+                      : 'border-slate-200 bg-white opacity-70 hover:opacity-100 hover:border-slate-300'
+                }`}
+                aria-pressed={destacada}
+              >
+                <div className="flex items-center gap-2">
+                  <span
+                    className="flex h-3 w-3 rounded-full shrink-0"
+                    style={{ backgroundColor: c.colorDot }}
+                    aria-hidden="true"
+                  />
+                  <span className="font-bold text-tinta-900">{c.etiqueta}</span>
+                  <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-tinta-700">
+                    {c.prioridad}
+                  </span>
+                </div>
+                <div className="mt-3 space-y-2.5 text-sm">
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
+                      Nivel de agua estimado
+                    </span>
+                    <p className="font-medium text-tinta-900">{c.profundidad}</p>
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
+                      Impacto en el entorno
+                    </span>
+                    <p className="text-tinta-700 leading-snug">{c.impacto}</p>
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
+                      Respuesta operativa
+                    </span>
+                    <p className="text-tinta-700 leading-snug">{c.accion}</p>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <div className="grid gap-6 xl:grid-cols-2">
         {/* Lo único que cambia con la pestaña es esta gráfica. */}
         <div id={ID_PANEL} role="tabpanel" aria-labelledby={`pestana-ej-${pestana}`}>
@@ -143,6 +322,155 @@ function Contenido(props: PropsPanelEjecutivo & { resumen: ResumenEjecutivo }) {
           <GraficaTrabajo barras={trabajo} />
         </section>
       </div>
+
+      {/* Mapa interactivo con distritos y unidades vecinales (UV) */}
+      <section className="tarjeta p-5 space-y-4" aria-labelledby="ej-titulo-mapa">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 id="ej-titulo-mapa" className="titular text-xl">
+              Distribución territorial y capas UV
+            </h2>
+            <p className="text-sm text-tinta-600">
+              Capas administrativas de distritos municipales y unidades vecinales (UV) con los
+              reportes geolocalizados.
+            </p>
+          </div>
+          {uvSeleccionada && (
+            <button
+              type="button"
+              onClick={() => setUvSeleccionada(null)}
+              className="btn btn-sm btn-secundario flex items-center gap-1.5"
+              data-testid="ejecutivo-quitar-filtro-uv-btn"
+            >
+              <X size={15} aria-hidden="true" />
+              <span>Ver todas las UV</span>
+            </button>
+          )}
+        </div>
+
+        {uvSeleccionada && (
+          <div
+            className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-xl border border-sky-200 bg-sky-50 text-sky-950 shadow-sm"
+            data-testid="ejecutivo-banner-filtro-uv"
+          >
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-600 text-white shadow-sm shrink-0">
+                <Filter size={16} aria-hidden="true" />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="font-bold text-sm text-sky-950">
+                    Filtro activo: Unidad Vecinal {uvSeleccionada.codigo}
+                  </span>
+                  {uvSeleccionada.nombre && (
+                    <span className="text-xs text-sky-800 bg-sky-100/90 px-2 py-0.5 rounded-md font-medium">
+                      {uvSeleccionada.nombre}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-sky-800 mt-0.5">
+                  Mostrando únicamente los{' '}
+                  <strong>{formato.numero(reportesVisibles.length)}</strong> incidentes
+                  geolocalizados dentro de esta UV.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setUvSeleccionada(null)}
+              className="btn btn-sm bg-white hover:bg-sky-100/80 text-sky-800 border-sky-300 shadow-xs flex items-center gap-1.5"
+              title="Quitar filtro de UV y mostrar todos los incidentes"
+              data-testid="ejecutivo-quitar-filtro-uv"
+            >
+              <X size={15} aria-hidden="true" />
+              <span>Quitar filtro</span>
+            </button>
+          </div>
+        )}
+
+        <div className="h-[460px] w-full overflow-hidden rounded-lg border border-slate-200">
+          <Mapa
+            reportes={reportesVisibles}
+            capas={props.capas ?? []}
+            ajustarAPuntos={Boolean(uvSeleccionada)}
+            onSeleccionarUv={(uv) => setUvSeleccionada(uv)}
+            className="h-full w-full"
+            ariaLabel="Mapa de distritos y unidades vecinales con reportes"
+          />
+        </div>
+      </section>
+
+      {uvsAfectadas.length > 0 && (
+        <section className="tarjeta p-5 space-y-3" aria-labelledby="ej-titulo-uvs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 id="ej-titulo-uvs" className="titular text-xl">
+              Unidades Vecinales (UV) con mayor incidencia
+            </h2>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-tinta-600">
+                Seleccioná una UV para filtrar incidentes en el mapa
+              </span>
+              {uvsAfectadas.length > 8 && (
+                <button
+                  type="button"
+                  onClick={() => setMostrarTodasUvs(!mostrarTodasUvs)}
+                  className="text-xs font-semibold text-sky-600 hover:text-sky-700 underline cursor-pointer"
+                >
+                  {mostrarTodasUvs ? 'Ver menos UVs' : `Ver todas (${uvsAfectadas.length})`}
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {uvsAMostrar.map((uv) => {
+              const estaSeleccionada =
+                uvSeleccionada !== null &&
+                coincideUv({ id: uv.unidad_vecinal_id, codigo: uv.codigo }, uvSeleccionada);
+              return (
+                <button
+                  key={uv.unidad_vecinal_id}
+                  type="button"
+                  onClick={() => {
+                    if (estaSeleccionada) {
+                      setUvSeleccionada(null);
+                    } else {
+                      setUvSeleccionada({
+                        id: uv.unidad_vecinal_id,
+                        codigo: uv.codigo,
+                        nombre: uv.nombre ?? `UV ${uv.codigo}`,
+                      });
+                    }
+                  }}
+                  className={`text-left rounded-lg border p-3 flex flex-col justify-between transition-all cursor-pointer ${
+                    estaSeleccionada
+                      ? 'border-sky-500 bg-sky-50/80 ring-2 ring-sky-500/20 shadow-sm'
+                      : 'border-slate-200 bg-slate-50/60 hover:bg-slate-100 hover:border-slate-300'
+                  }`}
+                  aria-pressed={estaSeleccionada}
+                >
+                  <div className="flex items-start justify-between gap-1">
+                    <div>
+                      <span className="font-semibold text-tinta-900">UV {uv.codigo}</span>
+                      {uv.nombre && <p className="text-xs text-tinta-600 truncate">{uv.nombre}</p>}
+                    </div>
+                    {estaSeleccionada && (
+                      <span className="rounded bg-sky-600 px-1.5 py-0.5 text-[10px] font-bold text-white shrink-0">
+                        FILTRADA
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2 text-right">
+                    <span className="text-lg font-bold text-tinta-900">
+                      {formato.numero(uv.n_reportes)}
+                    </span>
+                    <span className="text-xs text-tinta-600 ml-1">reportes</span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </>
   );
 }

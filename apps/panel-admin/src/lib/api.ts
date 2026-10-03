@@ -216,6 +216,22 @@ export function obtenerReportes(
   });
 }
 
+/**
+ * Reportes públicos para el mapa del panel ejecutivo:
+ * El rol ejecutivo no tiene permisos técnicos (/api/v1/tecnico/reportes da 403),
+ * pero consume la ruta pública `/api/v1/reportes` para ver los puntos en el mapa.
+ */
+export function obtenerReportesPublicos(
+  params: ParametrosConsulta,
+  signal?: AbortSignal,
+  opciones: OpcionesLectura = {},
+) {
+  return pedir<ReporteTecnicoFeatureCollection>(`/api/v1/reportes?${aQuery(params)}`, {
+    signal,
+    headers: cabecerasLectura(opciones),
+  });
+}
+
 export function obtenerReporte(id: string, signal?: AbortSignal, opciones: OpcionesLectura = {}) {
   return pedir<ReporteTecnicoFeature>(`/api/v1/tecnico/reportes/${encodeURIComponent(id)}`, {
     signal,

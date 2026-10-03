@@ -1,10 +1,11 @@
 import { PESOS, PUNTOS, type ReporteTecnico } from 'contracts';
 import { colorSeveridad } from '@/lib/formato';
 
-/** Puntaje máximo de cada variable en la tabla de severidad (CLAUDE.md §9.1). */
-const MAXIMO = 4;
-/** Puntaje máximo de la fórmula (severidad v2: 2·4 + 4 = 12). Sale de los pesos, no se fija. */
-const PUNTAJE_MAXIMO = (PESOS.profundidad + PESOS.frecuencia) * MAXIMO;
+/** Puntajes máximos por variable según la matriz de severidad v2 (contracts). */
+const MAX_PROFUNDIDAD = Math.max(...Object.values(PUNTOS.profundidad));
+const MAX_FRECUENCIA = Math.max(...Object.values(PUNTOS.frecuencia));
+/** Puntaje máximo de la fórmula (severidad v2: 2·4 + 5 = 13). Sale de los pesos y máximos. */
+const PUNTAJE_MAXIMO = PESOS.profundidad * MAX_PROFUNDIDAD + PESOS.frecuencia * MAX_FRECUENCIA;
 
 /**
  * De dónde salió el puntaje (M-03 del prototipo). El técnico que va a validar o a reclasificar
@@ -12,9 +13,19 @@ const PUNTAJE_MAXIMO = (PESOS.profundidad + PESOS.frecuencia) * MAXIMO;
  * pesa doble, que es lo que más sorprende cuando se mira por primera vez.
  */
 export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
-  const filas: Array<[string, number, number]> = [
-    ['Profundidad', PUNTOS.profundidad[reporte.profundidad_estimada], PESOS.profundidad],
-    ['Frecuencia', PUNTOS.frecuencia[reporte.frecuencia], PESOS.frecuencia],
+  const filas = [
+    {
+      nombre: 'Profundidad',
+      valor: PUNTOS.profundidad[reporte.profundidad_estimada],
+      peso: PESOS.profundidad,
+      maximo: MAX_PROFUNDIDAD,
+    },
+    {
+      nombre: 'Frecuencia',
+      valor: PUNTOS.frecuencia[reporte.frecuencia],
+      peso: PESOS.frecuencia,
+      maximo: MAX_FRECUENCIA,
+    },
   ];
   const color = colorSeveridad(reporte.severidad_calculada).relleno;
 
@@ -24,7 +35,7 @@ export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
         Cómo se llegó a {reporte.severidad_puntaje} de {PUNTAJE_MAXIMO} puntos
       </h3>
       <dl className="grid gap-2.5">
-        {filas.map(([nombre, valor, peso]) => (
+        {filas.map(({ nombre, valor, peso, maximo }) => (
           <div
             key={nombre}
             className="grid grid-cols-[minmax(96px,130px)_minmax(0,1fr)_64px] items-center gap-3 text-[15.5px]"
@@ -35,13 +46,13 @@ export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
             </dt>
             <dd className="barra-proporcion m-0">
               <span
-                style={{ width: `${(valor / MAXIMO) * 100}%`, background: color }}
+                style={{ width: `${Math.min(100, (valor / maximo) * 100)}%`, background: color }}
                 // El ancho ya lo dice el número de la derecha; la barra es apoyo visual.
                 aria-hidden="true"
               />
             </dd>
             <dd className="m-0 text-right tabular-nums">
-              {valor}/{MAXIMO}
+              {valor}/{maximo}
             </dd>
           </div>
         ))}

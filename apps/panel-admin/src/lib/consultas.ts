@@ -1,11 +1,13 @@
 import { type QueryClient, type QueryFunctionContext, queryOptions } from '@tanstack/react-query';
 import type { VentanaResumen } from 'contracts';
 import {
+  obtenerAgregadosUv,
   obtenerCapasMapa,
   obtenerDistritos,
   obtenerIndicadores,
   obtenerReporte,
   obtenerReportes,
+  obtenerReportesPublicos,
   obtenerResumenEjecutivo,
   obtenerUnidadesVecinales,
   type ParametrosConsulta,
@@ -68,6 +70,14 @@ export function consultaReportes(params: ParametrosConsulta) {
   });
 }
 
+export function consultaReportesPublicos(params: ParametrosConsulta) {
+  return queryOptions({
+    queryKey: ['reportes-publicos', params],
+    queryFn: (ctx) => obtenerReportesPublicos(params, ctx.signal, { sondeo: esSondeo(ctx) }),
+    ...SONDEO,
+  });
+}
+
 export function consultaReporte(id: string) {
   return queryOptions({
     queryKey: ['reporte', id],
@@ -118,6 +128,14 @@ export function consultaUnidadesVecinales() {
   return queryOptions({
     queryKey: ['geo', 'unidades-vecinales'],
     queryFn: () => obtenerUnidadesVecinales(),
+    ...GEOMETRIA,
+  });
+}
+
+export function consultaAgregadosUv() {
+  return queryOptions({
+    queryKey: ['geo', 'agregados-uv'],
+    queryFn: ({ signal }) => obtenerAgregadosUv(signal),
     ...GEOMETRIA,
   });
 }

@@ -1,12 +1,18 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReporteTecnicoFeature, type Rol, SEVERIDADES, type Severidad } from 'contracts';
 import { Check, EyeOff, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Aviso, type TipoAviso } from '@/componentes/Aviso';
-import { cambiarEstado, ErrorApi, fusionarReporte, reclasificarSeveridad } from '@/lib/api';
-import { etiquetaSeveridad } from '@/lib/formato';
+import {
+  cambiarEstado,
+  ErrorApi,
+  fusionarReporte,
+  obtenerReportes,
+  reclasificarSeveridad,
+} from '@/lib/api';
+import { etiquetaSeveridad, idCorto } from '@/lib/formato';
 import {
   type AccionModeracion,
   accionesModeracion,
@@ -14,7 +20,8 @@ import {
   TEXTOS_ACCION,
 } from '@/lib/moderacion';
 
-const RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RE_UUID_O_CORTO =
+  /^([0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 function describirError(e: unknown): string {
   if (e instanceof ErrorApi) {
@@ -37,7 +44,7 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
 
   const refrescar = async () => {
     await Promise.all([
-      cliente.invalidateQueries({ queryKey: ['reporte', p.id] }),
+      cliente.invalidateQueries({ queryKey: ['reporte'] }),
       cliente.invalidateQueries({ queryKey: ['reportes'] }),
       cliente.invalidateQueries({ queryKey: ['indicadores'] }),
     ]);
@@ -72,10 +79,19 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
   const puede = accionesModeracion(p.estado, rol);
   const hayAcciones = Object.values(puede).some(Boolean);
 
+  const candidatos = useQuery({
+    queryKey: ['reportes-candidatos-fusion'],
+    queryFn: () => obtenerReportes({ estado: 'validado', limite: '50' }),
+    enabled: accion === 'fusionar',
+  });
+
   const abrirFormulario = (a: AccionModeracion) => {
     setAccion(a);
     setErrorFormulario(null);
     setMensaje(null);
+    if (a === 'fusionar' && !motivo.trim()) {
+      setMotivo('Duplicado del mismo punto');
+    }
   };
 
   const confirmar = (ev: FormEvent) => {
@@ -87,13 +103,18 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
         setErrorFormulario('Escribí un motivo de al menos 3 caracteres.');
         return;
       }
-      const canonico = canonicoId.trim();
-      if (!RE_UUID.test(canonico)) {
-        setErrorFormulario('El identificador del reporte canónico debe ser un UUID.');
+      const canonico = canonicoId.trim().replace(/^#/, '');
+      if (!RE_UUID_O_CORTO.test(canonico)) {
+        setErrorFormulario(
+          'Ingresá un ID de reporte válido (ID corto de 8 caracteres o UUID completo).',
+        );
         return;
       }
-      if (canonico.toLowerCase() === p.id.toLowerCase()) {
-        setErrorFormulario('El reporte canónico tiene que ser otro reporte.');
+      if (
+        canonico.toLowerCase() === p.id.toLowerCase() ||
+        (canonico.length === 8 && p.id.toLowerCase().startsWith(canonico.toLowerCase()))
+      ) {
+        setErrorFormulario('El reporte canónico tiene que ser otro reporte, no este mismo.');
         return;
       }
       setErrorFormulario(null);
@@ -225,20 +246,62 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
           <p className="ayuda">{TEXTOS_ACCION[accion].ayuda}</p>
 
           {accion === 'fusionar' && (
-            <div>
-              <label htmlFor="canonico_id" className="mb-1 block font-semibold">
-                Identificador del reporte canónico
+            <div className="flex flex-col gap-3">
+              <label htmlFor="canonico_id" className="font-semibold">
+                Reporte canónico (el que se conserva)
               </label>
-              <input
-                id="canonico_id"
-                name="canonico_id"
-                className="campo"
-                value={canonicoId}
-                onChange={(ev) => setCanonicoId(ev.target.value)}
-                placeholder="UUID del reporte validado que se conserva"
-                autoComplete="off"
-                required
-              />
+
+              {candidatos.data?.features && candidatos.data.features.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs text-tinta-600">
+                    Elegí un reporte validado existente:
+                  </span>
+                  <select
+                    id="selector-canonico"
+                    className="campo text-sm"
+                    value={canonicoId}
+                    onChange={(ev) => setCanonicoId(ev.target.value)}
+                  >
+                    <option value="">-- Seleccionar de la lista de validados --</option>
+                    {candidatos.data.features
+                      .filter((f) => f.properties.id !== p.id)
+                      .map((f) => {
+                        const uv = f.properties.unidad_vecinal?.codigo
+                          ? `UV ${f.properties.unidad_vecinal.codigo}`
+                          : '';
+                        const desc = f.properties.descripcion
+                          ? f.properties.descripcion.slice(0, 45)
+                          : '';
+                        return (
+                          <option key={f.properties.id} value={f.properties.id}>
+                            [{idCorto(f.properties.id)}] {uv ? `${uv} - ` : ''}
+                            {desc}...
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+              )}
+
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-tinta-600">
+                  O escribí / pegá el ID (acepta ID corto de 8 caracteres o UUID):
+                </span>
+                <input
+                  id="canonico_id"
+                  name="canonico_id"
+                  className="campo font-mono text-sm"
+                  value={canonicoId}
+                  onChange={(ev) => setCanonicoId(ev.target.value)}
+                  placeholder="Ej: 44488f4b o UUID completo"
+                  autoComplete="off"
+                  required
+                />
+              </div>
+
+              <p className="text-xs text-tinta-600 bg-agua-50/50 p-2 rounded border border-agua-200">
+                ℹ️ El reporte canónico debe estar en estado <b>Validado</b>.
+              </p>
             </div>
           )}
 

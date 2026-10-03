@@ -2,6 +2,7 @@
 
 import { ETIQUETAS, type ReporteTecnicoFeature } from 'contracts';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { useFormato } from '@/lib/ciudad-contexto';
 import {
@@ -19,11 +20,11 @@ interface Props {
 }
 
 /**
- * Bandeja de triaje. La fila entera responde al puntero para sincronizarse con el mapa, pero el
- * enlace de la fecha sigue siendo lo que abre el reporte: así el teclado y los lectores de
- * pantalla tienen un control con nombre y destino, en vez de una fila «clicable» invisible.
+ * Bandeja de triaje. La fila entera es clicable y navega al detalle del reporte.
+ * Además incluye un botón explícito de acción para accesibilidad y claridad.
  */
 export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) {
+  const router = useRouter();
   const { fechaCorta, numero } = useFormato();
   return (
     <div className="overflow-x-auto">
@@ -41,6 +42,9 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
             <th scope="col" className="numero">
               N en el punto
             </th>
+            <th scope="col" className="text-right">
+              Acción
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -51,7 +55,8 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                 key={p.id}
                 data-testid="fila-reporte"
                 data-id={p.id}
-                className={seleccionado === p.id ? 'on' : ''}
+                className={`${seleccionado === p.id ? 'on' : ''} cursor-pointer hover:bg-agua-50/50 transition-colors`}
+                onClick={() => router.push(`/reportes/${p.id}`)}
                 onMouseEnter={() => onSeleccionar?.(p.id)}
                 onMouseLeave={() => onSeleccionar?.(null)}
                 onFocus={() => onSeleccionar?.(p.id)}
@@ -61,6 +66,7 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                     href={`/reportes/${p.id}`}
                     className="font-semibold text-agua-500 underline underline-offset-2"
                     data-testid="abrir-reporte"
+                    onClick={(e) => e.stopPropagation()}
                   >
                     {fechaCorta(p.creado_en)}
                     <span className="sr-only"> · abrir reporte</span>
@@ -78,6 +84,16 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                 <td>{etiquetaFrecuencia(p.frecuencia)}</td>
                 <td className="numero">
                   {p.n_reportes_punto === null ? '—' : numero(p.n_reportes_punto)}
+                </td>
+                <td className="text-right whitespace-nowrap">
+                  <Link
+                    href={`/reportes/${p.id}`}
+                    className="btn btn-sm btn-secundario inline-flex items-center gap-1 text-xs py-1 px-2.5 font-normal"
+                    data-testid="boton-ver-detalle"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    Ver detalle →
+                  </Link>
                 </td>
               </tr>
             );

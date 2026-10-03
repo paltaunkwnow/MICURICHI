@@ -4,7 +4,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { PanelEjecutivo } from '@/componentes/ejecutivo/PanelEjecutivo';
 import { ErrorApi } from '@/lib/api';
-import { consultaResumenEjecutivo } from '@/lib/consultas';
+import {
+  consultaAgregadosUv,
+  consultaCapasMapa,
+  consultaReportesPublicos,
+  consultaResumenEjecutivo,
+} from '@/lib/consultas';
 import type { PestanaEjecutiva } from '@/lib/ejecutivo';
 
 function mensajeDeError(e: unknown): string {
@@ -18,6 +23,9 @@ export default function PaginaEjecutivo() {
   // Se refresca sola cada 10 s, marcada como sondeo: una pantalla abierta en la oficina no
   // mantiene viva la sesión (`lib/consultas.ts`).
   const consulta = useQuery(consultaResumenEjecutivo());
+  const capas = useQuery(consultaCapasMapa());
+  const reportes = useQuery(consultaReportesPublicos({ limite: '300' }));
+  const agregadosUv = useQuery(consultaAgregadosUv());
 
   return (
     <PanelEjecutivo
@@ -27,6 +35,9 @@ export default function PaginaEjecutivo() {
       onReintentar={() => void consulta.refetch()}
       pestana={pestana}
       onCambiarPestana={setPestana}
+      capas={capas.data ?? []}
+      reportes={reportes.data?.features ?? []}
+      agregadosUv={agregadosUv.data ?? []}
     />
   );
 }

@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { type Ciudad, CONFIG_DOMINIO } from 'contracts';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -5,13 +6,14 @@ import { describe, expect, it } from 'vitest';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 import { conteoPestana, type PestanaEjecutiva } from '@/lib/ejecutivo';
 import { resumenDeEjemplo } from '@/lib/ejecutivo.fixture';
-import { PanelEjecutivo, type PropsPanelEjecutivo } from './PanelEjecutivo';
+import { coincideUv, PanelEjecutivo, type PropsPanelEjecutivo } from './PanelEjecutivo';
 
 /** Render estático, sin navegador. La ciudad llega como en la app, por el proveedor. */
 function render(
   extra: Partial<PropsPanelEjecutivo> = {},
   ciudad: Ciudad = CONFIG_DOMINIO.CIUDAD_POR_DEFECTO,
 ) {
+  const cliente = new QueryClient();
   const props: PropsPanelEjecutivo = {
     resumen: resumenDeEjemplo(),
     cargando: false,
@@ -22,7 +24,11 @@ function render(
     ...extra,
   };
   return renderToStaticMarkup(
-    createElement(ProveedorCiudad, { ciudad }, createElement(PanelEjecutivo, props)),
+    createElement(
+      QueryClientProvider,
+      { client: cliente },
+      createElement(ProveedorCiudad, { ciudad }, createElement(PanelEjecutivo, props)),
+    ),
   );
 }
 
@@ -165,5 +171,64 @@ describe('PanelEjecutivo (pantalla limpia)', () => {
     const conError = render({ resumen: undefined, error: 'El servidor tuvo un problema.' });
     expect(conError).toContain('No se pudo cargar el resumen.');
     expect(conError).not.toContain('data-testid="ejecutivo-total"');
+  });
+
+  it('el ejecutivo no exporta: el panel no tiene botones de exportación', () => {
+    expect(html).not.toContain('data-testid="ejecutivo-exportar-geojson"');
+    expect(html).not.toContain('data-testid="ejecutivo-exportar-csv"');
+    expect(html).not.toContain('Exportar GeoJSON');
+    expect(html).not.toContain('Exportar CSV');
+  });
+
+  it('con UV seleccionada muestra el banner de filtro activo, sin botones de exportación', () => {
+    const conUv = render({
+      uvSeleccionada: { id: 'unidad_vecinal:UV-05', codigo: '05', nombre: 'Barrio Central' },
+      reportes: [
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-63.18, -17.78] },
+          properties: {
+            id: 'rep-1',
+            severidad: 'alta',
+            unidad_vecinal: { id: 'unidad_vecinal:UV-05', codigo: '05', nombre: 'Barrio Central' },
+          },
+        },
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [-63.19, -17.79] },
+          properties: {
+            id: 'rep-2',
+            severidad: 'baja',
+            unidad_vecinal: { id: 'unidad_vecinal:UV-09', codigo: '09', nombre: 'Otra UV' },
+          },
+        },
+      ],
+    });
+    expect(conUv).toContain('data-testid="ejecutivo-banner-filtro-uv"');
+    expect(conUv).toContain('Filtro activo: Unidad Vecinal 05');
+    expect(conUv).toContain('Barrio Central');
+    expect(conUv).toContain('data-testid="ejecutivo-quitar-filtro-uv"');
+    expect(conUv).not.toContain('Exportar GeoJSON');
+    expect(conUv).not.toContain('Exportar CSV');
+  });
+
+  it('coincideUv compara correctamente IDs con o sin prefijo y códigos con o sin UV', () => {
+    expect(
+      coincideUv(
+        { id: 'unidad_vecinal:UV-01', codigo: '01' },
+        { id: 'unidad_vecinal:UV-01', codigo: '01' },
+      ),
+    ).toBe(true);
+    expect(
+      coincideUv({ id: 'UV-01', codigo: 'UV-01' }, { id: 'unidad_vecinal:UV-01', codigo: '01' }),
+    ).toBe(true);
+    expect(coincideUv({ id: '12', codigo: '12' }, { id: '12', codigo: '12' })).toBe(true);
+    expect(coincideUv(null, { id: '12', codigo: '12' })).toBe(false);
+    expect(
+      coincideUv(
+        { id: 'unidad_vecinal:01', codigo: '01' },
+        { id: 'unidad_vecinal:02', codigo: '02' },
+      ),
+    ).toBe(false);
   });
 });

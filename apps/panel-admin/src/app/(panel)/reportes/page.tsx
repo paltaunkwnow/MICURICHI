@@ -87,6 +87,14 @@ function Reportes() {
   const unidadesVecinales = useQuery(consultaUnidadesVecinales());
   const capas = useQuery(consultaCapasMapa());
 
+  // Reportes completos para el mapa (con los filtros actuales pero sin paginación), para que todos
+  // los puntos de la zona aparezcan en el mapa y no solo los 50 de la página de la tabla.
+  const paramsMapa = useMemo(() => ({ ...paramsExportacion, limite: '500' }), [paramsExportacion]);
+  const reportesMapa = useQuery({
+    ...consultaReportes(paramsMapa),
+    placeholderData: keepPreviousData,
+  });
+
   /**
    * Dos conteos que la bandeja necesita siempre, con filtros o sin ellos: cuántos esperan
    * revisión y cuántos de esos son críticos. Se piden con `limite=1` porque lo único que se usa
@@ -246,13 +254,15 @@ function Reportes() {
         >
           <div className="mapa-panel">
             <Mapa
-              reportes={features}
+              reportes={reportesMapa.data?.features ?? features}
               capas={capas.data ?? []}
               onSeleccionar={abrir}
+              onSeleccionarDistrito={(d) => cambiarFiltros({ distrito_id: d.id, pagina: 1 })}
+              onSeleccionarUv={(u) => cambiarFiltros({ unidad_vecinal_id: u.id, pagina: 1 })}
               seleccionado={resaltado}
               ajustarAPuntos
               className="h-[420px] w-full lg:h-[calc(100dvh-16rem)]"
-              ariaLabel="Mapa con los reportes de la página actual; hacé clic en un punto para abrirlo"
+              ariaLabel="Mapa con los reportes filtrados; hacé clic en un punto para abrirlo"
             />
           </div>
           <dl className="grid grid-cols-3 gap-3">
