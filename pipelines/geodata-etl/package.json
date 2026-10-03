@@ -26,7 +26,7 @@
   },
   "devDependencies": {
     "@types/geojson": "7946.0.16",
-    "@types/node": "24.13.4",
+    "@types/node": "26.6.3",
     "@types/pg": "8.23.1",
     "tsx": "4.23.13",
     "typescript": "5.9.3",
