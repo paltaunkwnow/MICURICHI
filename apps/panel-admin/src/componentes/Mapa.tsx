@@ -1,14 +1,18 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import type { CapaInfo, ReporteTecnicoFeature, Severidad } from 'contracts';
+import type { CapaInfo, EstadoReporte, ReporteTecnicoFeature, Severidad } from 'contracts';
+import { X } from 'lucide-react';
 import type { LngLatBoundsLike, Map as MapaGl } from 'maplibre-gl';
 // MapLibre 6 es ESM puro: no tiene export por defecto.
 import * as maplibregl from 'maplibre-gl';
+import Link from 'next/link';
 import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import {
   ajustarVisibilidadCapas,
   aplicarCapas,
@@ -18,7 +22,13 @@ import {
 } from '@/lib/capas-mapa';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { vistaInicialDelPanel } from '@/lib/encuadre';
-import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
+import {
+  colorSeveridad,
+  etiquetaDistrito,
+  etiquetaSeveridad,
+  etiquetaUnidadVecinal,
+} from '@/lib/formato';
+import { bboxDeLimites, textoZonaCentro, zonaDeFeature } from '@/lib/mapa-seleccion';
 
 // Base clara y desaturada, como en el prototipo: el técnico necesita leer las calles debajo de
 // los puntos. Fase 2: base vectorial propia <a confirmar> (CLAUDE.md §14.3).
@@ -64,6 +74,14 @@ export interface PropsMapa {
   onSeleccionar?: (id: string) => void;
   onSeleccionarDistrito?: (d: { id: string; codigo: string; nombre: string }) => void;
   onSeleccionarUv?: (u: { id: string; codigo: string; nombre: string }) => void;
+  /**
+   * El mapa quedó quieto (fin de arrastre o zoom): devuelve el bbox visible
+   * "minLon,minLat,maxLon,maxLat" ya redondeado. La bandeja lo usa para seguir al mapa; el que
+   * decide si filtra o no, y con qué demora, es quien pasa esta prop.
+   */
+  onMover?: (bbox: string) => void;
+  /** Muestra el chip «Mirando: Distrito … · UV …» con la zona del centro del mapa. */
+  mostrarZonaCentro?: boolean;
   /** Reporte resaltado desde la tabla: su pastilla se pinta en tinta, como en el prototipo. */
   seleccionado?: string | null;
   /** Encuadra los reportes cada vez que cambian (tabla) o el punto único (detalle). */
@@ -138,6 +156,8 @@ export function Mapa({
   onSeleccionar,
   onSeleccionarDistrito,
   onSeleccionarUv,
+  onMover,
+  mostrarZonaCentro = false,
   seleccionado = null,
   ajustarAPuntos = false,
   centro,
@@ -161,12 +181,23 @@ export function Mapa({
   const modoCapaRef = useRef<CapaVisible>(modoCapa);
   modoCapaRef.current = modoCapa;
 
+  // Tarjeta de un punto tocado en el mapa y texto del chip «Mirando» (zona del centro).
+  const [popup, setPopup] = useState<{ id: string; lngLat: [number, number] } | null>(null);
+  const [zonaCentroTexto, setZonaCentroTexto] = useState<string | null>(null);
+  const popupRef = useRef<maplibregl.Popup | null>(null);
+  const popupNodo = useRef<HTMLDivElement | null>(null);
+  if (typeof document !== 'undefined' && !popupNodo.current) {
+    popupNodo.current = document.createElement('div');
+  }
+
   // Los datos y callbacks se leen por ref para que el mapa se inicialice una sola vez.
   const reportesRef = useRef(reportes);
   const capasRef = useRef(capas);
   const seleccionarRef = useRef(onSeleccionar);
   const seleccionarDistritoRef = useRef(onSeleccionarDistrito);
   const seleccionarUvRef = useRef(onSeleccionarUv);
+  const onMoverRef = useRef(onMover);
+  const mostrarZonaCentroRef = useRef(mostrarZonaCentro);
   const ajustarRef = useRef(ajustarAPuntos);
   const seleccionRef = useRef(seleccionado);
   const clienteRef = useRef(cliente);
@@ -176,6 +207,8 @@ export function Mapa({
   seleccionarRef.current = onSeleccionar;
   seleccionarDistritoRef.current = onSeleccionarDistrito;
   seleccionarUvRef.current = onSeleccionarUv;
+  onMoverRef.current = onMover;
+  mostrarZonaCentroRef.current = mostrarZonaCentro;
   ajustarRef.current = ajustarAPuntos;
   seleccionRef.current = seleccionado;
   clienteRef.current = cliente;
@@ -255,13 +288,9 @@ export function Mapa({
       });
 
       const capasPuntos = ['puntos', 'puntos-halo', 'puntos-etiqueta'];
-      for (const capaId of capasPuntos) {
-        m.on('click', capaId, (e) => {
-          const f = m.queryRenderedFeatures(e.point, { layers: capasPuntos })[0];
-          if (!f) return;
-          const id = f.id ?? (f.properties as { id?: string } | null)?.id;
-          if (id !== undefined && id !== null) seleccionarRef.current?.(String(id));
-        });
+      const capasZona = ['capa-distrito_municipal-relleno', 'capa-unidad_vecinal-relleno'];
+      // El puntero de mano se mantiene por capa; lo que se unifica es el clic.
+      for (const capaId of [...capasPuntos, ...capasZona]) {
         m.on('mouseenter', capaId, () => {
           m.getCanvas().style.cursor = 'pointer';
         });
@@ -270,63 +299,92 @@ export function Mapa({
         });
       }
 
-      // Clics y puntero en distritos y UV
-      m.on('click', 'capa-unidad_vecinal-relleno', (e) => {
-        const f = m.queryRenderedFeatures(e.point, { layers: ['capa-unidad_vecinal-relleno'] })[0];
-        if (!f) return;
-        const p = f.properties as { id?: string; codigo?: string; nombre?: string } | null;
-        const id = String(f.id ?? p?.id ?? '');
-        const codigo = String(p?.codigo ?? id.split(':').pop() ?? id);
-        const nombre = String(p?.nombre ?? `UV ${codigo}`);
-        const bbox = calcularBboxFeature(f.geometry);
-        if (bbox) {
-          m.fitBounds(
-            [
-              [bbox[0], bbox[1]],
-              [bbox[2], bbox[3]],
-            ],
-            { padding: 36, maxZoom: 16, duration: 600 },
-          );
-        }
-        seleccionarUvRef.current?.({ id, codigo, nombre });
-      });
+      /** Encuadra el mapa sobre el polígono de una zona recién elegida. */
+      const encuadrarAZona = (
+        geometry: unknown,
+        opciones: { padding: number; maxZoom: number },
+      ) => {
+        const bbox = calcularBboxFeature(geometry);
+        if (!bbox) return;
+        m.fitBounds(
+          [
+            [bbox[0], bbox[1]],
+            [bbox[2], bbox[3]],
+          ],
+          { ...opciones, duration: 600 },
+        );
+      };
 
-      m.on('click', 'capa-distrito_municipal-relleno', (e) => {
-        const uvFeature = m.queryRenderedFeatures(e.point, {
-          layers: ['capa-unidad_vecinal-relleno'],
-        })[0];
-        if (uvFeature && modoCapaRef.current !== 'distritos') {
+      /**
+       * Un solo manejador de clic, con prioridad: primero el punto bajo el cursor, después la zona
+       * que tiene debajo. Antes había un `click` por cada capa de puntos (se disparaba hasta tres
+       * veces) y otro por cada capa de zona, así que tocar un punto también cambiaba el filtro de la
+       * zona de abajo y ganaba ese filtro —que además salía roto porque usaba `feature.id`, el
+       * índice que inventa MapLibre, en vez de `properties.id`—. Ahora el punto se queda con el clic
+       * y, sin punto, se resuelve la zona por `properties.id` (`lib/mapa-seleccion`).
+       */
+      m.on('click', (e) => {
+        const capasVisibles = capasPuntos.filter((c) => m.getLayer(c));
+        const punto = capasVisibles.length
+          ? m.queryRenderedFeatures(e.point, { layers: capasVisibles })[0]
+          : undefined;
+        if (punto && seleccionarRef.current) {
+          const bruto = punto.id ?? (punto.properties as { id?: string } | null)?.id;
+          if (bruto === undefined || bruto === null) return;
+          const id = String(bruto);
+          seleccionarRef.current(id);
+          const coords = (punto.geometry as { coordinates?: [number, number] }).coordinates;
+          if (coords) setPopup({ id, lngLat: [coords[0], coords[1]] });
           return;
         }
-        const f = m.queryRenderedFeatures(e.point, {
-          layers: ['capa-distrito_municipal-relleno'],
-        })[0];
-        if (!f) return;
-        const p = f.properties as { id?: string; codigo?: string; nombre?: string } | null;
-        const id = String(f.id ?? p?.id ?? '');
-        const codigo = String(p?.codigo ?? id.split(':').pop() ?? id);
-        const nombre = String(p?.nombre ?? `Distrito ${codigo}`);
-        const bbox = calcularBboxFeature(f.geometry);
-        if (bbox) {
-          m.fitBounds(
-            [
-              [bbox[0], bbox[1]],
-              [bbox[2], bbox[3]],
-            ],
-            { padding: 48, maxZoom: 15, duration: 600 },
-          );
+        // Clic fuera de un punto: se cierra la tarjeta y se resuelve la zona (UV primero salvo que
+        // se vean solo distritos).
+        setPopup(null);
+        if (modoCapaRef.current !== 'distritos' && m.getLayer('capa-unidad_vecinal-relleno')) {
+          const f = m.queryRenderedFeatures(e.point, {
+            layers: ['capa-unidad_vecinal-relleno'],
+          })[0];
+          const z = zonaDeFeature(f, 'uv');
+          if (z) {
+            encuadrarAZona(f?.geometry, { padding: 36, maxZoom: 16 });
+            seleccionarUvRef.current?.(z);
+            return;
+          }
         }
-        seleccionarDistritoRef.current?.({ id, codigo, nombre });
+        if (m.getLayer('capa-distrito_municipal-relleno')) {
+          const f = m.queryRenderedFeatures(e.point, {
+            layers: ['capa-distrito_municipal-relleno'],
+          })[0];
+          const z = zonaDeFeature(f, 'distrito');
+          if (z) {
+            encuadrarAZona(f?.geometry, { padding: 48, maxZoom: 15 });
+            seleccionarDistritoRef.current?.(z);
+          }
+        }
       });
 
-      for (const capa of ['capa-distrito_municipal-relleno', 'capa-unidad_vecinal-relleno']) {
-        m.on('mouseenter', capa, () => {
-          m.getCanvas().style.cursor = 'pointer';
-        });
-        m.on('mouseleave', capa, () => {
-          m.getCanvas().style.cursor = '';
-        });
-      }
+      /** Chip «Mirando»: la zona que cae en el centro del mapa. */
+      const actualizarZonaCentro = () => {
+        if (!mostrarZonaCentroRef.current) return;
+        const centro = m.project(m.getCenter());
+        const dF = m.getLayer('capa-distrito_municipal-relleno')
+          ? m.queryRenderedFeatures(centro, { layers: ['capa-distrito_municipal-relleno'] })[0]
+          : undefined;
+        const uF = m.getLayer('capa-unidad_vecinal-relleno')
+          ? m.queryRenderedFeatures(centro, { layers: ['capa-unidad_vecinal-relleno'] })[0]
+          : undefined;
+        const texto = textoZonaCentro(zonaDeFeature(dF, 'distrito'), zonaDeFeature(uF, 'uv'));
+        setZonaCentroTexto((previo) => (previo === texto ? previo : texto));
+      };
+
+      const alQuedarQuieto = () => {
+        onMoverRef.current?.(bboxDeLimites(m.getBounds()));
+        actualizarZonaCentro();
+      };
+      m.on('moveend', alQuedarQuieto);
+      // `idle` recalcula el chip cuando las capas terminan de pintarse (al moverse `moveend` solo no
+      // alcanza: la primera carga de la capa llega después). No toca el bbox para no encadenar.
+      m.on('idle', actualizarZonaCentro);
 
       listo.current = true;
       aplicarCapas(m, capasRef.current, origenDeLaPagina());
@@ -335,15 +393,58 @@ export function Mapa({
       if (m.getLayer('puntos-seleccionado')) {
         m.setFilter('puntos-seleccionado', ['==', ['get', 'id'], seleccionRef.current ?? '']);
       }
+      // Primer aviso sin esperar a que el técnico mueva: la bandeja ya puede seguir a la vista de
+      // arranque y el chip aparece en cuanto pintan las capas.
+      alQuedarQuieto();
     });
 
     mapa.current = m;
     return () => {
+      popupRef.current?.remove();
+      popupRef.current = null;
       m.remove();
       mapa.current = null;
       listo.current = false;
     };
   }, []);
+
+  // Tarjeta del punto tocado: se dibuja en un popup de MapLibre que sigue al punto, con el contenido
+  // puesto por React (portal) para que el enlace y el botón sean accesibles y navegables.
+  const repPopup = popup ? (reportes.find((f) => f.properties.id === popup.id) ?? null) : null;
+  const hayRep = repPopup !== null;
+  // Si el reporte dejó de estar (un refresco lo retiró), se cierra la tarjeta.
+  useEffect(() => {
+    if (popup && !hayRep) setPopup(null);
+  }, [popup, hayRep]);
+
+  useEffect(() => {
+    const m = mapa.current;
+    const nodo = popupNodo.current;
+    if (!m || !nodo) return;
+    if (!popupRef.current) {
+      popupRef.current = new maplibregl.Popup({
+        closeButton: false,
+        closeOnClick: false,
+        offset: 14,
+        maxWidth: '260px',
+      });
+    }
+    if (popup && hayRep) {
+      popupRef.current.setLngLat(popup.lngLat).setDOMContent(nodo).addTo(m);
+    } else {
+      popupRef.current.remove();
+    }
+  }, [popup, hayRep]);
+
+  // Escape cierra la tarjeta, como pide la accesibilidad del plan.
+  useEffect(() => {
+    if (!popup) return;
+    const alTecla = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPopup(null);
+    };
+    document.addEventListener('keydown', alTecla);
+    return () => document.removeEventListener('keydown', alTecla);
+  }, [popup]);
 
   useEffect(() => {
     if (mapa.current && listo.current) {
@@ -373,6 +474,21 @@ export function Mapa({
   return (
     <div className={`relative ${className}`}>
       <section ref={contenedor} className="h-full w-full" aria-label={ariaLabel} />
+      {mostrarZonaCentro && zonaCentroTexto && (
+        <p
+          className="absolute top-3 left-3 z-10 max-w-[70%] truncate rounded-md border border-slate-200 bg-white/95 px-2.5 py-1 text-xs font-medium text-tinta-700 shadow-sm"
+          data-testid="chip-mirando"
+          aria-live="polite"
+        >
+          {zonaCentroTexto}
+        </p>
+      )}
+      {popup && repPopup && popupNodo.current
+        ? createPortal(
+            <TarjetaPunto reporte={repPopup} onCerrar={() => setPopup(null)} />,
+            popupNodo.current,
+          )
+        : null}
       {mostrarControlesCapas && (
         <fieldset className="absolute bottom-3 left-3 z-10 flex flex-wrap gap-1 rounded-md bg-white/95 p-1 shadow-sm border border-slate-200 text-xs">
           <legend className="sr-only">Capas del mapa</legend>
@@ -396,6 +512,72 @@ export function Mapa({
           ))}
         </fieldset>
       )}
+    </div>
+  );
+}
+
+/**
+ * Contenido de la tarjeta que aparece al tocar un punto: título, severidad y estado en texto, y un
+ * enlace «Ver detalle». No navega sola (el clic en el punto solo abre esto); el enlace sí. Se
+ * enfoca al abrirse y se cierra con Escape (en el componente del mapa) o con el botón.
+ */
+function TarjetaPunto({
+  reporte,
+  onCerrar,
+}: {
+  reporte: ReporteTecnicoFeature | FeaturePuntoReporte;
+  onCerrar: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  const p = reporte.properties as {
+    id?: string;
+    severidad: Severidad;
+    estado?: EstadoReporte;
+    unidad_vecinal?: { codigo?: string } | null;
+    distrito?: { codigo?: string } | null;
+  };
+  const id = p.id ?? '';
+  const partes = [
+    p.unidad_vecinal?.codigo ? etiquetaUnidadVecinal(p.unidad_vecinal.codigo) : null,
+    p.distrito?.codigo ? etiquetaDistrito(p.distrito.codigo) : null,
+  ].filter(Boolean);
+  const titulo = partes.length ? partes.join(' · ') : 'Reporte';
+  return (
+    <div
+      ref={ref}
+      tabIndex={-1}
+      role="dialog"
+      aria-label={`Reporte en ${titulo}`}
+      className="w-[228px] text-tinta-900 outline-none"
+      data-testid="popup-punto"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-semibold leading-snug">{titulo}</p>
+        <button
+          type="button"
+          onClick={onCerrar}
+          aria-label="Cerrar la tarjeta del reporte"
+          className="inline-flex min-h-[24px] min-w-[24px] items-center justify-center rounded text-tinta-600 hover:bg-slate-100"
+        >
+          <X size={16} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <ChipSeveridad severidad={p.severidad} />
+        {p.estado ? <ChipEstado estado={p.estado} /> : null}
+      </div>
+      {id ? (
+        <Link
+          href={`/reportes/${id}`}
+          className="btn btn-sm btn-secundario mt-3 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-normal"
+          data-testid="popup-ver-detalle"
+        >
+          Ver detalle →
+        </Link>
+      ) : null}
     </div>
   );
 }

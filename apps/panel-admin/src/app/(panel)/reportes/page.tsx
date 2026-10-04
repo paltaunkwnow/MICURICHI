@@ -3,7 +3,7 @@
 import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Suspense, useCallback, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Aviso, type TipoAviso } from '@/componentes/Aviso';
 import { FiltrosDeReportes } from '@/componentes/FiltrosReportes';
 import { Mapa } from '@/componentes/Mapa';
@@ -19,6 +19,7 @@ import {
 } from '@/lib/consultas';
 import { avisoExportacion, mensajeErrorExportacion } from '@/lib/exportacion';
 import {
+  CAMBIO_LIMPIAR_FILTROS,
   type FiltrosReportes,
   hayFiltros,
   LIMITE_PAGINA,
@@ -28,6 +29,9 @@ import {
   serializarFiltros,
 } from '@/lib/filtros';
 import { AVISO_BANDEJA_PUBLICOS } from '@/lib/publicacion';
+
+/** Quietud del mapa antes de mover el bbox a la URL (igual que la app pública). */
+const ESPERA_MOVIMIENTO_MS = 400;
 
 /** Guarda en el equipo un archivo ya recibido, con el nombre que mandó el servidor. */
 function descargar(texto: string, nombre: string, tipo: string) {
@@ -80,6 +84,45 @@ function Reportes() {
     [filtros, navegar],
   );
 
+  // La tabla sigue al mapa. El interruptor arranca encendido; cuando lo está, al quedarse quieto el
+  // mapa escribe su bbox en la URL (debounce). Se lee todo por ref para que el manejador que recibe
+  // el mapa sea estable y no haya ciclos de recentrado.
+  const [seguirMapa, setSeguirMapa] = useState(true);
+  const filtrosRef = useRef(filtros);
+  filtrosRef.current = filtros;
+  const seguirMapaRef = useRef(seguirMapa);
+  seguirMapaRef.current = seguirMapa;
+  const ultimoBbox = useRef('');
+  const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (temporizador.current) clearTimeout(temporizador.current);
+    },
+    [],
+  );
+
+  const alMover = useCallback(
+    (bbox: string) => {
+      // Se recuerda la vista aunque no estemos siguiendo, para aplicarla al encender el interruptor.
+      ultimoBbox.current = bbox;
+      if (!seguirMapaRef.current || bbox === filtrosRef.current.bbox) return;
+      if (temporizador.current) clearTimeout(temporizador.current);
+      temporizador.current = setTimeout(
+        () => navegar({ ...filtrosRef.current, bbox, pagina: 1 }),
+        ESPERA_MOVIMIENTO_MS,
+      );
+    },
+    [navegar],
+  );
+
+  const alternarSeguir = useCallback(
+    (valor: boolean) => {
+      setSeguirMapa(valor);
+      navegar({ ...filtrosRef.current, bbox: valor ? ultimoBbox.current : '', pagina: 1 });
+    },
+    [navegar],
+  );
+
   // Se refresca sola cada 10 s (`lib/consultas.ts`); al cambiar de filtro se sigue viendo la
   // página anterior hasta que llega la nueva.
   const reportes = useQuery({ ...consultaReportes(params), placeholderData: keepPreviousData });
@@ -108,7 +151,19 @@ function Reportes() {
   const features = reportes.data?.features ?? [];
   const total = reportes.data?.total ?? 0;
   const [resaltado, setResaltado] = useState<string | null>(null);
-  const abrir = useCallback((id: string) => router.push(`/reportes/${id}`), [router]);
+  const tablaRef = useRef<HTMLDivElement>(null);
+
+  // Clic en un punto del mapa: NO navega. Resalta su fila y la lleva a la vista; el detalle se abre
+  // desde la tarjeta del mapa o desde la fila. Si la fila está en otra página de la tabla, no hay
+  // nada que desplazar y la tarjeta del mapa es el camino al detalle.
+  const seleccionarPunto = useCallback((id: string) => {
+    setResaltado(id);
+    requestAnimationFrame(() => {
+      tablaRef.current
+        ?.querySelector(`[data-id="${CSS.escape(id)}"]`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  }, []);
 
   const [avisoExportar, setAvisoExportar] = useState<{ tipo: TipoAviso; texto: string } | null>(
     null,
@@ -194,36 +249,39 @@ function Reportes() {
               : null}
           </Aviso>
 
-          <div className="tarjeta p-2 lg:p-4">
+          <div className="tarjeta p-2 lg:p-4" ref={tablaRef}>
             {reportes.isPending ? (
               <p className="p-4 text-tinta-600" role="status">
                 Cargando reportes…
               </p>
             ) : features.length === 0 ? (
               <div className="flex flex-col items-start gap-3 p-6">
-                <p className="titular text-xl">No hay reportes con estos filtros</p>
-                <p className="text-tinta-600">
-                  {hayFiltros(filtros)
-                    ? 'Probá quitar algún filtro o ampliar el rango de fechas.'
-                    : 'Todavía no se registró ningún reporte.'}
-                </p>
-                {hayFiltros(filtros) && (
-                  <button
-                    type="button"
-                    className="btn btn-secundario"
-                    onClick={() =>
-                      cambiarFiltros({
-                        estado: [],
-                        severidad: [],
-                        distrito_id: '',
-                        unidad_vecinal_id: '',
-                        desde: '',
-                        hasta: '',
-                      })
-                    }
-                  >
-                    Limpiar filtros
-                  </button>
+                {seguirMapa && filtros.bbox !== '' && !hayFiltros(filtros) ? (
+                  <>
+                    <p className="titular text-xl">No hay reportes en esta zona del mapa</p>
+                    <p className="text-tinta-600">
+                      Alejá o movete por el mapa, o apagá «Filtrar por el área del mapa» para ver
+                      todos.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="titular text-xl">No hay reportes con estos filtros</p>
+                    <p className="text-tinta-600">
+                      {hayFiltros(filtros)
+                        ? 'Probá quitar algún filtro o ampliar el rango de fechas.'
+                        : 'Todavía no se registró ningún reporte.'}
+                    </p>
+                    {hayFiltros(filtros) && (
+                      <button
+                        type="button"
+                        className="btn btn-secundario"
+                        onClick={() => cambiarFiltros(CAMBIO_LIMPIAR_FILTROS)}
+                      >
+                        Limpiar filtros
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             ) : (
@@ -252,17 +310,31 @@ function Reportes() {
           className="flex flex-col gap-4 lg:sticky lg:top-8 lg:self-start"
           aria-label="Mapa e indicadores de la bandeja"
         >
+          <label className="flex items-center gap-2 py-1 text-sm font-medium text-tinta-700">
+            <input
+              type="checkbox"
+              checked={seguirMapa}
+              onChange={(e) => alternarSeguir(e.target.checked)}
+              className="h-4 w-4 accent-verde-700"
+              data-testid="seguir-mapa"
+            />
+            Filtrar por el área del mapa
+          </label>
           <div className="mapa-panel">
             <Mapa
               reportes={reportesMapa.data?.features ?? features}
               capas={capas.data ?? []}
-              onSeleccionar={abrir}
-              onSeleccionarDistrito={(d) => cambiarFiltros({ distrito_id: d.id, pagina: 1 })}
-              onSeleccionarUv={(u) => cambiarFiltros({ unidad_vecinal_id: u.id, pagina: 1 })}
+              onSeleccionar={seleccionarPunto}
+              onSeleccionarDistrito={(d) =>
+                cambiarFiltros({ distrito_id: d.id, unidad_vecinal_id: '' })
+              }
+              onSeleccionarUv={(u) => cambiarFiltros({ unidad_vecinal_id: u.id, distrito_id: '' })}
+              onMover={alMover}
+              mostrarZonaCentro
               seleccionado={resaltado}
-              ajustarAPuntos
+              ajustarAPuntos={!seguirMapa}
               className="h-[420px] w-full lg:h-[calc(100dvh-16rem)]"
-              ariaLabel="Mapa con los reportes filtrados; hacé clic en un punto para abrirlo"
+              ariaLabel="Mapa con los reportes filtrados; hacé clic en un punto para ver su tarjeta"
             />
           </div>
           <dl className="grid grid-cols-3 gap-3">

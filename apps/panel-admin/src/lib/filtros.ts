@@ -1,4 +1,10 @@
-import { ESTADOS_REPORTE, type EstadoReporte, SEVERIDADES, type Severidad } from 'contracts';
+import {
+  BboxSchema,
+  ESTADOS_REPORTE,
+  type EstadoReporte,
+  SEVERIDADES,
+  type Severidad,
+} from 'contracts';
 import type { ParametrosConsulta } from './api';
 
 /** Tamaño de página fijo de la tabla del panel. */
@@ -10,6 +16,8 @@ export interface FiltrosReportes {
   severidad: Severidad[];
   distrito_id: string;
   unidad_vecinal_id: string;
+  /** Área visible del mapa "minLon,minLat,maxLon,maxLat"; vacío = no filtra por área. */
+  bbox: string;
   desde: string;
   hasta: string;
   pagina: number;
@@ -20,6 +28,7 @@ export const FILTROS_VACIOS: FiltrosReportes = {
   severidad: [],
   distrito_id: '',
   unidad_vecinal_id: '',
+  bbox: '',
   desde: '',
   hasta: '',
   pagina: 1,
@@ -41,6 +50,11 @@ function fechaValida(valor: string | null): string {
   return valor && RE_FECHA.test(valor) ? valor : '';
 }
 
+/** bbox solo si cumple `BboxSchema` de contracts (formato y min < max); si no, vacío. */
+function bboxValido(valor: string | null): string {
+  return valor && BboxSchema.safeParse(valor).success ? valor : '';
+}
+
 /** Lee los filtros desde los parámetros de la URL, descartando valores inválidos. */
 export function leerFiltros(sp: URLSearchParams): FiltrosReportes {
   const pagina = Number.parseInt(sp.get('pagina') ?? '1', 10);
@@ -49,6 +63,7 @@ export function leerFiltros(sp: URLSearchParams): FiltrosReportes {
     severidad: listaValida(sp.get('severidad'), SEVERIDADES),
     distrito_id: sp.get('distrito_id')?.trim() ?? '',
     unidad_vecinal_id: sp.get('unidad_vecinal_id')?.trim() ?? '',
+    bbox: bboxValido(sp.get('bbox')),
     desde: fechaValida(sp.get('desde')),
     hasta: fechaValida(sp.get('hasta')),
     pagina: Number.isFinite(pagina) && pagina >= 1 ? pagina : 1,
@@ -62,6 +77,7 @@ export function serializarFiltros(f: FiltrosReportes): URLSearchParams {
   if (f.severidad.length) sp.set('severidad', f.severidad.join(','));
   if (f.distrito_id) sp.set('distrito_id', f.distrito_id);
   if (f.unidad_vecinal_id) sp.set('unidad_vecinal_id', f.unidad_vecinal_id);
+  if (f.bbox) sp.set('bbox', f.bbox);
   if (f.desde) sp.set('desde', f.desde);
   if (f.hasta) sp.set('hasta', f.hasta);
   if (f.pagina > 1) sp.set('pagina', String(f.pagina));
@@ -79,15 +95,35 @@ export function parametrosConsulta(f: FiltrosReportes): ParametrosConsulta {
 
 /** Los mismos filtros sin paginación: GET /api/v1/exportar devuelve toda la selección. */
 export function parametrosExportacion(f: FiltrosReportes): ParametrosConsulta {
+  const filtroDeZona = f.distrito_id !== '' || f.unidad_vecinal_id !== '';
   return {
     estado: f.estado.length ? f.estado.join(',') : undefined,
     severidad: f.severidad.length ? f.severidad.join(',') : undefined,
     distrito_id: f.distrito_id || undefined,
     unidad_vecinal_id: f.unidad_vecinal_id || undefined,
+    // El área del mapa solo acota cuando no hay un filtro de zona explícito: si ya se eligió un
+    // distrito o una UV, la tabla trae todos sus reportes, no solo los que caen en la vista (mismo
+    // criterio que la app pública en VistaMapa). Así tampoco se pisan el filtro de zona y el bbox.
+    bbox: filtroDeZona ? undefined : f.bbox || undefined,
     desde: f.desde || undefined,
     hasta: f.hasta || undefined,
   };
 }
+
+/**
+ * Deja los filtros explícitos en blanco (incluido el bbox): lo que hace «Limpiar filtros». El
+ * interruptor «Filtrar por el área del mapa» es aparte; si sigue activo, el próximo movimiento
+ * vuelve a poner el bbox.
+ */
+export const CAMBIO_LIMPIAR_FILTROS = {
+  estado: [],
+  severidad: [],
+  distrito_id: '',
+  unidad_vecinal_id: '',
+  bbox: '',
+  desde: '',
+  hasta: '',
+} satisfies Partial<FiltrosReportes>;
 
 export function hayFiltros(f: FiltrosReportes) {
   return (

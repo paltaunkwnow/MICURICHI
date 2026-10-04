@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   alternarEnLista,
+  CAMBIO_LIMPIAR_FILTROS,
   FILTROS_VACIOS,
   hayFiltros,
   LIMITE_PAGINA,
@@ -9,6 +10,8 @@ import {
   parametrosExportacion,
   serializarFiltros,
 } from './filtros';
+
+const BBOX = '-63.21000,-17.81000,-63.15000,-17.75000';
 
 describe('leerFiltros', () => {
   it('lee listas separadas por coma y descarta valores desconocidos', () => {
@@ -29,6 +32,13 @@ describe('leerFiltros', () => {
   it('devuelve los filtros vacíos sin parámetros', () => {
     expect(leerFiltros(new URLSearchParams())).toEqual(FILTROS_VACIOS);
   });
+
+  it('acepta un bbox válido y descarta el inválido', () => {
+    expect(leerFiltros(new URLSearchParams(`bbox=${BBOX}`)).bbox).toBe(BBOX);
+    // min no menor que max: BboxSchema lo rechaza.
+    expect(leerFiltros(new URLSearchParams('bbox=-63.1,-17.7,-63.2,-17.8')).bbox).toBe('');
+    expect(leerFiltros(new URLSearchParams('bbox=hola')).bbox).toBe('');
+  });
 });
 
 describe('serializarFiltros', () => {
@@ -47,6 +57,13 @@ describe('serializarFiltros', () => {
   it('incluye la página cuando es mayor a 1', () => {
     expect(serializarFiltros({ ...FILTROS_VACIOS, pagina: 2 }).get('pagina')).toBe('2');
   });
+
+  it('guarda el bbox en la URL y lo relee igual', () => {
+    const f = { ...FILTROS_VACIOS, bbox: BBOX };
+    const sp = serializarFiltros(f);
+    expect(sp.get('bbox')).toBe(BBOX);
+    expect(leerFiltros(sp)).toEqual(f);
+  });
 });
 
 describe('parámetros para la API', () => {
@@ -64,6 +81,24 @@ describe('parámetros para la API', () => {
     });
     expect(parametrosExportacion(f)).not.toHaveProperty('pagina');
   });
+
+  it('manda el bbox cuando no hay filtro de zona', () => {
+    expect(parametrosConsulta({ ...FILTROS_VACIOS, bbox: BBOX }).bbox).toBe(BBOX);
+  });
+
+  it('omite el bbox cuando hay distrito o UV elegidos (no se pisan)', () => {
+    expect(
+      parametrosExportacion({ ...FILTROS_VACIOS, bbox: BBOX, distrito_id: 'distrito_municipal:07' })
+        .bbox,
+    ).toBeUndefined();
+    expect(
+      parametrosExportacion({
+        ...FILTROS_VACIOS,
+        bbox: BBOX,
+        unidad_vecinal_id: 'unidad_vecinal:CI',
+      }).bbox,
+    ).toBeUndefined();
+  });
 });
 
 describe('ayudas', () => {
@@ -77,5 +112,13 @@ describe('ayudas', () => {
     expect(alternarEnLista(lista, 'b')).toEqual(['a']);
     expect(alternarEnLista(lista, 'c')).toEqual(['a', 'b', 'c']);
     expect(lista).toEqual(['a', 'b']);
+  });
+
+  it('«Limpiar filtros» también vacía el bbox', () => {
+    const limpio = { ...FILTROS_VACIOS, bbox: BBOX, distrito_id: 'distrito_municipal:07' };
+    const resultado = { ...limpio, ...CAMBIO_LIMPIAR_FILTROS };
+    expect(resultado.bbox).toBe('');
+    expect(resultado.distrito_id).toBe('');
+    expect(hayFiltros(resultado)).toBe(false);
   });
 });

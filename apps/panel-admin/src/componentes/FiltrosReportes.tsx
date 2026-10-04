@@ -4,7 +4,12 @@ import { ESTADOS_REPORTE, SEVERIDADES } from 'contracts';
 import { FilterX } from 'lucide-react';
 import { useMemo } from 'react';
 import type { UnidadGeo } from '@/lib/api';
-import { alternarEnLista, type FiltrosReportes, hayFiltros } from '@/lib/filtros';
+import {
+  alternarEnLista,
+  CAMBIO_LIMPIAR_FILTROS,
+  type FiltrosReportes,
+  hayFiltros,
+} from '@/lib/filtros';
 import { colorSeveridad, etiquetaEstado, etiquetaSeveridad } from '@/lib/formato';
 
 export function FiltrosDeReportes({
@@ -156,16 +161,7 @@ export function FiltrosDeReportes({
           <button
             type="button"
             className="btn btn-secundario"
-            onClick={() =>
-              onCambiar({
-                estado: [],
-                severidad: [],
-                distrito_id: '',
-                unidad_vecinal_id: '',
-                desde: '',
-                hasta: '',
-              })
-            }
+            onClick={() => onCambiar(CAMBIO_LIMPIAR_FILTROS)}
           >
             <FilterX size={18} aria-hidden="true" />
             Limpiar filtros
