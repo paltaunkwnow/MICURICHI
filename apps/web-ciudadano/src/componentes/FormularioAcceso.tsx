@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { crearCuenta, ErrorApi, iniciarSesion } from '@/lib/api';
+import { guardarCorreoParaEntrar, tomarCorreoParaEntrar } from '@/lib/correo-para-entrar';
 import { mensajeDeError } from '@/lib/errores';
 import { CLAVE_YO, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
@@ -74,8 +75,18 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
   const form = useForm<DatosEntrar & Partial<DatosAlta>>({
     resolver: zodResolver((alta ? EsquemaAlta : EsquemaEntrar) as never),
     mode: 'onBlur',
-    defaultValues: { email: parametros?.get('email') ?? '' },
+    defaultValues: { email: '' },
   });
+
+  // El correo del alta recién hecha viaja por `sessionStorage` y no por la URL, que lo dejaría en
+  // el historial y en los registros (ver `lib/correo-para-entrar.ts`). Se lee ya montado: en el
+  // servidor no hay almacenamiento, y leerlo al renderizar desajustaría la hidratación. Se toma una
+  // sola vez y solo en el formulario de entrada; sin almacenamiento, el campo queda vacío.
+  useEffect(() => {
+    if (alta) return;
+    const correo = tomarCorreoParaEntrar();
+    if (correo) form.setValue('email', correo);
+  }, [alta, form]);
 
   const entrar = useMutation({
     mutationFn: (d: DatosEntrar) => iniciarSesion({ email: d.email, password: d.password }),
@@ -103,7 +114,12 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
   const registrar = useMutation({
     mutationFn: (d: DatosAlta) => crearCuenta(d),
     onMutate: () => setAviso(null),
-    onSuccess: () => setListo(true),
+    onSuccess: (_respuesta, d) => {
+      // Para que «Iniciar sesión» lo muestre ya escrito. Se guarda siempre, exista o no el correo:
+      // el servidor responde igual y esta pantalla tampoco puede distinguir los dos casos.
+      guardarCorreoParaEntrar(d.email);
+      setListo(true);
+    },
     onError: (e) => {
       if (e instanceof ErrorApi && e.estado === 429)
         setAviso(
@@ -115,29 +131,7 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
 
   const enviando = entrar.isPending || registrar.isPending;
 
-  /**
-   * Alta hecha. El servidor responde lo mismo exista o no el correo, así que esta pantalla
-   * tampoco puede decir «ya tenías cuenta» ni «cuenta creada»: dice lo único cierto en los dos
-   * casos, que ya se puede entrar con ese correo y esa contraseña.
-   */
-  if (listo) {
-    const email = form.getValues('email');
-    return (
-      <div className="tarjeta w-full max-w-md p-7">
-        <h1 className="mb-2 text-2xl">Ya podés entrar</h1>
-        <Aviso tono="ok">
-          Si ese correo no tenía cuenta, acaba de crearse. Iniciá sesión con el correo y la
-          contraseña que elegiste.
-        </Aviso>
-        <Link
-          href={`/ingresar?volver=${encodeURIComponent(volver)}&email=${encodeURIComponent(email)}`}
-          className="btn btn-bloque mt-5 no-underline"
-        >
-          Iniciar sesión
-        </Link>
-      </div>
-    );
-  }
+  if (listo) return <AltaHecha volver={volver} />;
 
   return (
     <div className="tarjeta w-full max-w-md p-7">
@@ -269,6 +263,33 @@ export function FormularioAcceso({ modo }: { modo: 'entrar' | 'alta' }) {
       <p className="ayuda mt-2">
         <Link href="/">Volver al mapa</Link> — verlo no necesita cuenta.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Alta hecha. El servidor responde lo mismo exista o no el correo, así que esta pantalla
+ * tampoco puede decir «ya tenías cuenta» ni «cuenta creada»: dice lo único cierto en los dos
+ * casos, que ya se puede entrar con ese correo y esa contraseña.
+ *
+ * Solo recibe a dónde volver, y por eso no puede distinguir los dos casos. Tampoco inicia sesión
+ * sola: con un correo ya registrado, entrar sin contraseña revelaría que existe. El correo no va
+ * en el enlace: `registrar` lo deja en `sessionStorage` y `/ingresar` lo toma al montar.
+ */
+export function AltaHecha({ volver }: { volver: string }) {
+  return (
+    <div className="tarjeta w-full max-w-md p-7">
+      <h1 className="mb-2 text-2xl">Ya podés entrar</h1>
+      <Aviso tono="ok">
+        Si ese correo no tenía cuenta, acaba de crearse. Iniciá sesión con el correo y la contraseña
+        que elegiste.
+      </Aviso>
+      <Link
+        href={`/ingresar?volver=${encodeURIComponent(volver)}`}
+        className="btn btn-bloque mt-5 no-underline"
+      >
+        Iniciar sesión
+      </Link>
     </div>
   );
 }

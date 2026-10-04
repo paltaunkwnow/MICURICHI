@@ -4,8 +4,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
-import { conteoPestana, type PestanaEjecutiva } from '@/lib/ejecutivo';
+import { conteoPestana, type PestanaEjecutiva, rangoPuntajePestana } from '@/lib/ejecutivo';
 import { resumenDeEjemplo } from '@/lib/ejecutivo.fixture';
+import { formulaPuntaje } from '@/lib/severidad';
 import { coincideUv, PanelEjecutivo, type PropsPanelEjecutivo } from './PanelEjecutivo';
 
 /** Render estático, sin navegador. La ciudad llega como en la app, por el proveedor. */
@@ -142,6 +143,28 @@ describe('PanelEjecutivo (pantalla limpia)', () => {
     for (const id of ['ej-titulo-inundaciones', 'ej-titulo-trabajo']) {
       expect(bloque(html, `aria-labelledby="${id}"`, '</section>')).not.toMatch(/<p[\s>]/);
     }
+  });
+
+  it('los criterios de severidad del panel salen de contracts: fórmula, rangos y sin respuesta operativa', () => {
+    expect(html).toContain('data-testid="ejecutivo-criterios"');
+    expect(html).toContain(formulaPuntaje());
+    const critica = bloque(html, 'data-testid="ejecutivo-criterio-critica"', '</button>');
+    const { min, max } = rangoPuntajePestana('critica');
+    expect(critica).toContain(`${min} a ${max} puntos`);
+    // Lo que decían las tarjetas de antes, sin fuente: ni impacto, ni acciones, ni prioridades.
+    const minusculas = html.toLowerCase();
+    for (const inventado of ['motobomba', 'cuadrilla', 'prioridad', 'impacto en el entorno']) {
+      expect(minusculas, inventado).not.toContain(inventado);
+    }
+    expect(html).not.toContain('Respuesta operativa');
+    expect(html).not.toContain('Nivel de agua estimado');
+  });
+
+  it('la tarjeta de la pestaña elegida es la que está presionada', () => {
+    const media = render({ pestana: 'media' });
+    expect(etiqueta(media, 'ejecutivo-criterio-media')).toContain('aria-pressed="true"');
+    expect(etiqueta(media, 'ejecutivo-criterio-critica')).toContain('aria-pressed="false"');
+    expect(etiqueta(media, 'ejecutivo-criterio-baja')).toContain('aria-pressed="false"');
   });
 
   it('la nota metodológica queda en una sola línea', () => {

@@ -1,4 +1,11 @@
-import { type AgregadoUv, AgregadoUvSchema, CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES } from 'contracts';
+import { createHash } from 'node:crypto';
+import {
+  type AgregadoUv,
+  AgregadoUvSchema,
+  CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES,
+  CapaInfoSchema,
+  rutaCapaConHuella,
+} from 'contracts';
 import { ejecutorPg, recalcularPuntosCriticos } from 'db';
 import {
   type BaseEfimera,
@@ -12,6 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { crearApp } from '../src/app.js';
 import { leerConfig } from '../src/config.js';
+import { resolverPunto } from '../src/resolver.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
@@ -46,9 +54,9 @@ describe('POST /geo/v1/resolver (§7.4)', () => {
     expect(r.asignado_por_proximidad).toBe(false);
     expect(r.version_capa).toBe('test');
   });
-  it('punto dentro de la manzana la informa', async () => {
+  it('punto dentro de una manzana: manzana null (0.17.0: ya no se calcula)', async () => {
     const r = await resolver(-17.797, -63.197);
-    expect(r.manzana?.id).toBe('manzana:A-1');
+    expect(r.manzana).toBeNull();
   });
   it('punto sobre el borde A|B → determinista (menor id) y en_limite', async () => {
     const r = await resolver(-17.79, -63.19);
@@ -441,7 +449,131 @@ describe('caché de capas', () => {
     const respuestas = await Promise.all(
       Array.from({ length: 5 }, () => app.capas.obtener('unidad_vecinal')),
     );
-    // Todas comparten exactamente el mismo objeto: una única construcción del índice.
+    // Todas comparten exactamente el mismo objeto: una sola carga de la capa.
     for (const r of respuestas) expect(r).toBe(respuestas[0]);
   });
 });
+
+describe('resolver: manzana ya no se consulta (M-1.1, contrato 0.17.0)', () => {
+  it('ninguna consulta del resolver menciona geo.manzana, y devuelve manzana null', async () => {
+    const consultas: string[] = [];
+    // Espía: registra el SQL de cada consulta y delega en el pool real.
+    const espia = {
+      query: (texto: unknown, params?: unknown) => {
+        const sql =
+          typeof texto === 'string' ? texto : String((texto as { text?: string })?.text ?? '');
+        consultas.push(sql);
+        return (pool.query as (t: unknown, p?: unknown) => Promise<unknown>)(texto, params);
+      },
+    } as unknown as pg.Pool;
+    // Punto dentro de la manzana sintética A-1 (antes el resolver devolvía manzana:A-1).
+    const r = await resolverPunto(espia, -17.797, -63.197);
+    expect(r.manzana).toBeNull();
+    expect(consultas.length).toBeGreaterThan(0);
+    for (const sql of consultas) expect(sql.toLowerCase()).not.toContain('manzana');
+  });
+});
+
+describe('capas: índice de teselas perezoso y sin GeoJSON retenido (M-1.2, M-1.3)', () => {
+  function teselaDe(lon: number, lat: number, z: number) {
+    const x = Math.floor(((lon + 180) / 360) * 2 ** z);
+    const latRad = (lat * Math.PI) / 180;
+    const y = Math.floor(
+      ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * 2 ** z,
+    );
+    return { z, x, y };
+  }
+
+  it('GET /capas no arma índices; la primera tesela lo arma y la segunda lo reutiliza', async () => {
+    const propia = await crearApp({ pool, cfg: leerConfig({ DATABASE_URL: base.url }) });
+    try {
+      const info = await propia.inject({ method: 'GET', url: '/geo/v1/capas' });
+      expect(info.statusCode).toBe(200);
+      // Tras /capas, la entrada de caché existe pero SIN índice de teselas.
+      const antes = await propia.capas.obtener('unidad_vecinal');
+      expect(antes).not.toBeNull();
+      expect(antes!.indice).toBeUndefined();
+
+      const { z: tz, x, y } = teselaDe(-63.19, -17.79, 14);
+      const t1 = await propia.inject({
+        method: 'GET',
+        url: `/geo/v1/teselas/unidad_vecinal/${tz}/${x}/${y}.mvt`,
+      });
+      expect(t1.statusCode).toBe(200);
+      const conIndice = await propia.capas.obtener('unidad_vecinal');
+      const indice1 = conIndice!.indice;
+      expect(indice1).toBeDefined();
+
+      // Segunda tesela de la misma capa: el mismo índice, no se reconstruye.
+      const t2 = await propia.inject({
+        method: 'GET',
+        url: `/geo/v1/teselas/unidad_vecinal/${tz}/${x}/${y + 1}.mvt`,
+      });
+      expect([200, 204]).toContain(t2.statusCode);
+      const reusado = await propia.capas.obtener('unidad_vecinal');
+      expect(reusado!.indice).toBe(indice1);
+    } finally {
+      await propia.close();
+    }
+  });
+
+  it('la caché guarda texto/bytes/n_features/bbox pero no el GeoJSON parseado', async () => {
+    const propia = await crearApp({ pool, cfg: leerConfig({ DATABASE_URL: base.url }) });
+    try {
+      await propia.inject({ method: 'GET', url: '/geo/v1/capas' });
+      const c = await propia.capas.obtener('unidad_vecinal');
+      expect(c).not.toBeNull();
+      expect(c).not.toHaveProperty('geojson');
+      expect(typeof c!.texto).toBe('string');
+      expect(typeof c!.bytes).toBe('number');
+      expect(typeof c!.n_features).toBe('number');
+      expect(c!.n_features).toBeGreaterThan(0);
+    } finally {
+      await propia.close();
+    }
+  });
+
+  it('M-1.3: /capas conserva huella, bytes, n_features, bbox, modo y url del contenido servido', async () => {
+    const propia = await crearApp({ pool, cfg: leerConfig({ DATABASE_URL: base.url }) });
+    try {
+      const cuerpo = (await propia.inject({ method: 'GET', url: '/geo/v1/capas/unidad_vecinal' }))
+        .body;
+      const fc = JSON.parse(cuerpo) as { features: unknown[] };
+      const huella = createHash('sha256').update(cuerpo).digest('hex').slice(0, 16);
+      const info = z
+        .array(CapaInfoSchema)
+        .parse((await propia.inject({ method: 'GET', url: '/geo/v1/capas' })).json());
+      const uv = info.find((c) => c.capa === 'unidad_vecinal')!;
+      expect(uv.modo).toBe('geojson');
+      expect(uv.url).toBe(rutaCapaConHuella('unidad_vecinal', huella));
+      expect(uv.bytes_web).toBe(Buffer.byteLength(cuerpo));
+      expect(uv.n_features).toBe(fc.features.length);
+      expect(uv.bbox).toEqual(bboxDe(cuerpo));
+    } finally {
+      await propia.close();
+    }
+  });
+});
+
+/** Mismo cálculo que `calcularBbox` de capas.ts, para comprobar que el bbox de /capas no cambió. */
+function bboxDe(texto: string): [number, number, number, number] | null {
+  const fc = JSON.parse(texto) as {
+    features: Array<{ geometry?: { coordinates?: unknown } }>;
+  };
+  let minX = Number.POSITIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  const rec = (c: unknown) => {
+    if (!Array.isArray(c)) return;
+    if (typeof c[0] === 'number') {
+      const [x, y] = c as number[];
+      if (x! < minX) minX = x!;
+      if (x! > maxX) maxX = x!;
+      if (y! < minY) minY = y!;
+      if (y! > maxY) maxY = y!;
+    } else for (const s of c) rec(s);
+  };
+  for (const f of fc.features) if (f.geometry) rec(f.geometry.coordinates);
+  return Number.isFinite(minX) ? [minX, minY, maxX, maxY] : null;
+}

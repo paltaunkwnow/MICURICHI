@@ -569,7 +569,7 @@ export function construirOpenApi(): Record<string, unknown> {
         }),
       },
       '/geo/v1/resolver': {
-        post: op('Point-in-polygon: distrito, UV y manzana de un punto (§7.4)', 'geo', {
+        post: op('Point-in-polygon: distrito y UV de un punto (§7.4)', 'geo', {
           requestBody: { required: true, content: json(ref('ResolverEntrada')) },
           responses: {
             '200': { description: 'Resolución', content: json(ref('ResolverRespuesta')) },

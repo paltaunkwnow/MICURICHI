@@ -1,19 +1,24 @@
 'use client';
 
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { SEVERIDADES, type Severidad } from 'contracts';
+import type { Severidad } from 'contracts';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { CapaAnterior } from '@/componentes/CapaAnterior';
-import { ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { FiltroSeveridad } from '@/componentes/indicadores/FiltroSeveridad';
+import { PestanasPorSeveridad } from '@/componentes/indicadores/PestanasPorSeveridad';
 import { TortaReportes } from '@/componentes/indicadores/TortaReportes';
 import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
 import { distritosCapaAnterior } from '@/lib/ejecutivo';
 import { alternarEnLista } from '@/lib/filtros';
 import { ESTADOS_ORDEN, etiquetaEstado } from '@/lib/formato';
 import { kpisIndicadores } from '@/lib/indicadores';
+import {
+  elegirPestanaSeveridad,
+  PARAMS_CONTEOS_PESTANAS,
+  type PestanaSeveridad,
+} from '@/lib/indicadores-pestanas';
 import {
   calcularPorciones,
   type EstadoTorta,
@@ -88,11 +93,25 @@ function ContenidoIndicadores() {
     (id: string) => navegar({ ...estado, distrito: estado.distrito === id ? '' : id }),
     [estado, navegar],
   );
+  // Los botones de «Por severidad» dejan el filtro en una sola severidad o lo quitan («Todo»). Si ya
+  // estaba así, `elegirPestanaSeveridad` devuelve el mismo estado y no hay nada que navegar.
+  const elegirPestana = useCallback(
+    (pestana: PestanaSeveridad) => {
+      const nuevo = elegirPestanaSeveridad(estado, pestana);
+      if (nuevo !== estado) navegar(nuevo);
+    },
+    [estado, navegar],
+  );
 
   const consulta = useQuery({
     ...consultaIndicadores(paramsBase),
     placeholderData: keepPreviousData,
   });
+  // Los números de los botones de «Por severidad» salen de los indicadores SIN filtro de severidad,
+  // así no cambian al filtrar. Sin filtro tiene la misma clave que `consulta` y no sale ninguna
+  // petición extra; con filtro es una consulta más, que sigue el sondeo de 10 s como las demás. Su
+  // clave nunca cambia: no hay un «dato anterior» que mantener (`keepPreviousData` no haría nada).
+  const conteos = useQuery(consultaIndicadores(PARAMS_CONTEOS_PESTANAS));
   const resumen = useQuery(consultaResumenEjecutivo());
   const consultaUvDistrito = useQuery({
     ...consultaIndicadores(paramsDistrito),
@@ -173,17 +192,11 @@ function ContenidoIndicadores() {
             ))}
           </div>
 
-          <section className="space-y-3">
-            <h2 className="titular text-2xl">Por severidad</h2>
-            <div className="flex flex-wrap gap-3">
-              {SEVERIDADES.map((s) => (
-                <div key={s} className="tarjeta flex items-center gap-3 px-4 py-3">
-                  <ChipSeveridad severidad={s} />
-                  <span className="titular text-2xl">{d.por_severidad[s] ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          </section>
+          <PestanasPorSeveridad
+            seleccionadas={estado.severidades}
+            conteos={conteos.data ?? null}
+            onElegir={elegirPestana}
+          />
 
           <section className="space-y-3">
             <h2 className="titular text-2xl">Por estado</h2>

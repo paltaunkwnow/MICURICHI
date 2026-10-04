@@ -345,10 +345,11 @@ describe('visibilidad de las fotos de un reporte (§13, contracts 0.11.0)', () =
     });
     expect(creado.statusCode).toBe(201);
     if (estado !== 'nuevo')
-      await pool.query('UPDATE reporte_inundacion SET estado = $2::estado_reporte WHERE id = $1', [
-        creado.json().id,
-        estado,
-      ]);
+      // La 0018 exige motivo en rechazado/duplicado: se pone uno al mover el estado por SQL.
+      await pool.query(
+        "UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = CASE WHEN $2 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE estado_motivo END WHERE id = $1",
+        [creado.json().id, estado],
+      );
     if (espera) await enEspera(ex, creado.json().id);
     return key;
   }

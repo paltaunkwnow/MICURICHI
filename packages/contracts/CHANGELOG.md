@@ -1,5 +1,25 @@
 # Changelog — contracts
 
+## 0.17.0 — 2026-10-04
+
+**Sin ruptura: `ResolverRespuesta.manzana` queda obsoleto (siempre `null`).** geo-service deja de
+calcular el point-in-polygon de manzana. Corría en cada resolución —una consulta espacial más contra
+`geo.manzana_vigente` (27 527 polígonos)— y **ningún consumidor lo lee**: el reporte dejó de guardar
+manzana en la migración 0010 (0.4.0) y los dos mapas solo dibujan distritos y UV.
+
+- **`ResolverRespuestaSchema.manzana`**: no cambia de forma (sigue siendo
+  `{ id, codigo } | null`), así que no rompe tipos. Se marca **`deprecated`** en el OpenAPI, con la
+  nota de que es siempre `null` desde 0.17.0. Se quita en una **contracción posterior**, no ahora:
+  un cliente con la app vieja en caché que todavía lea el campo recibe `null` en vez de un error.
+- **OpenAPI**: el resumen de `POST /geo/v1/resolver` ya no menciona «manzana» (pasa a «distrito y
+  UV»); el componente `ResolverRespuesta` marca `manzana` como `deprecated`.
+- `TIPOS_CAPA` (incluye `manzana`) y la capa `manzana` como dato geográfico **no cambian**:
+  geo-service la sigue listando y sirviendo en `/geo/v1/capas` (la E2E y el contrato la esperan).
+  Lo único que cambia es que el resolver ya no devuelve una manzana.
+
+**Consumidores:** geo-service (resolverPunto devuelve `manzana: null` y no consulta
+`geo.manzana_vigente`). api-core, web-ciudadano, panel-admin y e2e no cambian: ya ignoraban el campo.
+
 ## 0.16.0 — 2026-10-03
 
 **Sin ruptura: `GET /api/v1/indicadores` acepta filtros para las tortas del panel.** Las

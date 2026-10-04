@@ -96,6 +96,18 @@ VERIFICADO», verificado, resuelto, o retirado del mapa. El navegador no guarda 
 lista que guardaba antes en `localStorage` se borra sola, y al perder la sesión la de la cuenta
 sale de la caché.
 
+Después del alta, «Ya podés entrar» lleva a `/ingresar?volver=…` **sin el correo en la URL**, que
+lo dejaría en el historial y en los registros. El correo viaja por `sessionStorage`
+(`src/lib/correo-para-entrar.ts`): el alta lo guarda, `/ingresar` lo toma una sola vez al montar
+(en el cliente, para no desajustar la hidratación) y lo borra; sin almacenamiento, el campo queda
+vacío. `/ingresar` ya no lee `?email=`. La pantalla es la misma exista o no el correo y no inicia
+sesión sola: con un correo ya registrado, eso revelaría que existe.
+
+En el formulario de reporte, los avisos de error se anuncian al aparecer (`role="alert"`) y quedan
+junto a su acción: el del envío (`error-envio`) va en el pie del paso 4, encima de «Enviar
+reporte», y no al final del área con scroll; los de foto (`error-foto`), debajo de «Sacar foto» y
+junto a la fila «Fotos» de la revisión (`src/componentes/AvisosDelReporte.tsx`).
+
 ## El mapa
 
 MapLibre, con la base raster desaturada y los marcadores en pastilla del prototipo (punto de

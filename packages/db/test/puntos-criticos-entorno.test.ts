@@ -44,10 +44,13 @@ async function crear(lon: number, lat: number, estado = 'validado'): Promise<str
 }
 
 async function cambiarEstado(id: string, estado: string) {
-  await pool.query('UPDATE reporte_inundacion SET estado = $2::estado_reporte WHERE id = $1', [
-    id,
-    estado,
-  ]);
+  // Desde la migración 0018, rechazar o duplicar exige un motivo no vacío (lo que la API siempre
+  // fija al moderar). El motivo no influye en la agrupación, que es lo único que prueba este
+  // archivo; se pone uno fijo para que el fixture sea válido bajo el nuevo CHECK.
+  await pool.query(
+    'UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = $3 WHERE id = $1',
+    [id, estado, 'Cambio de estado en prueba de recálculo'],
+  );
 }
 
 /** Partición actual: conjuntos de ids que comparten punto crítico, en forma comparable. */

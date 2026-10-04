@@ -1,7 +1,12 @@
 /**
- * Caché de capas vigentes: GeoJSON web (para render) + índice geojson-vt (teselas al vuelo).
+ * Caché de capas vigentes: el GeoJSON web que se sirve, guardado como texto.
  * Prefiere data/processed/<version>/<capa>/<capa>.web.geojson generado por el ETL; si no existe,
  * simplifica en PostGIS con ST_SimplifyPreserveTopology.
+ *
+ * La caché NO retiene el objeto GeoJSON parseado (la capa de manzanas son ~27 MB): guarda `texto`,
+ * y el índice geojson-vt de las teselas se arma PEREZOSAMENTE —la primera vez que se pide una
+ * tesela de esa capa— volviendo a parsear `texto`, y queda memoizado en la entrada. Así
+ * /geo/v1/capas no paga el índice de una capa que quizá nadie dibuje.
  *
  * Cada capa en memoria lleva su huella (contrato 0.12.0): los primeros 16 hex del SHA-256 del
  * GeoJSON que se sirve, del que salen también las teselas. Va en la URL que da CapaInfo.url, así
@@ -30,11 +35,18 @@ export interface CapaEnCache {
   /** Versión y carga de las que salió: si el ETL recarga la misma versión, cambia y se reconstruye. */
   clave: string;
   huella: HuellaCapa;
-  geojson: FeatureCollection;
+  /** GeoJSON web servido tal cual: de aquí salen la huella y el ETag, y de aquí se rearma el índice. */
   texto: string;
   bytes: number;
-  indice: Indice;
+  n_features: number;
   bbox: [number, number, number, number] | null;
+  /**
+   * Índice geojson-vt para las teselas. Perezoso: `undefined` hasta que se pide la primera tesela
+   * de la capa; entonces se arma desde `texto` y se memoiza acá (geojson-vt es síncrono, así que no
+   * hay carrera). Que la caché no lo tenga siempre es a propósito: no se construye en
+   * /geo/v1/capas, solo cuando alguien dibuja teselas de esa capa.
+   */
+  indice?: Indice;
 }
 
 export class CacheCapas {
@@ -43,7 +55,7 @@ export class CacheCapas {
   /**
    * Cargas en vuelo, por capa y con la clave que están cargando. Sin esto, N peticiones
    * simultáneas de una capa fría lanzan N cargas completas a la vez (la de manzanas son ~27 MB de
-   * GeoJSON más su índice de teselas): memoria multiplicada por N y N consultas pesadas a PostGIS
+   * GeoJSON): memoria multiplicada por N y N consultas pesadas a PostGIS
    * para el mismo resultado.
    */
   private cargando = new Map<TipoCapa, { clave: string; promesa: Promise<CapaEnCache> }>();
@@ -107,8 +119,9 @@ export class CacheCapas {
       this.metricas?.contar('curichi_geo_cache_aciertos_total', { cache: 'capas' });
       return c;
     }
-    // Un fallo aquí no es "una consulta más": obliga a releer la capa entera y a reconstruir su
-    // índice de teselas. Si este contador no es prácticamente plano, algo está invalidando de más.
+    // Un fallo aquí no es "una consulta más": obliga a releer la capa entera de PostGIS y descarta
+    // su índice de teselas (se rearma al pedir la próxima tesela). Si este contador no es
+    // prácticamente plano, algo está invalidando de más.
     this.metricas?.contar('curichi_geo_cache_fallos_total', { cache: 'capas' });
     const enVuelo = this.cargando.get(capa);
     if (enVuelo && enVuelo.clave === clave) {
@@ -129,25 +142,16 @@ export class CacheCapas {
     const inicio = process.hrtime.bigint();
     const geojson = await this.cargar(capa, version);
     const texto = JSON.stringify(geojson);
-    const indice = geojsonvt(geojson, {
-      maxZoom: 16,
-      indexMaxZoom: 10,
-      indexMaxPoints: 100_000,
-      tolerance: 3,
-      extent: 4096,
-      buffer: 64,
-      promoteId: 'id',
-    });
-    const bbox = calcularBbox(geojson);
     const nuevo: CapaEnCache = {
       version,
       clave,
       huella: createHash('sha256').update(texto).digest('hex').slice(0, 16),
-      geojson,
       texto,
       bytes: Buffer.byteLength(texto),
-      indice,
-      bbox,
+      n_features: geojson.features.length,
+      bbox: calcularBbox(geojson),
+      // `indice` queda sin armar: el objeto `geojson` parseado se descarta al salir de esta
+      // función (la caché solo retiene `texto`) y el índice se arma al pedir la primera tesela.
     };
     // Una carga vieja que termina tarde no pisa a una más nueva ni revive lo invalidado.
     if (this.cargando.get(capa)?.clave === clave) this.cache.set(capa, nuevo);
@@ -211,7 +215,7 @@ export class CacheCapas {
       salida.push({
         capa,
         version: c.version,
-        n_features: c.geojson.features.length,
+        n_features: c.n_features,
         bytes_web: c.bytes,
         modo: teselas ? 'teselas' : 'geojson',
         url: teselas ? rutaTeselasConHuella(capa, c.huella) : rutaCapaConHuella(capa, c.huella),
@@ -222,9 +226,36 @@ export class CacheCapas {
   }
 
   tesela(c: CapaEnCache, capa: TipoCapa, z: number, x: number, y: number): Uint8Array | null {
-    const t = c.indice.getTile(z, x, y);
+    const t = this.indiceDe(c, capa).getTile(z, x, y);
     if (!t?.features.length) return null;
     return fromGeojsonVt({ [capa]: t }, { version: 2 });
+  }
+
+  /**
+   * Índice geojson-vt de la capa, armado perezosamente la primera vez que se pide una tesela y
+   * memoizado en la entrada de caché. Se parsea `texto` en ese momento porque la caché no retiene
+   * el objeto GeoJSON. geojson-vt es síncrono: entre el `if` y la asignación no corre otro código,
+   * así que dos teselas simultáneas de una capa fría no lo arman dos veces.
+   */
+  private indiceDe(c: CapaEnCache, capa: TipoCapa): Indice {
+    if (c.indice) return c.indice;
+    const inicio = process.hrtime.bigint();
+    const geojson = JSON.parse(c.texto) as FeatureCollection;
+    c.indice = geojsonvt(geojson, {
+      maxZoom: 16,
+      indexMaxZoom: 10,
+      indexMaxPoints: 100_000,
+      tolerance: 3,
+      extent: 4096,
+      buffer: 64,
+      promoteId: 'id',
+    });
+    this.metricas?.observar(
+      'curichi_geo_tesela_indice_construccion_segundos',
+      { capa },
+      Number(process.hrtime.bigint() - inicio) / 1e9,
+    );
+    return c.indice;
   }
 }
 

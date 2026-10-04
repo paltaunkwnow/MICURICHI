@@ -10,7 +10,15 @@ export const ResolverRespuestaSchema = z.object({
   dentro_cobertura: z.boolean(),
   distrito: UnidadAdministrativaSchema.nullable(),
   unidad_vecinal: UnidadAdministrativaSchema.nullable(),
-  manzana: z.object({ id: z.string(), codigo: z.string() }).nullable(),
+  // Obsoleto desde 0.17.0: geo-service dejó de calcular el PIP de manzana (corría en cada
+  // resolución y nadie lo lee; el reporte dejó de guardar manzana en la migración 0010). El campo
+  // queda en el esquema, siempre null, para no romper un cliente con la app vieja en caché; se
+  // quita en una contracción posterior.
+  manzana: z.object({ id: z.string(), codigo: z.string() }).nullable().meta({
+    deprecated: true,
+    description:
+      'Obsoleto desde 0.17.0: geo-service ya no calcula el PIP de manzana y este campo es siempre null. Ningún consumidor lo lee (el reporte dejó de guardar manzana en la migración 0010); se quita en una contracción posterior.',
+  }),
   version_capa: z.string().nullable(),
   en_limite: z.boolean(),
   asignado_por_proximidad: z.boolean(),

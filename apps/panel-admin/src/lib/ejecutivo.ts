@@ -7,6 +7,7 @@ import type {
   Severidad,
 } from 'contracts';
 import type { Formato } from './formato';
+import { type RangoPuntaje, rangoPuntaje } from './severidad';
 
 /**
  * Lógica pura del panel ejecutivo: agrupación de pestañas y datos de las gráficas. Sin React ni
@@ -74,6 +75,14 @@ export function conteosPorPestana(
     baja: conteoPestana(porSeveridad, 'baja'),
     todas: conteoPestana(porSeveridad, 'todas'),
   };
+}
+
+/**
+ * Puntajes que caen en una pestaña, según las bandas de contracts y respetando lo que suma: la
+ * pestaña «Crítica» junta las bandas alta y crítica, así que va de la primera a la última.
+ */
+export function rangoPuntajePestana(p: PestanaEjecutiva): RangoPuntaje {
+  return rangoPuntaje(definicionPestana(p).severidades);
 }
 
 /**

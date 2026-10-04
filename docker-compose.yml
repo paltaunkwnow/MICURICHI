@@ -96,6 +96,12 @@ services:
       - idle_in_transaction_session_timeout=60s
       - -c
       - log_min_duration_statement=1000
+    # /dev/shm del contenedor: Docker lo monta con 64 MB por defecto, y PostgreSQL usa memoria
+    # compartida dinámica (dynamic_shared_memory_type = posix, el valor por defecto en Linux) en
+    # /dev/shm para las consultas en paralelo. Con 64 MB se queda corto y la consulta falla con
+    # «could not resize shared memory segment … No space left on device». 256m da margen; se ajusta
+    # con POSTGRES_SHM_SIZE.
+    shm_size: ${POSTGRES_SHM_SIZE:-256m}
     ports:
       # Solo loopback: publicar en 0.0.0.0 deja la base accesible desde toda la red local con la
       # contraseña de desarrollo. Para llegar desde otra máquina, un túnel SSH.

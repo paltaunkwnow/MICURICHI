@@ -17,15 +17,19 @@ beforeAll(async () => {
   base = await levantarBaseEfimera();
   pool = new pg.Pool({ connectionString: base.url, max: 1 });
   await cargarCapasDePrueba(ejecutorPg(pool));
+  // Las filas rechazado/duplicado llevan estado_motivo no vacío: la migración 0018 lo exige
+  // (CHECK motivo_en_rechazo_y_duplicado). El índice del estado es 1 + i % 5, así que duplicado
+  // cae en i % 5 = 2 y rechazado en i % 5 = 3. fusionado_en_id queda null en todas las filas.
   await pool.query(`
     INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id,
       ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-      severidad_calculada, severidad_puntaje, estado, publicar_en)
+      severidad_calculada, severidad_puntaje, estado, estado_motivo, publicar_en)
     SELECT g.p, g.p, 'distrito_municipal:01',
            (ARRAY['unidad_vecinal:A', 'unidad_vecinal:B', 'unidad_vecinal:C'])[1 + i % 3],
            'gps', 'via_publica', 'Reporte sintético para el plan', 'rodilla', 'ocasional',
            'media', 6,
            (ARRAY['nuevo', 'validado', 'duplicado', 'rechazado', 'resuelto']::estado_reporte[])[1 + i % 5],
+           CASE WHEN i % 5 IN (2, 3) THEN 'Dato sintético para el plan' ELSE NULL END,
            now()
       FROM generate_series(1, 4000) AS i,
            LATERAL (SELECT ST_SetSRID(ST_MakePoint(-63.2 + (i % 100) * 0.0003,

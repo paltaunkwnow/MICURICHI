@@ -7,12 +7,12 @@ import {
   ReporteFiltrosSchema,
 } from 'contracts';
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { cacheDeListadoPublico } from '../cache.js';
 import { listarReportes, MAX_OFFSET, obtenerReporte, reportesDelAutor } from '../consultas.js';
 import { reservarTurnoDeReporte } from '../cuota.js';
+import { IdReporteParam, resolverIdReporte } from '../id-reporte.js';
 import {
   anotarResultado,
   ClaveIdempotenciaSchema,
@@ -22,20 +22,8 @@ import {
 } from '../idempotencia.js';
 import { ipHashDiario } from '../privacidad.js';
 import { revisarDispositivo } from '../ubicacion-dispositivo.js';
+import { condicionPublicado, condicionPublico } from '../visibilidad.js';
 import { aFeature, vistaMiReporte, vistaPublica, vistaTecnica } from '../vistas.js';
-
-const IdParam = z.object({
-  id: z
-    .string()
-    .trim()
-    .refine(
-      (s) =>
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ||
-        /^[0-9a-f]{8}$/i.test(s),
-      { message: 'El id debe ser un UUID o un ID corto de 8 caracteres hexadecimales' },
-    )
-    .transform((s) => s.toLowerCase()),
-});
 
 /** Ventana en la que una `objeto_key` recién subida puede asociarse a un reporte. */
 export const HORAS_VALIDEZ_FOTO = 24;
@@ -412,26 +400,15 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     };
   });
 
-  async function resolverUuid(id: string): Promise<string | null> {
-    if (id.length === 8) {
-      const r = await dep.pool.query<{ id: string }>(
-        `SELECT id FROM reporte_inundacion WHERE id::text LIKE $1 LIMIT 2`,
-        [`${id.toLowerCase()}%`],
-      );
-      if (r.rows.length === 1 && r.rows[0]) return r.rows[0].id;
-      return null;
-    }
-    return id;
-  }
-
   app.get('/api/v1/reportes/:id', limiteLectura, async (req, res) => {
-    const p = IdParam.safeParse(req.params);
+    const p = IdReporteParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    const uuid = await resolverUuid(p.data.id);
+    // Resuelve SOLO reportes públicos: un ID corto de uno oculto (en espera, rechazado o
+    // duplicado) no resuelve y da el MISMO 404 que uno inexistente, sin delatar que existe.
+    const uuid = await resolverIdReporte(dep.pool, p.data.id, condicionPublico(''));
     if (!uuid)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    // En espera, rechazado o duplicado: el mismo 404 que si no existiera.
     const fila = await obtenerReporte(dep.pool, uuid, 'publico');
     if (!fila)
       return res
@@ -477,13 +454,13 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
   });
 
   app.get('/api/v1/tecnico/reportes/:id', soloTecnico, async (req, res) => {
-    const p = IdParam.safeParse(req.params);
+    const p = IdReporteParam.safeParse(req.params);
     if (!p.success)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    const uuid = await resolverUuid(p.data.id);
+    // Resuelve solo publicados: mientras espera su publicar_en tampoco lo ve el técnico (ADR 0006).
+    const uuid = await resolverIdReporte(dep.pool, p.data.id, condicionPublicado(''));
     if (!uuid)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-    // Mientras espera su publicar_en tampoco lo ve el técnico (ADR 0006).
     const fila = await obtenerReporte(dep.pool, uuid, 'publicado');
     if (!fila)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });

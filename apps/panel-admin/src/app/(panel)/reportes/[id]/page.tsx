@@ -5,7 +5,7 @@ import { ETIQUETAS } from 'contracts';
 import { ArrowLeft, Check, Copy, FileText, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { Dato } from '@/componentes/Dato';
@@ -69,6 +69,8 @@ export default function PaginaDetalleReporte() {
   const usuario = useUsuarioActual();
   const { fechaHora, numero } = useFormato();
   const [mostrarUnitario, setMostrarUnitario] = useState(false);
+  // El botón que abre la ficha: al cerrarla, el foco vuelve a él (accesibilidad del diálogo).
+  const botonUnitario = useRef<HTMLButtonElement>(null);
   // Se refresca solo cada 10 s: si otro técnico lo modera, el estado se ve sin recargar.
   const reporte = useQuery(consultaReporte(id));
   const capas = useQuery(consultaCapasMapa());
@@ -132,6 +134,7 @@ export default function PaginaDetalleReporte() {
         <p className="text-tinta-600">Creado el {fechaHora(p.creado_en)}</p>
 
         <button
+          ref={botonUnitario}
           type="button"
           onClick={() => setMostrarUnitario(true)}
           className="btn btn-primario ml-auto flex items-center gap-2"
@@ -260,7 +263,11 @@ export default function PaginaDetalleReporte() {
       </div>
 
       {mostrarUnitario && (
-        <ReporteUnitarioModal reporte={f} onCerrar={() => setMostrarUnitario(false)} />
+        <ReporteUnitarioModal
+          reporte={f}
+          onCerrar={() => setMostrarUnitario(false)}
+          retorno={botonUnitario}
+        />
       )}
     </div>
   );

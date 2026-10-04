@@ -1,0 +1,12 @@
+# git status --porcelain
+ M CLAUDE.md
+?? .claude/agents/trabajador-raiz.md
+?? docs/sdd/2026-10-04-arreglos-chicos/
+
+# git diff --stat
+ CLAUDE.md | 43 +++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 41 insertions(+), 2 deletions(-)
+
+# sha256 de los no rastreados
+ebc06a8b53ff04530066ee39f4fee1716c3839b666d70a8a8a7e44084910362b *.claude/agents/trabajador-raiz.md
+ae24724af6d350d65a02317111b00b455c88a0d549fa28610a5e6866f43b0e75 *docs/sdd/2026-10-04-arreglos-chicos/arbol-inicial.txt

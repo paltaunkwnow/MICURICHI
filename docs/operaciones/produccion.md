@@ -375,6 +375,9 @@ pasa siempre: toda conexión desde la máquina llega desde el puente, que es lo 
 ## Base de datos
 
 - [ ] PostgreSQL 18 + PostGIS 3.6 **real**, no PGlite (ver [ADR 0003](../decisiones/0003-pglite-solo-en-local-y-pruebas.md)).
+- [ ] `shm_size` del contenedor `postgis` con holgura (por defecto 256m, variable
+      `POSTGRES_SHM_SIZE`): Docker monta `/dev/shm` con 64 MB y PostgreSQL lo usa para la memoria
+      compartida de las consultas en paralelo; con 64 MB fallan con «No space left on device».
 - [ ] Migraciones aplicadas por el **job `migraciones`** (ver «Migraciones al desplegar»). Los
       servicios **no** migran solos al arrancar: si la base va por detrás, fallan.
 - [ ] `PENDIENTE` Ejecutar la suite completa contra ese PostgreSQL antes de abrir.
@@ -432,6 +435,33 @@ una copia `<a medir>`. Conviene migrar en un horario de poco tráfico y, despué
 La 0016 (contracción: quita `usuario.ultimo_reporte_en` y el `DEFAULT` de `publicar_en`) va en un
 release **posterior** al de T3 y T4, nunca en el mismo: el api-core anterior sigue atendiendo
 mientras corre el job de migraciones y todavía inserta sin nombrar `publicar_en`.
+
+### Migración 0018: integridad de moderación
+
+La 0018 graba en la base dos reglas de moderación que hasta ahora solo imponía api-core (CLAUDE.md
+§7.1 y §7.3), sin cambio de contrato. Son dos `CHECK` sobre `reporte_inundacion`:
+
+- `motivo_en_rechazo_y_duplicado`: un reporte `rechazado` o `duplicado` exige `estado_motivo` no
+  vacío.
+- `fusion_solo_en_duplicado`: `fusionado_en_id` solo puede estar puesto en un `duplicado`.
+
+No se agrega «`duplicado` ⇒ canónico no nulo»: la FK `fusionado_en_id` es `ON DELETE SET NULL`, así
+que al borrar un reporte canónico sus duplicados quedan con `fusionado_en_id = NULL` pero siguen en
+`duplicado` —un estado legítimo que esa regla rechazaría—.
+
+**No traba el despliegue por filas viejas.** Los dos `CHECK` se crean `NOT VALID` (toman un lock
+breve y ya frenan toda escritura nueva) y, en la misma migración, se validan solo si ninguna fila
+los viola. Si alguna los viola, la migración emite un `NOTICE` con el conteo, **no toca ningún
+dato** y la restricción queda sin validar: las escrituras nuevas ya están protegidas. Para validarla
+después de limpiar esas filas:
+
+```sql
+ALTER TABLE reporte_inundacion VALIDATE CONSTRAINT motivo_en_rechazo_y_duplicado;
+ALTER TABLE reporte_inundacion VALIDATE CONSTRAINT fusion_solo_en_duplicado;
+```
+
+La 0018 también quita el índice redundante `reporte_estado` (lo cubre `reporte_estado_creado`; ver
+«Índices de la tabla de reportes y por qué está cada uno»).
 
 ### TLS con la base
 
@@ -1016,14 +1046,14 @@ arrancar si `S3_ACCESS_KEY` es el usuario root.
 
 ## Índices de la tabla de reportes y por qué está cada uno
 
-Con un millón de reportes, `reporte_inundacion` tiene 15 índices. No es gratis: cada `INSERT` los
-actualiza todos. El reparto:
+Con un millón de reportes, `reporte_inundacion` tiene 14 índices (la migración 0018 quitó uno
+redundante, ver abajo). No es gratis: cada `INSERT` los actualiza todos. El reparto:
 
 | Índice | Para qué | Añadido en |
 |---|---|---|
 | `reporte_inundacion_pkey` | Clave primaria | 0001 |
 | `reporte_geom_gist` | Consultas espaciales del técnico (coordenada exacta) | 0001 |
-| `reporte_estado`, `reporte_uv`, `reporte_distrito`, `reporte_creado`, `reporte_punto_critico` | Filtros del listado | 0001 |
+| `reporte_uv`, `reporte_distrito`, `reporte_creado`, `reporte_punto_critico` | Filtros del listado | 0001 |
 | `reporte_estado_creado` | Listado público: filtro por estado más orden por fecha | 0002 |
 | `reporte_con_ip_hash`, `reporte_foto_huerfanas` | Retención (§13); parciales y pequeños | 0002 |
 | `reporte_geom_publico_gist` | Listado público por bbox sobre la geometría **publicable** | 0005 |
@@ -1035,6 +1065,10 @@ Sobre la 0006: con un millón de reportes, un `DELETE` masivo **no terminó en 1
 que cancelarlo, porque la autorreferencia `fusionado_en_id` obligaba a recorrer la tabla entera
 por cada fila borrada. Con los índices puestos, el mismo borrado de 2 000 000 de filas tardó
 **22,2 s**.
+
+Sobre la 0018: quita `reporte_estado` (índice de una sola columna sobre `estado`). El compuesto
+`reporte_estado_creado (estado, creado_en DESC)` ya cubre los filtros por `estado` —es su columna
+principal—, así que el de una sola columna era redundante y solo sumaba trabajo a cada `INSERT`.
 
 ## Límites conocidos que NO se han resuelto
 

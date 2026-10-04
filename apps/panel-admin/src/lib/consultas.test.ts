@@ -5,9 +5,12 @@ import {
   QueryObserver,
   type QueryObserverOptions,
 } from '@tanstack/react-query';
+import type { Severidad } from 'contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CABECERA_SONDEO } from './api';
 import {
+  consultaAgregadosUv,
+  consultaCandidatosFusion,
   consultaCapasMapa,
   consultaDistritos,
   consultaIndicadores,
@@ -18,6 +21,9 @@ import {
   INTERVALO_SONDEO_MS,
   invalidarTrasActivarCapa,
 } from './consultas';
+import { cajaDeBusqueda, LIMITE_CANDIDATOS_FUSION } from './fusion-cercana';
+import { PARAMS_CONTEOS_PESTANAS } from './indicadores-pestanas';
+import { paramsIndicadores } from './indicadores-torta';
 
 /** Cuerpo mínimo de cada ruta: acá no importa qué trae, sino cuándo y con qué cabeceras se pide. */
 function cuerpoPara(url: string): unknown {
@@ -209,6 +215,176 @@ describe('sondeo de las pantallas de trabajo', () => {
   it('el panel ejecutivo pide siempre el histórico completo', async () => {
     await montar(suelta(consultaResumenEjecutivo()));
     expect(llamadas[0]?.url).toBe('/api/v1/ejecutivo/resumen?ventana=todo');
+  });
+});
+
+describe('conteos de las pestañas «Por severidad» de /indicadores', () => {
+  // La pantalla pide dos veces los indicadores: la consulta base, con los filtros de la URL, y la de
+  // los conteos de las pestañas, siempre sin filtro de severidad (`PARAMS_CONTEOS_PESTANAS`). Sin
+  // filtro son la misma clave y TanStack las junta en una sola petición.
+  const URL_SIN_FILTRO = '/api/v1/indicadores?';
+  const conteos = () => suelta(consultaIndicadores(PARAMS_CONTEOS_PESTANAS));
+  const base = (severidades: Severidad[]) =>
+    suelta(consultaIndicadores(paramsIndicadores(severidades)));
+  const urls = () => llamadas.map((l) => l.url);
+
+  it('sin filtro de severidad la base y los conteos son una sola consulta: una petición', async () => {
+    await montarJuntas(base([]), conteos());
+    expect(urls()).toEqual([URL_SIN_FILTRO]);
+  });
+
+  it('con una severidad elegida salen dos: la filtrada y la de los conteos, sin filtro', async () => {
+    await montarJuntas(base(['critica']), conteos());
+    expect(urls().sort()).toEqual([URL_SIN_FILTRO, '/api/v1/indicadores?severidad=critica']);
+  });
+
+  it('cambiar de pestaña no vuelve a pedir los conteos: siguen siendo la misma consulta', async () => {
+    await montarJuntas(base([]), conteos());
+    // Se toca «Crítica» y después se suma «Alta» arriba: la base cambia de clave, los conteos no.
+    await montarJuntas(base(['critica']));
+    await montarJuntas(base(['critica', 'alta']));
+    expect(urls()).toEqual([
+      URL_SIN_FILTRO,
+      '/api/v1/indicadores?severidad=critica',
+      '/api/v1/indicadores?severidad=critica%2Calta',
+    ]);
+  });
+
+  it('la consulta de los conteos sigue el sondeo de 10 s como las demás', () => {
+    const o = conteos();
+    expect(o.refetchInterval).toBe(INTERVALO_SONDEO_MS);
+    expect(o.refetchIntervalInBackground).toBe(false);
+    expect(o.staleTime).toBe(0);
+    expect(o.meta).toEqual({ sondeo: true });
+  });
+
+  it('con filtro, los conteos se vuelven a pedir cada 10 s, marcados como sondeo', async () => {
+    await montarJuntas(base(['critica']), conteos());
+    expect(llamadas).toHaveLength(2);
+
+    await vi.advanceTimersByTimeAsync(INTERVALO_SONDEO_MS);
+    expect(llamadas).toHaveLength(4);
+    const sinFiltro = llamadas.flatMap((l, i) => (l.url === URL_SIN_FILTRO ? [i] : []));
+    expect(sinFiltro).toHaveLength(2);
+    expect(sondeo(sinFiltro[0] ?? -1)).toBeNull(); // la carga la pide la persona
+    expect(sondeo(sinFiltro[1] ?? -1)).toBe('1'); // el refresco, no
+  });
+
+  it('sin filtro el sondeo no se duplica, aunque los dos observadores arranquen desfasados', async () => {
+    // Tras filtrar y volver a «Todo», la base y los conteos comparten clave con sus temporizadores
+    // desfasados (cada uno arrancó cuando cambió la URL). TanStack reinicia el de todos los
+    // observadores en cada actualización de la consulta, así que siguen siendo una petición por
+    // ciclo. Se simula con la base sondeando desde el segundo 0 y los conteos montados 3 s después.
+    await montar(base([]));
+    await vi.advanceTimersByTimeAsync(3_000);
+    await montar(conteos());
+    const antes = llamadas.length;
+    await vi.advanceTimersByTimeAsync(6 * INTERVALO_SONDEO_MS);
+    expect(llamadas.length - antes).toBe(6);
+    for (let i = antes; i < llamadas.length; i++) expect(sondeo(i), `petición ${i}`).toBe('1');
+  });
+});
+
+describe('candidatos a canónico al fusionar (solo reportes cercanos)', () => {
+  const CENTRO = { lat: -17.78, lon: -63.18 };
+  const consulta = (radioM: number, abierto: boolean) =>
+    suelta(consultaCandidatosFusion(CENTRO, radioM, abierto));
+  const clave = (radioM: number, centro = CENTRO) =>
+    consultaCandidatosFusion(centro, radioM, true).queryKey;
+
+  it('la clave lleva el radio y la caja: ampliar la búsqueda o cambiar de punto es otra consulta', () => {
+    expect(clave(100)).toEqual(clave(100));
+    expect(clave(300)).not.toEqual(clave(100));
+    expect(clave(1000)).not.toEqual(clave(300));
+    expect(clave(100, { lat: -17.79, lon: -63.18 })).not.toEqual(clave(100));
+    expect(JSON.stringify(clave(300))).toContain('"radio_m":300');
+    expect(JSON.stringify(clave(100))).toContain(cajaDeBusqueda(CENTRO, 100));
+  });
+
+  it('con el formulario cerrado no pide nada; al abrirlo pide una vez, con la caja y solo validados', async () => {
+    await montar(consulta(100, false));
+    await vi.advanceTimersByTimeAsync(3 * INTERVALO_SONDEO_MS);
+    expect(llamadas).toHaveLength(0);
+
+    await montar(consulta(100, true));
+    expect(llamadas).toHaveLength(1);
+    const url = new URL(llamadas[0]?.url ?? '', 'http://panel');
+    // La lista técnica, que ve la coordenada exacta; nunca la pública, que la desplaza.
+    expect(url.pathname).toBe('/api/v1/tecnico/reportes');
+    expect(url.searchParams.get('estado')).toBe('validado');
+    expect(url.searchParams.get('bbox')).toBe(cajaDeBusqueda(CENTRO, 100));
+    expect(url.searchParams.get('limite')).toBe(String(LIMITE_CANDIDATOS_FUSION));
+    // La pidió la persona al abrir el formulario: renueva la sesión, no es un sondeo.
+    expect(sondeo(0)).toBeNull();
+  });
+
+  it('no se repite sola: es una lista de una vez, no una pantalla que se refresca', async () => {
+    await montar(consulta(100, true));
+    await vi.advanceTimersByTimeAsync(6 * INTERVALO_SONDEO_MS);
+    expect(llamadas).toHaveLength(1);
+  });
+
+  it('ampliar el radio vuelve a pedir con una caja más grande', async () => {
+    await montar(consulta(100, true));
+    await montar(consulta(300, true));
+    expect(llamadas).toHaveLength(2);
+    const caja = (i: number) =>
+      new URL(llamadas[i]?.url ?? '', 'http://panel').searchParams.get('bbox');
+    expect(caja(0)).toBe(cajaDeBusqueda(CENTRO, 100));
+    expect(caja(1)).toBe(cajaDeBusqueda(CENTRO, 300));
+    expect(caja(1)).not.toBe(caja(0));
+  });
+});
+
+describe('agregados por UV: «UV con mayor incidencia» sigue el ritmo de la pantalla', () => {
+  // Son cifras (cuántos reportes tiene cada UV), no geometría: cambian con cada reporte nuevo.
+  // Se piden a geo-service, que no tiene sesión: no llevan la marca de sondeo de api-core.
+  const URL_AGREGADOS = '/geo/v1/agregados/unidades-vecinales';
+
+  it('se refrescan cada 10 s, nunca con la pestaña oculta, y sin datos frescos que esperar', () => {
+    const o = suelta(consultaAgregadosUv());
+    expect(o.refetchInterval).toBe(INTERVALO_SONDEO_MS);
+    expect(o.refetchIntervalInBackground).toBe(false);
+    expect(o.staleTime).toBe(0);
+    // No son la geometría de la capa (la que se pide una sola vez).
+    expect(o.staleTime).not.toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('la carga la pide la persona y a los 10 s vuelve a pedir, sin la marca de sondeo', async () => {
+    await montar(suelta(consultaAgregadosUv()));
+    expect(llamadas.map((l) => l.url)).toEqual([URL_AGREGADOS]);
+
+    await vi.advanceTimersByTimeAsync(INTERVALO_SONDEO_MS - 1);
+    expect(llamadas).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(llamadas).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(INTERVALO_SONDEO_MS);
+    expect(llamadas).toHaveLength(3);
+
+    for (const l of llamadas) expect(l.url).toBe(URL_AGREGADOS);
+    // geo-service no renueva ninguna inactividad: la cabecera de sondeo es solo de api-core.
+    for (let i = 0; i < llamadas.length; i++) expect(sondeo(i), `petición ${i}`).toBeNull();
+  });
+
+  it('con la pestaña oculta no pide; al volver pide una vez', async () => {
+    await montar(suelta(consultaAgregadosUv()));
+    expect(llamadas).toHaveLength(1);
+
+    focusManager.setFocused(false);
+    await vi.advanceTimersByTimeAsync(6 * INTERVALO_SONDEO_MS);
+    expect(llamadas).toHaveLength(1);
+
+    focusManager.setFocused(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(llamadas).toHaveLength(2);
+  });
+
+  it('una activación de capa los invalida con el resto de la geometría (misma clave de siempre)', async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(consultaAgregadosUv().queryKey, []);
+    await invalidarTrasActivarCapa(qc);
+    expect(qc.getQueryState(consultaAgregadosUv().queryKey)?.isInvalidated).toBe(true);
+    qc.clear();
   });
 });
 

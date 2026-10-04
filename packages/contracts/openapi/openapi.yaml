@@ -3199,6 +3199,11 @@ components:
                 - id
                 - codigo
             - type: "null"
+          deprecated: true
+          description: "Obsoleto desde 0.17.0: geo-service ya no calcula el PIP de manzana
+            y este campo es siempre null. Ningún consumidor lo lee (el reporte
+            dejó de guardar manzana en la migración 0010); se quita en una
+            contracción posterior."
         version_capa:
           type:
             - string
@@ -4588,7 +4593,7 @@ paths:
                 $ref: "#/components/schemas/CapaVersion"
   /geo/v1/resolver:
     post:
-      summary: "Point-in-polygon: distrito, UV y manzana de un punto (§7.4)"
+      summary: "Point-in-polygon: distrito y UV de un punto (§7.4)"
       tags:
         - geo
       requestBody:

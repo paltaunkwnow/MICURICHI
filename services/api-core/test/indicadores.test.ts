@@ -60,10 +60,11 @@ async function sembrar(o: {
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
        ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
        severidad_calculada, severidad_puntaje, severidad_version, severidad_manual, severidad_motivo, estado,
-       publicar_en)
+       estado_motivo, publicar_en)
      SELECT ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
        'distrito_municipal:01', $1, $2, 'manual', 'via_publica', 'Reporte sembrado para indicadores',
-       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::severidad, $5, $6::estado_reporte, now()
+       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::severidad, $5, $6::estado_reporte,
+       CASE WHEN $6 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE NULL END, now()
      FROM generate_series(1, $7::int)
      RETURNING id::text`,
     [

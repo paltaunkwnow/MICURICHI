@@ -601,6 +601,7 @@ a.fila:hover {
   background: #fff;
 }
 .opc:has(input:focus-visible),
+.opcion-radio:has(input:focus-visible),
 .chip:has(input:focus-visible) {
   outline: 3px solid var(--color-verde-500);
   outline-offset: 2px;
@@ -1151,6 +1152,33 @@ a.fila:hover {
   font-weight: 600;
   font-size: 32px;
   line-height: 36px;
+}
+
+/* «Por severidad» de /indicadores: la severidad de siempre (color + texto + barras) con su número,
+   como botón. Mismo gesto que .pestana-ej y .chip: el presionado se invierte (aria-pressed), así
+   que el estado no depende de un color y el lector de pantalla lo anuncia. */
+.pestana-sev {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  border: 1.5px solid var(--color-filete);
+  border-radius: var(--radius-tarjeta);
+  background: #fff;
+  color: var(--color-tinta-900);
+  font: inherit;
+  box-shadow: var(--sh-sm);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.pestana-sev:hover {
+  background: var(--color-fondo);
+}
+.pestana-sev[aria-pressed="true"] {
+  background: var(--color-tinta-900);
+  border-color: var(--color-tinta-900);
+  color: #fff;
 }
 
 /* ============================ ESTILOS DE IMPRESIÓN (REPORTE UNITARIO) ============================ */

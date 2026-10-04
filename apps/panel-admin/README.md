@@ -103,14 +103,32 @@ La interfaz reproduce el prototipo funcional que entregó el usuario
 | Ruta | Pantalla del prototipo | Qué hace |
 |---|---|---|
 | `/reportes` | M-02 | Bandeja: filtros, tabla y mapa sincronizados, exportación, indicadores de carga |
-| `/reportes/:id` | M-03 | Ficha completa: lo declarado, de dónde salió el puntaje, moderación y auditoría |
-| `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal, y la tabla «De una capa anterior» (distritos que ya no están en la capa vigente) |
+| `/reportes/:id` | M-03 | Ficha completa: lo declarado, de dónde salió el puntaje, moderación y auditoría. «Reporte unitario» abre la ficha para imprimir o descargar (.txt y GeoJSON): lleva la nota metodológica (CLAUDE.md §9.4), el encabezado `Mi Curichi · {ciudad de la configuración}` y firmas en blanco, sin oficinas ni cargos. Es un diálogo modal: el foco entra, Tab no sale, Escape cierra y el foco vuelve al botón (`src/lib/dialogo.ts`) |
+| `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal, y la tabla «De una capa anterior» (distritos que ya no están en la capa vigente). «Por severidad» son botones («Todo» y las cuatro severidades, cada uno con su número): una severidad deja el filtro en solo esa y «Todo» lo quita. Comparten la URL (`?severidad=`) con la fila «Filtrar por severidad» —con dos elegidas arriba quedan presionadas las dos— y sus números salen de los indicadores sin filtro de severidad, así que no cambian al filtrar (`src/lib/indicadores-pestanas.ts`) |
 | `/capas` | A-02 | Versiones cargadas por el ETL y activación de la vigente |
 | `/plano` | A-06 | Plano oficial de zonificación como referencia, con su advertencia. Solo en la instalación de Santa Cruz de la Sierra (ver arriba) |
-| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin), siempre sobre el histórico: la cifra de inundaciones activas con «N verificadas · M en revisión», pestañas Crítica (crítica + alta) / Media / Baja / Todas, «Inundaciones activas por distrito» (con «Otros» para una capa anterior o sin distrito, así las barras suman el total) y «Cómo va el trabajo». Sin mapa ni selector de período. El rol ejecutivo solo ve esta ruta |
+| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin), siempre sobre el histórico: la cifra de inundaciones activas con «N verificadas · M en revisión», pestañas Crítica (crítica + alta) / Media / Baja / Todas, «Inundaciones activas por distrito» (con «Otros» para una capa anterior o sin distrito, así las barras suman el total) y «Cómo va el trabajo». Sin mapa ni selector de período. «Significado de los niveles de severidad» muestra la fórmula, los puntos de cada respuesta y el rango de puntaje de cada nivel, todo de `contracts` (`src/lib/severidad.ts`): no dice qué hace el municipio con cada nivel. El rol ejecutivo solo ve esta ruta |
 
 El texto de estado usa las palabras del técnico («Validado», «Duplicado»), no las del vecino: acá
 se trabaja con la máquina de estados de `CLAUDE.md` §7.3.
+
+### Fusionar solo con reportes cercanos
+
+«Fusionar» ofrece, para elegir el reporte canónico, solo los reportes **validados a 100 m o menos
+de la coordenada exacta** del reporte, sin el propio y del más cercano al más lejano. Cada opción
+dice el ID corto, la UV, la distancia («a 35 m») y el comienzo de la descripción; no hay campo para
+pegar un ID. Sin ninguno, el panel lo dice y ofrece buscar hasta 300 m y hasta 1 km (solo los
+radios mayores al vigente). «Confirmar fusión» queda deshabilitado mientras no haya uno elegido.
+
+Es una restricción de la interfaz: api-core sigue aceptando como canónico cualquier reporte
+`validado` (`CLAUDE.md` §7.3), sin cambios de API ni de contrato. La búsqueda usa el filtro `bbox`
+de `GET /api/v1/tecnico/reportes` (hasta 100 validados, del más reciente al más antiguo) con una
+caja que contiene el círculo del radio, y la distancia exacta se mide en el cliente con
+`distanciaMetros` de `contracts`, la misma cuenta del radio de 60 m (`src/lib/fusion-cercana.ts`).
+La caja se alinea hacia afuera a una cuadrícula de 0,0005° (unos 56 m): api-core registra la URL
+con su cadena de consulta, y una caja centrada en el punto dejaría en el log la coordenada exacta
+del reporte. Solo sale con el formulario abierto y su clave de caché lleva el radio. Si la caja
+tiene más validados de los que trae la respuesta, la lista avisa que puede haber más cerca.
 
 ## El mapa
 
@@ -140,7 +158,10 @@ solos cada 10 s (`src/lib/consultas.ts`): `refetchInterval` de 10 s, `staleTime`
 guarda esas cifras en caché) y nada con la pestaña oculta (`refetchIntervalInBackground: false`);
 al volver a la pestaña se piden una vez. Los distritos y las unidades vecinales tienen `staleTime`
 infinito y se piden una sola vez; los distritos reusan la lista de capas del mapa, así que
-`/geo/v1/capas` sale una vez aunque la bandeja monte las dos consultas.
+`/geo/v1/capas` sale una vez aunque la bandeja monte las dos consultas. Los agregados por UV
+(«UV con mayor incidencia» del ejecutivo) también salen de geo-service, pero son cifras y no
+geometría: siguen el mismo ritmo de 10 s con `staleTime` 0 (geo-service guarda las suyas hasta
+2 min, CLAUDE.md §4.6) y sin la cabecera de sondeo, porque geo-service no tiene sesión.
 
 Esos refrescos llevan `meta: { sondeo: true }` y salen con la cabecera `x-curichi-sondeo: 1`
 (`CABECERA_SONDEO` en `src/lib/api.ts`). api-core no renueva la inactividad con ella: una pantalla

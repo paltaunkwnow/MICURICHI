@@ -1,11 +1,6 @@
 import { PESOS, PUNTOS, type ReporteTecnico } from 'contracts';
 import { colorSeveridad } from '@/lib/formato';
-
-/** Puntajes máximos por variable según la matriz de severidad v2 (contracts). */
-const MAX_PROFUNDIDAD = Math.max(...Object.values(PUNTOS.profundidad));
-const MAX_FRECUENCIA = Math.max(...Object.values(PUNTOS.frecuencia));
-/** Puntaje máximo de la fórmula (severidad v2: 2·4 + 5 = 13). Sale de los pesos y máximos. */
-const PUNTAJE_MAXIMO = PESOS.profundidad * MAX_PROFUNDIDAD + PESOS.frecuencia * MAX_FRECUENCIA;
+import { MAX_FRECUENCIA, MAX_PROFUNDIDAD, PUNTAJE_MAXIMO } from '@/lib/severidad';
 
 /**
  * De dónde salió el puntaje (M-03 del prototipo). El técnico que va a validar o a reclasificar

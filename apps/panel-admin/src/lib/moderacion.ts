@@ -51,7 +51,7 @@ export const TEXTOS_ACCION: Record<
   fusionar: {
     titulo: 'Fusionar como duplicado',
     ayuda:
-      'Lo retira del mapa público y lo suma al reporte canónico, que tiene que existir y estar validado.',
+      'Lo retira del mapa público y lo suma a un reporte validado cercano, que es el que se conserva.',
     confirmar: 'Confirmar fusión',
   },
   reabrir: {

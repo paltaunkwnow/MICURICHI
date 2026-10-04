@@ -16,6 +16,7 @@ import {
   textoAnuncio,
   textoVerificadas,
 } from '@/lib/ejecutivo';
+import { CriteriosSeveridad } from './CriteriosSeveridad';
 import { GraficaInundaciones, GraficaTrabajo } from './Graficas';
 import { PestanasSeveridad } from './PestanasSeveridad';
 
@@ -69,44 +70,6 @@ export interface PropsPanelEjecutivo {
   uvSeleccionada?: { id: string; codigo: string; nombre: string } | null;
   onSeleccionarUv?: (uv: { id: string; codigo: string; nombre: string } | null) => void;
 }
-
-const CRITERIOS_SEVERIDAD = [
-  {
-    id: 'critica' as const,
-    etiqueta: 'Crítica (y Alta)',
-    colorDot: '#B3200A',
-    prioridad: 'Prioridad 1 · Emergencia',
-    bordeActivo: 'border-red-500 bg-red-50/60 ring-2 ring-red-500/20 shadow-sm',
-    profundidad: 'Superior a 40 cm (al muslo o cintura / >70 cm) o recurrente a la rodilla',
-    impacto:
-      'Peligro para personas, corte total del tránsito vehicular y riesgo inminente de anegamiento en viviendas o predios.',
-    accion:
-      'Despacho prioritario de cuadrillas de emergencia, motobombas y auxilio municipal inmediato.',
-  },
-  {
-    id: 'media' as const,
-    etiqueta: 'Media',
-    colorDot: '#C98A0E',
-    prioridad: 'Prioridad 2 · Precaución',
-    bordeActivo: 'border-amber-500 bg-amber-50/60 ring-2 ring-amber-500/20 shadow-sm',
-    profundidad: '10 a 40 cm (nivel de la rodilla) o constante al tobillo',
-    impacto:
-      'Circulación vehicular con dificultad o desvíos, anegamiento en calzada y cruces, sumideros tapados o saturación temporal.',
-    accion:
-      'Programación de cuadrillas de desobstrucción, limpieza de sumideros y monitoreo técnico.',
-  },
-  {
-    id: 'baja' as const,
-    etiqueta: 'Baja',
-    colorDot: '#28934D',
-    prioridad: 'Prioridad 3 · Ordinaria',
-    bordeActivo: 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-500/20 shadow-sm',
-    profundidad: 'Menor a 10 cm (nivel del tobillo) de ocurrencia aislada',
-    impacto:
-      'Anegamiento superficial y charcos en cunetas o vías secundarias sin ingreso a inmuebles ni interrupción sustancial del tránsito.',
-    accion: 'Inspección rutinaria y mantenimiento preventivo en planes ordinarios de drenaje.',
-  },
-];
 
 /**
  * Pantalla del rol ejecutivo: la cifra grande, las pestañas de severidad y dos gráficas por
@@ -233,72 +196,8 @@ function Contenido(
         />
       </section>
 
-      {/* Explicación y significado de los niveles de severidad */}
-      <section className="tarjeta p-5 space-y-4" aria-labelledby="ej-titulo-criterios">
-        <div className="border-b border-slate-100 pb-3">
-          <h2 id="ej-titulo-criterios" className="titular text-xl">
-            Significado de los niveles de severidad
-          </h2>
-          <p className="text-sm text-tinta-600 mt-1">
-            Criterios técnicos de profundidad del agua, afectación en vía pública y tipo de
-            respuesta municipal.
-          </p>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-3">
-          {CRITERIOS_SEVERIDAD.map((c) => {
-            const destacada = pestana === c.id;
-            const seleccionada = pestana === 'todas' || destacada;
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => props.onCambiarPestana(c.id)}
-                className={`text-left rounded-xl border p-4 transition-all duration-200 cursor-pointer ${
-                  destacada
-                    ? c.bordeActivo
-                    : seleccionada
-                      ? 'border-slate-200 bg-slate-50/40 hover:border-slate-300'
-                      : 'border-slate-200 bg-white opacity-70 hover:opacity-100 hover:border-slate-300'
-                }`}
-                aria-pressed={destacada}
-              >
-                <div className="flex items-center gap-2">
-                  <span
-                    className="flex h-3 w-3 rounded-full shrink-0"
-                    style={{ backgroundColor: c.colorDot }}
-                    aria-hidden="true"
-                  />
-                  <span className="font-bold text-tinta-900">{c.etiqueta}</span>
-                  <span className="ml-auto rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-tinta-700">
-                    {c.prioridad}
-                  </span>
-                </div>
-                <div className="mt-3 space-y-2.5 text-sm">
-                  <div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
-                      Nivel de agua estimado
-                    </span>
-                    <p className="font-medium text-tinta-900">{c.profundidad}</p>
-                  </div>
-                  <div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
-                      Impacto en el entorno
-                    </span>
-                    <p className="text-tinta-700 leading-snug">{c.impacto}</p>
-                  </div>
-                  <div>
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-tinta-500 block">
-                      Respuesta operativa
-                    </span>
-                    <p className="text-tinta-700 leading-snug">{c.accion}</p>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </section>
+      {/* Qué significa cada nivel: la fórmula y los rangos de puntaje, de contracts */}
+      <CriteriosSeveridad pestana={pestana} onCambiarPestana={props.onCambiarPestana} />
 
       <div className="grid gap-6 xl:grid-cols-2">
         {/* Lo único que cambia con la pestaña es esta gráfica. */}

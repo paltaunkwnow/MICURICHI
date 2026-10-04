@@ -48,10 +48,11 @@ async function sembrar(o: {
   const [r] = await ex.consultar<{ id: string }>(
     `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo,
        ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
-       severidad_version, severidad_manual, severidad_motivo, estado, creado_en, publicar_en)
+       severidad_version, severidad_manual, severidad_motivo, estado, estado_motivo, creado_en, publicar_en)
      VALUES (ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
        $1, 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte sembrado para el resumen ejecutivo',
-       'rodilla', 'ocasional', $2::severidad, 5, 2, $3::severidad, $4, $5::estado_reporte, $6::timestamptz, $6::timestamptz)
+       'rodilla', 'ocasional', $2::severidad, 5, 2, $3::severidad, $4, $5::estado_reporte,
+       CASE WHEN $5 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE NULL END, $6::timestamptz, $6::timestamptz)
      RETURNING id::text`,
     [
       o.distrito,

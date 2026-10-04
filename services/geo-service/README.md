@@ -1,6 +1,6 @@
 # geo-service — Parte 4 (servicio geoespacial)
 
-Fastify + PostGIS. Responde "¿en qué distrito, UV y manzana cae este punto?" y sirve las capas al mapa.
+Fastify + PostGIS. Responde "¿en qué distrito y UV cae este punto?" y sirve las capas al mapa.
 
 | Ruta | Qué hace |
 |---|---|

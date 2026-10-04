@@ -109,6 +109,7 @@ import {
 import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { AccesoRequerido } from './AccesoRequerido';
 import { Aviso } from './Aviso';
+import { ErrorDeFoto, PieDeRevision } from './AvisosDelReporte';
 import { CamaraReporte } from './CamaraReporte';
 import { ChipSeveridad } from './ChipSeveridad';
 import { CuentaRegresiva, TextoTrasEnviar } from './CuentaRegresiva';
@@ -680,7 +681,8 @@ export function FormularioReporte() {
 
   // Tras un rechazo, el paso del error ya está montado: se abre el bloque plegado si el mensaje
   // quedó adentro y se lleva la vista hasta él. Un mensaje que no se ve es un botón que no hace
-  // nada (TRASPASO §3.8).
+  // nada (TRASPASO §3.8). Se elige el primero del documento: los errores de campo (en el área con
+  // scroll) van antes que el aviso del envío (en el pie, que siempre está a la vista).
   useEffect(() => {
     if (!mostrarError) return;
     setMostrarError(false);
@@ -1376,11 +1378,7 @@ export function FormularioReporte() {
                 {fotos.length}/{MAX_FOTOS}
               </span>
             </div>
-            {errorFoto ? (
-              <Aviso tono="err" className="mt-3" data-testid="error-foto">
-                {errorFoto}
-              </Aviso>
-            ) : null}
+            {errorFoto ? <ErrorDeFoto mensaje={errorFoto} className="mt-3" /> : null}
             <MensajeDeCampo campo="fotos" mensaje={errores.fotos?.message} />
             <Aviso tono="ok" icono={ShieldCheck} className="mt-3">
               Antes de subirlas borramos los metadatos, incluida la ubicación que guarda la cámara.
@@ -1600,10 +1598,7 @@ export function FormularioReporte() {
               </Aviso>
             ) : null}
             {errorFoto ? (
-              <Aviso tono="err" className="mt-3.5" data-testid="error-foto">
-                <b className="mb-1 block text-[14.5px]">Foto sin subir</b>
-                {errorFoto}
-              </Aviso>
+              <ErrorDeFoto mensaje={errorFoto} titulo="Foto sin subir" className="mt-3.5" />
             ) : null}
 
             <fieldset className="mt-4.5">
@@ -1640,33 +1635,22 @@ export function FormularioReporte() {
               aria-hidden="true"
               className="sr-only"
             />
-
-            {errorEnvio ? (
-              <Aviso
-                tono="err"
-                className="mt-3.5"
-                data-testid="error-envio"
-                data-campo-con-error=""
-              >
-                {errorEnvio}
-              </Aviso>
-            ) : null}
           </div>
-          <div className="pie">
-            <button
-              type="submit"
-              data-testid="boton-enviar"
-              className="btn btn-bloque"
-              disabled={!puedeAvanzar(4, estadoAvance)}
-            >
-              {releyendo
+          {/* El aviso del envío va en el pie, junto al botón: el área de arriba hace scroll y un
+              aviso al final de ella quedaba debajo del pliegue (plan 2026-10-04, M-6.1). */}
+          <PieDeRevision
+            errorEnvio={errorEnvio}
+            deshabilitado={!puedeAvanzar(4, estadoAvance)}
+            textoBoton={
+              releyendo
                 ? 'Confirmando tu ubicación…'
                 : enviar.isPending
                   ? 'Enviando…'
                   : subir.isPending
                     ? 'Subiendo foto…'
-                    : 'Enviar reporte'}
-            </button>
+                    : 'Enviar reporte'
+            }
+          >
             <Aviso tono="info" className="mt-2" data-testid="aviso-demora">
               <b className="block">{textoDemora(demoraProximoS)}</b>
               Aparece en el mapa como «{TEXTO_SIN_VERIFICAR}» hasta que un técnico municipal lo
@@ -1676,7 +1660,7 @@ export function FormularioReporte() {
               Al enviar volvemos a leer tu ubicación para comprobar que el punto siga a {RADIO_M} m
               o menos de vos; no la guardamos. En el mapa nunca aparece quién reportó.
             </p>
-          </div>
+          </PieDeRevision>
         </>
       ) : null}
     </form>

@@ -1,5 +1,5 @@
 import { type QueryClient, type QueryFunctionContext, queryOptions } from '@tanstack/react-query';
-import type { VentanaResumen } from 'contracts';
+import type { PuntoLatLon, VentanaResumen } from 'contracts';
 import {
   obtenerAgregadosUv,
   obtenerCapasMapa,
@@ -12,6 +12,7 @@ import {
   obtenerUnidadesVecinales,
   type ParametrosConsulta,
 } from './api';
+import { parametrosCandidatosFusion } from './fusion-cercana';
 
 /**
  * Consultas de TanStack Query del panel, en un solo lugar para que las pantallas y las pruebas
@@ -20,6 +21,8 @@ import {
  * Bandeja, detalle, indicadores y ejecutivo se refrescan solos cada 10 s: un reporte publicado se
  * ve sin recargar. Con la pestaña oculta no se pide nada y al volver se pide una vez. api-core no
  * guarda estas cifras en caché, así que `staleTime` 0: lo que se muestra es lo último que se pidió.
+ * Los agregados por UV («UV con mayor incidencia») son cifras de geo-service y siguen el mismo
+ * ritmo, pero sin la marca de sondeo: esa cabecera es de api-core, que es quien tiene sesión.
  * La geometría (distritos, unidades vecinales) se pide una sola vez; la lista de capas del mapa
  * vence a los `PLAZO_LISTA_CAPAS_MS`, porque es la que trae la URL con huella de cada capa y un
  * administrador puede activar otra versión con la pantalla abierta.
@@ -29,12 +32,18 @@ export const INTERVALO_SONDEO_MS = 10_000;
 /** El panel ejecutivo muestra siempre el histórico completo: no tiene selector de período. */
 export const VENTANA_EJECUTIVO: VentanaResumen = 'todo';
 
-const SONDEO = {
+/** Ritmo de lo que se refresca solo: cada 10 s, nunca con la pestaña oculta, sin caché. */
+const REFRESCO = {
   refetchInterval: INTERVALO_SONDEO_MS,
   refetchIntervalInBackground: false,
   staleTime: 0,
-  meta: { sondeo: true },
 } as const;
+
+/**
+ * Lo mismo para lo que se pide a api-core: sus refrescos salen con `CABECERA_SONDEO`, para que un
+ * panel abierto en una pantalla no mantenga viva la sesión (`esSondeo`).
+ */
+const SONDEO = { ...REFRESCO, meta: { sondeo: true } } as const;
 
 const GEOMETRIA = { staleTime: Number.POSITIVE_INFINITY } as const;
 
@@ -83,6 +92,24 @@ export function consultaReporte(id: string) {
     queryKey: ['reporte', id],
     queryFn: (ctx) => obtenerReporte(id, ctx.signal, { sondeo: esSondeo(ctx) }),
     ...SONDEO,
+  });
+}
+
+/**
+ * Reportes validados cerca de uno, para elegir con cuál se fusiona. Usa el filtro `bbox` de la
+ * lista técnica (la que ve la coordenada exacta) con la caja del radio; la distancia exacta se
+ * resuelve después, en el cliente (`lib/fusion-cercana.ts`). Sale solo con el formulario de fusión
+ * abierto (`abierto`) y la clave lleva el radio y la caja, así que ampliar la búsqueda es otra
+ * consulta. No es una pantalla que se refresque sola: la pide la persona al abrir el formulario
+ * (renueva la sesión, sin marca de sondeo) y `staleTime` 0 vuelve a pedirla al reabrirlo.
+ */
+export function consultaCandidatosFusion(centro: PuntoLatLon, radioM: number, abierto: boolean) {
+  const params = parametrosCandidatosFusion(centro, radioM);
+  return queryOptions({
+    queryKey: ['reportes-candidatos-fusion', { bbox: params.bbox, radio_m: radioM }],
+    queryFn: (ctx) => obtenerReportes(params, ctx.signal),
+    enabled: abierto,
+    staleTime: 0,
   });
 }
 
@@ -138,11 +165,17 @@ export function consultaUnidadesVecinales() {
   });
 }
 
+/**
+ * Cuántos reportes tiene cada UV. Aunque salen de geo-service y llevan la clave `['geo', …]` (se
+ * invalidan con la capa), no son geometría: cambian con cada reporte, así que siguen el ritmo de
+ * las demás cifras y no la caché infinita de la geometría. Sin `meta.sondeo`: geo-service no tiene
+ * sesión que renovar.
+ */
 export function consultaAgregadosUv() {
   return queryOptions({
     queryKey: ['geo', 'agregados-uv'],
     queryFn: ({ signal }) => obtenerAgregadosUv(signal),
-    ...GEOMETRIA,
+    ...REFRESCO,
   });
 }
 

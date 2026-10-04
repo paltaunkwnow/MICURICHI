@@ -18,9 +18,10 @@ export async function resolverPunto(
 ): Promise<ResolverRespuesta> {
   const pt = 'ST_SetSRID(ST_MakePoint($1, $2), 4326)';
   // 1–2) UV que contienen el punto (ST_Intersects incluye el borde). Índice GIST vía && implícito.
-  // El PIP de distrito y el de manzana no dependen del resultado de la UV: van en paralelo
-  // para no encadenar cuatro idas y vueltas a la base en cada resolución.
-  const [uvs, distritoPip, mz] = await Promise.all([
+  // El PIP de distrito no depende del resultado de la UV: van en paralelo para no encadenar idas
+  // y vueltas a la base en cada resolución. La manzana ya no se consulta (contrato 0.17.0): corría
+  // en cada resolución y nadie la lee (el reporte dejó de guardarla en la migración 0010).
+  const [uvs, distritoPip] = await Promise.all([
     pool.query<FilaUv>(
       `SELECT id, codigo, nombre, distrito_id, version_capa, NULL::float AS distancia_m
        FROM geo.unidad_vecinal_vigente WHERE ST_Intersects(geom, ${pt}) ORDER BY id`,
@@ -28,10 +29,6 @@ export async function resolverPunto(
     ),
     pool.query<{ id: string; codigo: string; nombre: string }>(
       `SELECT id, codigo, nombre FROM geo.distrito_municipal_vigente WHERE ST_Intersects(geom, ${pt}) ORDER BY id LIMIT 1`,
-      [lon, lat],
-    ),
-    pool.query<{ id: string; codigo: string }>(
-      `SELECT id, codigo FROM geo.manzana_vigente WHERE ST_Contains(geom, ${pt}) ORDER BY id LIMIT 1`,
       [lon, lat],
     ),
   ]);
@@ -92,7 +89,8 @@ export async function resolverPunto(
     // en la UI si el punto cayó en el municipio pero sin UV asignable.
     distrito,
     unidad_vecinal: uv ? { id: uv.id, codigo: uv.codigo, nombre: uv.nombre } : null,
-    manzana: mz.rows[0] ?? null,
+    // Obsoleto (contrato 0.17.0): siempre null; geo-service ya no calcula el PIP de manzana.
+    manzana: null,
     version_capa: uv?.version_capa ?? null,
     en_limite: enLimite,
     asignado_por_proximidad: asignadoPorProximidad,

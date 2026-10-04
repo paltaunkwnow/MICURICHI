@@ -7,32 +7,14 @@ import {
 } from 'contracts';
 import { ejecutorPg, recalcularEntornoDeReporte } from 'db';
 import type { FastifyInstance } from 'fastify';
-import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { obtenerReporte } from '../consultas.js';
+import { IdReporteParam, resolverIdReporte } from '../id-reporte.js';
 import { condicionPublicado } from '../visibilidad.js';
 import { aFeature, type FilaReporte, vistaTecnica } from '../vistas.js';
 import { invalidarAgregadosEnVuelo } from './admin.js';
 
-/**
- * Los uuid se normalizan a minúsculas al entrar. La base los compara como uuid, pero aquí se
- * comparan como texto y `auditoria.entidad_id` es texto: sin normalizar, `/reportes/<ID EN
- * MAYÚSCULAS>` con el canónico en minúsculas pasaba la comprobación de «distinto» y el reporte
- * quedaba duplicado de sí mismo, y el historial de un reporte se repartía entre dos claves.
- */
-const IdParam = z.object({
-  id: z
-    .string()
-    .trim()
-    .refine(
-      (s) =>
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ||
-        /^[0-9a-f]{8}$/i.test(s),
-      { message: 'El id debe ser un UUID o un ID corto de 8 caracteres hexadecimales' },
-    )
-    .transform((s) => s.toLowerCase()),
-});
 const AFECTA_PUNTOS = new Set(['validado', 'resuelto']);
 
 export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
@@ -63,31 +45,12 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     let fusionadoEn =
       nuevo === 'duplicado' ? fusionadoEnCrudo?.trim().replace(/^#/, '').toLowerCase() : undefined;
 
-    if (nuevo === 'duplicado' && fusionadoEn) {
-      if (fusionadoEn.length === 8) {
-        const rCorto = await dep.pool.query<{ id: string; estado: string }>(
-          `SELECT id::text, estado::text FROM reporte_inundacion WHERE id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
-          [fusionadoEn],
-        );
-        if (rCorto.rows.length === 0) {
-          return {
-            ok: false,
-            error: 404,
-            codigo: 'NO_EXISTE',
-            mensaje: `No se encontró ningún reporte publicado con el ID corto "${fusionadoEn}".`,
-          };
-        }
-        if (rCorto.rows.length > 1) {
-          return {
-            ok: false,
-            error: 400,
-            codigo: 'ID_AMBIGUO',
-            mensaje: `El ID corto "${fusionadoEn}" coincide con más de un reporte. Usá el UUID completo.`,
-          };
-        }
-        fusionadoEn = rCorto.rows[0]!.id;
-      }
-    }
+    // El canónico, como UUID o ID corto, se resuelve solo entre los publicados (igual que el
+    // reporte que se modera). Null —inexistente, oculto o ambiguo— cae en la comprobación de más
+    // abajo («El reporte canónico no existe o no está publicado»).
+    if (nuevo === 'duplicado' && fusionadoEn)
+      fusionadoEn =
+        (await resolverIdReporte(dep.pool, fusionadoEn, condicionPublicado(''))) ?? undefined;
 
     if (fusionadoEn === id)
       return {
@@ -259,27 +222,15 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     }
   }
 
-  async function resolverId(id: string): Promise<string | null> {
-    if (id.length === 8) {
-      const r = await dep.pool.query<{ id: string }>(
-        `SELECT id::text FROM reporte_inundacion WHERE id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
-        [id],
-      );
-      if (r.rows.length === 1 && r.rows[0]) return r.rows[0].id;
-      return null;
-    }
-    return id;
-  }
-
   app.patch(
     '/api/v1/reportes/:id/estado',
     { preHandler: requerirRol('tecnico', 'admin') },
     async (req, res) => {
-      const p = IdParam.safeParse(req.params);
+      const p = IdReporteParam.safeParse(req.params);
       const b = ReporteCambiarEstadoSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-      const targetId = await resolverId(p.data.id);
+      const targetId = await resolverIdReporte(dep.pool, p.data.id, condicionPublicado(''));
       if (!targetId)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)
@@ -303,11 +254,11 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     '/api/v1/reportes/:id/fusionar',
     { preHandler: requerirRol('tecnico', 'admin') },
     async (req, res) => {
-      const p = IdParam.safeParse(req.params);
+      const p = IdReporteParam.safeParse(req.params);
       const b = ReporteFusionarSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-      const targetId = await resolverId(p.data.id);
+      const targetId = await resolverIdReporte(dep.pool, p.data.id, condicionPublicado(''));
       if (!targetId)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)
@@ -331,11 +282,11 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
     '/api/v1/reportes/:id/severidad',
     { preHandler: requerirRol('tecnico', 'admin') },
     async (req, res) => {
-      const p = IdParam.safeParse(req.params);
+      const p = IdReporteParam.safeParse(req.params);
       const b = ReporteReclasificarSchema.safeParse(req.body);
       if (!p.success)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
-      const targetId = await resolverId(p.data.id);
+      const targetId = await resolverIdReporte(dep.pool, p.data.id, condicionPublicado(''));
       if (!targetId)
         return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
       if (!b.success)

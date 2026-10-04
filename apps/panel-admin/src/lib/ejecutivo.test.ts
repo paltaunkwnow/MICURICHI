@@ -1,4 +1,4 @@
-import { CONFIG_DOMINIO, type ResumenEjecutivo, ResumenEjecutivoSchema } from 'contracts';
+import { BANDAS, CONFIG_DOMINIO, type ResumenEjecutivo, ResumenEjecutivoSchema } from 'contracts';
 import { describe, expect, it } from 'vitest';
 import {
   barrasInundaciones,
@@ -10,6 +10,7 @@ import {
   distritosCapaAnterior,
   marcasEje,
   PESTANAS,
+  rangoPuntajePestana,
   textoAnuncio,
   textoVerificadas,
 } from './ejecutivo';
@@ -33,6 +34,50 @@ describe('pestañas del panel ejecutivo', () => {
   it('las tres pestañas de severidad suman lo mismo que «Todas» (no se pierde ni se duplica)', () => {
     const c = conteosPorPestana(s);
     expect(c.critica + c.media + c.baja).toBe(c.todas);
+  });
+});
+
+describe('rango de puntaje de cada pestaña (de las bandas de contracts)', () => {
+  it('cada pestaña cubre exactamente las bandas de las severidades que suma', () => {
+    for (const p of PESTANAS) {
+      const bandas = BANDAS.filter((b) => p.severidades.includes(b.banda));
+      const r = rangoPuntajePestana(p.id);
+      expect(r.min, p.id).toBe(Math.min(...bandas.map((b) => b.min)));
+      expect(r.max, p.id).toBe(Math.max(...bandas.map((b) => b.max)));
+      expect(
+        r.bandas.map((b) => b.banda),
+        p.id,
+      ).toEqual(bandas.map((b) => b.banda));
+    }
+  });
+
+  it('«Crítica» junta dos bandas (alta y crítica); media y baja, una cada una', () => {
+    expect(rangoPuntajePestana('critica').bandas.map((b) => b.banda)).toEqual(['alta', 'critica']);
+    expect(rangoPuntajePestana('media').bandas.map((b) => b.banda)).toEqual(['media']);
+    expect(rangoPuntajePestana('baja').bandas.map((b) => b.banda)).toEqual(['baja']);
+  });
+
+  it('con la matriz v2 (CLAUDE.md §9.1): crítica y alta 8–13, media 5–7, baja 3–4, todas 3–13', () => {
+    const de = (id: Parameters<typeof rangoPuntajePestana>[0]) => {
+      const { min, max } = rangoPuntajePestana(id);
+      return [min, max];
+    };
+    expect(de('critica')).toEqual([8, 13]);
+    expect(de('media')).toEqual([5, 7]);
+    expect(de('baja')).toEqual([3, 4]);
+    expect(de('todas')).toEqual([3, 13]);
+  });
+
+  it('las tres pestañas de severidad no se pisan y juntas cubren los puntajes de «Todas»', () => {
+    const [c, m, b] = [
+      rangoPuntajePestana('critica'),
+      rangoPuntajePestana('media'),
+      rangoPuntajePestana('baja'),
+    ];
+    expect(b.max + 1).toBe(m.min);
+    expect(m.max + 1).toBe(c.min);
+    expect(b.min).toBe(rangoPuntajePestana('todas').min);
+    expect(c.max).toBe(rangoPuntajePestana('todas').max);
   });
 });
 

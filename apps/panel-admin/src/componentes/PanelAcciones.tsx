@@ -1,27 +1,32 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { type ReporteTecnicoFeature, type Rol, SEVERIDADES, type Severidad } from 'contracts';
-import { Check, EyeOff, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
-import { Aviso, type TipoAviso } from '@/componentes/Aviso';
 import {
-  cambiarEstado,
-  ErrorApi,
-  fusionarReporte,
-  obtenerReportes,
-  reclasificarSeveridad,
-} from '@/lib/api';
-import { etiquetaSeveridad, idCorto } from '@/lib/formato';
+  type PuntoLatLon,
+  type ReporteTecnicoFeature,
+  type Rol,
+  SEVERIDADES,
+  type Severidad,
+} from 'contracts';
+import { Check, EyeOff, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
+import { type FormEvent, useMemo, useState } from 'react';
+import { Aviso, type TipoAviso } from '@/componentes/Aviso';
+import { CandidatosFusion } from '@/componentes/CandidatosFusion';
+import { cambiarEstado, ErrorApi, fusionarReporte, reclasificarSeveridad } from '@/lib/api';
+import { consultaCandidatosFusion } from '@/lib/consultas';
+import { etiquetaSeveridad } from '@/lib/formato';
+import {
+  avisoRecorte,
+  candidatosCercanos,
+  puedeConfirmarFusion,
+  RADIO_FUSION_INICIAL_M,
+} from '@/lib/fusion-cercana';
 import {
   type AccionModeracion,
   accionesModeracion,
   cuerpoCambioEstado,
   TEXTOS_ACCION,
 } from '@/lib/moderacion';
-
-const RE_UUID_O_CORTO =
-  /^([0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 function describirError(e: unknown): string {
   if (e instanceof ErrorApi) {
@@ -33,12 +38,26 @@ function describirError(e: unknown): string {
   return e instanceof Error ? e.message : 'Error desconocido.';
 }
 
-export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature; rol: Rol }) {
+export function PanelAcciones({
+  reporte,
+  rol,
+  accionInicial = null,
+}: {
+  reporte: ReporteTecnicoFeature;
+  rol: Rol;
+  /**
+   * Formulario abierto al montar. La pantalla no lo usa (arranca cerrado): sirve a las pruebas, que
+   * corren sin DOM y no pueden hacer clic en el botón de la acción.
+   */
+  accionInicial?: AccionModeracion | null;
+}) {
   const p = reporte.properties;
   const cliente = useQueryClient();
-  const [accion, setAccion] = useState<AccionModeracion | null>(null);
+  const [accion, setAccion] = useState<AccionModeracion | null>(accionInicial);
   const [motivo, setMotivo] = useState('');
+  // Reporte canónico elegido de la lista de cercanos ('' = ninguno) y radio de esa búsqueda.
   const [canonicoId, setCanonicoId] = useState('');
+  const [radioFusion, setRadioFusion] = useState<number>(RADIO_FUSION_INICIAL_M);
   const [errorFormulario, setErrorFormulario] = useState<string | null>(null);
   const [mensaje, setMensaje] = useState<{ tipo: TipoAviso; texto: string } | null>(null);
 
@@ -68,6 +87,7 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
       setAccion(null);
       setMotivo('');
       setCanonicoId('');
+      setRadioFusion(RADIO_FUSION_INICIAL_M);
       setMensaje({ tipo: 'ok', texto: 'Reporte fusionado como duplicado del canónico.' });
       await refrescar();
     },
@@ -79,18 +99,31 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
   const puede = accionesModeracion(p.estado, rol);
   const hayAcciones = Object.values(puede).some(Boolean);
 
-  const candidatos = useQuery({
-    queryKey: ['reportes-candidatos-fusion'],
-    queryFn: () => obtenerReportes({ estado: 'validado', limite: '50' }),
-    enabled: accion === 'fusionar',
-  });
+  // Fusionar solo ofrece validados cerca de la coordenada exacta de este reporte, y la búsqueda
+  // sale únicamente con el formulario de fusión abierto (`lib/fusion-cercana.ts`).
+  const [lon, lat] = reporte.geometry.coordinates;
+  const centro = useMemo<PuntoLatLon>(() => ({ lon, lat }), [lon, lat]);
+  const busqueda = useQuery(consultaCandidatosFusion(centro, radioFusion, accion === 'fusionar'));
+  const cercanos = useMemo(
+    () => candidatosCercanos(busqueda.data?.features ?? [], { id: p.id, centro }, radioFusion),
+    [busqueda.data, p.id, centro, radioFusion],
+  );
+  const avisoDeRecorte = busqueda.data
+    ? avisoRecorte(busqueda.data.features.length, busqueda.data.total)
+    : null;
+  // Solo vale lo elegido que sigue en la lista: si otro técnico lo rechazó mientras tanto y la
+  // lista se actualizó, no queda nada elegido y «Confirmar fusión» se vuelve a deshabilitar.
+  const elegido = cercanos.find((c) => c.id === canonicoId) ?? null;
+  const estadoBusqueda = busqueda.data ? 'listo' : busqueda.isError ? 'error' : 'cargando';
 
   const abrirFormulario = (a: AccionModeracion) => {
     setAccion(a);
     setErrorFormulario(null);
     setMensaje(null);
-    if (a === 'fusionar' && !motivo.trim()) {
-      setMotivo('Duplicado del mismo punto');
+    if (a === 'fusionar') {
+      setCanonicoId('');
+      setRadioFusion(RADIO_FUSION_INICIAL_M);
+      if (!motivo.trim()) setMotivo('Duplicado del mismo punto');
     }
   };
 
@@ -103,22 +136,12 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
         setErrorFormulario('Escribí un motivo de al menos 3 caracteres.');
         return;
       }
-      const canonico = canonicoId.trim().replace(/^#/, '');
-      if (!RE_UUID_O_CORTO.test(canonico)) {
-        setErrorFormulario(
-          'Ingresá un ID de reporte válido (ID corto de 8 caracteres o UUID completo).',
-        );
-        return;
-      }
-      if (
-        canonico.toLowerCase() === p.id.toLowerCase() ||
-        (canonico.length === 8 && p.id.toLowerCase().startsWith(canonico.toLowerCase()))
-      ) {
-        setErrorFormulario('El reporte canónico tiene que ser otro reporte, no este mismo.');
+      if (!elegido) {
+        setErrorFormulario('Elegí de la lista el reporte con el que se fusiona.');
         return;
       }
       setErrorFormulario(null);
-      fusionar.mutate({ canonico_id: canonico, motivo: texto });
+      fusionar.mutate({ canonico_id: elegido.id, motivo: texto });
       return;
     }
     // Rechazar, resolver y reabrir se validan con el esquema del contrato, el mismo de api-core.
@@ -246,63 +269,21 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
           <p className="ayuda">{TEXTOS_ACCION[accion].ayuda}</p>
 
           {accion === 'fusionar' && (
-            <div className="flex flex-col gap-3">
-              <label htmlFor="canonico_id" className="font-semibold">
-                Reporte canónico (el que se conserva)
-              </label>
-
-              {candidatos.data?.features && candidatos.data.features.length > 0 && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-xs text-tinta-600">
-                    Elegí un reporte validado existente:
-                  </span>
-                  <select
-                    id="selector-canonico"
-                    className="campo text-sm"
-                    value={canonicoId}
-                    onChange={(ev) => setCanonicoId(ev.target.value)}
-                  >
-                    <option value="">-- Seleccionar de la lista de validados --</option>
-                    {candidatos.data.features
-                      .filter((f) => f.properties.id !== p.id)
-                      .map((f) => {
-                        const uv = f.properties.unidad_vecinal?.codigo
-                          ? `UV ${f.properties.unidad_vecinal.codigo}`
-                          : '';
-                        const desc = f.properties.descripcion
-                          ? f.properties.descripcion.slice(0, 45)
-                          : '';
-                        return (
-                          <option key={f.properties.id} value={f.properties.id}>
-                            [{idCorto(f.properties.id)}] {uv ? `${uv} - ` : ''}
-                            {desc}...
-                          </option>
-                        );
-                      })}
-                  </select>
-                </div>
-              )}
-
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-tinta-600">
-                  O escribí / pegá el ID (acepta ID corto de 8 caracteres o UUID):
-                </span>
-                <input
-                  id="canonico_id"
-                  name="canonico_id"
-                  className="campo font-mono text-sm"
-                  value={canonicoId}
-                  onChange={(ev) => setCanonicoId(ev.target.value)}
-                  placeholder="Ej: 44488f4b o UUID completo"
-                  autoComplete="off"
-                  required
-                />
-              </div>
-
-              <p className="text-xs text-tinta-600 bg-agua-50/50 p-2 rounded border border-agua-200">
-                ℹ️ El reporte canónico debe estar en estado <b>Validado</b>.
-              </p>
-            </div>
+            <CandidatosFusion
+              estado={estadoBusqueda}
+              radioM={radioFusion}
+              candidatos={cercanos}
+              aviso={avisoDeRecorte}
+              elegido={elegido?.id ?? ''}
+              onElegir={setCanonicoId}
+              onAmpliar={(radioM) => {
+                setCanonicoId('');
+                setRadioFusion(radioM);
+              }}
+              onReintentar={() => {
+                busqueda.refetch();
+              }}
+            />
           )}
 
           <div>
@@ -332,7 +313,7 @@ export function PanelAcciones({ reporte, rol }: { reporte: ReporteTecnicoFeature
               type="submit"
               className="btn btn-primario"
               data-testid="confirmar-accion"
-              disabled={ocupado}
+              disabled={accion === 'fusionar' ? !puedeConfirmarFusion(elegido, ocupado) : ocupado}
             >
               {ocupado ? 'Guardando…' : TEXTOS_ACCION[accion].confirmar}
             </button>
