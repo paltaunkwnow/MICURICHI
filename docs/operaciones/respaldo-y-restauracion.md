@@ -11,8 +11,8 @@
 | Objetos de fotos (volumen `fotos-data` o el bucket S3) | **Sí, aparte** | Las filas de `reporte_foto` sin el objeto dejan fotos rotas. El respaldo de la base NO las lleva. |
 | Tablas de `geo.*` (distritos, unidades vecinales, manzanas) | Van en el respaldo | Se podrían regenerar con el ETL desde `data/raw/`, pero los reportes guardan el id de su unidad vecinal y la versión con que se resolvieron: restaurarlas tal cual es lo seguro. |
 | `_migraciones` | **No, a propósito** | Se anota aparte cuál era la última; ver «Cómo se restaura». |
-| `data/processed/` | No | Es salida del ETL, reproducible con un comando (CLAUDE.md §6.10). |
-| `data/raw/` | **Sí, pero fuera de este sistema** | Es la entrega del municipio, inmutable. Debe estar en el almacenamiento del municipio, no solo aquí (§16, punto 2). |
+| `data/processed/` | No | Es salida del ETL, reproducible con un comando (CLAUDE.md §6.4, regla 2). |
+| `data/raw/` | **Sí, pero fuera de este sistema** | Es la entrega del municipio, inmutable. Debe estar en el almacenamiento del municipio, no solo aquí (CLAUDE.md §16, punto 1). |
 
 ## Cómo se restaura, y por qué el respaldo excluye `_migraciones`
 

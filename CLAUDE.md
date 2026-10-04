@@ -35,7 +35,7 @@
 
 **Territorio.** Santa Cruz de la Sierra, Bolivia `<a confirmar>`. Capas del municipio en shapefile, carpeta **`DM_UV_MZ_2025`**: distritos municipales (16), unidades vecinales (576) y manzanas (27 527), en EPSG:32720. Fuente oficial, vigencia y licencia `<a confirmar>`. Las manzanas son solo de render; el point-in-polygon resuelve distrito y UV.
 
-**Es** un inventario de reportes ciudadanos (percepción, no medición). **No es** un modelo hidráulico, ni un estudio de drenaje, ni un instrumento para decidir inversiones por sí solo (§9.5).
+**Es** un inventario de reportes ciudadanos (percepción, no medición). **No es** un modelo hidráulico, ni un estudio de drenaje, ni un instrumento para decidir inversiones por sí solo (§9.4).
 
 ---
 
@@ -111,14 +111,14 @@ flowchart LR
   C[(packages/contracts)] -.tipos y esquemas.-> WEB & ADM & API & GEO & ETL
 ```
 
-Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es el único que escribe reportes. `geo-service` es de **solo lectura**. Solo `packages/db` cambia el esquema, por migraciones. Solo el ETL escribe las tablas de capas. En la pila Docker el proxy Caddy es lo único que publica puertos (`https://localhost` y `https://panel.localhost`); las apps de Next reenvían `/api` y `/geo` a los servicios.
+Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es el único que escribe reportes. `geo-service` es de **solo lectura**. Solo `packages/db` cambia el esquema, por migraciones. Solo el ETL escribe las tablas de capas. En la pila Docker el proxy Caddy es lo único que publica puertos **hacia fuera** (`https://localhost` y `https://panel.localhost`); lo demás escucha solo en `127.0.0.1`; las apps de Next reenvían `/api` y `/geo` a los servicios.
 
 ### 4.3 Parte 1 — Frontend público (`apps/web-ciudadano/`)
 
 | Aspecto | Detalle |
 |---|---|
 | **Propósito** | Que cualquier vecino, desde el celular, vea el mapa y reporte un punto en menos de 2 minutos. |
-| **Responsabilidades** | Mapa MapLibre con capa base atribuida, UV y distritos, puntos con clustering; detalle con «NO SE HA VERIFICADO» visible (texto, icono y color de aviso) en el detalle, las tarjetas, las pastillas y la leyenda; formulario anclado a la posición del dispositivo («Compartir mi ubicación», precisión de 50 m o menos, círculo de 60 m, relectura de la posición al enviar); foto con la **cámara dentro de la página** (`getUserMedia`), **sin input de archivo** ni galería; permisos solo dentro del flujo de reporte; aviso de la demora y cuenta regresiva; «Mis reportes» desde la API; validación con Zod + React Hook Form; previsualización de la UV antes de enviar; login con correo o solo el usuario (se completa con `@curichi.local`); la página pública **no se refresca sola**; PWA; mobile-first; WCAG 2.2 AA; texto de limitaciones (§9.5) visible. |
+| **Responsabilidades** | Mapa MapLibre con capa base atribuida, UV y distritos, puntos con clustering; detalle con «NO SE HA VERIFICADO» visible (texto, icono y color de aviso) en el detalle, las tarjetas, las pastillas y la leyenda; formulario anclado a la posición del dispositivo («Compartir mi ubicación», precisión de 50 m o menos, círculo de 60 m, relectura de la posición al enviar); foto con la **cámara dentro de la página** (`getUserMedia`), **sin input de archivo** ni galería; permisos solo dentro del flujo de reporte; aviso de la demora y cuenta regresiva; «Mis reportes» desde la API; validación con Zod + React Hook Form; previsualización de la UV antes de enviar; login con correo o solo el usuario (se completa con `@curichi.local`); la página pública **no se refresca sola**; PWA; mobile-first; WCAG 2.2 AA; texto de limitaciones (§9.4) visible. |
 | **NO le corresponde** | Calcular severidad, distrito o UV; decidir la demora ni comprobar el radio (lo hace el servidor); moderar; almacenar fotos; hablar con la base; definir tipos de intercambio. |
 | **Entradas** | `GET /api/v1/reportes`, `/reportes/:id`, `/mis-reportes`, `/configuracion`, `/auth/yo`; `POST /geo/v1/resolver`; capas por `CapaInfo.url` (con huella). |
 | **Salidas** | `POST /api/v1/reportes` (con `dispositivo`) y `POST /api/v1/fotos`, con sesión; `POST /api/v1/auth/registro`, `/auth/login`, `/auth/logout`. |
@@ -357,7 +357,7 @@ Respuesta: `{ dentro_cobertura, distrito: {id, codigo, nombre}, unidad_vecinal: 
 | `POST /auth/login`, `/auth/logout`, `GET /auth/yo` | — / autenticado | Login con correo o con el usuario solo (se completa con `@curichi.local`); rota la sesión. `/auth/yo` suma `reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde` y, a técnico, admin y ejecutivo, `panel_url`. |
 | `GET /admin/capas` | técnico, admin | Versiones cargadas (el panel la muestra solo al admin). |
 | `POST /admin/capas/:id/activar` | admin | Activa una versión, con auditoría, e invalida la caché de `geo-service`. |
-| `GET /health`, `GET /ready` | público | `/ready` prueba la base, `geo-service` y el almacén de fotos (escribiendo y borrando un archivo en disco, o S3); `503` solo si falla la base; lo demás, `200` con `degradado: true`. |
+| `GET /health`, `GET /ready` | público | `/ready` prueba la base, `geo-service` y el almacén de fotos (escribiendo y borrando un archivo en disco y mirando que quede espacio sobre `FOTOS_MIN_LIBRE_BYTES`, o S3); `503` solo si falla la base; lo demás, `200` con `degradado: true` (`fotos: 'poco_espacio'` si falta disco). |
 | `GET /docs` | público en local | OpenAPI UI. |
 
 ### 7.6 Endpoints de `geo-service` (prefijo `/geo/v1`)
@@ -388,7 +388,7 @@ Respuesta: `{ dentro_cobertura, distrito: {id, codigo, nombre}, unidad_vecinal: 
 | Node.js | 24.x LTS | `.nvmrc` y `engines`; no usar versiones *Current* |
 | pnpm / Turborepo | 12.4.x / 2.10.x | |
 | TypeScript | 5.9.x | `strict: true`; fijada a propósito (no subir a 7 sin ADR) |
-| Next.js / React | 16.3.6+ / 19.3.x | App Router; 16.3.6 corrige una RCE crítica en `next/og` |
+| Next.js / React | 16.3.6+ / 19.3.x | App Router; 16.3.6 por el aviso crítico que marcó `pnpm audit` el 2026-10-03 (`next/og`) |
 | Tailwind / TanStack Query / Zod / React Hook Form | 4.3 / 5.102 / 4.6 / 7.88 | |
 | MapLibre GL JS | 6.9.x | sin servicios propietarios |
 | Fastify / Drizzle ORM | 5.12.x / 0.45.x | geometría con SQL tipado de Drizzle |
@@ -497,10 +497,10 @@ Los paquetes se llaman igual que su carpeta (`pnpm --filter <nombre>`).
 | `Mi-Curichi.exe` | **Arranque con un clic** (raíz del repo): enciende Docker Desktop si hace falta, levanta los perfiles `servicios` y `minio`, espera a que todo esté sano y abre `https://localhost`. Menú: panel, estado, registros, actualizar con `--build`, compartir con amigos (túneles de Cloudflare que se cierran al salir), E2E, detener. Flags `--iniciar [--sin-navegador]`, `--estado`, `--detener`, `--ayuda`. Se compila con `powershell -ExecutionPolicy Bypass -File scripts/lanzador/compilar.ps1` (el `.exe` no se versiona). |
 | `docker compose up -d` | Sin perfiles, solo `postgis`. Perfiles: `servicios` (migraciones, `api-core`, `geo-service`, las dos apps y Caddy, lo único con puertos hacia fuera), `minio`, `respaldos`, `observabilidad`. Pila completa: `docker compose --profile servicios --profile minio up -d --build`. Nunca `docker compose down` sobre la base del usuario. |
 | `pnpm install` / `pnpm dev` | Instala; `dev` levanta api-core 3001, geo-service 3002, web 3000 y panel 3100 (no levanta la base). |
-| `pnpm db:migrate` / `db:generate` / `db:seed:samples` | Migraciones (rol dueño, `DATABASE_URL`); nueva migración; cuentas de desarrollo y reportes sintéticos. En producción: el job `migraciones` del perfil `servicios` (`node node_modules/db/dist/cli/migrar.js [--hasta NNNN]`). |
+| `pnpm db:migrate` / `db:generate` / `db:seed:samples` | Migraciones (rol dueño, `DATABASE_URL`); nueva migración; cuentas de desarrollo y reportes sintéticos. En producción: el job `migraciones` del perfil `servicios` (`node node_modules/db/dist/cli/migrar.js [--hasta NNNN] [--publicar-nuevos-existentes]`; en `packages/db`, `pnpm --filter db migrate:prod`). La 0015 aborta si quedan `nuevo` enviados con la regla anterior, salvo con `--publicar-nuevos-existentes`. |
 | `pnpm db:local` | Alternativa sin Docker (PGlite en 5433). |
 | `pnpm etl:inspect` / `etl:run` / `etl:load` / `etl:all` / `etl:test` | ETL (§6), con `-- --version DM_UV_MZ_2025 [--capa …]`. |
-| `pnpm lint` / `typecheck` / `test` / `build` | Todo el monorepo vía Turborepo (en esta máquina, con `--concurrency=1`). |
+| `pnpm lint` / `typecheck` / `test` / `build` | `lint` es `biome check .` sobre todo el repo; `typecheck`, `test` y `build` van por Turborepo (en esta máquina, con `--concurrency=1`). |
 | `node e2e/scripts/correr-local.mjs --grupo G1…G5\|todos` | **E2E local**: levanta los servicios contra la base aparte `curichi_e2e` (nunca `curichi`) con el entorno de prueba y corre Playwright por grupos. Exige los puertos 3000–3002 y 3100 libres y 2,5 GB de RAM libre. |
 | `pnpm contracts:build` | Regenera OpenAPI y `dominio.json`. |
 | `pnpm secretos` / `pnpm auditoria` | Escaneo de secretos y `pnpm audit --audit-level high` (igual que el CI). |

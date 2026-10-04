@@ -110,11 +110,11 @@
 
 ### 7.1 Confirman decisiones ya tomadas en `CLAUDE.md`
 
-- **Moderación previa** (§7.3: nada se publica en `nuevo`) — coincide con PetaBencana, Ushahidi y SeeClickFix.
+- **Moderación previa** (en septiembre de 2026, nada se publicaba en `nuevo`) — coincidía con PetaBencana, Ushahidi y SeeClickFix. Desde el ADR 0006 (2026-09-26), `nuevo` se publica sin moderación previa como «NO SE HA VERIFICADO» (CLAUDE.md §7.3).
 - **Privacidad del reportante** (§13: jitter, reporte anónimo) — ninguna plataforma relevada expone identidad en el mapa público.
 - **Capa base libre con atribución** (§14.3) — viable gracias a OSM/HOT; ninguna de las plataformas relevadas depende de un servicio propietario de pago.
 - **Punto crítico por DBSCAN** (§9.2) — es la capacidad que **ninguna** otra plataforma de reporte tiene, y por lo tanto el argumento principal frente al municipio.
-- **Exportación con nota metodológica** (§9.5) — SIATA publica datos crudos; FixMyStreet es código abierto. Es práctica de la categoría, no un extra.
+- **Exportación con nota metodológica** (CLAUDE.md §9.4) — SIATA publica datos crudos; FixMyStreet es código abierto. Es práctica de la categoría, no un extra.
 
 ### 7.2 Abren preguntas para el usuario (no se implementa nada sin aprobación)
 

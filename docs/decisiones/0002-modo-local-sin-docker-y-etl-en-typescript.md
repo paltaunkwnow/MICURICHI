@@ -16,7 +16,7 @@ Restricciones que había que respetar:
 - El SQL debía ser el mismo que contra PostgreSQL real: `ST_Contains`, índices GIST,
   `ST_ClusterDBSCAN`, `geography` para distancias en metros.
 - Migrar a Docker en la Fase 2 no podía exigir reescribir código de los servicios.
-- `data/raw/` es inmutable y el pipeline debe seguir siendo reproducible con un comando (§6.10).
+- `data/raw/` es inmutable y el pipeline debe seguir siendo reproducible con un comando (§6.10 en su momento; hoy CLAUDE.md §6.4).
 
 ## Decisión
 
@@ -40,8 +40,9 @@ Restricciones que había que respetar:
 - La Fase 1 corre completa en la máquina disponible: migraciones, seeds, servicios, apps y E2E.
 - No hay cambio de código para pasar a Docker: basta apuntar `DATABASE_URL` al 5432 y usar el
   `docker-compose.yml` que ya está en el repositorio.
-- Los comandos equivalentes de GDAL y tippecanoe quedan documentados en `CLAUDE.md` §6 como
-  referencia para cuando existan.
+- Los comandos equivalentes de GDAL y tippecanoe quedaron documentados en `CLAUDE.md` §6 como
+  referencia hasta el 2026-10-03, cuando se quitaron del manual por no usarse; siguen en el
+  historial (`git show 2bf512b:CLAUDE.md`).
 
 **En contra / riesgos asumidos**
 

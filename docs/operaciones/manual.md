@@ -161,7 +161,7 @@ Es la entrega de capas administrativas del **Gobierno Autónomo Municipal de San
 Sierra** `<organismo exacto a confirmar>`, con fecha de archivo 2025-03-05. Vive en
 `data/raw/DM_UV_MZ_2025/`, que es **inmutable**: no se renombra, no se corrige un `.dbf`, no se
 añade un `.prj` a mano. Una corrección del origen es una versión nueva con su propio
-`MANIFEST.md` (CLAUDE.md §6.10).
+`MANIFEST.md` (CLAUDE.md §6.1).
 
 | Archivo | Capa | Features | Campos que usa el ETL |
 |---|---|---:|---|
@@ -172,7 +172,7 @@ añade un `.prj` a mano. Una corrección del origen es una versión nueva con su
 Los tres vienen en **EPSG:32720** (WGS 84 / UTM 20S, declarado en el `.prj`) y **UTF-8** (`.cpg`).
 El ETL reproyecta a EPSG:4326, que es lo único que sale hacia la web.
 
-**No se versionan en git** (§6.10.3): `.gitignore` deja pasar únicamente el `MANIFEST.md`, que
+**No se versionan en git** (CLAUDE.md §6.4, regla 3): `.gitignore` deja pasar únicamente el `MANIFEST.md`, que
 lleva el `sha256` de cada archivo. Antes de trabajar con la carpeta conviene comprobar que es la
 misma entrega:
 

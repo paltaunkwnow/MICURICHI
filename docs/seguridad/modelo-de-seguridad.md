@@ -29,7 +29,7 @@ nada a lo que aplicar un límite que signifique algo.
 
 Que exista una cuenta **no** significa que el reporte deje de ser anónimo hacia fuera: `autor_id`
 no sale en ninguna vista pública, ni el correo, ni el nombre. Lo sabe el municipio, no el mapa.
-CLAUDE.md §13 y §16.4 lo recogen desde el 2026-09-26.
+CLAUDE.md §13 (fila «Cuenta y autor») lo recoge desde el 2026-09-26.
 
 Las lecturas públicas siguen saliendo del navegador **sin cookies** (`credentials: 'omit'`).
 Ya no hace falta —el servidor no puede cambiar de representación por una cookie— pero es gratis y

@@ -275,7 +275,7 @@ pública", que antes fallaba.
 ## 4. Decisiones técnicas que conviene conocer antes de tocar nada
 
 1. **PostGIS corre dentro de Node**, no en Docker: PGlite compilado a WebAssembly más la extensión oficial `@electric-sql/pglite-postgis` (marcada como experimental por sus autores), expuesta por el protocolo de PostgreSQL con `@electric-sql/pglite-socket`. `api-core` y `geo-service` se conectan con el driver `pg` normal y la misma `DATABASE_URL` que usarían contra Docker, así que **migrar a Docker no exige cambios de código**: basta apuntar `DATABASE_URL` al 5432 y usar el `docker-compose.yml` que ya está en el repositorio.
-2. **El ETL está escrito en TypeScript con mapshaper y turf**, no con GDAL y Python, porque la máquina no tiene esas herramientas ni permisos para instalarlas. Los comandos equivalentes de GDAL y tippecanoe quedaron documentados en `CLAUDE.md` §6 como referencia.
+2. **El ETL está escrito en TypeScript con mapshaper y turf**, no con GDAL y Python, porque la máquina no tiene esas herramientas ni permisos para instalarlas. Los comandos equivalentes de GDAL y tippecanoe estuvieron en `CLAUDE.md` §6 como referencia hasta el 2026-10-03 (`git show 2bf512b:CLAUDE.md`).
 3. **Las teselas se generan al vuelo** con `geojson-vt` y `vt-pbf` dentro de `geo-service`, en lugar de precompilarlas con tippecanoe. Una capa pasa a teselas automáticamente cuando su GeoJSON web supera 5 MB.
 4. **Las fotos se guardan en disco** (`infra/.storage/fotos`) tras un adaptador con interfaz de tipo S3. Cambiar a MinIO o S3 es implementar esa interfaz.
 5. **Las contraseñas usan scrypt** de Node, no Argon2id, para no depender de binarios nativos. Está anotado como pendiente para la Fase 2.
@@ -821,7 +821,7 @@ Con `api-core` parado (probado parando el contenedor), la app pública no daba n
 
 | Dónde | Qué decía con la API caída | Por qué importa |
 |---|---|---|
-| Mapa público | «Todavía nadie reportó en esta zona» | Es una afirmación sobre el barrio construida a partir de un fallo de red, y justo la contraria a la que el propio sistema advierte en `CLAUDE.md` §9.5. En móvil ni siquiera eso: mapa vacío y silencio. |
+| Mapa público | «Todavía nadie reportó en esta zona» | Es una afirmación sobre el barrio construida a partir de un fallo de red, y justo la contraria a la que el propio sistema advierte en `CLAUDE.md` §9.4. En móvil ni siquiera eso: mapa vacío y silencio. |
 | «Mis reportes» | Todos los reportes como «En revisión» | Un reporte ya validado y publicado se mostraba como pendiente. `useQueries` trataba cualquier error igual que el 404 que sí significa «en revisión». |
 | `/mis-reportes/<lo-que-sea>` | Línea de tiempo completa: «Mi reporte · En revisión · Lo enviaste ✓» | Para un identificador inventado. El seguimiento se apoya en dos fuentes —el navegador y la API— y, cuando ninguna sabe nada, dibujaba el reporte igual. |
 
@@ -928,10 +928,10 @@ No todo lo mirado estaba roto, y conviene dejarlo escrito para no volver a mirar
 
 | Qué falta | Quién lo tiene que dar | Sin ello |
 |---|---|---|
-| Los shapefiles reales `DM_UV_MZ_2025` (DM.shp, UV.shp, MZ.shp con sus `.dbf`, `.prj`, `.shx`, `.cpg`) | El usuario; `data/raw/` no se versiona por decisión de `CLAUDE.md` §6.10.3 y solo conserva el `MANIFEST.md` con sus sha256 | La base sirve las capas **sintéticas** (3 distritos, 12 UV, 1152 manzanas, todas con «(sintético)» en el nombre) en vez de las reales (16, 582 y 27 817). El ETL ya está configurado y verificado para ellas en `pipelines/geodata-etl/config/capas.yaml`: basta copiar la carpeta y correr `pnpm etl:all` |
+| Los shapefiles reales `DM_UV_MZ_2025` (DM.shp, UV.shp, MZ.shp con sus `.dbf`, `.prj`, `.shx`, `.cpg`) | El usuario; `data/raw/` no se versiona por decisión de `CLAUDE.md` §6.4, regla 3 y solo conserva el `MANIFEST.md` con sus sha256 | La base sirve las capas **sintéticas** (3 distritos, 12 UV, 1152 manzanas, todas con «(sintético)» en el nombre) en vez de las reales (16, 582 y 27 817). El ETL ya está configurado y verificado para ellas en `pipelines/geodata-etl/config/capas.yaml`: basta copiar la carpeta y correr `pnpm etl:all` |
 | Dominio, certificado y proxy de entrada | El municipio | No se puede poner `COOKIE_SEGURA=1` con sentido, ni HSTS, ni fijar `TRUST_PROXY` al número de saltos real, del que dependen el rate limit y el `ip_hash` |
-| Decisión sobre el alojamiento | El usuario (§16, punto 6) | Sigue sin poder cerrarse la Fase 2 |
-| Validación de los parámetros de dominio con el técnico municipal | El municipio (§16, punto 7) | Severidad, radio de 25 m, jitter de 30 m y límites siguen siendo propuestas |
+| Decisión sobre el alojamiento | El usuario (CLAUDE.md §16, punto 2) | Sigue sin poder cerrarse la Fase 2 |
+| Validación de los parámetros de dominio con el técnico municipal | El municipio (CLAUDE.md §16, punto 3) | Severidad, radio de 25 m, jitter de 30 m y límites siguen siendo propuestas |
 
 ### 11.10 Estado al cerrar la Fase 5
 
@@ -1376,8 +1376,8 @@ puede enviar **un reporte cada 60 minutos**. El detalle de seguridad —qué se 
 atacó y con qué resultado, riesgos nuevos— está en
 [`docs/seguridad/auditoria-2026-09.md` §9](seguridad/auditoria-2026-09.md).
 
-> **Pendiente de decisión del usuario:** CLAUDE.md §13 y §16.4 siguen describiendo el reporte
-> anónimo sin cuenta. No se editaron porque CLAUDE.md solo se toca con autorización.
+> **Resuelto (ver «Reporte con cuenta obligatoria» más abajo):** CLAUDE.md §13 exige cuenta desde
+> el 2026-09-26.
 
 Qué cambió, por dónde empezar a leer:
 

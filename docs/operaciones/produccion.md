@@ -59,7 +59,7 @@ Mientras falte cualquiera de estos, el sistema **no** se abre al público.
       hay que borrar nada a mano en los navegadores: ver «Cachés HTTP».
 - [ ] Probar cámara y ubicación en teléfonos reales: iPhone con Safari, Android con Chrome y los
       navegadores internos de WhatsApp, Facebook e Instagram. Anotar la resolución real de la foto.
-- [ ] Validar con el municipio los parámetros (`CLAUDE.md` §16.7): radio de 60 m, precisión de
+- [ ] Validar con el municipio los parámetros (`CLAUDE.md` §16, punto 3): radio de 60 m, precisión de
       50 m, 10 min de antigüedad de la posición, demoras de 1 y 4 min, 3 reportes y 12 fotos por
       día, 10 altas por IP y por día, WebP de calidad 80, matriz de severidad, radio de recurrencia
       de 25 m, jitter de 30 m y rate limit de 10 reportes por hora e IP.
@@ -67,7 +67,7 @@ Mientras falte cualquiera de estos, el sistema **no** se abre al público.
       y el peso real de las fotos (`SELECT count(*), avg(bytes) FROM reporte_foto;`). Ver «Fotos en
       producción».
 - [ ] Retención acordada con el municipio de `ip_hash`, de los datos personales y de las fotos de
-      reportes rechazados (`CLAUDE.md` §16.11). Ver «Datos personales».
+      reportes rechazados (`CLAUDE.md` §16, punto 4). Ver «Datos personales».
 - [ ] `ALERTAS_WEBHOOK_URL` con una alerta de prueba recibida de verdad, un vigilante **externo**
       contra los dos dominios y el envío de logs a un almacén con retención. Ver «Observabilidad».
 - [ ] La suite completa contra el PostgreSQL de producción antes de abrir, y `pnpm privilegios` en
@@ -574,7 +574,7 @@ recibieron la invalidación se enteran en 10 s o menos.
       de unos 100 m de lado y el desplazamiento público llega a 30 m, así que publicar las dos
       cosas juntas dejaba la vivienda en la intersección de las dos, bastante más estrecha que el
       desplazamiento solo. En vía pública sí se publica: ahí el punto ya sale en su sitio.
-- [ ] `PENDIENTE` Retención acordada con el municipio (§16, punto 11 de `CLAUDE.md`).
+- [ ] `PENDIENTE` Retención acordada con el municipio (§16, punto 4 de `CLAUDE.md`).
 - [x] Respaldos cifrados (gpg, AES-256) antes de salir de la máquina: contienen correos de
       técnicos y coordenadas exactas. La clave (`RESPALDO_CLAVE_CIFRADO`) se guarda también fuera
       del servidor.
@@ -1040,7 +1040,7 @@ por cada fila borrada. Con los índices puestos, el mismo borrado de 2 000 000 d
 
 | Qué | Estado | Por qué |
 |---|---|---|
-| Un solo punto crítico gigante | **Abierto** | Con un millón de reportes densos, DBSCAN con `minpoints = 1` encadenó los 750 021 publicables en **un solo** punto crítico. Es la limitación documentada en CLAUDE.md §9.2 llevada al extremo. El radio de 25 m es un parámetro de dominio que §16 (punto 7) deja pendiente de validar con el técnico municipal: no es una decisión de ingeniería. Lo que sí se arregló es que eso ya no revienta el proceso ni bloquea una petición HTTP. |
+| Un solo punto crítico gigante | **Abierto** | Con un millón de reportes densos, DBSCAN con `minpoints = 1` encadenó los 750 021 publicables en **un solo** punto crítico. Es la limitación documentada en CLAUDE.md §9.2 llevada al extremo. El radio de 25 m es un parámetro de dominio que §16 (punto 3) deja pendiente de validar con el técnico municipal: no es una decisión de ingeniería. Lo que sí se arregló es que eso ya no revienta el proceso ni bloquea una petición HTTP. |
 | Rate limiting por proceso | **Abierto, deliberado** | Ver arriba. Con `--scale` el límite por IP se multiplica por el número de réplicas hasta que haya un almacén compartido o el límite se ponga en el proxy de entrada. |
 | Fotos en disco | **Modo oficial en la VPS** (ADR 0006) | Correcto en una máquina: sus réplicas comparten el volumen, con guarda de espacio y alertas. Para varias máquinas, `AlmacenS3` existe, está probado contra MinIO y se activa con `S3_ENDPOINT`. Abiertos: la copia de las fotos fuera de la VPS y el traslado manual de las ya guardadas si se pasa a S3. |
 | `CREATE INDEX` bloquea escrituras | **Aceptado** | Una migración que crea un índice toma un lock que impide escribir en la tabla. Medido: 0,95 s con 750 000 filas indexadas. A diez millones serían unos 10 s de escrituras bloqueadas. Si eso deja de ser tolerable, hace falta `CREATE INDEX CONCURRENTLY`, que no puede correr dentro de una transacción y obliga a cambiar el ejecutor de migraciones. |
