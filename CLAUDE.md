@@ -14,8 +14,8 @@
 6. **No inventar** normativas, versiones, cifras ni fuentes. Lo no verificado se escribe como `<a confirmar>`.
 7. **Ningún secreto en el repo.** Todo por variables de entorno con `.env.example` sin valores reales.
 8. **La ubicación de un reporte es dato sensible.** Vista pública con precisión degradada cuando corresponda; identidad del reportante nunca en el mapa público. La posición del dispositivo, que se usa para comprobar el radio de 60 m, **nunca se guarda ni se registra en logs**. Los permisos de ubicación y de cámara se piden **solo al reportar**, nunca al cargar la web.
-9. **Antes de programar cualquier parte: plan corto → aprobación → código.** Sin excepciones.
-10. **Probar antes de tocar.** Quien edita código corre antes las pruebas del paquete y las vuelve a correr después: lo que estaba verde no puede quedar rojo, y lo que ya estaba rojo se informa, no se arregla de pasada. El proceso formal es `/sdd` (`docs/proceso/sdd.md`), solo cuando el usuario lo pide.
+9. **Antes de programar: plan → aprobación → reparto.** El agente principal, con el modelo más potente, arma el plan con metas verificables; el usuario lo aprueba; recién entonces se reparte a subagentes según su nivel (§12.4). Sin excepciones.
+10. **Probar antes de tocar y verificar al terminar.** Quien edita código corre antes las pruebas del paquete y las vuelve a correr después: lo que estaba verde no puede quedar rojo, y lo que ya estaba rojo se informa, no se arregla de pasada. **Toda función nueva o arreglo termina con la verificación SDD hecha por subagentes** (§12.4), aunque no se haya pedido `/sdd`. El `/sdd` completo (`docs/proceso/sdd.md`), solo cuando el usuario lo pide.
 11. **Alcance de la Misión 1 cerrado** (§3). Todo lo demás va al backlog (§15).
 
 ---
@@ -129,7 +129,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 | Aspecto | Detalle |
 |---|---|
 | **Propósito** | Que el técnico convierta reportes crudos en un inventario validado, exportable y consultable. |
-| **Responsabilidades** | Login de técnico, admin y ejecutivo (una cuenta ciudadana no entra). **Bandeja**: tabla y mapa sincronizados con filtros (distrito, UV, severidad, estado, fechas); clic en una zona del mapa pone su filtro con el id real de la capa y los selectores la muestran; clic en un punto resalta su fila y abre una tarjeta con «Ver detalle»; interruptor «Filtrar por el área del mapa» (encendido por defecto) que filtra por el área visible (`bbox` en la URL) y un chip «Mirando: Distrito X · UV Y». **Moderación posterior a la publicación**: validar, rechazar (con motivo), fusionar (también por ID corto de 8 caracteres), reclasificar severidad (con motivo); la bandeja y el detalle avisan que un `nuevo` ya se ve en el mapa público y que rechazarlo lo retira; el admin tiene «Retirar del mapa» en un `validado`; el detalle muestra cómo se ubicó el punto, la precisión y la distancia al dispositivo; ficha imprimible del reporte. **Exportación** CSV y GeoJSON de la selección filtrada (técnico y admin). **Indicadores**: tarjetas, «Por severidad», «Por estado», dos tortas (por distrito y por UV, porcentaje sobre el total filtrado, las 8 mayores y «Otros», leyenda como tabla) con fichas de severidad que las filtran; clic en un distrito acota la torta de UV y clic en una UV abre la bandeja filtrada; estado en la URL; tabla «De una capa anterior». **Ejecutivo** (`/ejecutivo`, única pantalla del rol ejecutivo; técnico y admin también la ven): cifra grande de inundación activa (`nuevo` + `validado`) con «N verificadas · M en revisión», pestañas por severidad, dos gráficas por distrito («Inundaciones activas por distrito», con «Otros», y «Cómo va el trabajo»), la nota metodológica en una línea y un mapa de distritos y UV con selección de UV; sin coropleta, sin selector de período y **sin exportación**. **Capas**: solo el admin; aparece en el menú solo si hay una versión cargada sin activar; los demás roles ven «solo para administración». Bandeja, detalle, indicadores y ejecutivo se actualizan **cada 10 s** sin caché, solo con la pestaña visible, con consultas de sondeo (`x-curichi-sondeo`) que no renuevan la inactividad de la sesión. |
+| **Responsabilidades** | Login de técnico, admin y ejecutivo (una cuenta ciudadana no entra). **Bandeja**: tabla y mapa sincronizados con filtros (distrito, UV, severidad, estado, fechas); clic en una zona del mapa pone su filtro con el id real de la capa y los selectores la muestran; clic en un punto resalta su fila y abre una tarjeta con «Ver detalle»; interruptor «Filtrar por el área del mapa» (encendido por defecto) que filtra por el área visible (`bbox` en la URL) y un chip «Mirando: Distrito X · UV Y». **Moderación posterior a la publicación**: validar, rechazar (con motivo), fusionar (solo con un `validado` cercano, elegido de una lista ordenada por distancia: 100 m, ampliable a 300 m y 1 km; el panel no deja pegar un ID, la API sigue aceptando UUID o ID corto), reclasificar severidad (con motivo); la bandeja y el detalle avisan que un `nuevo` ya se ve en el mapa público y que rechazarlo lo retira; el admin tiene «Retirar del mapa» en un `validado`; el detalle muestra cómo se ubicó el punto, la precisión y la distancia al dispositivo; ficha imprimible del reporte. **Exportación** CSV y GeoJSON de la selección filtrada (técnico y admin). **Indicadores**: tarjetas, «Por severidad» como pestañas («Todo» y cada severidad, con números que no cambian al filtrar; la misma selección que la fila «Filtrar por severidad»), «Por estado», dos tortas (por distrito y por UV, porcentaje sobre el total filtrado, las 8 mayores y «Otros», leyenda como tabla) con fichas de severidad que las filtran; clic en un distrito acota la torta de UV y clic en una UV abre la bandeja filtrada; estado en la URL; tabla «De una capa anterior». **Ejecutivo** (`/ejecutivo`, única pantalla del rol ejecutivo; técnico y admin también la ven): cifra grande de inundación activa (`nuevo` + `validado`) con «N verificadas · M en revisión», pestañas por severidad, dos gráficas por distrito («Inundaciones activas por distrito», con «Otros», y «Cómo va el trabajo»), la nota metodológica en una línea y un mapa de distritos y UV con selección de UV; sin coropleta, sin selector de período y **sin exportación**. **Capas**: solo el admin; aparece en el menú solo si hay una versión cargada sin activar; los demás roles ven «solo para administración». Bandeja, detalle, indicadores y ejecutivo se actualizan **cada 10 s** sin caché, solo con la pestaña visible, con consultas de sondeo (`x-curichi-sondeo`) que no renuevan la inactividad de la sesión. |
 | **NO le corresponde** | Ejecutar el ETL; calcular severidad ni puntos críticos; analítica avanzada. |
 | **Salidas** | `PATCH /api/v1/reportes/:id/estado`, `PATCH /reportes/:id/severidad`, `POST /reportes/:id/fusionar`, `GET /exportar`, `GET /indicadores`, `POST /admin/capas/:id/activar`. |
 | **Definition of Done** | lint + typecheck + tests verdes; Playwright: login → filtrar por UV → validar → exportar GeoJSON; README; `.env.example`. |
@@ -163,7 +163,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 
 ### 4.8 Transversal — `packages/contracts` (custodia: Parte 3)
 
-- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio. Versión actual: **0.16.0**.
+- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio. Versión actual: **0.17.0**.
 - **Ninguna parte define un tipo de intercambio por su cuenta**: lo agrega aquí en una tarea que lo anuncie; la Parte 3 lo revisa.
 - Todo cambio de contrato sube la versión, se documenta en `packages/contracts/CHANGELOG.md` y regenera el OpenAPI (`pnpm --filter contracts build`; el CI comprueba que no cambie al regenerarlo).
 - El ETL importa `contracts` directamente; `dist/dominio.json` queda para consumidores en otros lenguajes.
@@ -532,6 +532,45 @@ Los paquetes se llaman igual que su carpeta (`pnpm --filter <nombre>`).
 - Un PR por tarea, con la parte y la carpeta en el título: `[P3 api-core] Máquina de estados del reporte`.
 - Plantilla `.github/PULL_REQUEST_TEMPLATE.md`: qué cambia, cómo verificarlo, cambios de contrato, hallazgos fuera de la carpeta, checklist DoD.
 - CI: lint, typecheck, test, build, secretos, audit; E2E en `main` y bajo demanda.
+
+### 12.4 Cómo trabaja Claude: plan, subagentes por nivel y verificación SDD
+
+Fijado por el usuario el 2026-10-04. Vale para todo trabajo que cambie código; un cambio chico tiene un plan chico, no ninguno.
+
+**1. Plan primero, con el modelo más potente.** El agente principal corre en el modelo más potente disponible (hoy Opus 5.5 o Fable 5.1; lo elige el usuario en el selector de la app, Claude no cambia su propio modelo). Arma el plan de **todo** el trabajo antes de repartir nada, y cada tarea declara:
+
+- parte y carpeta designada (§5) y lo que no puede tocar;
+- **meta verificable**: qué tiene que quedar funcionando y con qué comando o prueba se demuestra;
+- dependencias (qué tareas terminan antes);
+- **nivel** y modelo asignado (tabla de abajo).
+
+El plan pasa por la aprobación del usuario (regla 9). Después el agente principal no programa: reparte, integra, revisa cada resultado contra su meta y cierra.
+
+**2. Reparto por nivel e importancia.**
+
+| Nivel | Modelo del subagente | Tareas |
+|---|---|---|
+| **Raíz** | Opus 4.8 (`claude-opus-4-8`) | Lo que sostiene al resto: `packages/contracts`, esquema y migraciones, máquina de estados y visibilidad, severidad, autenticación y sesión, seguridad y privacidad (§13), PIP y capas, publicación diferida, Docker, CI y proxy, y **toda tarea de la que dependan otras**. También los subagentes `sdd-*`. |
+| **Estándar** | Sonnet 5.5 (`sonnet`) | Funciones acotadas a una carpeta que siguen un patrón que ya existe: pantallas y componentes, endpoints de lectura, pruebas nuevas, ETL sobre lo ya definido, documentación técnica. |
+| **Mecánico** | Haiku 4.5 (`haiku`) | Buscar y resumir código, inventarios, renombres, formato, correr un comando y transcribir la salida. |
+
+- Las tareas raíz van **primero** y nunca por debajo de Opus 4.8; las que dependen de ellas arrancan cuando la raíz alcanzó su meta.
+- Ante la duda, un nivel más arriba. Si un subagente no alcanza su meta en dos intentos, la tarea sube un nivel.
+- Ningún subagente corre en Opus 5.5.
+- Cómo se fija el modelo: Sonnet y Haiku con el parámetro `model` del Agent tool (`sonnet`, `haiku`). Opus 4.8 con un agente que lo tenga en su frontmatter (`trabajador-raiz` y los `sdd-*`), **sin** pasar `model`, que lo pisaría. El alias `opus` puede resolver a Opus 5.5: no se usa.
+- Un solo escritor por carpeta a la vez; lo que lee va en paralelo y lo que ejecuta (suites, builds, Docker, E2E) va en fila, mirando antes la memoria libre.
+- Cada subagente recibe su tarea, su meta, su carpeta y lo que no puede tocar; si escribe código, cumple la regla 10 con la salida pegada. Ningún subagente commitea.
+
+**3. Verificación SDD al terminar cada función o arreglo.** Ninguna función nueva ni arreglo se da por terminado sin esto, con los comandos de `.claude/skills/sdd/matriz-de-riesgo.md` para las banderas que active el cambio:
+
+1. **Antes de tocar:** el agente principal prepara lo que en `/sdd` hace F0 (banderas, foto `refs/sdd/<slug>`, carpeta `docs/sdd/<fecha>-<slug>/` con `plan.md`, el plan aprobado, cuyas metas hacen de criterios). `sdd-verificador` en modo **línea base**.
+2. **Al terminar, en paralelo:** `sdd-verificador` en modo **verificación** (comparación con la línea base, test por test); `sdd-revisor` contra las metas de `plan.md`; `sdd-auditor` si hay banderas `seguridad`, `privacidad`, `compartir` o `lanzadores`, o el diff toca `api-core`, fotos o autenticación.
+3. **En vivo:** con `ui`, `api` o `infra`, `sdd-verificador` en modo **en vivo** sobre la pila Docker, con permiso del usuario para reconstruirla.
+
+- Regresión (verde en la línea base, rojo después) = **bloqueante**: vuelve al subagente que la causó y no se cierra.
+- «Verde» sin la salida pegada no cuenta; lo que no se pudo ejecutar queda **no verificado**, con el motivo.
+- El cierre al usuario: qué se hizo, el resultado de la verificación (regresiones primero) y lo no verificado.
+- El `/sdd` completo (spec, pruebas en rojo, dos puertas) sigue siendo solo cuando el usuario lo pide.
 
 ---
 

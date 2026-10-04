@@ -130,7 +130,10 @@ servicio por vez y sin otro comando pesado en marcha:
    rojo es rojo de la corrida.
 4. **Solo con migración autorizada**, en este orden: imagen de api-core reconstruida;
    `docker compose exec -T postgis pg_dump -U curichi -Fc curichi > "$SCRATCH/curichi-antes-<slug>.dump"`
-   (fuera del repo: tiene datos personales); `docker compose --profile servicios run --rm migraciones`.
+   (fuera del repo: tiene datos personales); `docker compose --profile servicios run --rm --no-deps migraciones`
+   (sin `--no-deps`, `run` resuelve la dependencia y **recrea `postgis`** si su configuración del Compose
+   cambió, como pasó en la corrida `2026-10-04-arreglos-chicos` con `shm_size`; `postgis` ya tiene que
+   estar `healthy` antes de correrlo).
    Si la migración no tiene vuelta atrás (p. ej. `ALTER TYPE … ADD VALUE`), se avisó en la puerta 1.
 5. **Reemplazar:** `docker compose --profile servicios --profile minio up -d --no-deps <svc>`.
    Nunca `down`, nunca `postgis`, nunca `--force-recreate` de lo que no tocaste.
