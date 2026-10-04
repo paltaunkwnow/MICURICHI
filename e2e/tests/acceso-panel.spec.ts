@@ -8,6 +8,7 @@ import {
   esperarPila,
   PANEL,
   PUBLICA,
+  sesionDelPanelEnElNavegador,
 } from './ayudas';
 
 /**
@@ -149,5 +150,48 @@ test.describe('acceso al panel desde la app pública', () => {
       page.locator('#contenido').getByRole('link', { name: 'Iniciar sesión' }),
     ).toBeVisible();
     await expect(page.getByRole('link', { name: /panel (técnico|ejecutivo)/i })).toHaveCount(0);
+  });
+});
+
+/**
+ * «Capas» es administración (plan 2026-10-03, punto 2): la ve solo el admin, y solo cuando tiene una
+ * versión sin activar. El técnico no la ve en el menú y, si entra por la URL, recibe un aviso. El
+ * admin sí ve la tabla de versiones. La puerta real la aplica api-core (403 al técnico); esto es la
+ * puerta de la interfaz.
+ */
+test.describe('panel · la sección «Capas» es solo del admin', () => {
+  test.beforeAll(async ({ request }) => {
+    await esperarPila(request);
+  });
+
+  test('el técnico no ve «Capas» en el menú y en /capas recibe el aviso de solo administración', async ({
+    page,
+  }) => {
+    await sesionDelPanelEnElNavegador(page, CREDENCIALES_TECNICO);
+    await page.goto(`${PANEL}/reportes`);
+    await expect(page.getByRole('heading', { name: 'Reportes', level: 1 })).toBeVisible({
+      timeout: 60_000,
+    });
+    const menu = page.getByRole('navigation', { name: 'Secciones del panel' });
+    await expect(menu.getByRole('link', { name: 'Reportes' })).toBeVisible();
+    await expect(menu.getByRole('link', { name: 'Capas', exact: true })).toHaveCount(0);
+
+    await page.goto(`${PANEL}/capas`);
+    await expect(page.getByTestId('capas-solo-admin')).toBeVisible({ timeout: 60_000 });
+    // No se le muestra la tabla de versiones ni el botón de activar.
+    await expect(page.getByRole('table', { name: 'Versiones de capas cargadas' })).toHaveCount(0);
+  });
+
+  test('el admin ve la tabla de versiones en /capas', async ({ page }) => {
+    await sesionDelPanelEnElNavegador(page, CREDENCIALES_ADMIN);
+    await page.goto(`${PANEL}/capas`);
+    await expect(
+      page.getByRole('heading', { name: 'Capas administrativas', level: 1 }),
+    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId('capas-solo-admin')).toHaveCount(0);
+    // La tabla de versiones cargadas (su leyenda es el nombre accesible de la tabla).
+    await expect(page.getByRole('table', { name: 'Versiones de capas cargadas' })).toBeVisible({
+      timeout: 60_000,
+    });
   });
 });

@@ -83,6 +83,8 @@ const GRUPOS = {
     'panel-tecnico',
     'panel-al-dia',
     'panel-ejecutivo',
+    'panel-indicadores-tortas',
+    'panel-mapa-reactivo',
     'quitar-campos-panel',
   ],
   G5: ['accesibilidad', 'responsive', 'csp'],
@@ -159,7 +161,7 @@ Grupos (specs de tests/, sin .spec.ts):
   G1  api-contratos · separacion-publica-tecnica · cuenta-ciudadana · acceso-panel · publicacion-diferida
   G2  mapa-publico · mapa-seleccion · trafico-publico · datos-reales · navegacion
   G3  formulario-reporte · formulario-sumidero-y-fotos · ubicacion-obligatoria · camara-foto · resiliencia-interfaz · quitar-campos-web
-  G4  recorrido-completo · panel-tecnico · panel-al-dia · panel-ejecutivo · quitar-campos-panel
+  G4  recorrido-completo · panel-tecnico · panel-al-dia · panel-ejecutivo · panel-indicadores-tortas · panel-mapa-reactivo · quitar-campos-panel
   G5  accesibilidad · responsive · csp
 El proyecto chromium corre todos; el proyecto movil además mapa-publico, mapa-seleccion,
 camara-foto y ubicacion-obligatoria.
