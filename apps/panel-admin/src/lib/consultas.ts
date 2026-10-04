@@ -86,10 +86,16 @@ export function consultaReporte(id: string) {
   });
 }
 
-export function consultaIndicadores() {
+/**
+ * Indicadores del panel, con los filtros de las tortas (0.16.0): `severidad` (lista) y, al tocar
+ * un distrito, `distrito_id`. Sin filtros es la consulta de siempre; el `queryKey` incluye los
+ * parámetros, así que cambiar un filtro pide de nuevo y `invalidarTrasActivarCapa` sigue casando
+ * por el prefijo `['indicadores']`.
+ */
+export function consultaIndicadores(params: ParametrosConsulta = {}) {
   return queryOptions({
-    queryKey: ['indicadores'],
-    queryFn: (ctx) => obtenerIndicadores(ctx.signal, { sondeo: esSondeo(ctx) }),
+    queryKey: ['indicadores', params],
+    queryFn: (ctx) => obtenerIndicadores(params, ctx.signal, { sondeo: esSondeo(ctx) }),
     ...SONDEO,
   });
 }

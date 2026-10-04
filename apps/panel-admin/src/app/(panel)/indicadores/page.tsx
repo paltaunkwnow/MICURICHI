@@ -1,14 +1,28 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
-import { SEVERIDADES } from 'contracts';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { SEVERIDADES, type Severidad } from 'contracts';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useCallback, useMemo } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { CapaAnterior } from '@/componentes/CapaAnterior';
 import { ChipSeveridad } from '@/componentes/ChipSeveridad';
+import { FiltroSeveridad } from '@/componentes/indicadores/FiltroSeveridad';
+import { TortaReportes } from '@/componentes/indicadores/TortaReportes';
 import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
 import { distritosCapaAnterior } from '@/lib/ejecutivo';
-import { ESTADOS_ORDEN, etiquetaCapa, etiquetaEstado } from '@/lib/formato';
+import { alternarEnLista } from '@/lib/filtros';
+import { ESTADOS_ORDEN, etiquetaEstado } from '@/lib/formato';
 import { kpisIndicadores } from '@/lib/indicadores';
+import {
+  calcularPorciones,
+  type EstadoTorta,
+  type ItemConteo,
+  leerEstadoTorta,
+  paramsIndicadores,
+  serializarEstadoTorta,
+  urlBandejaUv,
+} from '@/lib/indicadores-torta';
 
 function Kpi({
   valor,
@@ -27,36 +41,101 @@ function Kpi({
   );
 }
 
-function Barra({ n, total }: { n: number; total: number }) {
-  const pct = total ? Math.round((n / total) * 100) : 0;
+export default function Indicadores() {
+  // useSearchParams exige un límite de Suspense para el prerender (igual que la bandeja).
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 flex-1 overflow-hidden rounded-full bg-tinta-100">
-        <div className="h-full rounded-full bg-agua-500" style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-12 text-right text-[13.5px] text-tinta-600">{pct}%</span>
-    </div>
+    <Suspense
+      fallback={
+        <p className="text-tinta-600" role="status">
+          Cargando indicadores…
+        </p>
+      }
+    >
+      <ContenidoIndicadores />
+    </Suspense>
   );
 }
 
-export default function Indicadores() {
-  // Las dos se refrescan solas cada 10 s. El resumen ejecutivo trae los distritos de una capa
-  // anterior, que `/indicadores` no distingue.
-  const consulta = useQuery(consultaIndicadores());
+function ContenidoIndicadores() {
+  const sp = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  // Severidades elegidas y distrito seleccionado viven en la URL (?severidad=…&distrito=…), para
+  // poder compartir el enlace y para que el sondeo de 10 s siga pidiendo lo mismo.
+  const estado = useMemo(() => leerEstadoTorta(new URLSearchParams(sp.toString())), [sp]);
+  const paramsBase = useMemo(() => paramsIndicadores(estado.severidades), [estado.severidades]);
+  // La torta de UV se acota al distrito elegido con una segunda consulta (`distrito_id`), que solo
+  // sale cuando hay un distrito seleccionado.
+  const paramsDistrito = useMemo(
+    () => paramsIndicadores(estado.severidades, estado.distrito || undefined),
+    [estado.severidades, estado.distrito],
+  );
+
+  const navegar = useCallback(
+    (nuevo: EstadoTorta) => {
+      const q = serializarEstadoTorta(nuevo).toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+    },
+    [pathname, router],
+  );
+  const alternarSeveridad = useCallback(
+    (s: Severidad) =>
+      navegar({ ...estado, severidades: alternarEnLista([...estado.severidades], s) }),
+    [estado, navegar],
+  );
+  const alternarDistrito = useCallback(
+    (id: string) => navegar({ ...estado, distrito: estado.distrito === id ? '' : id }),
+    [estado, navegar],
+  );
+
+  const consulta = useQuery({
+    ...consultaIndicadores(paramsBase),
+    placeholderData: keepPreviousData,
+  });
   const resumen = useQuery(consultaResumenEjecutivo());
+  const consultaUvDistrito = useQuery({
+    ...consultaIndicadores(paramsDistrito),
+    placeholderData: keepPreviousData,
+    enabled: estado.distrito !== '',
+  });
+
   const capaAnterior = resumen.data ? distritosCapaAnterior(resumen.data) : [];
   const d = consulta.data;
-  const maxDistrito = Math.max(1, ...(d?.por_distrito ?? []).map((x) => x.n));
-  const maxUv = Math.max(1, ...(d?.por_unidad_vecinal ?? []).map((x) => x.n));
-  /**
-   * Nombre de cada distrito, para que la tabla de unidades vecinales no muestre el identificador
-   * interno. La respuesta trae el nombre en `por_distrito` y solo el id en `por_unidad_vecinal`,
-   * y toda unidad vecinal con reportes tiene su distrito en la otra lista, así que se cruzan acá
-   * en lugar de pedirle un campo más a la API.
-   */
-  const nombreDistrito = new Map(
-    (d?.por_distrito ?? []).filter((x) => x.nombre).map((x) => [x.distrito_id, x.nombre as string]),
+
+  const porcionesDistrito = useMemo(
+    () =>
+      calcularPorciones(
+        (d?.por_distrito ?? []).map(
+          (x): ItemConteo => ({ id: x.distrito_id, nombre: x.nombre ?? x.distrito_id, n: x.n }),
+        ),
+        { etiquetaOtros: 'Otros distritos' },
+      ),
+    [d],
   );
+
+  // Fuente de la torta de UV: la consulta acotada si hay distrito; si no, la base (toda la ciudad).
+  const datosUv = estado.distrito ? consultaUvDistrito.data : d;
+  const porcionesUv = useMemo(
+    () =>
+      calcularPorciones(
+        (datosUv?.por_unidad_vecinal ?? []).map(
+          (x): ItemConteo => ({
+            id: x.unidad_vecinal_id,
+            nombre: x.nombre ?? x.unidad_vecinal_id,
+            n: x.n,
+          }),
+        ),
+        { etiquetaOtros: 'Otras UV' },
+      ),
+    [datosUv],
+  );
+
+  const nombreDistritoSel = estado.distrito
+    ? (d?.por_distrito.find((x) => x.distrito_id === estado.distrito)?.nombre ?? estado.distrito)
+    : null;
+  const uvCargando =
+    estado.distrito !== '' && consultaUvDistrito.isPending && !consultaUvDistrito.data;
 
   return (
     <div className="space-y-6">
@@ -71,6 +150,8 @@ export default function Indicadores() {
           vigentes (nuevos, validados y resueltos). Rechazados y duplicados se ven en «Por estado».
         </p>
       </div>
+
+      <FiltroSeveridad seleccionadas={estado.severidades} onAlternar={alternarSeveridad} />
 
       <Aviso tipo="alerta" testId="indicadores-sin-actualizar">
         {d && consulta.error
@@ -119,88 +200,53 @@ export default function Indicadores() {
             </div>
           </section>
 
-          <section className="space-y-3">
-            <h2 className="titular text-2xl">Reportes por distrito</h2>
-            <table className="w-full text-left">
-              <caption className="sr-only">Cantidad de reportes por distrito municipal</caption>
-              <thead>
-                <tr className="border-b border-filete text-[13.5px] text-tinta-600">
-                  <th scope="col" className="py-2">
-                    Distrito
-                  </th>
-                  <th scope="col" className="py-2 text-right">
-                    Reportes
-                  </th>
-                  <th scope="col" className="py-2">
-                    Proporción
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.por_distrito.map((x) => (
-                  <tr key={x.distrito_id} className="border-b border-filete last:border-0">
-                    <td className="py-2 font-semibold">{x.nombre ?? x.distrito_id}</td>
-                    <td className="py-2 text-right">{x.n}</td>
-                    <td className="w-1/2 py-2">
-                      <Barra n={x.n} total={maxDistrito} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+          <div className="grid gap-6 xl:grid-cols-2">
+            <TortaReportes
+              testId="torta-distrito"
+              titulo="Reportes por distrito"
+              subtitulo="Tocá un distrito para ver sus unidades vecinales."
+              porciones={porcionesDistrito}
+              unidadCentro="reportes"
+              vacioTexto="No hay reportes con estas severidades."
+              accion={{
+                modo: 'seleccion',
+                seleccionado: estado.distrito || null,
+                onActivar: (p) => alternarDistrito(p.id),
+                pista: 'Mostrar sus unidades vecinales',
+              }}
+            />
 
-          <section className="space-y-3">
-            <h2 className="titular text-2xl">Unidades vecinales con más reportes</h2>
-            <table className="w-full text-left">
-              <caption className="sr-only">Cantidad de reportes por unidad vecinal</caption>
-              <thead>
-                <tr className="border-b border-filete text-[13.5px] text-tinta-600">
-                  <th scope="col" className="py-2">
-                    Unidad vecinal
-                  </th>
-                  <th scope="col" className="py-2">
-                    Distrito
-                  </th>
-                  <th scope="col" className="py-2 text-right">
-                    Reportes
-                  </th>
-                  <th scope="col" className="py-2">
-                    Proporción
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.por_unidad_vecinal.map((x) => (
-                  <tr key={x.unidad_vecinal_id} className="border-b border-filete last:border-0">
-                    <td className="py-2 font-semibold">{x.nombre ?? x.unidad_vecinal_id}</td>
-                    <td className="py-2 text-tinta-600">
-                      {(x.distrito_id ? nombreDistrito.get(x.distrito_id) : null) ??
-                        x.distrito_id ??
-                        '—'}
-                    </td>
-                    <td className="py-2 text-right">{x.n}</td>
-                    <td className="w-2/5 py-2">
-                      <Barra n={x.n} total={maxUv} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </section>
+            {uvCargando ? (
+              <figure className="tarjeta m-0 p-5" data-testid="torta-uv-cargando">
+                <figcaption className="titular text-xl">Reportes por unidad vecinal</figcaption>
+                <p className="mt-4 text-tinta-600" role="status">
+                  Cargando unidades vecinales…
+                </p>
+              </figure>
+            ) : (
+              <TortaReportes
+                testId="torta-uv"
+                titulo="Reportes por unidad vecinal"
+                subtitulo={nombreDistritoSel ? `En ${nombreDistritoSel}` : 'En toda la ciudad'}
+                porciones={porcionesUv}
+                unidadCentro="reportes"
+                vacioTexto="No hay reportes con estas severidades."
+                accion={{
+                  modo: 'enlace',
+                  href: (p) => urlBandejaUv(p.id, estado.severidades),
+                  pista: 'Abrir la bandeja filtrada por esta unidad vecinal',
+                }}
+              />
+            )}
+          </div>
+
+          {estado.distrito && consultaUvDistrito.error ? (
+            <Aviso tipo="error">
+              No se pudieron cargar las unidades vecinales del distrito elegido.
+            </Aviso>
+          ) : null}
 
           {capaAnterior.length ? <CapaAnterior filas={capaAnterior} /> : null}
-
-          <section className="space-y-2">
-            <h2 className="titular text-2xl">Capas vigentes</h2>
-            <ul className="flex flex-wrap gap-2">
-              {Object.entries(d.capas_vigentes).map(([capa, version]) => (
-                <li key={capa} className="chip-suave chip">
-                  {etiquetaCapa(capa)}: {version ?? 'sin versión activa'}
-                </li>
-              ))}
-            </ul>
-          </section>
         </>
       )}
     </div>

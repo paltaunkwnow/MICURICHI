@@ -2,11 +2,21 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { CONFIG_DOMINIO, type Indicadores, type ResumenEjecutivo } from 'contracts';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import PaginaIndicadores from '@/app/(panel)/indicadores/page';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
 import { resumenDeEjemplo } from '@/lib/ejecutivo.fixture';
+
+// La página de indicadores lee los filtros de las tortas desde la URL (useSearchParams) y navega
+// con el router; acá se renderiza suelta con renderToStaticMarkup, sin el router de Next, así que
+// se simula next/navigation con una URL vacía (ningún filtro) y un router inerte. vitest sube este
+// `vi.mock` por encima de los imports, así que alcanza a la página y a la torta antes de montarlas.
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ replace: () => {}, push: () => {} }),
+  usePathname: () => '/indicadores',
+}));
 
 /** Indicadores SINTÉTICOS, solo para que la página tenga qué dibujar. */
 const INDICADORES: Indicadores = {

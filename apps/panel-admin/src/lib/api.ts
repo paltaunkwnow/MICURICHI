@@ -328,8 +328,12 @@ export function obtenerResumenEjecutivo(
 
 // --- Indicadores y capas -------------------------------------------------
 
-export function obtenerIndicadores(signal?: AbortSignal, opciones: OpcionesLectura = {}) {
-  return pedir<Indicadores>('/api/v1/indicadores', {
+export function obtenerIndicadores(
+  params: ParametrosConsulta = {},
+  signal?: AbortSignal,
+  opciones: OpcionesLectura = {},
+) {
+  return pedir<Indicadores>(`/api/v1/indicadores?${aQuery(params)}`, {
     signal,
     headers: cabecerasLectura(opciones),
   });
