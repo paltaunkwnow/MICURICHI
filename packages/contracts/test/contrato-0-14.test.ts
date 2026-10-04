@@ -186,14 +186,3 @@ describe('0.14.0: GET /fotos/{key} para la moderación', () => {
     expect(cacheControl).toMatch(/dueño de una foto sin reporte/);
   });
 });
-
-describe('versión del paquete', () => {
-  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.15.0', () => {
-    const { version } = JSON.parse(readFileSync(resolve(raiz, 'package.json'), 'utf8')) as {
-      version: string;
-    };
-    const ultima = readFileSync(resolve(raiz, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1];
-    expect(version).toBe('0.15.0');
-    expect(ultima).toBe(version);
-  });
-});

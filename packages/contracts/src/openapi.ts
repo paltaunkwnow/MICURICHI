@@ -6,6 +6,7 @@ import {
   CapaVersionSchema,
   ExportacionGeoJsonSchema,
   ExportarQuerySchema,
+  IndicadoresFiltrosSchema,
   IndicadoresSchema,
   ReadyApiCoreSchema,
 } from './esquemas/admin.js';
@@ -450,11 +451,15 @@ export function construirOpenApi(): Record<string, unknown> {
       },
       '/api/v1/indicadores': {
         get: op(
-          'Indicadores básicos, solo con reportes ya publicados (publicar_en <= now())',
+          'Indicadores básicos, solo con reportes ya publicados (publicar_en <= now()). Los filtros opcionales severidad (lista, sobre la severidad efectiva) y distrito_id acotan las tortas del panel: total, por_distrito, por_unidad_vecinal, por_severidad y por_estado cuentan el subconjunto filtrado; puntos_criticos_recurrentes solo se filtra por distrito_id.',
           'admin',
           {
             security: seguridadSesion,
-            responses: { '200': { description: 'Indicadores', content: json(ref('Indicadores')) } },
+            parameters: parametrosDesde(IndicadoresFiltrosSchema),
+            responses: {
+              '200': { description: 'Indicadores', content: json(ref('Indicadores')) },
+              '400': error('FILTROS_INVALIDOS: severidad fuera de baja/media/alta/critica'),
+            },
           },
         ),
       },

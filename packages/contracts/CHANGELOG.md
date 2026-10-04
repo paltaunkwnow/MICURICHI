@@ -1,5 +1,35 @@
 # Changelog — contracts
 
+## 0.16.0 — 2026-10-03
+
+**Sin ruptura: `GET /api/v1/indicadores` acepta filtros para las tortas del panel.** Las
+estadísticas en porcentajes se reemplazan por dos tortas (reportes por distrito y por UV) con
+filtro de severidad y drill-down por distrito; el panel necesita pedir el subconjunto que quiere
+dibujar.
+
+- **`IndicadoresFiltrosSchema`** (componente `IndicadoresFiltros` solo como parámetros de query,
+  no como esquema de respuesta): dos filtros, los dos opcionales.
+  - `severidad`: lista separada por comas de `SEVERIDADES`, sobre la severidad **efectiva**
+    (`COALESCE(severidad_manual, severidad_calculada)`), con el mismo helper `listaDesdeQuery` que
+    `GET /api/v1/reportes`. `?severidad=critica,alta`.
+  - `distrito_id`: string no vacío; al tocar un distrito en la torta, la torta de UV muestra solo
+    las suyas.
+  - Sin ningún parámetro, la respuesta es idéntica a la de antes. Un valor de severidad fuera de
+    `baja|media|alta|critica` da **400 FILTROS_INVALIDOS** (api-core valida con este esquema).
+- **`IndicadoresSchema.por_unidad_vecinal`** ya traía `distrito_id` y `nombre` (desde 0.x): no
+  cambia. El panel usa `distrito_id` para agrupar y para el clic en el distrito.
+
+**Qué cuenta cada agregado con los filtros (decisión de api-core, documentada acá):** los dos
+filtros acotan el subconjunto de reportes, y `total`, `por_estado`, `por_severidad`, `por_distrito`
+y `por_unidad_vecinal` cuentan ese mismo subconjunto (`por_estado` sobre todos los estados, el resto
+sobre `nuevo`/`validado`/`resuelto`, como siempre). `puntos_criticos_recurrentes` se filtra **solo
+por `distrito_id`** (la columna existe en `punto_critico`), **no por `severidad`**: un punto crítico
+agrupa reportes de varias severidades y su `severidad_max` no es la de un reporte, así que no casa
+con la lista del filtro.
+
+**Consumidores:** api-core aplica los filtros (SQL parametrizado) y valida la query. panel-admin
+(tortas reactivas) los usa. geo-service, web-ciudadano y e2e no cambian.
+
 ## 0.15.0 — 2026-09-27
 
 **Con ruptura en los tipos, no en el cable: los tres campos transitorios pasan a obligatorios.**

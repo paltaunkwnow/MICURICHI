@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import { SEVERIDADES, TIPOS_CAPA } from '../dominio/enums.js';
+import { listaDesdeQuery } from './comunes.js';
 import { ReporteFiltrosSchema, ReporteTecnicoFeatureSchema } from './reporte.js';
 
 export const CapaVersionSchema = z.object({
@@ -51,6 +52,19 @@ export const ExportacionGeoJsonSchema = z.object({
   features: z.array(ReporteTecnicoFeatureSchema),
 });
 export type ExportacionGeoJson = z.infer<typeof ExportacionGeoJsonSchema>;
+
+/**
+ * Filtros de `GET /api/v1/indicadores` (0.16.0): acotan las tortas del panel. `severidad` es una
+ * lista separada por comas sobre la severidad EFECTIVA (COALESCE(severidad_manual,
+ * severidad_calculada)), igual que en `GET /api/v1/reportes`; `distrito_id`, para que al tocar un
+ * distrito la torta de UV muestre solo las suyas. Ambos opcionales: sin ninguno, la respuesta es
+ * la de siempre. Valores inválidos → 400 FILTROS_INVALIDOS.
+ */
+export const IndicadoresFiltrosSchema = z.object({
+  severidad: listaDesdeQuery(SEVERIDADES),
+  distrito_id: z.string().min(1).optional(),
+});
+export type IndicadoresFiltros = z.infer<typeof IndicadoresFiltrosSchema>;
 
 export const IndicadoresSchema = z.object({
   total: z.number().int(),

@@ -4341,11 +4341,42 @@ paths:
                 $ref: "#/components/schemas/ErrorApi"
   /api/v1/indicadores:
     get:
-      summary: Indicadores básicos, solo con reportes ya publicados (publicar_en <=
-        now())
+      summary: "Indicadores básicos, solo con reportes ya publicados (publicar_en <=
+        now()). Los filtros opcionales severidad (lista, sobre la severidad
+        efectiva) y distrito_id acotan las tortas del panel: total,
+        por_distrito, por_unidad_vecinal, por_severidad y por_estado cuentan el
+        subconjunto filtrado; puntos_criticos_recurrentes solo se filtra por
+        distrito_id."
       tags:
         - admin
       security: *a1
+      parameters:
+        - name: severidad
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+                enum:
+                  - baja
+                  - media
+                  - alta
+                  - critica
+              - type: array
+                items:
+                  type: string
+                  enum:
+                    - baja
+                    - media
+                    - alta
+                    - critica
+              - type: string
+        - name: distrito_id
+          in: query
+          required: false
+          schema:
+            type: string
+            minLength: 1
       responses:
         "200":
           description: Indicadores
@@ -4353,6 +4384,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Indicadores"
+        "400":
+          description: "FILTROS_INVALIDOS: severidad fuera de baja/media/alta/critica"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorApi"
   /api/v1/ejecutivo/resumen:
     get:
       summary: Resumen del panel ejecutivo. Exige rol ejecutivo, tecnico o admin.
