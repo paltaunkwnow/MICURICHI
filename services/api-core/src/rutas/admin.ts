@@ -1,4 +1,11 @@
-import { ExportarQuerySchema, type Indicadores, NOTA_METODOLOGICA, SEVERIDADES } from 'contracts';
+import {
+  ExportarQuerySchema,
+  type Indicadores,
+  type IndicadoresFiltros,
+  IndicadoresFiltrosSchema,
+  NOTA_METODOLOGICA,
+  SEVERIDADES,
+} from 'contracts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
@@ -80,14 +87,46 @@ const datosDeCapa = (
 const PUBLICADO = condicionPublicado('');
 
 /**
+ * Condiciones de los filtros del panel (0.16.0) sobre la tabla `reporte_inundacion`, sin alias:
+ * severidad EFECTIVA contra la lista, y distrito. `agregarParam` las ata al array de parámetros de
+ * cada consulta (SQL parametrizado, nunca interpolado). Devuelve el SQL ya con el ` AND ` delante,
+ * o '' si no hay filtros.
+ */
+function condicionesFiltro(
+  filtros: IndicadoresFiltros,
+  agregarParam: (v: unknown) => string,
+): string {
+  const cond: string[] = [];
+  if (filtros.severidad?.length)
+    cond.push(
+      `COALESCE(severidad_manual, severidad_calculada) = ANY(${agregarParam(filtros.severidad)}::severidad[])`,
+    );
+  if (filtros.distrito_id) cond.push(`distrito_id = ${agregarParam(filtros.distrito_id)}`);
+  return cond.map((c) => ` AND ${c}`).join('');
+}
+
+/**
  * Dos tandas en paralelo, cada una en serie: como mucho dos conexiones del pool. Antes eran siete
  * consultas a la vez, siete de las ocho conexiones, y un par de paneles abiertos dejaban sin
  * conexiones al resto de la API.
+ *
+ * Los filtros (severidad efectiva, distrito) acotan el subconjunto que cuentan `total`,
+ * `por_estado`, `por_severidad`, `por_distrito` y `por_unidad_vecinal`. `puntos_criticos_recurrentes`
+ * se filtra solo por distrito (ver CHANGELOG 0.16.0): un punto crítico agrupa reportes de varias
+ * severidades y su `severidad_max` no casa con la lista del filtro.
  */
-async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
+async function calcularIndicadores(
+  pool: pg.Pool,
+  filtros: IndicadoresFiltros,
+): Promise<Indicadores> {
   const [conteos, geografia] = await Promise.all([
     (async () => {
       // Una sola pasada por la tabla: estado × severidad efectiva, a lo sumo 20 filas.
+      const pe: unknown[] = [];
+      const filtroPe = condicionesFiltro(filtros, (v) => {
+        pe.push(v);
+        return `$${pe.length}`;
+      });
       const porEstadoYSeveridad = await pool.query<{
         estado: string;
         severidad: string;
@@ -95,10 +134,17 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT estado::text AS estado, COALESCE(severidad_manual, severidad_calculada)::text AS severidad,
                 count(*)::int AS n
-           FROM reporte_inundacion WHERE ${PUBLICADO} GROUP BY 1, 2`,
+           FROM reporte_inundacion WHERE ${PUBLICADO}${filtroPe} GROUP BY 1, 2`,
+        pe,
       );
+      // Recurrentes: solo por distrito (la columna existe en punto_critico), no por severidad.
+      const pc: unknown[] = [];
+      const filtroPc = filtros.distrito_id
+        ? ` AND distrito_id = $${pc.push(filtros.distrito_id)}`
+        : '';
       const recurrentes = await pool.query<{ n: number }>(
-        'SELECT count(*)::int AS n FROM punto_critico WHERE n_reportes >= 2',
+        `SELECT count(*)::int AS n FROM punto_critico WHERE n_reportes >= 2${filtroPc}`,
+        pc,
       );
       const capas = await pool.query<{ capa: string; version: string }>(
         'SELECT capa, version FROM geo.capa_version WHERE vigente',
@@ -106,6 +152,11 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       return { porEstadoYSeveridad, recurrentes, capas };
     })(),
     (async () => {
+      const pd: unknown[] = [ESTADOS_QUE_CUENTAN];
+      const filtroPd = condicionesFiltro(filtros, (v) => {
+        pd.push(v);
+        return `$${pd.length}`;
+      });
       const porDistrito = await pool.query<{
         distrito_id: string;
         nombre: string | null;
@@ -113,11 +164,16 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT a.distrito_id, c.nombre, a.n
            FROM (SELECT distrito_id, count(*)::int AS n FROM reporte_inundacion
-                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO} GROUP BY distrito_id) a
+                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO}${filtroPd} GROUP BY distrito_id) a
            ${datosDeCapa('distrito_municipal', 'a.distrito_id', 'x.nombre')}
           ORDER BY a.n DESC, a.distrito_id`,
-        [ESTADOS_QUE_CUENTAN],
+        pd,
       );
+      const pu: unknown[] = [ESTADOS_QUE_CUENTAN];
+      const filtroPu = condicionesFiltro(filtros, (v) => {
+        pu.push(v);
+        return `$${pu.length}`;
+      });
       const porUv = await pool.query<{
         unidad_vecinal_id: string;
         nombre: string | null;
@@ -126,11 +182,11 @@ async function calcularIndicadores(pool: pg.Pool): Promise<Indicadores> {
       }>(
         `SELECT a.unidad_vecinal_id, c.nombre, c.distrito_id, a.n
            FROM (SELECT unidad_vecinal_id, count(*)::int AS n FROM reporte_inundacion
-                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO} GROUP BY unidad_vecinal_id
+                  WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO}${filtroPu} GROUP BY unidad_vecinal_id
                   ORDER BY count(*) DESC, unidad_vecinal_id LIMIT 50) a
            ${datosDeCapa('unidad_vecinal', 'a.unidad_vecinal_id', 'x.nombre, x.distrito_id')}
           ORDER BY a.n DESC, a.unidad_vecinal_id`,
-        [ESTADOS_QUE_CUENTAN],
+        pu,
       );
       return { porDistrito, porUv };
     })(),
@@ -261,25 +317,39 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
   /*
    * SIN CACHÉ (plan S25): el panel técnico sondea cada 10 s y tiene que ver enseguida lo que se
    * publica solo, al vencer su demora. Queda la deduplicación en vuelo: los paneles que piden a la
-   * vez comparten el mismo cálculo. El contador de generación sube con cada moderación, y una
-   * petición posterior no se sube a un cálculo que ya había leído la base antes.
+   * vez LA MISMA combinación de filtros comparten el mismo cálculo. El contador de generación sube
+   * con cada moderación, y una petición posterior no se sube a un cálculo que ya había leído la
+   * base antes. La clave distingue por filtros (0.16.0): dos peticiones con filtros distintos no
+   * comparten resultado.
    */
-  let enVuelo: { generacion: number; promesa: Promise<Indicadores> } | null = null;
+  const enVuelo = new Map<string, { generacion: number; promesa: Promise<Indicadores> }>();
   let generacion = 0;
   invalidadoresIndicadores.set(app, () => {
     generacion++;
-    enVuelo = null;
+    enVuelo.clear();
   });
+
+  /** Clave estable de la combinación de filtros (severidad sin importar el orden). */
+  const claveFiltros = (f: IndicadoresFiltros): string =>
+    JSON.stringify({ s: [...(f.severidad ?? [])].sort(), d: f.distrito_id ?? null });
 
   app.get(
     '/api/v1/indicadores',
     { preHandler: requerirRol('tecnico', 'admin') },
-    async (): Promise<Indicadores> => {
-      if (enVuelo && enVuelo.generacion === generacion) return enVuelo.promesa;
-      const calculo = calcularIndicadores(dep.pool).finally(() => {
-        if (enVuelo?.promesa === calculo) enVuelo = null;
+    async (req, res) => {
+      const q = IndicadoresFiltrosSchema.safeParse(req.query);
+      if (!q.success)
+        return res.status(400).send({
+          codigo: 'FILTROS_INVALIDOS',
+          mensaje: q.error.issues.map((i) => i.message).join('; '),
+        });
+      const clave = claveFiltros(q.data);
+      const existente = enVuelo.get(clave);
+      if (existente && existente.generacion === generacion) return existente.promesa;
+      const calculo = calcularIndicadores(dep.pool, q.data).finally(() => {
+        if (enVuelo.get(clave)?.promesa === calculo) enVuelo.delete(clave);
       });
-      enVuelo = { generacion, promesa: calculo };
+      enVuelo.set(clave, { generacion, promesa: calculo });
       return calculo;
     },
   );

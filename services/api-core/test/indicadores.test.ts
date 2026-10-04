@@ -178,6 +178,124 @@ describe('qué cuenta', () => {
   });
 });
 
+describe('filtros del panel (0.16.0)', () => {
+  const pedir = (app: FastifyInstance, qs: string) =>
+    app.inject({ method: 'GET', url: `/api/v1/indicadores${qs}`, cookies: sesion(cookieTecnico) });
+
+  it('sin parámetros devuelve lo mismo que antes', async () => {
+    const d = (await pedir(await appNueva(), '')).json();
+    expect(d.total).toBe(4);
+    expect(d.por_severidad).toEqual({ critica: 1, alta: 1, media: 1, baja: 1 });
+    expect(d.por_estado).toEqual({
+      nuevo: 1,
+      validado: 2,
+      resuelto: 1,
+      rechazado: 3,
+      duplicado: 2,
+    });
+  });
+
+  it('con severidad los conteos cambian y cuadran', async () => {
+    const app = await appNueva();
+    const base = (await pedir(app, '')).json();
+    const critica = (await pedir(app, '?severidad=critica')).json();
+    // El subconjunto es más chico y por_severidad se queda solo con la severidad pedida.
+    expect(critica.total).toBe(base.por_severidad.critica);
+    expect(critica.total).toBeLessThan(base.total);
+    expect(critica.por_severidad).toEqual({
+      critica: base.por_severidad.critica,
+      alta: 0,
+      media: 0,
+      baja: 0,
+    });
+    // El único reporte crítico del seed es un validado: por_estado también se achica al subconjunto.
+    expect(critica.por_estado).toEqual({ validado: 1 });
+    // por_distrito y por_unidad_vecinal del filtro suman el total del filtro (cuadran).
+    expect(critica.por_distrito.reduce((s: number, d: { n: number }) => s + d.n, 0)).toBe(
+      critica.total,
+    );
+    expect(critica.por_unidad_vecinal.reduce((s: number, u: { n: number }) => s + u.n, 0)).toBe(
+      critica.total,
+    );
+    // Dos severidades suman las dos.
+    const dos = (await pedir(app, '?severidad=critica,alta')).json();
+    expect(dos.total).toBe(base.por_severidad.critica + base.por_severidad.alta);
+  });
+
+  it('con distrito_id solo cuentan los reportes y las UV de ese distrito', async () => {
+    const cuadrado = JSON.stringify({
+      type: 'Polygon',
+      coordinates: [
+        [
+          [-63.1, -17.8],
+          [-63.09, -17.8],
+          [-63.09, -17.78],
+          [-63.1, -17.78],
+          [-63.1, -17.8],
+        ],
+      ],
+    });
+    await ex.consultar(
+      `INSERT INTO geo.distrito_municipal (id, codigo, nombre, geom, version_capa)
+         VALUES ('distrito_municipal:02', '02', 'Distrito Dos (test)', ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 'test')
+         ON CONFLICT DO NOTHING`,
+      [cuadrado],
+    );
+    await ex.consultar(
+      `INSERT INTO geo.unidad_vecinal (id, codigo, nombre, geom, version_capa, distrito_id)
+         VALUES ('unidad_vecinal:D', 'D', 'UV D (test)', ST_Multi(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)), 'test', 'distrito_municipal:02')
+         ON CONFLICT DO NOTHING`,
+      [cuadrado],
+    );
+    const nuevos = await ex.consultar<{ id: string }>(
+      `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
+         ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
+         severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
+       VALUES (ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326),
+         'distrito_municipal:02', 'unidad_vecinal:D', 'test', 'manual', 'via_publica', 'Reporte del distrito dos',
+         'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())
+       RETURNING id::text`,
+    );
+    try {
+      const app = await appNueva();
+      const soloDos = (await pedir(app, '?distrito_id=distrito_municipal:02')).json();
+      expect(soloDos.total).toBe(1);
+      expect(soloDos.por_distrito.map((d: { distrito_id: string }) => d.distrito_id)).toEqual([
+        'distrito_municipal:02',
+      ]);
+      expect(
+        soloDos.por_unidad_vecinal.map((u: { unidad_vecinal_id: string }) => u.unidad_vecinal_id),
+      ).toEqual(['unidad_vecinal:D']);
+      expect(
+        soloDos.por_unidad_vecinal.every(
+          (u: { distrito_id: string }) => u.distrito_id === 'distrito_municipal:02',
+        ),
+      ).toBe(true);
+      // El distrito 01 no ve la UV del distrito 02.
+      const soloUno = (await pedir(app, '?distrito_id=distrito_municipal:01')).json();
+      expect(soloUno.total).toBe(4);
+      expect(
+        soloUno.por_unidad_vecinal.map((u: { unidad_vecinal_id: string }) => u.unidad_vecinal_id),
+      ).not.toContain('unidad_vecinal:D');
+      expect(
+        soloUno.por_unidad_vecinal.every(
+          (u: { distrito_id: string }) => u.distrito_id === 'distrito_municipal:01',
+        ),
+      ).toBe(true);
+    } finally {
+      await ex.consultar(`DELETE FROM reporte_inundacion WHERE id = ANY($1::uuid[])`, [
+        nuevos.map((f) => f.id),
+      ]);
+    }
+  });
+
+  it('una severidad inválida responde 400 FILTROS_INVALIDOS y no 200', async () => {
+    const r = await pedir(await appNueva(), '?severidad=urgente');
+    expect(r.statusCode).toBe(400);
+    expect(r.json().codigo).toBe('FILTROS_INVALIDOS');
+  });
+});
+
 describe('sin caché: cada petición es la cifra del momento (plan S25)', () => {
   const resumen = (app: FastifyInstance) =>
     app.inject({
