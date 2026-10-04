@@ -1,5 +1,6 @@
 'use client';
 
+import { useQuery } from '@tanstack/react-query';
 import {
   ChartColumn,
   Map as IconoMapa,
@@ -11,10 +12,11 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { obtenerVersionesCapas } from '@/lib/api';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { etiquetaRol } from '@/lib/formato';
 import { hayPlanoDeReferencia } from '@/lib/plano';
-import { enlacesPara } from '@/lib/roles';
+import { enlacesPara, hayVersionCapaPendiente } from '@/lib/roles';
 import { useCerrarSesion, useUsuarioActual } from '@/lib/sesion';
 
 const ICONOS: Record<string, LucideIcon> = {
@@ -29,8 +31,18 @@ export function BarraLateral() {
   const usuario = useUsuarioActual();
   const ruta = usePathname();
   const salir = useCerrarSesion();
+  const ciudad = useCiudad();
+  const esAdmin = usuario.rol === 'admin';
+  // «Capas» es solo del admin: se pregunta por las versiones nada más para ese rol (el endpoint
+  // le contesta 403 al técnico y al ejecutivo) y el enlace aparece solo si hay alguna sin activar.
+  const versionesCapas = useQuery({
+    queryKey: ['capas-versiones'],
+    queryFn: ({ signal }) => obtenerVersionesCapas(signal),
+    enabled: esAdmin,
+  });
   const enlaces = enlacesPara(usuario.rol, {
-    planoDeReferencia: hayPlanoDeReferencia(useCiudad()),
+    planoDeReferencia: hayPlanoDeReferencia(ciudad),
+    capasPendientes: esAdmin && hayVersionCapaPendiente(versionesCapas.data ?? []),
   });
 
   return (

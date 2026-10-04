@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  debeMostrarEnlaceCapas,
   destinoDesdeLogin,
   enlaceInicio,
   enlacesPara,
+  hayVersionCapaPendiente,
   puedeEntrarAlPanel,
   puedeVerRuta,
   rutaInicial,
 } from './roles';
 
-const CON_PLANO = { planoDeReferencia: true };
+const CON_PLANO = { planoDeReferencia: true, capasPendientes: false };
 
 describe('rol y navegación del panel', () => {
   it('tras el login el ejecutivo va a /ejecutivo y los demás a /reportes', () => {
@@ -43,12 +45,46 @@ describe('rol y navegación del panel', () => {
   });
 
   it('«Plano oficial» solo aparece en la instalación que tiene plano de referencia', () => {
-    expect(enlacesPara('tecnico', { planoDeReferencia: true }).map((e) => e.href)).toContain(
-      '/plano',
-    );
-    const sinPlano = enlacesPara('admin', { planoDeReferencia: false }).map((e) => e.href);
+    expect(
+      enlacesPara('tecnico', { planoDeReferencia: true, capasPendientes: false }).map(
+        (e) => e.href,
+      ),
+    ).toContain('/plano');
+    const sinPlano = enlacesPara('admin', {
+      planoDeReferencia: false,
+      capasPendientes: true,
+    }).map((e) => e.href);
     expect(sinPlano).not.toContain('/plano');
     expect(sinPlano).toEqual(['/ejecutivo', '/reportes', '/indicadores', '/capas']);
+  });
+
+  it('«Capas» es solo del admin y solo con una versión sin activar', () => {
+    // El admin lo ve únicamente cuando hay algo que activar; sin versiones pendientes, no.
+    expect(
+      enlacesPara('admin', { planoDeReferencia: true, capasPendientes: true }).map((e) => e.href),
+    ).toContain('/capas');
+    expect(
+      enlacesPara('admin', { planoDeReferencia: true, capasPendientes: false }).map((e) => e.href),
+    ).not.toContain('/capas');
+    // Técnico y ejecutivo no lo ven nunca, aunque hubiera versiones pendientes.
+    for (const rol of ['tecnico', 'ejecutivo'] as const) {
+      expect(
+        enlacesPara(rol, { planoDeReferencia: true, capasPendientes: true }).map((e) => e.href),
+      ).not.toContain('/capas');
+    }
+  });
+
+  it('debeMostrarEnlaceCapas: admin con versión pendiente', () => {
+    expect(debeMostrarEnlaceCapas('admin', true)).toBe(true);
+    expect(debeMostrarEnlaceCapas('admin', false)).toBe(false);
+    expect(debeMostrarEnlaceCapas('tecnico', true)).toBe(false);
+    expect(debeMostrarEnlaceCapas('ejecutivo', true)).toBe(false);
+  });
+
+  it('hayVersionCapaPendiente: alguna versión cargada sin activar', () => {
+    expect(hayVersionCapaPendiente([])).toBe(false);
+    expect(hayVersionCapaPendiente([{ vigente: true }])).toBe(false);
+    expect(hayVersionCapaPendiente([{ vigente: true }, { vigente: false }])).toBe(true);
   });
 
   it('/login solo saca de ahí a quien puede entrar al panel; una cuenta ciudadana se queda', () => {

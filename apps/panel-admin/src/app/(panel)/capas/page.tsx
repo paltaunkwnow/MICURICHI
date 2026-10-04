@@ -1,6 +1,8 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CircleQuestionMark } from 'lucide-react';
+import Link from 'next/link';
 import { useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { activarCapa, obtenerVersionesCapas } from '@/lib/api';
@@ -11,6 +13,34 @@ import { useUsuarioActual } from '@/lib/sesion';
 
 export default function Capas() {
   const usuario = useUsuarioActual();
+  // Activar una versión es acción de administración. Técnico y ejecutivo pueden llegar por URL,
+  // pero no ven la tabla: el permiso real lo aplica api-core (403), esto es la puerta de la interfaz.
+  if (usuario.rol !== 'admin') return <SoloAdministracion />;
+  return <TablaCapas />;
+}
+
+/** Aviso para técnico y ejecutivo que entran a /capas por la URL: la sección es solo del admin. */
+function SoloAdministracion() {
+  return (
+    <div className="space-y-4">
+      <h1 className="titular text-3xl">Capas administrativas</h1>
+      <div className="aviso aviso-info max-w-[76ch]" data-testid="capas-solo-admin">
+        <CircleQuestionMark size={17} aria-hidden="true" className="mt-0.5 shrink-0" />
+        <span>
+          Esta sección es solo para administración: la versión de capa vigente la activa una cuenta
+          de administrador. Volvé a{' '}
+          <Link href="/reportes" className="font-semibold underline">
+            la bandeja de reportes
+          </Link>
+          .
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Tabla de versiones cargadas con la activación, solo para el admin. */
+function TablaCapas() {
   const { fechaHora, numero } = useFormato();
   const cliente = useQueryClient();
   const [mensaje, setMensaje] = useState<string | null>(null);
@@ -94,7 +124,7 @@ export default function Capas() {
                     <span className="rounded-full bg-verde-100 px-3 py-1 font-semibold text-verde-700">
                       Vigente
                     </span>
-                  ) : usuario.rol === 'admin' ? (
+                  ) : (
                     <button
                       type="button"
                       className="btn-secundario btn"
@@ -110,10 +140,6 @@ export default function Capas() {
                     >
                       Activar
                     </button>
-                  ) : (
-                    <span className="text-[13.5px] text-tinta-600">
-                      Solo un administrador puede activarla
-                    </span>
                   )}
                 </td>
               </tr>

@@ -1,8 +1,8 @@
 import { CircleQuestionMark, Download, TriangleAlert } from 'lucide-react';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { obtenerCiudad } from '@/lib/ciudad-servidor';
 import { hayPlanoDeReferencia } from '@/lib/plano';
+import { VerEnCapas } from './VerEnCapas';
 
 export const metadata: Metadata = { title: 'Plano oficial de zonificación' };
 
@@ -127,9 +127,9 @@ export default async function PaginaPlano() {
           vecinales y 27.527 manzanas), y es contra ese shapefile —no contra esta imagen— que se
           resuelve el distrito y la unidad vecinal de cada reporte. La imagen es de otra fecha y
           numera <b>doce</b> distritos urbanos; la entrega trae quince numerados más «PI». Cuando
-          los dos no coincidan, manda la capa vigente, que es la que se ve en <b>Capas</b>. Calcar
-          la imagen tampoco serviría: dejaría bordes aproximados justo donde el vecino reporta la
-          esquina de su cuadra.
+          los dos no coincidan, manda la capa vigente
+          <VerEnCapas texto="que es la que se ve en" />. Calcar la imagen tampoco serviría: dejaría
+          bordes aproximados justo donde el vecino reporta la esquina de su cuadra.
         </span>
       </div>
 
@@ -238,11 +238,8 @@ function SinPlano({ ciudad }: { ciudad: string }) {
         <CircleQuestionMark size={17} aria-hidden="true" className="mt-0.5 shrink-0" />
         <span>
           Esta instalación ({ciudad}) no tiene un plano de referencia cargado. El distrito y la
-          unidad vecinal de cada reporte se resuelven contra la capa oficial vigente, que se ve en{' '}
-          <Link href="/capas" className="font-semibold underline">
-            Capas
-          </Link>
-          .
+          unidad vecinal de cada reporte se resuelven contra la capa oficial vigente
+          <VerEnCapas texto="que se ve en" />.
         </span>
       </div>
     </div>

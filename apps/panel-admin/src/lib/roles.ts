@@ -7,6 +7,7 @@ import type { Rol } from 'contracts';
 
 export const RUTA_EJECUTIVO = '/ejecutivo';
 export const RUTA_PLANO = '/plano';
+export const RUTA_CAPAS = '/capas';
 
 /** Roles que entran al panel. Un `ciudadano` con sesión no tiene nada que hacer acá. */
 export function puedeEntrarAlPanel(rol: Rol): boolean {
@@ -43,18 +44,42 @@ const ENLACES_PANEL: EnlacePanel[] = [
   { href: RUTA_EJECUTIVO, texto: 'Ejecutivo' },
   { href: '/reportes', texto: 'Reportes' },
   { href: '/indicadores', texto: 'Indicadores' },
-  { href: '/capas', texto: 'Capas' },
+  { href: RUTA_CAPAS, texto: 'Capas' },
   { href: RUTA_PLANO, texto: 'Plano oficial' },
 ];
 
+/** true si alguna versión de capa está cargada pero todavía sin activar (`vigente = false`). */
+export function hayVersionCapaPendiente(versiones: ReadonlyArray<{ vigente: boolean }>): boolean {
+  return versiones.some((v) => !v.vigente);
+}
+
+/**
+ * «Capas» es administración: la ve solo el admin, y solo cuando hay una versión cargada sin
+ * activar esperando que la active. Técnico y ejecutivo no la ven nunca; por eso la barra lateral
+ * ni siquiera pide las versiones para esos roles.
+ */
+export function debeMostrarEnlaceCapas(rol: Rol, hayVersionPendiente: boolean): boolean {
+  return rol === 'admin' && hayVersionPendiente;
+}
+
+export interface OpcionesEnlaces {
+  /** La instalación tiene plano de referencia (`hayPlanoDeReferencia` en `plano.ts`). */
+  planoDeReferencia: boolean;
+  /** Hay una versión de capa cargada sin activar (solo se consulta para el admin). */
+  capasPendientes: boolean;
+}
+
 /**
  * Enlaces de la barra lateral que corresponden al rol y a la instalación: «Plano oficial» es
- * contenido de la ciudad que tiene plano de referencia (`hayPlanoDeReferencia` en `plano.ts`).
+ * contenido de la ciudad que tiene plano de referencia; «Capas» es administración y solo aparece
+ * cuando el admin tiene una versión sin activar (`debeMostrarEnlaceCapas`).
  */
-export function enlacesPara(rol: Rol, instalacion: { planoDeReferencia: boolean }): EnlacePanel[] {
-  return ENLACES_PANEL.filter(
-    (e) => puedeVerRuta(rol, e.href) && (e.href !== RUTA_PLANO || instalacion.planoDeReferencia),
-  );
+export function enlacesPara(rol: Rol, opciones: OpcionesEnlaces): EnlacePanel[] {
+  return ENLACES_PANEL.filter((e) => {
+    if (e.href === RUTA_CAPAS) return debeMostrarEnlaceCapas(rol, opciones.capasPendientes);
+    if (e.href === RUTA_PLANO) return puedeVerRuta(rol, e.href) && opciones.planoDeReferencia;
+    return puedeVerRuta(rol, e.href);
+  });
 }
 
 /**
