@@ -36,7 +36,7 @@
   },
   "dependencies": {
     "contracts": "workspace:*",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "0.45.3",
     "hash-wasm": "4.12.0",
     "pg": "8.23.0"
   },
@@ -47,7 +47,7 @@
     "@types/geojson": "7946.0.16",
     "@types/node": "24.13.4",
     "@types/pg": "8.23.1",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }
