@@ -66,6 +66,14 @@ describe('mensajes de error para el vecino', () => {
     expect(esUbicacionRechazada(new TypeError('x'))).toBe(false);
   });
 
+  it('el 422 de ubicación precisa disponible explica que hay que usar el camino normal (ADR 0007)', () => {
+    const texto = mensajeDeError(new ErrorApi('UBICACION_PRECISA_DISPONIBLE', 'crudo', 422));
+    expect(texto).not.toBe('crudo');
+    expect(texto).toContain(`${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m`);
+    // Es uno de los 422 de la posición: lleva al paso 1 a compartir la ubicación de nuevo.
+    expect(esUbicacionRechazada(new ErrorApi('UBICACION_PRECISA_DISPONIBLE', 'x', 422))).toBe(true);
+  });
+
   it('nunca deja escapar el texto crudo de la plataforma', () => {
     expect(mensajeDeError(new TypeError('Failed to fetch'))).not.toContain('Failed to fetch');
     expect(mensajeDeError(plazoAgotado())).not.toContain('signal timed out');

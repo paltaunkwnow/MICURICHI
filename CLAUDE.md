@@ -13,7 +13,7 @@
 5. **Distrito y unidad vecinal se calculan por point-in-polygon**, nunca se toman de texto escrito por el usuario.
 6. **No inventar** normativas, versiones, cifras ni fuentes. Lo no verificado se escribe como `<a confirmar>`.
 7. **Ningún secreto en el repo.** Todo por variables de entorno con `.env.example` sin valores reales.
-8. **La ubicación de un reporte es dato sensible.** Vista pública con precisión degradada cuando corresponda; identidad del reportante nunca en el mapa público. La posición del dispositivo, que se usa para comprobar el radio de 60 m, **nunca se guarda ni se registra en logs**. Los permisos de ubicación y de cámara se piden **solo al reportar**, nunca al cargar la web.
+8. **La ubicación de un reporte es dato sensible.** Vista pública con precisión degradada cuando corresponda; identidad del reportante nunca en el mapa público. La posición del dispositivo, que se usa para comprobar el radio de 60 m (o, sin GPS preciso, solo para centrar el mapa de la ubicación aproximada, ADR 0007), **nunca se guarda ni se registra en logs**. Los permisos de ubicación y de cámara se piden **solo al reportar**, nunca al cargar la web.
 9. **Antes de programar: plan → aprobación → reparto.** El agente principal, con el modelo más potente, arma el plan con metas verificables; el usuario lo aprueba; recién entonces se reparte a subagentes según su nivel (§12.4). Sin excepciones.
 10. **Probar antes de tocar y verificar al terminar.** Quien edita código corre antes las pruebas del paquete y las vuelve a correr después: lo que estaba verde no puede quedar rojo, y lo que ya estaba rojo se informa, no se arregla de pasada. **Toda función nueva o arreglo termina con la verificación SDD hecha por subagentes** (§12.4), aunque no se haya pedido `/sdd`. El `/sdd` completo (`docs/proceso/sdd.md`), solo cuando el usuario lo pide.
 11. **Alcance de la Misión 1 cerrado** (§3). Todo lo demás va al backlog (§15).
@@ -28,7 +28,7 @@
 
 | Usuario | Qué hace | Parte |
 |---|---|---|
-| Ciudadano / vecino | Ve el mapa público sin cuenta. Para reportar crea su cuenta, inicia sesión y comparte su ubicación: el punto se ajusta dentro de 60 m de su posición. Foto opcional, solo con la cámara dentro de la página. Ve sus propios reportes, también los que esperan publicarse | Parte 1 (`apps/web-ciudadano`) |
+| Ciudadano / vecino | Ve el mapa público sin cuenta. Para reportar crea su cuenta, inicia sesión y comparte su ubicación: el punto se ajusta dentro de 60 m de su posición; si el dispositivo no llega a 50 m de precisión (una computadora), lo pone a mano con «ubicación aproximada», que los técnicos ven sin comprobar (ADR 0007). Foto opcional, solo con la cámara dentro de la página. Ve sus propios reportes, también los que esperan publicarse | Parte 1 (`apps/web-ciudadano`) |
 | Técnico municipal | Revisa los reportes publicados: valida, rechaza, fusiona, reclasifica, filtra, exporta, mira indicadores | Parte 2 (`apps/panel-admin`) |
 | Administrador | Lo del técnico, más usuarios, retiro de verificados y activación de capas (único rol que ve «Capas») | Parte 2 |
 | Ejecutivo (secretarios, concejales, alcalde) | Ve dónde y cuánto se inunda y cómo va el trabajo en `/ejecutivo`: cifra grande, pestañas por severidad, dos gráficas por distrito y un mapa de distritos y UV; no modera ni exporta | Parte 2 |
@@ -56,6 +56,7 @@
 | **Demora de publicación** | 1 min para el 1.º reporte del día de la cuenta y 4 min para el 2.º y el 3.º; la fija el servidor en `publicar_en`. Mientras espera, solo lo ve su autor. |
 | **Reporte sin verificar** | Publicado en estado `nuevo`, sin revisión técnica: etiqueta exacta «NO SE HA VERIFICADO»; los validados dicen «Verificado». |
 | **Radio del dispositivo** | Distancia máxima (60 m) entre el punto y la posición del teléfono al enviar. La posición se usa para comprobarlo y no se guarda. |
+| **Ubicación aproximada** | Camino para un dispositivo que no llega a 50 m de precisión (por ejemplo una computadora): el punto se pone a mano en cualquier lugar de la cobertura, se guarda con `ubicacion_metodo = aproximada` y sin distancia al dispositivo, y los técnicos lo ven «sin comprobar con el dispositivo» (ADR 0007). |
 
 Vocabulario de drenaje y pavimento (sumidero, colector, contrapendiente, PCI, IRI, IDF…): `docs/dominio/drenaje-y-pavimento.md`.
 
@@ -68,7 +69,7 @@ Vocabulario de drenaje y pavimento (sumidero, colector, contrapendiente, PCI, IR
 1. **Mapa público** con los puntos (clustering visual) — Parte 1.
 2. **Detalle del punto** con coordenadas, distrito y UV (por PIP), fecha, descripción, foto, severidad y estado («NO SE HA VERIFICADO», «Verificado» o «Resuelto») — Parte 1.
 3. **Point-in-polygon** contra las capas oficiales en PostGIS — Parte 4.
-4. **Formulario de reporte** con la ubicación del dispositivo **obligatoria** (el punto se ajusta dentro de 60 m: arrastrando, con las flechas, «mover 5 m» o escribiendo coordenadas), foto opcional con la cámara dentro de la página y los campos de §7.1 — Partes 1 y 3.
+4. **Formulario de reporte** con la ubicación del dispositivo **obligatoria** (el punto se ajusta dentro de 60 m: arrastrando, con las flechas, «mover 5 m» o escribiendo coordenadas; sin GPS preciso, ubicación aproximada puesta a mano y marcada para los técnicos, ADR 0007), foto opcional con la cámara dentro de la página y los campos de §7.1 — Partes 1 y 3.
 5. **Panel técnico**: bandeja (tabla + mapa reactivo) con filtros, moderación posterior a la publicación, exportación CSV y GeoJSON, indicadores — Parte 2.
 6. **ETL** shapefile → GeoJSON → PostGIS con un comando — Parte 5.
 7. **Entorno local completo** con Docker Compose y el lanzador `Mi-Curichi.exe` — Parte 5.
@@ -118,7 +119,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 | Aspecto | Detalle |
 |---|---|
 | **Propósito** | Que cualquier vecino, desde el celular, vea el mapa y reporte un punto en menos de 2 minutos. |
-| **Responsabilidades** | Mapa MapLibre con capa base atribuida, UV y distritos, puntos con clustering; detalle con «NO SE HA VERIFICADO» visible (texto, icono y color de aviso) en el detalle, las tarjetas, las pastillas y la leyenda; formulario anclado a la posición del dispositivo («Compartir mi ubicación», precisión de 50 m o menos, círculo de 60 m, relectura de la posición al enviar); foto con la **cámara dentro de la página** (`getUserMedia`), **sin input de archivo** ni galería; permisos solo dentro del flujo de reporte; aviso de la demora y cuenta regresiva; «Mis reportes» desde la API; validación con Zod + React Hook Form; previsualización de la UV antes de enviar; login con correo o solo el usuario (se completa con `@curichi.local`); la página pública **no se refresca sola**; PWA; mobile-first; WCAG 2.2 AA; texto de limitaciones (§9.4) visible. |
+| **Responsabilidades** | Mapa MapLibre con capa base atribuida, UV y distritos, puntos con clustering; detalle con «NO SE HA VERIFICADO» visible (texto, icono y color de aviso) en el detalle, las tarjetas, las pastillas y la leyenda; formulario anclado a la posición del dispositivo («Compartir mi ubicación», precisión de 50 m o menos, círculo de 60 m, relectura de la posición al enviar) y, si el dispositivo no llega a 50 m, el camino «ubicación aproximada» con el punto a mano dentro de la ciudad (ADR 0007); foto con la **cámara dentro de la página** (`getUserMedia`), **sin input de archivo** ni galería; permisos solo dentro del flujo de reporte; aviso de la demora y cuenta regresiva; «Mis reportes» desde la API; validación con Zod + React Hook Form; previsualización de la UV antes de enviar; login con correo o solo el usuario (se completa con `@curichi.local`); la página pública **no se refresca sola**; PWA; mobile-first; WCAG 2.2 AA; texto de limitaciones (§9.4) visible. |
 | **NO le corresponde** | Calcular severidad, distrito o UV; decidir la demora ni comprobar el radio (lo hace el servidor); moderar; almacenar fotos; hablar con la base; definir tipos de intercambio. |
 | **Entradas** | `GET /api/v1/reportes`, `/reportes/:id`, `/mis-reportes`, `/configuracion`, `/auth/yo`; `POST /geo/v1/resolver`; capas por `CapaInfo.url` (con huella). |
 | **Salidas** | `POST /api/v1/reportes` (con `dispositivo`) y `POST /api/v1/fotos`, con sesión; `POST /api/v1/auth/registro`, `/auth/login`, `/auth/logout`. |
@@ -139,7 +140,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 | Aspecto | Detalle |
 |---|---|
 | **Propósito** | Único punto de escritura del dominio y guardián de las reglas de negocio. |
-| **Responsabilidades** | CRUD de reportes; máquina de estados (§7.3); severidad (§9.1) con función pura testeada; comprobación de la posición del dispositivo (precisión, antigüedad, radio de 60 m) sin guardarla ni registrarla; resolución de distrito/UV vía `geo-service`; `publicar_en` fijado en el INSERT y **una sola condición de visibilidad** (`condicionPublico` / `condicionPublicado`) en todas las rutas; recálculo de puntos críticos en cada transición (§9.2); sesión por cookie y autorización por rol; validación con `contracts`; auditoría; rate limiting, antispam y **cupo diario por cuenta en la base**; idempotencia por cuenta; fotos (magic bytes, **WebP** de 1600 px máx. **sin metadatos**, guarda de disco); exportación con nota metodológica; indicadores con filtros; healthchecks; logs estructurados. **Custodia `packages/contracts`.** |
+| **Responsabilidades** | CRUD de reportes; máquina de estados (§7.3); severidad (§9.1) con función pura testeada; comprobación de la posición del dispositivo (precisión, antigüedad, radio de 60 m; con `ubicacion_aproximada`, antigüedad y precisión de más de 50 m, sin radio, ADR 0007) sin guardarla ni registrarla; resolución de distrito/UV vía `geo-service`; `publicar_en` fijado en el INSERT y **una sola condición de visibilidad** (`condicionPublico` / `condicionPublicado`) en todas las rutas; recálculo de puntos críticos en cada transición (§9.2); sesión por cookie y autorización por rol; validación con `contracts`; auditoría; rate limiting, antispam y **cupo diario por cuenta en la base**; idempotencia por cuenta; fotos (magic bytes, **WebP** de 1600 px máx. **sin metadatos**, guarda de disco); exportación con nota metodológica; indicadores con filtros; healthchecks; logs estructurados. **Custodia `packages/contracts`.** |
 | **NO le corresponde** | Esquema y migraciones (Parte 4); operaciones sobre polígonos (Parte 4); ETL, infra, CI (Parte 5); render. |
 | **Definition of Done** | lint + typecheck + Vitest verdes; integración del camino crítico (`POST /reportes` con dispositivo a ≤ 60 m → UV → severidad → `nuevo` con `publicar_en`); prueba de tabla de visibilidad que recorre todas las rutas; tabla de severidad (§9.1); foto con EXIF GPS → WebP sin EXIF, XMP ni ICC; README; `.env.example`; OpenAPI en `/docs`. |
 
@@ -163,7 +164,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 
 ### 4.8 Transversal — `packages/contracts` (custodia: Parte 3)
 
-- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio. Versión actual: **0.17.0**.
+- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio. Versión actual: **0.18.0**.
 - **Ninguna parte define un tipo de intercambio por su cuenta**: lo agrega aquí en una tarea que lo anuncie; la Parte 3 lo revisa.
 - Todo cambio de contrato sube la versión, se documenta en `packages/contracts/CHANGELOG.md` y regenera el OpenAPI (`pnpm --filter contracts build`; el CI comprueba que no cambie al regenerarlo).
 - El ETL importa `contracts` directamente; `dist/dominio.json` queda para consumidores en otros lenguajes.
@@ -263,9 +264,9 @@ El esquema y las migraciones son de la **Parte 4** (`packages/db/`); los contrat
 | `distrito_id`, `unidad_vecinal_id` | `text` FK a `geo.*` | **calculados por el sistema** |
 | `version_capa` | `text` | versión de capa con la que se resolvió |
 | `resolucion_flags` | `jsonb` | `{ en_limite, asignado_por_proximidad, distancia_m, distrito_discrepante? }` (§7.4) |
-| `ubicacion_metodo` | `gps` \| `manual` | lo **deriva el servidor**: `gps` si la distancia punto–dispositivo es ≤ `max(2 m, precision_m)`, si no `manual` |
-| `precision_gps_m` | `numeric` null | precisión declarada por el dispositivo (≤ 50 m para aceptar) |
-| `distancia_dispositivo_m` | `smallint` null, 0–1000 | distancia redondeada punto–dispositivo; la posición del dispositivo **no se guarda** |
+| `ubicacion_metodo` | `gps` \| `manual` \| `aproximada` | lo **deriva el servidor**: `gps` si la distancia punto–dispositivo es ≤ `max(2 m, precision_m)`, si no `manual`; `aproximada` si entró por el camino de ubicación aproximada (ADR 0007, migración 0019) |
+| `precision_gps_m` | `numeric` null | precisión declarada por el dispositivo (≤ 50 m en el camino normal; más de 50 m en `aproximada`) |
+| `distancia_dispositivo_m` | `smallint` null, 0–1000 | distancia redondeada punto–dispositivo (`null` en `aproximada`); la posición del dispositivo **no se guarda** |
 | `ubicacion_tipo` | `via_publica` \| `vivienda_o_predio` \| `otro` | activa el jitter público (§13) |
 | `descripcion` | `text` | 10–1000 caracteres `<a confirmar>` |
 | `profundidad_estimada` | `tobillo` \| `rodilla` \| `muslo` \| `mas_70` | |
@@ -339,7 +340,7 @@ Respuesta: `{ dentro_cobertura, distrito: {id, codigo, nombre}, unidad_vecinal: 
 
 | Método y ruta | Rol | Descripción |
 |---|---|---|
-| `POST /reportes` | autenticado (rate limited) | Crea en `nuevo`; autor de la sesión (sin sesión, `401 SIN_SESION`). Body `ReporteCrearSchema` con `dispositivo` **obligatorio** (`lat`, `lon`, `precision_m`, `antiguedad_s`), sin `ubicacion_metodo` ni `precision_gps_m`. Antes de resolver y sin gastar cupo: `422 PRECISION_INSUFICIENTE` (> 50 m), `422 POSICION_VENCIDA` (> 600 s `<a confirmar>`), `422 UBICACION_FUERA_DE_RADIO` (> 60 m). Límite por IP y **3 reportes por cuenta y por día** en `ZONA_HORARIA` (`429 CUOTA_DE_REPORTES` con `Retry-After` hasta la medianoche). Resuelve UV, calcula severidad, fija `publicar_en`; devuelve `publicar_en` y `segundos_para_publicar` (también en el replay idempotente). |
+| `POST /reportes` | autenticado (rate limited) | Crea en `nuevo`; autor de la sesión (sin sesión, `401 SIN_SESION`). Body `ReporteCrearSchema` con `dispositivo` **obligatorio** (`lat`, `lon`, `precision_m`, `antiguedad_s`), sin `ubicacion_metodo` ni `precision_gps_m`. Antes de resolver y sin gastar cupo: `422 PRECISION_INSUFICIENTE` (> 50 m), `422 POSICION_VENCIDA` (> 600 s `<a confirmar>`), `422 UBICACION_FUERA_DE_RADIO` (> 60 m). Con `ubicacion_aproximada: true` (ADR 0007) no se comprueba el radio y se guarda método `aproximada`, pero la precisión tiene que ser de más de 50 m (si no, `422 UBICACION_PRECISA_DISPONIBLE`). Límite por IP y **3 reportes por cuenta y por día** en `ZONA_HORARIA` (`429 CUOTA_DE_REPORTES` con `Retry-After` hasta la medianoche). Resuelve UV, calcula severidad, fija `publicar_en`; devuelve `publicar_en` y `segundos_para_publicar` (también en el replay idempotente). |
 | `POST /fotos` | autenticado (rate limited) | Multipart; `FOTO_MAX_BYTES` (8 MB) y 3 fotos por reporte `<a confirmar>`; entran JPEG, PNG y WebP por magic bytes y **sale WebP**. 12 fotos por cuenta y por día (`429 CUOTA_DE_FOTOS`, devueltas si falla el procesamiento); `507 SIN_ESPACIO` bajo `FOTOS_MIN_LIBRE_BYTES`. Devuelve un `objeto_key` que solo esa cuenta puede asociar. |
 | `GET /fotos/:key` | público (rate limited) | Foto de reporte publicado: `public, no-cache` con `ETag` (revalida la visibilidad). El autor ve las suyas en cualquier estado y técnico/admin las de publicados luego rechazados o fusionados, con `private, no-store`. Sin reporte, solo quien la subió. Lo demás, `404`. |
 | `GET /reportes` | público | **Siempre vista pública**: `nuevo`, `validado`, `resuelto` con `publicar_en <= now()`, jitter, sin autor. Filtros: `bbox`, `estado` (dentro de los públicos), `distrito_id`, `unidad_vecinal_id`, `punto_critico_id`, `severidad`, `desde`, `hasta`, `pagina`, `limite`. |
@@ -470,6 +471,7 @@ Relación entre `causa_presunta`, los campos del sumidero y la patología que lo
 - La ausencia de reportes no significa ausencia de anegamiento (sesgo de participación).
 - «NO SE HA VERIFICADO» = no revisado por un técnico; puede ser erróneo.
 - El radio de 60 m no prueba que el vecino estuviera en el lugar: el GPS se puede falsear.
+- Los reportes con ubicación «aproximada» se cargaron desde dispositivos sin GPS preciso (por ejemplo computadoras): el punto lo puso la persona a mano y no se comprobó con el dispositivo (ADR 0007).
 - Cada exportación lleva estas limitaciones en `nota_metodologica` y en el encabezado del CSV.
 
 ---
@@ -581,7 +583,7 @@ El plan pasa por la aprobación del usuario (regla 9). Después el agente princi
 | Tema | Regla |
 |---|---|
 | **Cuenta y autor** | Reportar exige **cuenta**; el autor sale de la sesión, nunca del cuerpo. La identidad del reportante **nunca** aparece en el mapa ni en exportaciones públicas. |
-| **Ubicación del dispositivo** | Se exige precisión ≤ 50 m, posición ≤ 600 s `<a confirmar>` y punto a ≤ 60 m (`422` propios, sin gastar cupo). La posición **no se guarda** ni se registra (pino redacta `body.dispositivo`); solo queda `distancia_dispositivo_m`. Es coherencia, **no prueba de presencia**: los controles reales son la cuenta, el cupo, la auditoría y la revisión técnica. |
+| **Ubicación del dispositivo** | Se exige precisión ≤ 50 m, posición ≤ 600 s `<a confirmar>` y punto a ≤ 60 m (`422` propios, sin gastar cupo). La posición **no se guarda** ni se registra (pino redacta `body.dispositivo`); solo queda `distancia_dispositivo_m`. Un dispositivo que no llega a 50 m (una computadora) reporta por el camino de **ubicación aproximada** (ADR 0007): sin radio, con el punto a mano dentro de la cobertura, método `aproximada` y sin distancia; el servidor rechaza ese camino con una precisión de 50 m o menos (`422 UBICACION_PRECISA_DISPONIBLE`). Es coherencia, **no prueba de presencia**: los controles reales son la cuenta, el cupo, la auditoría y la revisión técnica. |
 | **Permisos del navegador** | La web no pide ubicación ni cámara al cargar: la ubicación al tocar «Compartir mi ubicación», la cámara al tocar «Sacar foto». `Permissions-Policy: geolocation=(self), camera=(self), microphone=(), payment=(), usb=()`. Al cerrar la cámara se detienen sus pistas. Ambas exigen HTTPS. |
 | **Jitter público** | `vivienda_o_predio` → desplazamiento determinista (semilla = `id`) de hasta 30 m `<a confirmar>`; vista pública redondeada a 5 decimales. El técnico ve la coordenada exacta. |
 | **EXIF y fotos** | Conversión a **WebP** sin metadatos **antes** de guardar; `exif_sanitizado = true` para servir; test que verifica, por los chunks RIFF, que no queda EXIF, XMP ni ICC. Tipos por magic bytes; nombres generados por el servidor; `507 SIN_ESPACIO` bajo el umbral de disco. Las de reportes publicados se sirven con `public, no-cache` y `ETag` (retirar el reporte deja de servir la foto sin purgar cachés). Una foto sin reporte solo la ve quien la subió. «Solo cámara» es una barrera de interfaz, no una garantía. |
@@ -603,7 +605,7 @@ El plan pasa por la aprobación del usuario (regla 9). Después el agente princi
 
 ### 14.1 Accesibilidad (WCAG 2.2 AA)
 
-- Todo el flujo de reporte se completa **con teclado** y lector de pantalla: alternativa al arrastre (coordenadas, flechas, «mover 5 m»), foto opcional, mensajes claros sin ubicación precisa, diálogo de cámara que atrapa el foco.
+- Todo el flujo de reporte se completa **con teclado** y lector de pantalla: alternativa al arrastre (coordenadas, flechas, «mover 5 m»), también en el camino de ubicación aproximada, foto opcional, mensajes claros sin ubicación precisa, diálogo de cámara que atrapa el foco.
 - Contraste ≥ 4,5:1; severidad con **color + texto + forma**; «NO SE HA VERIFICADO» con texto, icono y color de aviso; pastillas del mapa con `aria-label`. Gráficos con leyenda o tabla que no dependa del color.
 - Objetivos táctiles ≥ 24×24 px (48 px en el UI kit); formularios con etiquetas y errores anunciados (`aria-live`); `lang="es"`; sin siglas sin expandir en la UI pública.
 - Auditoría con Lighthouse y `axe` en Playwright (Parte 5); las Partes 1 y 2 corrigen.

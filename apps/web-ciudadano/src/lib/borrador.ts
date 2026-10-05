@@ -143,6 +143,11 @@ export interface Borrador {
    * enviar, el reintento tiene que llevar la MISMA clave o el servidor crearía un segundo reporte.
    */
   clave: string;
+  /**
+   * El reporte iba por el camino de ubicación aproximada (ADR 0007). La posición del teléfono no se
+   * guarda, pero sí el modo: al retomar se vuelve a ofrecer ese camino. Ausente = camino normal.
+   */
+  aproximado?: boolean;
 }
 
 /** Lo que guarda el formulario; las dos marcas de tiempo las pone `guardarBorrador`. */
@@ -241,6 +246,7 @@ export function leerBorrador(): Borrador | null {
       fotos: fotosVigentes(d.fotos, ahora),
       valores: valores as Borrador['valores'],
       clave: d.clave,
+      aproximado: d.aproximado === true,
     };
   } catch {
     // Basura de una versión anterior o JSON roto: se descarta en silencio.

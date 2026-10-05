@@ -130,6 +130,29 @@ con su cadena de consulta, y una caja centrada en el punto dejaría en el log la
 del reporte. Solo sale con el formulario abierto y su clave de caché lleva el radio. Si la caja
 tiene más validados de los que trae la respuesta, la lista avisa que puede haber más cerca.
 
+### Ubicación aproximada
+
+Un reporte puede entrar desde un dispositivo sin GPS preciso (una computadora ubicada por Wi-Fi o
+IP) por el camino de «ubicación aproximada» (ADR 0007, contracts 0.18.0): el punto lo puso la
+persona a mano y api-core no lo comprobó contra el dispositivo. Llega con `ubicacion_metodo =
+aproximada`, la precisión declarada en `precision_gps_m` (más de 50 m) y la distancia al
+dispositivo en `null`. El panel nunca lo muestra como «manual», que diría que el punto se ajustó
+cerca del teléfono: `etiquetaMetodo` (`src/lib/formato.ts`) devuelve «Ubicación aproximada — sin
+comprobar con el dispositivo». Es un `switch` exhaustivo: un método nuevo en contracts rompe el
+typecheck en vez de caer en el texto de otro.
+
+- **Bandeja**: una insignia «Aproximada» (`data-testid="insignia-ubicacion-aproximada"`) junto a la
+  unidad vecinal de la fila. Es texto con icono, no solo color; el tooltip y los lectores de
+  pantalla traen la etiqueta completa.
+- **Detalle** (`DatosUbicacion`): el método con una aclaración (el punto lo puso la persona y su
+  dispositivo no tenía GPS preciso), la precisión declarada y, en «Distancia al dispositivo», que no
+  aplica.
+- **Ficha del reporte**: el mismo renglón «Método de Captura» en el .txt y en la vista imprimible;
+  el GeoJSON trae el método tal como llegó.
+
+No hay cola ni filtro aparte para estos reportes: se moderan como cualquier otro, y en el mapa
+público siguen diciendo «NO SE HA VERIFICADO».
+
 ## El mapa
 
 Mismo tratamiento que en la app pública: base raster desaturada y marcadores en pastilla con el

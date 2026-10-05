@@ -60,11 +60,16 @@ export const DispositivoSchema = z
     lat: LatSchema,
     lon: LonSchema,
     precision_m: z
+      // El tope físico que acota Zod es 100 km, no un valor de negocio: una computadora ubicada por
+      // Wi-Fi o IP declara cientos de metros o varios km. Con un tope más bajo, una precisión así
+      // daría 400 PAYLOAD_INVALIDO en vez del 422 (PRECISION_INSUFICIENTE o UBICACION_PRECISA_
+      // DISPONIBLE) que la interfaz necesita para explicar qué pasa. Los topes de negocio son de
+      // api-core, no del esquema.
       .number()
       .min(0)
-      .max(10_000)
+      .max(100_000)
       .meta({
-        description: `Precisión que declara el dispositivo (Geolocation coords.accuracy), en metros. Se aceptan ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos (422 PRECISION_INSUFICIENTE)`,
+        description: `Precisión que declara el dispositivo (Geolocation coords.accuracy), en metros. Se aceptan ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos (422 PRECISION_INSUFICIENTE); con ubicacion_aproximada se pide MÁS de ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m (si no, 422 UBICACION_PRECISA_DISPONIBLE). Zod solo acota el rango físico (hasta 100 km, por las computadoras ubicadas por Wi-Fi o IP), así que el tope de negocio es 422 y no 400`,
       }),
     antiguedad_s: z
       .number()
@@ -88,6 +93,20 @@ export const ReporteCrearSchema = z
      * los deriva api-core de esta posición.
      */
     dispositivo: DispositivoSchema,
+    /**
+     * Camino de ubicación aproximada (0.18.0, ADR 0007): lo pide el cliente cuando el dispositivo no
+     * llega a `PRECISION_DISPOSITIVO_MAX_M` m de precisión (una computadora ubicada por Wi-Fi o IP).
+     * El punto lo pone la persona a mano en cualquier lugar de la cobertura y NO se comprueba el
+     * radio; api-core guarda `ubicacion_metodo = 'aproximada'`, exige MÁS de
+     * `PRECISION_DISPOSITIVO_MAX_M` m (si no, 422 UBICACION_PRECISA_DISPONIBLE) y deja la distancia
+     * al dispositivo en null. Opcional: por defecto el reporte va por el camino normal (GPS preciso).
+     */
+    ubicacion_aproximada: z
+      .boolean()
+      .default(false)
+      .meta({
+        description: `true para reportar con ubicación aproximada desde un dispositivo sin GPS preciso (p. ej. una computadora): el punto lo pone la persona a mano, se guarda ubicacion_metodo = aproximada y no se comprueba el radio de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m. Exige una precisión mayor a ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m (si no, 422 UBICACION_PRECISA_DISPONIBLE). Por defecto false (camino normal con GPS)`,
+      }),
     ubicacion_tipo: z.enum(UBICACION_TIPOS),
     descripcion: z
       .string()
@@ -186,7 +205,7 @@ export const ReporteTecnicoSchema = ReportePublicoSchema.extend({
   estado: z.enum(ESTADOS_REPORTE),
   ubicacion_metodo: z.enum(UBICACION_METODOS).meta({
     description:
-      'Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro del margen de error del dispositivo (a dispositivo.precision_m o menos de su posición al enviar, y con 2 m como margen mínimo), manual si quedó más lejos, siempre dentro del radio. El margen existe porque dos lecturas del GPS difieren varios metros aunque nadie mueva el punto',
+      'Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro del margen de error del dispositivo (a dispositivo.precision_m o menos de su posición al enviar, y con 2 m como margen mínimo), manual si quedó más lejos, siempre dentro del radio. El margen existe porque dos lecturas del GPS difieren varios metros aunque nadie mueva el punto. aproximada (desde 0.18.0, ADR 0007): el reporte entró por el camino de ubicación aproximada (dispositivo sin GPS preciso); el punto lo puso la persona a mano y no se comprobó contra la posición del dispositivo (los técnicos lo ven «sin comprobar»)',
   }),
   precision_gps_m: z.number().nullable().meta({
     description: 'Precisión que declaró el dispositivo al enviar, en metros',

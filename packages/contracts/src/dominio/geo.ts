@@ -19,9 +19,14 @@ export interface PuntoLatLon {
 /**
  * Códigos 422 de `POST /api/v1/reportes` sobre la posición del dispositivo, en el orden en que
  * api-core los comprueba: después de validar el cuerpo y antes de resolver la ubicación.
+ * `UBICACION_PRECISA_DISPONIBLE` (desde 0.18.0, ADR 0007) es la otra cara de
+ * `PRECISION_INSUFICIENTE`: se pidió el camino de ubicación aproximada (`ubicacion_aproximada:
+ * true`) pero el dispositivo sí llega a `PRECISION_DISPOSITIVO_MAX_M` m o menos, así que tiene que
+ * usar el camino normal. Con `ubicacion_aproximada` no se comprueba el radio.
  */
 export const CODIGOS_UBICACION_DISPOSITIVO = [
   'PRECISION_INSUFICIENTE',
+  'UBICACION_PRECISA_DISPONIBLE',
   'POSICION_VENCIDA',
   'UBICACION_FUERA_DE_RADIO',
 ] as const;

@@ -165,11 +165,16 @@ export type CoordenadasEscritas =
   | { tipo: 'lejos'; distanciaM: number; mensaje: string }
   | { tipo: 'invalida'; mensaje: string };
 
-/** Las coordenadas escritas a mano, que valen solo dentro del círculo. */
+/**
+ * Las coordenadas escritas a mano. Por el camino normal valen solo dentro del círculo; en el
+ * camino de ubicación aproximada (ADR 0007, `aproximado: true`) valen a cualquier distancia, que
+ * el point-in-polygon ya exige que caigan en la cobertura.
+ */
 export function coordenadasEscritas(
   latTexto: string,
   lonTexto: string,
   ancla: PuntoLatLon,
+  { aproximado = false }: { aproximado?: boolean } = {},
 ): CoordenadasEscritas {
   const punto = leerCoordenadas(latTexto, lonTexto);
   if (!punto)
@@ -179,7 +184,7 @@ export function coordenadasEscritas(
         'Revisá las coordenadas: la latitud va entre -90 y 90, y la longitud entre -180 y 180.',
     };
   const distanciaM = distanciaRedondeada(punto, ancla);
-  if (!dentroDelRadio(punto, ancla))
+  if (!aproximado && !dentroDelRadio(punto, ancla))
     return {
       tipo: 'lejos',
       distanciaM,
@@ -224,12 +229,25 @@ export function puntoInicial({
   ancla,
   guardado,
   enlace,
+  aproximado = false,
 }: {
   ancla: PuntoLatLon;
   guardado: Ubicacion | null;
   enlace: PuntoLatLon | null;
+  /** Ubicación aproximada (ADR 0007): sin radio, nada se descarta por quedar lejos del teléfono. */
+  aproximado?: boolean;
 }): { punto: Ubicacion; aviso: string | null; movido: boolean } {
   const enElTelefono: Ubicacion = { lat: ancla.lat, lon: ancla.lon, precargada: true };
+  if (aproximado) {
+    if (guardado) return { punto: guardado, aviso: null, movido: false };
+    if (enlace)
+      return {
+        punto: { lat: enlace.lat, lon: enlace.lon, precargada: true },
+        aviso: null,
+        movido: false,
+      };
+    return { punto: enElTelefono, aviso: null, movido: false };
+  }
   if (guardado) {
     if (dentroDelRadio(guardado, ancla)) return { punto: guardado, aviso: null, movido: false };
     return {

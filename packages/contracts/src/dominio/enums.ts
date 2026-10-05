@@ -72,7 +72,13 @@ export type Rol = (typeof ROLES)[number];
 export const ROLES_DEL_PANEL = ['tecnico', 'admin', 'ejecutivo'] as const satisfies readonly Rol[];
 export type RolDelPanel = (typeof ROLES_DEL_PANEL)[number];
 
-export const UBICACION_METODOS = ['gps', 'manual'] as const;
+/**
+ * Cómo quedó fijada la coordenada del reporte (lo deriva el servidor, §7.1). `aproximada` (0.18.0,
+ * ADR 0007): el reporte entró por el camino de ubicación aproximada desde un dispositivo sin GPS
+ * preciso (una computadora ubicada por Wi-Fi o IP); el punto lo puso la persona a mano y no se
+ * comprobó contra la posición del dispositivo.
+ */
+export const UBICACION_METODOS = ['gps', 'manual', 'aproximada'] as const;
 export type UbicacionMetodo = (typeof UBICACION_METODOS)[number];
 
 export const UBICACION_TIPOS = ['via_publica', 'vivienda_o_predio', 'otro'] as const;

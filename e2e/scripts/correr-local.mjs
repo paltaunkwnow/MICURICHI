@@ -57,7 +57,7 @@ const DOCKER_BIN = 'C:\\Program Files\\Docker\\Docker\\resources\\bin';
 const PNPM = ['-y', 'pnpm@12.4.1'];
 
 /**
- * Specs de cada grupo (sin `tests/` ni `.spec.ts`). Reparten los 24 archivos para correr de a
+ * Specs de cada grupo (sin `tests/` ni `.spec.ts`). Reparten los 27 archivos para correr de a
  * tandas y no quedarse sin RAM (ver e2e/README.md). El proyecto `chromium` corre todos; el proyecto
  * `movil` solo los de CON_MOVIL (su `testMatch` en playwright.config.ts filtra el resto).
  */
@@ -74,6 +74,7 @@ const GRUPOS = {
     'formulario-reporte',
     'formulario-sumidero-y-fotos',
     'ubicacion-obligatoria',
+    'ubicacion-aproximada',
     'camara-foto',
     'resiliencia-interfaz',
     'quitar-campos-web',
@@ -160,7 +161,7 @@ Opciones:
 Grupos (specs de tests/, sin .spec.ts):
   G1  api-contratos · separacion-publica-tecnica · cuenta-ciudadana · acceso-panel · publicacion-diferida
   G2  mapa-publico · mapa-seleccion · trafico-publico · datos-reales · navegacion
-  G3  formulario-reporte · formulario-sumidero-y-fotos · ubicacion-obligatoria · camara-foto · resiliencia-interfaz · quitar-campos-web
+  G3  formulario-reporte · formulario-sumidero-y-fotos · ubicacion-obligatoria · ubicacion-aproximada · camara-foto · resiliencia-interfaz · quitar-campos-web
   G4  recorrido-completo · panel-tecnico · panel-al-dia · panel-ejecutivo · panel-indicadores-tortas · panel-mapa-reactivo · quitar-campos-panel
   G5  accesibilidad · responsive · csp
 El proyecto chromium corre todos; el proyecto movil además mapa-publico, mapa-seleccion,

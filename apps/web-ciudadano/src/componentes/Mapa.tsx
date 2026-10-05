@@ -31,6 +31,7 @@ import {
 } from '@/lib/mapa-datos';
 import {
   type Direccion,
+  desplazar,
   moverDentroDelRadio,
   PASO_BOTON_M,
   PASO_FINO_M,
@@ -855,8 +856,12 @@ export function Mapa({
         element: elementoDelMarcador(fijo, (direccion, metros) => {
           const c = circuloRef.current;
           const actual = marcador.current?.getLngLat();
-          if (!c || !actual) return;
-          const p = moverDentroDelRadio({ lat: actual.lat, lon: actual.lng }, direccion, metros, c);
+          if (!actual) return;
+          const desde = { lat: actual.lat, lon: actual.lng };
+          // Sin círculo (ubicación aproximada, ADR 0007) el marcador se mueve libre por la ciudad.
+          const p = c
+            ? moverDentroDelRadio(desde, direccion, metros, c)
+            : desplazar(desde, direccion, metros);
           marcador.current?.setLngLat([p.lon, p.lat]);
           avisarUbicacion.current(p.lat, p.lon);
         }),
@@ -878,9 +883,10 @@ export function Mapa({
       });
       marcador.current = marca;
     } else marcador.current.setLngLat([punto.lon, punto.lat]);
-    // Con el círculo, el mapa no persigue al marcador en cada ajuste de 5 m: solo lo trae si quedó
-    // fuera de la vista. Sin círculo (la revisión del reporte), se centra como siempre.
-    if (circuloRef.current) {
+    // En el mapa de selección del paso 1 (con círculo o en modo aproximado) no se persigue al
+    // marcador en cada ajuste de 5 m: solo se lo trae si quedó fuera de la vista. En la revisión
+    // del reporte (`fijo`) se centra en él.
+    if (!fijo) {
       if (!m.getBounds().contains([punto.lon, punto.lat]))
         m.easeTo({ center: [punto.lon, punto.lat] });
     } else m.easeTo({ center: [punto.lon, punto.lat], zoom: Math.max(m.getZoom(), 16) });

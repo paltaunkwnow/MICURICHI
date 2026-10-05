@@ -69,9 +69,13 @@ components:
             precision_m:
               type: number
               minimum: 0
-              maximum: 10000
+              maximum: 100000
               description: Precisión que declara el dispositivo (Geolocation coords.accuracy),
-                en metros. Se aceptan 50 m o menos (422 PRECISION_INSUFICIENTE)
+                en metros. Se aceptan 50 m o menos (422 PRECISION_INSUFICIENTE);
+                con ubicacion_aproximada se pide MÁS de 50 m (si no, 422
+                UBICACION_PRECISA_DISPONIBLE). Zod solo acota el rango físico
+                (hasta 100 km, por las computadoras ubicadas por Wi-Fi o IP),
+                así que el tope de negocio es 422 y no 400
             antiguedad_s:
               type: number
               minimum: 0
@@ -85,6 +89,15 @@ components:
             - antiguedad_s
           description: Posición del dispositivo al enviar. El punto del reporte tiene que
             estar a 60 m o menos (422 UBICACION_FUERA_DE_RADIO). No se guarda
+        ubicacion_aproximada:
+          default: false
+          description: "true para reportar con ubicación aproximada desde un dispositivo
+            sin GPS preciso (p. ej. una computadora): el punto lo pone la
+            persona a mano, se guarda ubicacion_metodo = aproximada y no se
+            comprueba el radio de 60 m. Exige una precisión mayor a 50 m (si no,
+            422 UBICACION_PRECISA_DISPONIBLE). Por defecto false (camino normal
+            con GPS)"
+          type: boolean
         ubicacion_tipo:
           type: string
           enum:
@@ -748,12 +761,17 @@ components:
           enum:
             - gps
             - manual
+            - aproximada
           description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
             del margen de error del dispositivo (a dispositivo.precision_m o
             menos de su posición al enviar, y con 2 m como margen mínimo),
             manual si quedó más lejos, siempre dentro del radio. El margen
             existe porque dos lecturas del GPS difieren varios metros aunque
-            nadie mueva el punto"
+            nadie mueva el punto. aproximada (desde 0.18.0, ADR 0007): el
+            reporte entró por el camino de ubicación aproximada (dispositivo sin
+            GPS preciso); el punto lo puso la persona a mano y no se comprobó
+            contra la posición del dispositivo (los técnicos lo ven «sin
+            comprobar»)"
         precision_gps_m:
           description: Precisión que declaró el dispositivo al enviar, en metros
           type:
@@ -1046,12 +1064,17 @@ components:
               enum:
                 - gps
                 - manual
+                - aproximada
               description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
                 del margen de error del dispositivo (a dispositivo.precision_m o
                 menos de su posición al enviar, y con 2 m como margen mínimo),
                 manual si quedó más lejos, siempre dentro del radio. El margen
                 existe porque dos lecturas del GPS difieren varios metros aunque
-                nadie mueva el punto"
+                nadie mueva el punto. aproximada (desde 0.18.0, ADR 0007): el
+                reporte entró por el camino de ubicación aproximada (dispositivo
+                sin GPS preciso); el punto lo puso la persona a mano y no se
+                comprobó contra la posición del dispositivo (los técnicos lo ven
+                «sin comprobar»)"
             precision_gps_m:
               description: Precisión que declaró el dispositivo al enviar, en metros
               type:
@@ -1358,13 +1381,18 @@ components:
                     enum:
                       - gps
                       - manual
+                      - aproximada
                     description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
                       del margen de error del dispositivo (a
                       dispositivo.precision_m o menos de su posición al enviar,
                       y con 2 m como margen mínimo), manual si quedó más lejos,
                       siempre dentro del radio. El margen existe porque dos
                       lecturas del GPS difieren varios metros aunque nadie mueva
-                      el punto"
+                      el punto. aproximada (desde 0.18.0, ADR 0007): el reporte
+                      entró por el camino de ubicación aproximada (dispositivo
+                      sin GPS preciso); el punto lo puso la persona a mano y no
+                      se comprobó contra la posición del dispositivo (los
+                      técnicos lo ven «sin comprobar»)"
                   precision_gps_m:
                     description: Precisión que declaró el dispositivo al enviar, en metros
                     type:
@@ -2674,13 +2702,18 @@ components:
                     enum:
                       - gps
                       - manual
+                      - aproximada
                     description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
                       del margen de error del dispositivo (a
                       dispositivo.precision_m o menos de su posición al enviar,
                       y con 2 m como margen mínimo), manual si quedó más lejos,
                       siempre dentro del radio. El margen existe porque dos
                       lecturas del GPS difieren varios metros aunque nadie mueva
-                      el punto"
+                      el punto. aproximada (desde 0.18.0, ADR 0007): el reporte
+                      entró por el camino de ubicación aproximada (dispositivo
+                      sin GPS preciso); el punto lo puso la persona a mano y no
+                      se comprobó contra la posición del dispositivo (los
+                      técnicos lo ven «sin comprobar»)"
                   precision_gps_m:
                     description: Precisión que declaró el dispositivo al enviar, en metros
                     type:
@@ -3499,8 +3532,8 @@ paths:
                 $ref: "#/components/schemas/MiReporteFeature"
         "400":
           description: "PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera
-            de sus rangos físicos (precision_m de 0 a 10 000, antiguedad_s ≥ 0),
-            evento_en con más de 10 min de adelanto o más de 365 días de
+            de sus rangos físicos (precision_m de 0 a 100 000, antiguedad_s ≥
+            0), evento_en con más de 10 min de adelanto o más de 365 días de
             antigüedad, y respuestas del sumidero incoherentes (con
             sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero =
             true)"
@@ -3515,14 +3548,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorApi"
         "422":
-          description: "PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a 50 m.
+          description: "PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a 50 m sin
+            ubicacion_aproximada. UBICACION_PRECISA_DISPONIBLE: se pidió
+            ubicacion_aproximada pero la precisión es de 50 m o menos (hay
+            ubicación precisa disponible; usá el camino normal).
             POSICION_VENCIDA: dispositivo.antiguedad_s mayor a 600 s.
             UBICACION_FUERA_DE_RADIO: el punto está a más de 60,5 m de
             dispositivo (el radio de 60 m más 0,5 m de tolerancia por el
             redondeo de las coordenadas; la interfaz recorta el punto al radio
-            sin tolerancia). Esos tres se comprueban en ese orden, después de
-            validar el cuerpo y antes de resolver la ubicación, y no gastan
-            cupo. FUERA_DE_COBERTURA: el punto no cae en el municipio"
+            sin tolerancia); con ubicacion_aproximada no se comprueba. Se
+            comprueban en ese orden, después de validar el cuerpo y antes de
+            resolver la ubicación, y no gastan cupo. FUERA_DE_COBERTURA: el
+            punto no cae en el municipio"
           content:
             application/json:
               schema:

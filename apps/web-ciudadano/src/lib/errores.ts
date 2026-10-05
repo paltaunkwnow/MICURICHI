@@ -14,6 +14,9 @@ const MINUTOS_POSICION = Math.round(CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S / 6
  */
 const MENSAJES_UBICACION: Record<CodigoUbicacionDispositivo, string> = {
   PRECISION_INSUFICIENTE: `Tu teléfono no te ubicó con la precisión necesaria (${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos). Salí a un lugar abierto y volvé a compartir tu ubicación.`,
+  // ADR 0007: se pidió el camino aproximado pero el dispositivo sí llega a la precisión exigida,
+  // así que corresponde el camino normal (con el punto comprobado dentro del radio).
+  UBICACION_PRECISA_DISPONIBLE: `Tu dispositivo ahora te ubica con precisión (${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos): volvé a compartir tu ubicación y marcá el punto a ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m o menos de donde estás.`,
   POSICION_VENCIDA: `Tu ubicación era de hace más de ${MINUTOS_POSICION} minutos. Volvé a compartirla para enviar el reporte.`,
   UBICACION_FUERA_DE_RADIO: `El punto quedó a más de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m de donde estás. Volvé a compartir tu ubicación y ajustá el punto.`,
 };

@@ -1,6 +1,7 @@
-import { CONFIG_DOMINIO } from 'contracts';
+import { CONFIG_DOMINIO, UBICACION_METODOS } from 'contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  aclaracionMetodo,
   avisosResolucion,
   coordenadas,
   crearFormato,
@@ -79,9 +80,72 @@ describe('etiquetas del dominio', () => {
     expect(etiquetaSiNo(true)).toBe('Sí');
   });
 
+  it('con «gps» o «manual», la distancia al dispositivo se dice como siempre', () => {
+    // El método es un segundo dato opcional: sin él, o con uno de estos dos, nada cambia.
+    expect(distanciaDispositivo(12, 'manual')).toBe('a 12 m del teléfono');
+    expect(distanciaDispositivo(0, 'gps')).toBe('a 0 m del teléfono');
+    expect(distanciaDispositivo(null, 'gps')).toBe(
+      'Sin dato: el reporte es anterior a la ubicación obligatoria',
+    );
+    expect(distanciaDispositivo(undefined, 'manual')).toBe(
+      'Sin dato: el reporte es anterior a la ubicación obligatoria',
+    );
+  });
+
   it('nombra las capas conocidas y deja pasar las desconocidas', () => {
     expect(etiquetaCapa('unidad_vecinal')).toBe('Unidad vecinal');
     expect(etiquetaCapa('otra_capa')).toBe('otra_capa');
+  });
+});
+
+/**
+ * Ubicación aproximada (contracts 0.18.0, ADR 0007): el reporte entró desde un dispositivo sin GPS
+ * preciso, con el punto puesto a mano, `precision_gps_m` de más de 50 y la distancia en `null`.
+ * Mostrarlo con el texto de «manual» diría que el punto se ajustó cerca del teléfono, y no es cierto.
+ */
+describe('ubicación aproximada (ADR 0007)', () => {
+  const ETIQUETA = 'Ubicación aproximada — sin comprobar con el dispositivo';
+  const ACLARACION = 'El punto lo puso la persona a mano; su dispositivo no tenía GPS preciso.';
+  const NO_APLICA = 'No aplica: el punto no se comprobó contra el dispositivo';
+
+  it('«aproximada» dice que el punto no se comprobó con el dispositivo', () => {
+    expect(etiquetaMetodo('aproximada', null)).toBe(ETIQUETA);
+  });
+
+  it('no depende de la distancia: ni la promete, ni cae en el texto de «manual»', () => {
+    // api-core la guarda en null, pero si llegara un número (o un 0) la etiqueta no lo repite.
+    for (const d of [null, undefined, 0, 12, 60, 950]) {
+      const texto = etiquetaMetodo('aproximada', d);
+      expect(texto, `distancia ${String(d)}`).toBe(ETIQUETA);
+      expect(texto).not.toMatch(/[0-9]/);
+      expect(texto).not.toBe(etiquetaMetodo('manual', d));
+      expect(texto).not.toMatch(/movido a mano|selección manual|posición del teléfono/i);
+    }
+  });
+
+  it('cada método de contracts tiene su propia etiqueta, y ninguna es la de respaldo', () => {
+    // Un método nuevo en contracts rompe el typecheck de `etiquetaMetodo` (switch exhaustivo); esto
+    // además asegura que ninguno de los de hoy cae en otro texto ni en el de respaldo.
+    for (const d of [null, 12]) {
+      const etiquetas = UBICACION_METODOS.map((m) => etiquetaMetodo(m, d));
+      expect(new Set(etiquetas).size, `distancia ${String(d)}`).toBe(UBICACION_METODOS.length);
+      for (const e of etiquetas) expect(e).not.toMatch(/sin descripci[óo]n/i);
+    }
+  });
+
+  it('«gps» y «manual» no llevan aclaración; «aproximada» dice por qué no se comprobó', () => {
+    expect(aclaracionMetodo('aproximada')).toBe(ACLARACION);
+    expect(aclaracionMetodo('gps')).toBeNull();
+    expect(aclaracionMetodo('manual')).toBeNull();
+    // Todos los métodos de contracts tienen respuesta (una cadena o null, nunca undefined).
+    for (const m of UBICACION_METODOS) expect(aclaracionMetodo(m)).not.toBeUndefined();
+  });
+
+  it('la distancia al dispositivo no aplica: ni «a 0 m del teléfono» ni «anterior a la ubicación obligatoria»', () => {
+    for (const d of [null, undefined, 0, 7]) {
+      expect(distanciaDispositivo(d, 'aproximada'), `distancia ${String(d)}`).toBe(NO_APLICA);
+    }
+    expect(NO_APLICA).not.toMatch(/anterior a la ubicación obligatoria|del teléfono/);
   });
 });
 

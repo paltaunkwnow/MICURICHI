@@ -1,0 +1,28 @@
+-- Migración 0019 — Añadir 'aproximada' al enum ubicacion_metodo. Parte 4. Contrato: packages/contracts 0.18.0.
+--
+-- EL CAMBIO
+--
+-- Un dispositivo sin GPS preciso (por ejemplo, una laptop) puede reportar con la ubicación
+-- aproximada, puesta a mano. El reporte se guarda con `ubicacion_metodo = 'aproximada'`, la
+-- precisión declarada en `precision_gps_m` y `distancia_dispositivo_m = NULL`: con esa imprecisión
+-- la distancia al dispositivo no dice nada, y la posición del dispositivo sigue sin guardarse (§13).
+-- Hasta ahora `ubicacion_metodo` lo derivaba el servidor entre 'gps' y 'manual' según la distancia
+-- punto–dispositivo; 'aproximada' es un tercer caso, el del aparato que nunca llegó a los 50 m.
+--
+-- DECISIONES
+--
+-- · ADD VALUE sin BEFORE/AFTER: 'aproximada' queda al final del orden del enum, detrás de 'gps' y
+--   'manual'. El orden del enum no significa nada en el dominio, así que agregar al final es lo más
+--   simple y lo que ya hizo la 0017 con 'agua_estancada'.
+-- · Ninguna CHECK impide guardar un reporte 'aproximada': el límite de los 50 m de precisión lo hace
+--   cumplir api-core (responde 422 si se pide el camino aproximado con una precisión de 50 m o
+--   menos), no la base; `precision_gps_m` es numeric sin CHECK, así que admite 178; y el CHECK
+--   `distancia_dispositivo_rango` de la 0013 (`BETWEEN 0 AND 1000`) admite NULL. No hay que ajustar
+--   nada más en esta migración.
+--
+-- IDEMPOTENCIA
+--
+-- `ADD VALUE IF NOT EXISTS` no falla ni duplica si el valor ya está. El runner (`src/migrar.ts`)
+-- commitea cada migración por separado, así que el valor nuevo queda utilizable en las siguientes.
+
+ALTER TYPE ubicacion_metodo ADD VALUE IF NOT EXISTS 'aproximada';

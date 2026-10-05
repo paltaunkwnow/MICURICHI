@@ -1,6 +1,7 @@
 'use client';
 
 import { ETIQUETAS, type ReporteTecnicoFeature } from 'contracts';
+import { LocateOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
@@ -8,6 +9,7 @@ import { useFormato } from '@/lib/ciudad-contexto';
 import {
   etiquetaDistrito,
   etiquetaFrecuencia,
+  etiquetaMetodo,
   etiquetaProfundidad,
   etiquetaUnidadVecinal,
 } from '@/lib/formato';
@@ -17,6 +19,38 @@ interface Props {
   /** Fila resaltada; su pastilla en el mapa se pinta en tinta (M-02 del prototipo). */
   seleccionado?: string | null;
   onSeleccionar?: (id: string | null) => void;
+}
+
+/**
+ * Marca de un reporte de ubicación aproximada (ADR 0007: el punto lo puso la persona a mano y no se
+ * comprobó contra el dispositivo). Va junto a la unidad vecinal, la celda de la ubicación. Texto con
+ * icono, nunca solo color (CLAUDE.md §14.1).
+ *
+ * Pegada a «UV 123», «Aproximada» sola se leería como que la unidad vecinal es aproximada: el
+ * tooltip trae la etiqueta completa y los lectores de pantalla oyen «Ubicación: Aproximada, sin
+ * comprobar con el dispositivo». Ese contexto queda fuera de la pastilla para que su texto sea
+ * exactamente «Aproximada», el que fijan las pruebas de extremo a extremo.
+ */
+function InsigniaUbicacionAproximada() {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="sr-only">Ubicación:</span>
+      <span
+        className="mini"
+        data-testid="insignia-ubicacion-aproximada"
+        title={etiquetaMetodo('aproximada', null)}
+        style={{
+          background: 'var(--color-sev-media-fondo)',
+          color: 'var(--color-sev-media-texto)',
+          fontWeight: 700,
+        }}
+      >
+        <LocateOff size={13} aria-hidden="true" />
+        Aproximada
+      </span>
+      <span className="sr-only">, sin comprobar con el dispositivo</span>
+    </span>
+  );
 }
 
 /**
@@ -72,7 +106,15 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                     <span className="sr-only"> · abrir reporte</span>
                   </Link>
                 </td>
-                <td>{etiquetaUnidadVecinal(p.unidad_vecinal?.codigo)}</td>
+                <td>
+                  {etiquetaUnidadVecinal(p.unidad_vecinal?.codigo)}
+                  {p.ubicacion_metodo === 'aproximada' ? (
+                    <>
+                      {' '}
+                      <InsigniaUbicacionAproximada />
+                    </>
+                  ) : null}
+                </td>
                 <td>{etiquetaDistrito(p.distrito?.codigo)}</td>
                 <td>
                   <ChipSeveridad severidad={p.severidad} />

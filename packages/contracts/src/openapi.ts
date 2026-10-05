@@ -167,14 +167,15 @@ export function construirOpenApi(): Record<string, unknown> {
                 content: json(ref('MiReporteFeature')),
               },
               '400': error(
-                `PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera de sus rangos físicos (precision_m de 0 a 10 000, antiguedad_s ≥ 0), evento_en con más de ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} min de adelanto o más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días de antigüedad, y respuestas del sumidero incoherentes (con sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero = true)`,
+                `PAYLOAD_INVALIDO. Además del formato: dispositivo ausente o fuera de sus rangos físicos (precision_m de 0 a 100 000, antiguedad_s ≥ 0), evento_en con más de ${CONFIG_DOMINIO.EVENTO_TOLERANCIA_FUTURO_MIN} min de adelanto o más de ${CONFIG_DOMINIO.EVENTO_MAX_DIAS_ATRAS} días de antigüedad, y respuestas del sumidero incoherentes (con sumidero_cercano = no, sin sumidero_estado ni agua_brota_sumidero = true)`,
               ),
               '401': error('SIN_SESION: hay que iniciar sesión para reportar'),
               '422': error(
-                `PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m. ` +
+                `PRECISION_INSUFICIENTE: dispositivo.precision_m mayor a ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m sin ubicacion_aproximada. ` +
+                  `UBICACION_PRECISA_DISPONIBLE: se pidió ubicacion_aproximada pero la precisión es de ${CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M} m o menos (hay ubicación precisa disponible; usá el camino normal). ` +
                   `POSICION_VENCIDA: dispositivo.antiguedad_s mayor a ${CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S} s. ` +
-                  `UBICACION_FUERA_DE_RADIO: el punto está a más de ${metros(RADIO_M + TOLERANCIA_M)} m de dispositivo (el radio de ${RADIO_M} m más ${metros(TOLERANCIA_M)} m de tolerancia por el redondeo de las coordenadas; la interfaz recorta el punto al radio sin tolerancia). ` +
-                  'Esos tres se comprueban en ese orden, después de validar el cuerpo y antes de resolver la ubicación, y no gastan cupo. ' +
+                  `UBICACION_FUERA_DE_RADIO: el punto está a más de ${metros(RADIO_M + TOLERANCIA_M)} m de dispositivo (el radio de ${RADIO_M} m más ${metros(TOLERANCIA_M)} m de tolerancia por el redondeo de las coordenadas; la interfaz recorta el punto al radio sin tolerancia); con ubicacion_aproximada no se comprueba. ` +
+                  'Se comprueban en ese orden, después de validar el cuerpo y antes de resolver la ubicación, y no gastan cupo. ' +
                   'FUERA_DE_COBERTURA: el punto no cae en el municipio',
               ),
               '429': error(

@@ -241,6 +241,8 @@ export function mosaicoDeFotos(e: { subidas: number; subiendo: boolean }): {
 export interface EstadoParaAvanzar {
   /** Posición del teléfono a la que se ancla el paso 1; `null` mientras no se compartió. */
   ancla: Ancla | null;
+  /** Camino de ubicación aproximada (ADR 0007): sin exigir precisión del dispositivo ni radio. */
+  aproximado?: boolean;
   ubicacion: Ubicacion | null;
   resuelto: { dentro_cobertura: boolean } | null;
   resolviendo: boolean;
@@ -256,18 +258,20 @@ export interface EstadoParaAvanzar {
 /** ¿El botón del paso («Continuar», o «Enviar reporte» en el último) se puede usar? */
 export function puedeAvanzar(paso: number, e: EstadoParaAvanzar): boolean {
   switch (paso) {
-    case 1:
-      // Sin la posición del teléfono, con una imprecisa o con el punto fuera del círculo, el
-      // servidor lo rechazaría (422). La unidad vecinal que se muestra tiene que ser la del punto
-      // actual, no la del anterior.
+    case 1: {
+      // La unidad vecinal que se muestra tiene que ser la del punto actual, no la del anterior, y
+      // tiene que caer en la cobertura: eso vale para los dos caminos.
+      if (!e.ancla || !e.ubicacion || e.resolviendo || !e.resuelto?.dentro_cobertura) return false;
+      // Ubicación aproximada (ADR 0007): api-core no comprueba precisión ni radio, así que acá
+      // tampoco. El punto lo pone la persona a mano en cualquier lugar de la cobertura.
+      if (e.aproximado) return true;
+      // Camino normal: sin la posición del teléfono, con una imprecisa o con el punto fuera del
+      // círculo, el servidor lo rechazaría (422).
       return (
-        !!e.ancla &&
         e.ancla.precisionM <= CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M &&
-        !!e.ubicacion &&
-        dentroDelRadio(e.ubicacion, e.ancla) &&
-        !e.resolviendo &&
-        !!e.resuelto?.dentro_cobertura
+        dentroDelRadio(e.ubicacion, e.ancla)
       );
+    }
     case 2:
       return (
         !!e.profundidad_estimada && !!e.frecuencia && !problemaFechaEvento(e.evento_en, e.ahora)
@@ -347,6 +351,7 @@ export function armarEnvio(
   ubicacion: Ubicacion,
   fotos: ReadonlyArray<{ objeto_key: string }>,
   dispositivo: Dispositivo,
+  aproximado = false,
 ): ReporteCrearEntrada {
   const cuerpo: ReporteCrearEntrada = {
     ...datos,
@@ -354,6 +359,9 @@ export function armarEnvio(
     lat: ubicacion.lat,
     lon: ubicacion.lon,
     dispositivo,
+    // ADR 0007: por el camino aproximado api-core guarda `ubicacion_metodo = aproximada` y no
+    // comprueba el radio. Por el normal viaja false, que es el valor por defecto del contrato.
+    ubicacion_aproximada: aproximado,
     fotos: fotos.map((f) => f.objeto_key),
   };
   for (const campo of CAMPOS_DERIVADOS) delete (cuerpo as Record<string, unknown>)[campo];

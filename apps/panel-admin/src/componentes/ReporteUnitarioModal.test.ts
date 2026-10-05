@@ -303,3 +303,86 @@ describe('ReporteUnitarioModal: vista imprimible', () => {
     }
   });
 });
+
+/**
+ * Ubicación aproximada (contracts 0.18.0, ADR 0007): la ficha, que es lo que el técnico imprime o
+ * adjunta, tiene que decir que el punto no se comprobó con el dispositivo. La nota metodológica
+ * (sección «Limitaciones») nombra el caso para todos los reportes, así que acá se mira el renglón
+ * del método, no la ficha entera.
+ */
+describe('ReporteUnitarioModal: ubicación aproximada (ADR 0007)', () => {
+  const formatoPrueba = {
+    fechaHora: (f: string | null | undefined) => (f ? `FMT(${f})` : '—'),
+    numero: (n: number) => String(n),
+  };
+  const ETIQUETA = 'Ubicación aproximada — sin comprobar con el dispositivo';
+  const ACLARACION = 'El punto lo puso la persona a mano; su dispositivo no tenía GPS preciso.';
+
+  const aproximada = () =>
+    reportePrueba({
+      ubicacion_metodo: 'aproximada',
+      precision_gps_m: 178,
+      distancia_dispositivo_m: null,
+    });
+
+  /** Los renglones del bloque «Método de Captura» del .txt, hasta «Precisión GPS». */
+  function bloqueMetodo(texto: string): string[] {
+    const desde = texto.indexOf('Método de Captura:');
+    const hasta = texto.indexOf('Precisión GPS:');
+    expect(desde).toBeGreaterThan(-1);
+    expect(hasta).toBeGreaterThan(desde);
+    return texto.slice(desde, hasta).trimEnd().split('\n');
+  }
+
+  it('el .txt marca el método como aproximado, en el mismo renglón de siempre', () => {
+    const texto = generarTextoReporteUnitario(aproximada(), formatoPrueba, CIUDAD);
+    expect(texto).toContain(`Método de Captura:  ${ETIQUETA}`);
+    expect(texto).toContain('Precisión GPS:      ± 178 m');
+    // El texto de «manual» sería falso: el punto no se ajustó cerca del teléfono.
+    expect(texto).not.toMatch(/Movido a mano|Selección manual/);
+  });
+
+  it('el .txt explica por qué no se comprobó, sangrado bajo el método y en 80 columnas', () => {
+    const texto = generarTextoReporteUnitario(aproximada(), formatoPrueba, CIUDAD);
+    const renglones = bloqueMetodo(texto);
+    expect(renglones.length).toBeGreaterThan(1);
+    expect(sinSaltos(renglones.join(' '))).toContain(ACLARACION);
+    for (const r of renglones) expect(r.length, r).toBeLessThanOrEqual(80);
+    // Los renglones de continuación empiezan bajo el valor, no bajo la etiqueta.
+    for (const r of renglones.slice(1)) expect(r.startsWith(' '.repeat(20)), r).toBe(true);
+  });
+
+  it('la vista imprimible marca el método y lo explica', () => {
+    const vista = textoVisible(renderizarFicha(aproximada()));
+    expect(vista).toContain(`Método de Captura: ${ETIQUETA}`);
+    expect(vista).toContain(ACLARACION);
+    expect(vista).toContain('Precisión Declarada: ± 178 m');
+    expect(vista).not.toMatch(/Movido a mano|Selección manual/);
+  });
+
+  it('«gps» y «manual» no cambian: su renglón de siempre y ni marca ni aclaración', () => {
+    const casos = [
+      ['gps', 2, 'En la posición del teléfono (dentro de su margen de error)'],
+      ['manual', 12, 'Movido a mano por la persona'],
+    ] as const;
+    for (const [ubicacion_metodo, distancia_dispositivo_m, linea] of casos) {
+      const f = reportePrueba({ ubicacion_metodo, distancia_dispositivo_m });
+      const texto = generarTextoReporteUnitario(f, formatoPrueba, CIUDAD);
+      expect(bloqueMetodo(texto), ubicacion_metodo).toEqual([`Método de Captura:  ${linea}`]);
+      const vista = textoVisible(renderizarFicha(f));
+      expect(vista, ubicacion_metodo).toContain(`Método de Captura: ${linea}`);
+      for (const salida of [texto, vista]) {
+        expect(salida, ubicacion_metodo).not.toContain(ETIQUETA);
+        expect(salida, ubicacion_metodo).not.toContain(ACLARACION);
+      }
+    }
+  });
+
+  it('el GeoJSON de la ficha lleva el método tal como llegó', () => {
+    const json = JSON.parse(generarJsonReporteUnitario(aproximada())) as {
+      properties: { ubicacion_metodo: string; distancia_dispositivo_m: number | null };
+    };
+    expect(json.properties.ubicacion_metodo).toBe('aproximada');
+    expect(json.properties.distancia_dispositivo_m).toBeNull();
+  });
+});

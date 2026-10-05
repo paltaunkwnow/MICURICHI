@@ -109,9 +109,13 @@ describe('migración 0018 desde cero (base limpia)', () => {
   });
 
   it('0018 es el número siguiente al mayor que había en disco (0017)', () => {
+    // 0018 va inmediatamente después de 0017: el número anterior a 0018 en la lista ordenada es
+    // 0017. No se afirma que 0018 sea la última en disco porque las migraciones posteriores (0019…)
+    // la dejan de serlo sin invalidar esta garantía.
     const numeros = listarMigraciones().map(numero).sort();
-    expect(numeros.at(-1)).toBe('0018');
-    expect(numeros.at(-2)).toBe('0017');
+    const i = numeros.indexOf('0018');
+    expect(i).toBeGreaterThan(0);
+    expect(numeros[i - 1]).toBe('0017');
   });
 
   it('crea las dos restricciones y, sin filas que las violen, las deja validadas', async () => {

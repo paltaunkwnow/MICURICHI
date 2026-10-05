@@ -74,9 +74,11 @@ describe('0.9.0: parámetros de la ubicación del dispositivo', () => {
     expect(CONFIG_DOMINIO.REPORTE_RADIO_TOLERANCIA_M).toBe(0.5);
   });
 
-  it('los tres 422 de la posición del dispositivo, en el orden en que se comprueban', () => {
+  it('los 422 de la posición del dispositivo, en el orden en que se comprueban', () => {
+    // UBICACION_PRECISA_DISPONIBLE (0.18.0) es la otra cara de PRECISION_INSUFICIENTE y va junto a él.
     expect([...CODIGOS_UBICACION_DISPOSITIVO]).toStrictEqual([
       'PRECISION_INSUFICIENTE',
+      'UBICACION_PRECISA_DISPONIBLE',
       'POSICION_VENCIDA',
       'UBICACION_FUERA_DE_RADIO',
     ]);
@@ -196,7 +198,7 @@ describe('0.9.0: ReporteCrearSchema exige la posición del dispositivo', () => {
 
   it('fuera de los rangos físicos falla en el campo del dispositivo', () => {
     const casos: [Record<string, unknown>, string][] = [
-      [{ precision_m: 10_001 }, 'dispositivo.precision_m'],
+      [{ precision_m: 100_001 }, 'dispositivo.precision_m'],
       [{ precision_m: -1 }, 'dispositivo.precision_m'],
       [{ precision_m: '12' }, 'dispositivo.precision_m'],
       [{ precision_m: null }, 'dispositivo.precision_m'],
@@ -335,7 +337,7 @@ describe('0.9.0: OpenAPI', () => {
     expect(crearJs?.properties).not.toHaveProperty('precision_gps_m');
     const disp = crearJs?.properties?.dispositivo;
     expect(disp?.required).toEqual(['lat', 'lon', 'precision_m', 'antiguedad_s']);
-    expect(disp?.properties?.precision_m).toMatchObject({ minimum: 0, maximum: 10_000 });
+    expect(disp?.properties?.precision_m).toMatchObject({ minimum: 0, maximum: 100_000 });
     expect(disp?.properties?.antiguedad_s).toMatchObject({ minimum: 0 });
     expect(disp?.properties?.antiguedad_s).not.toHaveProperty('maximum');
   });

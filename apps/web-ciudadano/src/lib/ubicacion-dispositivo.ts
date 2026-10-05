@@ -38,8 +38,10 @@ export type EstadoUbicacionDispositivo =
   /**
    * `vez` cambia con cada «Compartir mi ubicación» que llega a la precisión, y no con la
    * relectura al enviar: es lo que distingue «llegó la ubicación, poné el punto» de «se actualizó».
+   * `aproximada` es true cuando se ancló a una posición imprecisa por el camino de ubicación
+   * aproximada (ADR 0007): no hay radio y el punto lo pone la persona a mano.
    */
-  | { fase: 'lista'; ancla: LecturaDispositivo; vez: number }
+  | { fase: 'lista'; ancla: LecturaDispositivo; vez: number; aproximada?: boolean }
   | { fase: 'imprecisa'; ultima: LecturaDispositivo | null }
   | { fase: 'denegada' }
   | { fase: 'error'; problema: ProblemaUbicacion };
@@ -125,12 +127,23 @@ export function decidirEnvio({
   relectura,
   anterior,
   ahora,
+  aproximado = false,
 }: {
   punto: { lat: number; lon: number };
   relectura: LecturaDispositivo | null;
   anterior: LecturaDispositivo | null;
   ahora: number;
+  /** Camino de ubicación aproximada (ADR 0007): cualquier precisión sirve y no se comprueba el radio. */
+  aproximado?: boolean;
 }): DecisionEnvio {
+  if (aproximado) {
+    // Solo cuenta que la posición no esté vencida; el punto puede estar en cualquier lugar de la
+    // cobertura, así que nunca es «movido».
+    const lectura =
+      (relectura && esVigente(relectura, ahora) ? relectura : null) ??
+      (anterior && esVigente(anterior, ahora) ? anterior : null);
+    return lectura ? { tipo: 'enviar', lectura } : { tipo: 'vencida' };
+  }
   const nueva = relectura && relectura.precisionM <= PRECISION_MAX_M ? relectura : null;
   const lectura = nueva ?? (anterior && esVigente(anterior, ahora) ? anterior : null);
   if (!lectura) return { tipo: 'vencida' };
@@ -203,6 +216,25 @@ export class ControladorUbicacion {
       tomadaEn: this.deps.ahora(),
     };
     this.poner({ fase: 'lista', ancla, vez: this.veces });
+  }
+
+  /**
+   * «Reportar con ubicación aproximada» (ADR 0007): se ancla a la última lectura aunque no llegue
+   * a la precisión exigida. El punto lo pone la persona a mano y api-core no comprueba el radio.
+   * Solo hace algo si ya hay una lectura (fase «buscando» o «imprecisa»); sin ninguna no habría
+   * dónde centrar el mapa, y por eso tampoco se ofrece el camino (`ofreceUbicacionAproximada`).
+   */
+  aproximar(): void {
+    const ultima =
+      this.estado.fase === 'buscando' || this.estado.fase === 'imprecisa'
+        ? this.estado.ultima
+        : null;
+    if (!ultima) return;
+    this.apagar();
+    this.turno += 1;
+    this.veces += 1;
+    this.simulado = false;
+    this.poner({ fase: 'lista', ancla: ultima, vez: this.veces, aproximada: true });
   }
 
   /** Para `useSyncExternalStore`: devuelve siempre el mismo objeto mientras no cambie. */
@@ -295,12 +327,12 @@ export class ControladorUbicacion {
    * La posición al tocar «Enviar reporte», sin caché. Con una lectura precisa, el ancla pasa a ser
    * esa; si no llega a tiempo, falla o es imprecisa, devuelve `null` y el ancla queda como estaba.
    */
-  releer(): Promise<LecturaDispositivo | null> {
+  releer(aproximada = false): Promise<LecturaDispositivo | null> {
     if (this.simulado && this.estado.fase === 'lista') {
       return Promise.resolve({
         lat: this.estado.ancla.lat,
         lon: this.estado.ancla.lon,
-        precisionM: 5,
+        precisionM: this.estado.ancla.precisionM,
         tomadaEn: this.deps.ahora(),
       });
     }
@@ -321,7 +353,9 @@ export class ControladorUbicacion {
       geo.getCurrentPosition(
         (pos) => {
           const lectura = lecturaDe(pos, this.deps.ahora());
-          if (!lectura || lectura.precisionM > PRECISION_MAX_M) return terminar(null);
+          // En el camino aproximado (ADR 0007) cualquier precisión sirve; en el normal, no.
+          if (!lectura || (!aproximada && lectura.precisionM > PRECISION_MAX_M))
+            return terminar(null);
           if (!hecho && turno === this.turno && this.estado.fase === 'lista')
             this.poner({ ...this.estado, ancla: lectura });
           terminar(lectura);

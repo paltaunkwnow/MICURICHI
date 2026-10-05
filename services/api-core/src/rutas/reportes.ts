@@ -77,7 +77,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
        * así un rechazo no gasta cupo. Desde acá `dispositivo` no se usa más: no llega a la fila,
        * ni a la auditoría, ni a la huella de idempotencia, ni al log (§0 regla 8).
        */
-      const ubicacion = revisarDispositivo(d, dispositivo);
+      const ubicacion = revisarDispositivo(d, dispositivo, { aproximada: d.ubicacion_aproximada });
       if (!ubicacion.ok) {
         app.metricas.contar('curichi_reportes_fuera_de_radio_total', { codigo: ubicacion.codigo });
         // Solo el código y las cifras que se devuelven: ninguna coordenada.
@@ -286,6 +286,9 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             autor.id,
             JSON.stringify({
               estado: 'nuevo',
+              // El método con que se fijó la coordenada (ADR 0007). Nunca la posición del
+              // dispositivo: `ubicacion` solo trae método, distancia y precisión (§0 regla 8).
+              ubicacion_metodo: ubicacion.metodo,
               severidad: sev.banda,
               puntaje: sev.puntaje,
               reglas: sev.reglas,

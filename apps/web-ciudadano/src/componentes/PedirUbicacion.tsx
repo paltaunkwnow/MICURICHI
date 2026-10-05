@@ -3,6 +3,7 @@
 import { CONFIG_DOMINIO, ETIQUETAS } from 'contracts';
 import { LocateFixed, MapPin } from 'lucide-react';
 import Link from 'next/link';
+import { ofreceUbicacionAproximada } from '@/lib/ubicacion-aproximada';
 import type { EstadoUbicacionDispositivo } from '@/lib/ubicacion-dispositivo';
 import { Aviso } from './Aviso';
 
@@ -23,21 +24,38 @@ export function VistaPedirUbicacion({
   estado,
   alCompartir,
   alSimular,
+  alAproximar,
   aviso = null,
+  reanudando = false,
 }: {
   estado: EstadoUbicacionDispositivo;
   alCompartir: () => void;
   alSimular?: () => void;
+  /**
+   * Habilita «Reportar con ubicación aproximada» (ADR 0007). Aparece solo cuando el dispositivo no
+   * llega a la precisión exigida (`ofreceUbicacionAproximada`); sin este callback el camino no se
+   * ofrece (p. ej. la ubicación de prueba, que sí llega a la precisión).
+   */
+  alAproximar?: () => void;
   /** Por qué se vuelve a pedir: un borrador retomado, una posición vencida, un 422. */
   aviso?: string | null;
+  /** Se retomó un borrador que iba por el camino aproximado: se recuerda para seguir por ahí. */
+  reanudando?: boolean;
 }) {
   if (estado.fase === 'lista') return null;
+  const ofreceAproximada = !!alAproximar && ofreceUbicacionAproximada(estado);
   return (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
         {aviso ? (
           <Aviso tono="alerta" className="mb-3" data-testid="aviso-ubicacion">
             {aviso}
+          </Aviso>
+        ) : null}
+        {reanudando ? (
+          <Aviso tono="info" className="mb-3" data-testid="reanudar-ubicacion-aproximada">
+            Seguías reportando con <b>ubicación aproximada</b>. Compartí tu ubicación para
+            continuar: el punto que marcaste sigue guardado.
           </Aviso>
         ) : null}
         <div className="tarjeta p-5">
@@ -65,6 +83,28 @@ export function VistaPedirUbicacion({
             <Detalle estado={estado} />
           </div>
         </div>
+        {ofreceAproximada ? (
+          <div className="tarjeta mt-3 p-5" data-testid="bloque-ubicacion-aproximada">
+            <h3 className="titular text-[17px]">¿Estás en una computadora o sin GPS?</h3>
+            <p
+              className="mt-2 text-[15px] leading-[1.5] text-tinta-600"
+              data-testid="explicacion-ubicacion-aproximada"
+            >
+              Tu dispositivo no te ubica con {PRECISION_M} m de precisión (por ejemplo, una
+              computadora, que se ubica por Wi-Fi). Podés reportar igual: vas a poner el punto{' '}
+              <b>a mano</b>, en el mapa, donde se junta el agua. Los técnicos lo van a ver como
+              «ubicación aproximada, sin comprobar con tu dispositivo».
+            </p>
+            <button
+              type="button"
+              className="btn btn-tinta btn-bloque mt-3"
+              data-testid="boton-ubicacion-aproximada"
+              onClick={alAproximar}
+            >
+              Reportar con ubicación aproximada
+            </button>
+          </div>
+        ) : null}
       </div>
       <div className="pie">
         <Accion estado={estado} alCompartir={alCompartir} alSimular={alSimular} />

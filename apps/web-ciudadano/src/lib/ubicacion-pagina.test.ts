@@ -219,3 +219,91 @@ describe('paso 1: pedir la ubicación', () => {
     ).toBe('');
   });
 });
+
+describe('paso 1: reportar con ubicación aproximada (ADR 0007)', () => {
+  const vistaAprox = (estado: EstadoUbicacionDispositivo, extra: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      createElement(VistaPedirUbicacion, {
+        estado,
+        alCompartir: nada,
+        alAproximar: nada,
+        ...extra,
+      }),
+    );
+  const imprecisa = (precisionM: number): EstadoUbicacionDispositivo => ({
+    fase: 'imprecisa',
+    ultima: { lat: 1, lon: 2, precisionM, tomadaEn: 0 },
+  });
+
+  it('con una lectura imprecisa ofrece el botón nativo y explica los tres puntos acordados', () => {
+    const html = vistaAprox(imprecisa(178));
+    expect(html).toMatch(
+      /<button[^>]*data-testid="boton-ubicacion-aproximada"[^>]*>[\s\S]*?Reportar con ubicación aproximada/,
+    );
+    expect(html).toMatch(/data-testid="explicacion-ubicacion-aproximada"/);
+    // 1) el dispositivo no llega a los 50 m (p. ej. una computadora);
+    expect(html).toContain('50 m');
+    expect(html).toMatch(/computadora/i);
+    // 2) el punto lo pone la persona a mano;
+    expect(html).toMatch(/a mano/i);
+    // 3) los técnicos lo ven como «sin comprobar con tu dispositivo».
+    expect(html).toContain('sin comprobar con tu dispositivo');
+  });
+
+  it('también durante la búsqueda, sin esperar los 30 s del plazo', () => {
+    expect(
+      vistaAprox({ fase: 'buscando', ultima: { lat: 1, lon: 2, precisionM: 120, tomadaEn: 0 } }),
+    ).toContain('data-testid="boton-ubicacion-aproximada"');
+  });
+
+  it('no aparece sin lectura todavía, ni sin el callback (p. ej. la pantalla inactiva)', () => {
+    expect(vistaAprox({ fase: 'buscando', ultima: null })).not.toContain(
+      'boton-ubicacion-aproximada',
+    );
+    // Sin `alAproximar` (el camino no está habilitado) tampoco, aunque la lectura sea imprecisa.
+    expect(
+      renderToStaticMarkup(
+        createElement(VistaPedirUbicacion, { estado: imprecisa(180), alCompartir: nada }),
+      ),
+    ).not.toContain('boton-ubicacion-aproximada');
+  });
+
+  it('al retomar un borrador aproximado, lo recuerda', () => {
+    const html = vistaAprox({ fase: 'inactiva' }, { reanudando: true });
+    expect(html).toMatch(/data-testid="reanudar-ubicacion-aproximada"/);
+    expect(html).toMatch(/aproximada/i);
+  });
+});
+
+describe('el formulario cablea el camino aproximado', () => {
+  const fuente = leerFuente('componentes/FormularioReporte.tsx');
+
+  it('deriva el modo del controlador y ofrece el camino desde el botón', () => {
+    expect(fuente).toMatch(/esModoAproximado\(/);
+    expect(fuente).toMatch(/alAproximar=\{\(\)\s*=>\s*ubicador\.aproximar\(\)\}/);
+  });
+
+  it('en el modo aproximado no dibuja el círculo de 60 m', () => {
+    expect(fuente).toMatch(/circulo=\{aproximado \? null :/);
+  });
+
+  it('avisa «Ubicación aproximada» en el paso del mapa y lo anuncia (role="status")', () => {
+    expect(fuente).toContain('data-testid="aviso-ubicacion-aproximada"');
+    expect(fuente).toContain('Ubicación aproximada');
+    expect(fuente).toMatch(
+      /aviso-ubicacion-aproximada"[^\n]*role="status"|role="status"[^\n]*aviso-ubicacion-aproximada"/,
+    );
+  });
+
+  it('la revisión muestra la fila de ubicación marcada', () => {
+    expect(fuente).toContain('testId="revision-ubicacion"');
+    // FilaRevision reenvía ese testId como data-testid al nodo de la fila.
+    expect(fuente).toMatch(/data-testid=\{testId\}/);
+  });
+
+  it('manda ubicacion_aproximada y relee con cualquier precisión en ese camino', () => {
+    expect(fuente).toMatch(/armarEnvio\([\s\S]*?aproximado\)/);
+    expect(fuente).toMatch(/releer\(aproximado\)/);
+    expect(fuente).toMatch(/decidirEnvio\(\{[\s\S]*?aproximado[\s\S]*?\}\)/);
+  });
+});

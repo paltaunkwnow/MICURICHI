@@ -312,3 +312,37 @@ describe('al salir del paso 1 el punto deja de ser precargado (hallazgo de T2)',
     expect(fuente).toMatch(/if \(movido\) setPasoPendiente\(null\)/);
   });
 });
+
+describe('modo de ubicación aproximada: sin radio (ADR 0007)', () => {
+  it('conserva el punto ya elegido aunque quede lejísimos del teléfono', () => {
+    const lejos = { ...alNorte(5000), precargada: false };
+    const r = puntoInicial({ ancla: ANCLA, guardado: lejos, enlace: null, aproximado: true });
+    expect(r.punto).toBe(lejos);
+    expect(r.aviso).toBeNull();
+    expect(r.movido).toBe(false);
+  });
+
+  it('sin punto guardado usa el del enlace o el del teléfono, sin aviso de radio', () => {
+    const r = puntoInicial({
+      ancla: ANCLA,
+      guardado: null,
+      enlace: alNorte(800),
+      aproximado: true,
+    });
+    expect(r.punto).toEqual({ ...alNorte(800), precargada: true });
+    expect(r.aviso).toBeNull();
+    expect(r.movido).toBe(false);
+    const sinNada = puntoInicial({ ancla: ANCLA, guardado: null, enlace: null, aproximado: true });
+    expect(sinNada.punto).toEqual({ lat: ANCLA.lat, lon: ANCLA.lon, precargada: true });
+  });
+
+  it('las coordenadas escritas se aceptan a cualquier distancia', () => {
+    const lejos = alNorte(800);
+    const r = coordenadasEscritas(lejos.lat.toFixed(7), lejos.lon.toFixed(7), ANCLA, {
+      aproximado: true,
+    });
+    expect(r.tipo).toBe('ok');
+    // Lo que no es una coordenada igual se rechaza.
+    expect(coordenadasEscritas('abc', '-63', ANCLA, { aproximado: true }).tipo).toBe('invalida');
+  });
+});

@@ -447,3 +447,67 @@ describe('«Ir a mi ubicación» del mapa: nunca dispara el aviso del navegador'
     expect(r).toEqual({ tipo: 'error' });
   });
 });
+
+describe('ubicación aproximada (ADR 0007)', () => {
+  it('«Reportar con ubicación aproximada» se ancla a la última lectura aunque sea imprecisa', () => {
+    const g = geoFalsa();
+    const c = new ControladorUbicacion({ entorno: entornoCon(g.geo) });
+    c.compartir();
+    g.emitir(posicion(ANCLA, 178));
+    expect(c.leer()).toMatchObject({ fase: 'buscando', ultima: { precisionM: 178 } });
+    c.aproximar();
+    const e = c.leer();
+    expect(e.fase).toBe('lista');
+    if (e.fase !== 'lista') return;
+    expect(e.aproximada).toBe(true);
+    expect(e.ancla).toMatchObject({ lat: ANCLA.lat, lon: ANCLA.lon, precisionM: 178 });
+    // Deja de vigilar: ya tiene su ancla y el GPS encendido gasta batería.
+    expect(g.geo.clearWatch).toHaveBeenCalled();
+  });
+
+  it('sin ninguna lectura todavía, «aproximar» no hace nada', () => {
+    const g = geoFalsa();
+    const c = new ControladorUbicacion({ entorno: entornoCon(g.geo) });
+    c.compartir();
+    c.aproximar();
+    expect(c.leer().fase).toBe('buscando');
+  });
+
+  it('la relectura al enviar acepta cualquier precisión en modo aproximado', async () => {
+    const g = geoFalsa();
+    const c = new ControladorUbicacion({ entorno: entornoCon(g.geo) });
+    c.compartir();
+    g.emitir(posicion(ANCLA, 200));
+    c.aproximar();
+    g.geo.getCurrentPosition.mockImplementation((ok: PositionCallback) =>
+      ok(posicion(alNorte(5), 220)),
+    );
+    await expect(c.releer(true)).resolves.toMatchObject({ precisionM: 220 });
+    // Sin el modo aproximado, esa misma lectura imprecisa no sirve.
+    g.geo.getCurrentPosition.mockImplementation((ok: PositionCallback) => ok(posicion(ANCLA, 220)));
+    await expect(c.releer()).resolves.toBeNull();
+  });
+
+  it('decidirEnvio en modo aproximado solo mira la antigüedad, nunca el radio', () => {
+    const punto = { lat: ANCLA.lat, lon: ANCLA.lon };
+    // Relectura imprecisa y vigente: se envía con ella aunque no haya ancla anterior.
+    const impre = lectura(alNorte(400), 300, T0);
+    expect(
+      decidirEnvio({ punto, relectura: impre, anterior: null, ahora: T0, aproximado: true }),
+    ).toEqual({ tipo: 'enviar', lectura: impre });
+    // Lejísimos del teléfono: nunca «movido», no hay radio en el camino aproximado.
+    const lejos = decidirEnvio({
+      punto,
+      relectura: lectura(alNorte(5000), 300, T0),
+      anterior: lectura(ANCLA, 300, T0),
+      ahora: T0,
+      aproximado: true,
+    });
+    expect(lejos.tipo).toBe('enviar');
+    // Con la posición vencida y sin relectura, igual hay que volver a compartir.
+    const vieja = lectura(ANCLA, 300, T0 - (ANTIGUEDAD_MAX_S + 1) * 1000);
+    expect(
+      decidirEnvio({ punto, relectura: null, anterior: vieja, ahora: T0, aproximado: true }),
+    ).toEqual({ tipo: 'vencida' });
+  });
+});

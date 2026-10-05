@@ -19,6 +19,7 @@ import {
   dentroDelRadio,
   distanciaMetros,
   type PuntoLatLon,
+  type UbicacionMetodo,
 } from 'contracts';
 
 /**
@@ -37,9 +38,13 @@ export const DISTANCIA_GPS_MIN_M = 2;
 export type RevisionDispositivo =
   | {
       ok: true;
-      metodo: 'gps' | 'manual';
-      /** Redondeada al metro y nunca mayor que el radio: es lo que se guarda. */
-      distanciaM: number;
+      metodo: UbicacionMetodo;
+      /**
+       * Redondeada al metro y nunca mayor que el radio: es lo que se guarda. `null` en el camino
+       * de ubicación aproximada (ADR 0007), donde el radio no se comprueba y la distancia al
+       * dispositivo no diría nada.
+       */
+      distanciaM: number | null;
       precisionM: number;
     }
   | {
@@ -55,13 +60,31 @@ const alMilimetro = (m: number) => Math.round(m * 1000) / 1000;
 /**
  * Revisa, en el orden del contrato, precisión, antigüedad y radio. `punto` es el del reporte y
  * `dispositivo`, la lectura del teléfono.
+ *
+ * Con `opciones.aproximada` (ADR 0007: ubicación aproximada desde un dispositivo sin GPS preciso,
+ * p. ej. una computadora) la precisión se exige al revés —tiene que ser MAYOR que el máximo, porque
+ * si alcanzara correspondería el camino normal con su radio— y el radio no se comprueba: el punto
+ * lo pone la persona a mano. El método queda `aproximada` y la distancia, `null` (con esa
+ * imprecisión no diría nada). La antigüedad se sigue exigiendo igual. El point-in-polygon lo hace
+ * cumplir la ruta, no esta función.
  */
 export function revisarDispositivo(
   punto: PuntoLatLon,
   dispositivo: Dispositivo,
+  opciones: { aproximada?: boolean } = {},
 ): RevisionDispositivo {
+  const aproximada = opciones.aproximada ?? false;
   const precisionMax = CONFIG_DOMINIO.PRECISION_DISPOSITIVO_MAX_M;
-  if (dispositivo.precision_m > precisionMax)
+  // La otra cara de PRECISION_INSUFICIENTE: si el dispositivo ubica con `precisionMax` o menos, hay
+  // ubicación precisa disponible y corresponde el camino normal (ADR 0007).
+  if (aproximada && dispositivo.precision_m <= precisionMax)
+    return {
+      ok: false,
+      codigo: 'UBICACION_PRECISA_DISPONIBLE',
+      mensaje: 'Tu dispositivo te ubica con buena precisión: reportá desde tu posición.',
+      detalles: { precision_m: Math.round(dispositivo.precision_m), maximo_m: precisionMax },
+    };
+  if (!aproximada && dispositivo.precision_m > precisionMax)
     return {
       ok: false,
       codigo: 'PRECISION_INSUFICIENTE',
@@ -76,6 +99,16 @@ export function revisarDispositivo(
       codigo: 'POSICION_VENCIDA',
       mensaje: `Tu ubicación es de hace más de ${Math.round(antiguedadMax / 60)} minutos. Volvé a compartirla para enviar el reporte.`,
       detalles: { antiguedad_s: Math.round(dispositivo.antiguedad_s), maximo_s: antiguedadMax },
+    };
+
+  // Camino aproximado: no se comprueba el radio y la distancia no se guarda (el punto lo puso la
+  // persona a mano). El PIP lo sigue exigiendo la ruta, que responde 422 FUERA_DE_COBERTURA.
+  if (aproximada)
+    return {
+      ok: true,
+      metodo: 'aproximada',
+      distanciaM: null,
+      precisionM: dispositivo.precision_m,
     };
 
   const radio = CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M;

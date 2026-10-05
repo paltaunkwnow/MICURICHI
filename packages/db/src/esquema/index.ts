@@ -64,7 +64,7 @@ export const estadoEnum = pgEnum('estado_reporte', [
   'resuelto',
 ]);
 export const rolEnum = pgEnum('rol', ['ciudadano', 'tecnico', 'ejecutivo', 'admin']);
-export const ubicacionMetodoEnum = pgEnum('ubicacion_metodo', ['gps', 'manual']);
+export const ubicacionMetodoEnum = pgEnum('ubicacion_metodo', ['gps', 'manual', 'aproximada']);
 export const ubicacionTipoEnum = pgEnum('ubicacion_tipo', [
   'via_publica',
   'vivienda_o_predio',

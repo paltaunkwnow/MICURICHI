@@ -98,12 +98,12 @@ describe('0.16.0: OpenAPI', () => {
 });
 
 describe('versión del paquete', () => {
-  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.17.0', () => {
+  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.18.0', () => {
     const { version } = JSON.parse(readFileSync(resolve(raiz, 'package.json'), 'utf8')) as {
       version: string;
     };
     const ultima = readFileSync(resolve(raiz, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1];
-    expect(version).toBe('0.17.0');
+    expect(version).toBe('0.18.0');
     expect(ultima).toBe(version);
   });
 });

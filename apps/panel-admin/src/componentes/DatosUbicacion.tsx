@@ -1,5 +1,6 @@
 import type { ReporteTecnicoFeature } from 'contracts';
 import {
+  aclaracionMetodo,
   coordenadas,
   distanciaDispositivo,
   etiquetaMetodo,
@@ -13,6 +14,7 @@ import { Dato } from './Dato';
 export function DatosUbicacion({ reporte }: { reporte: ReporteTecnicoFeature }) {
   const p = reporte.properties;
   const [lon, lat] = reporte.geometry.coordinates;
+  const aclaracion = aclaracionMetodo(p.ubicacion_metodo);
   return (
     <dl className="lista-datos">
       <Dato etiqueta="Distrito">
@@ -26,10 +28,13 @@ export function DatosUbicacion({ reporte }: { reporte: ReporteTecnicoFeature }) 
       </Dato>
       <Dato etiqueta="Método de ubicación">
         {etiquetaMetodo(p.ubicacion_metodo, p.distancia_dispositivo_m)}
+        {aclaracion ? (
+          <span className="mt-0.5 block text-sm text-tinta-600">{aclaracion}</span>
+        ) : null}
       </Dato>
       <Dato etiqueta="Precisión del GPS">{precisionGps(p.precision_gps_m)}</Dato>
       <Dato etiqueta="Distancia al dispositivo">
-        {distanciaDispositivo(p.distancia_dispositivo_m)}
+        {distanciaDispositivo(p.distancia_dispositivo_m, p.ubicacion_metodo)}
       </Dato>
       <Dato etiqueta="Tipo de lugar">{etiquetaUbicacionTipo(p.ubicacion_tipo)}</Dato>
       <Dato etiqueta="Versión de capa">{p.version_capa}</Dato>

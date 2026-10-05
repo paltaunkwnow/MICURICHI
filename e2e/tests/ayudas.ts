@@ -74,6 +74,22 @@ export function textoDistancia(punto: { lat: number; lon: number }, telefono = P
 }
 
 /**
+ * Claves y números de un JSON, a cualquier profundidad. Sirve para afirmar que la posición del
+ * dispositivo no está en lo que guarda ni devuelve el servidor (CLAUDE.md §0, regla 8): ninguna
+ * clave `dispositivo` y ninguno de sus números entre los de la respuesta.
+ */
+export function recorrer(valor: unknown, claves: string[] = [], numeros: number[] = []) {
+  if (typeof valor === 'number') numeros.push(valor);
+  else if (Array.isArray(valor)) for (const v of valor) recorrer(v, claves, numeros);
+  else if (valor && typeof valor === 'object')
+    for (const [k, v] of Object.entries(valor)) {
+      claves.push(k);
+      recorrer(v, claves, numeros);
+    }
+  return { claves, numeros };
+}
+
+/**
  * Un punto a 50 m del teléfono (30 al norte y 40 al este), dentro del círculo: el vecino lo
  * ajustó a mano. Ni su latitud ni su longitud coinciden con las del teléfono, así que se puede
  * buscar la posición del teléfono en lo que guarda el servidor sin confundirla con la del punto.
@@ -473,6 +489,39 @@ export function mapaDelPaso1(page: Page) {
 /** «Compartir mi ubicación», el único botón que pide la ubicación (plan 2026-09-26, pedido F). */
 export function botonCompartirUbicacion(page: Page) {
   return page.getByTestId('boton-compartir-ubicacion');
+}
+
+/**
+ * El texto de «Reportar con ubicación aproximada», el botón del paso 1 que ofrece el camino para
+ * un dispositivo sin GPS preciso (ADR 0007, contracts 0.18.0). Es también su nombre accesible, lo
+ * que oye quien usa un lector de pantalla.
+ */
+export const TEXTO_BOTON_UBICACION_APROXIMADA = 'Reportar con ubicación aproximada';
+
+/**
+ * El botón del camino aproximado. Solo aparece en el paso 1 con una lectura de más de 50 m, mientras
+ * se busca la ubicación o cuando venció el plazo; con 50 m o menos, sin permiso o sin ninguna lectura
+ * todavía, no existe.
+ */
+export function botonUbicacionAproximada(page: Page) {
+  return page.getByTestId('boton-ubicacion-aproximada');
+}
+
+/**
+ * Espera la oferta del camino aproximado en el paso 1: el botón, con su nombre accesible, y la
+ * explicación de que el punto lo pone la persona a mano y de que los técnicos lo ven sin comprobar
+ * (plan 2026-10-04, C-4.1). No afirma nada sobre lo que NO hay (mapa, «Continuar»): eso lo dice
+ * cada prueba. Devuelve el botón.
+ */
+export async function esperarOfertaDeUbicacionAproximada(page: Page) {
+  const boton = botonUbicacionAproximada(page);
+  await expect(boton).toBeVisible();
+  await expect(boton).toHaveAccessibleName(new RegExp(`^${TEXTO_BOTON_UBICACION_APROXIMADA}`));
+  const explicacion = page.getByTestId('explicacion-ubicacion-aproximada');
+  await expect(explicacion).toBeVisible();
+  await expect(explicacion).toContainText(/a mano/i);
+  await expect(explicacion).toContainText(/sin comprobar/i);
+  return boton;
 }
 
 /**

@@ -91,6 +91,7 @@ import {
   aceptarPunto,
   coordenadasEscritas,
   type Direccion,
+  desplazar,
   encuadreDelPaso1,
   moverDentroDelRadio,
   PASO_BOTON_M,
@@ -101,6 +102,7 @@ import {
   textoDistancia,
 } from '@/lib/radio';
 import { refrescarSesion, useSesion } from '@/lib/sesion';
+import { esModoAproximado } from '@/lib/ubicacion-aproximada';
 import {
   ControladorUbicacion,
   DispositivoCongelado,
@@ -315,6 +317,8 @@ export function FormularioReporte() {
   const [ubicador] = useState(() => new ControladorUbicacion());
   const estadoUbicacion = useSyncExternalStore(ubicador.suscribir, ubicador.leer, ubicador.leer);
   const ancla = estadoUbicacion.fase === 'lista' ? estadoUbicacion.ancla : null;
+  /** El reporte va por el camino de ubicación aproximada (ADR 0007): sin círculo ni radio de 60 m. */
+  const aproximado = esModoAproximado(estadoUbicacion);
   /** El `dispositivo` del primer intento de envío: los reintentos lo repiten tal cual. */
   const congelado = useRef(new DispositivoCongelado());
   /** Releyendo la posición al tocar «Enviar reporte». */
@@ -346,6 +350,8 @@ export function FormularioReporte() {
   } | null>(null);
   const [errorEnvio, setErrorEnvio] = useState<string | null>(null);
   const [retomado, setRetomado] = useState(false);
+  /** Se retomó un borrador que iba por ubicación aproximada: se recuerda hasta volver a anclar. */
+  const [reanudarAproximada, setReanudarAproximada] = useState(false);
   /**
    * Miniatura local (`blob:`) de cada foto sacada en esta visita, por `objeto_key`: se ve al
    * instante y sin pedirla al servidor. Una foto de un borrador retomado no la tiene y usa la URL
@@ -430,12 +436,16 @@ export function FormularioReporte() {
       ancla: e.ancla,
       guardado: puntoYaElegido(actual, { aceptado: pasoPendiente !== null }),
       enlace: enlaceRef.current,
+      // El modo sale del controlador: en el aproximado no hay radio y nada se descarta por lejos.
+      aproximado: e.aproximada === true,
     });
     if (!actual || punto.lat !== actual.lat || punto.lon !== actual.lon) fijarUbicacion(punto);
     setAvisoUbicacion(aviso);
     // El punto que la persona había elegido ya no es el mismo: que lo mire y siga paso a paso, en
     // vez de volver de un salto a la revisión y enviar un lugar que no eligió.
     if (movido) setPasoPendiente(null);
+    // Ya hay ancla: si venía retomando el camino aproximado, el recordatorio ya cumplió.
+    setReanudarAproximada(false);
   }, [vezAnclada]);
 
   /**
@@ -474,6 +484,9 @@ export function FormularioReporte() {
       if (b.paso > 1) setPasoPendiente(b.paso);
       setPaso(1);
       setRetomado(true);
+      // La posición del teléfono no se guarda: se vuelve a pedir. Si iba por el camino aproximado,
+      // se recuerda para ofrecerlo de nuevo y conservar el punto, caiga donde caiga.
+      if (b.aproximado) setReanudarAproximada(true);
     }
   }, [form]);
 
@@ -489,8 +502,9 @@ export function FormularioReporte() {
       fotos,
       valores: valores as Borrador['valores'],
       clave: claveEnvio.current as string,
+      aproximado,
     });
-  }, [paso, pasoPendiente, ubicacion, resuelto, fotos, valores, creado]);
+  }, [paso, pasoPendiente, ubicacion, resuelto, fotos, valores, creado, aproximado]);
 
   const empezarDeCero = () => {
     olvidarBorrador();
@@ -513,12 +527,13 @@ export function FormularioReporte() {
     setErrorCoordenadas(null);
     setErrorFoto(null);
     setRetomado(false);
+    setReanudarAproximada(false);
     setPasoPendiente(null);
     setPaso(1);
     // Como recién abierto, pero sin volver a pedir la ubicación si ya se compartió: el punto
     // vuelve al enlace (si queda cerca) o a la posición del teléfono.
     if (ancla) {
-      const { punto, aviso } = puntoInicial({ ancla, guardado: null, enlace });
+      const { punto, aviso } = puntoInicial({ ancla, guardado: null, enlace, aproximado });
       fijarUbicacion(punto);
       setAvisoUbicacion(aviso);
       mapa.current?.jumpTo({ center: [punto.lon, punto.lat] });
@@ -544,23 +559,27 @@ export function FormularioReporte() {
     setResolviendo(true);
   }
 
-  /** Un punto elegido en el mapa (arrastre, toque, flechas), recortado al círculo. */
+  /** Un punto elegido en el mapa (arrastre, toque, flechas). Con círculo se recorta a él; en el
+   * modo aproximado (ADR 0007) cae libre, en cualquier lugar de la cobertura. */
   function elegirPunto(lat: number, lon: number) {
     if (!ancla) return;
-    const p = recortarAlCirculo({ lat, lon }, ancla);
+    const p = aproximado ? { lat, lon } : recortarAlCirculo({ lat, lon }, ancla);
     fijarUbicacion({ lat: p.lat, lon: p.lon });
   }
 
-  /** «Mover 5 m»: desde el punto actual, sin salir del círculo. */
+  /** «Mover 5 m»: desde el punto actual; sin salir del círculo, o libre en el modo aproximado. */
   function moverPunto(direccion: Direccion) {
     if (!ancla) return;
-    const p = moverDentroDelRadio(ubicacion ?? ancla, direccion, PASO_BOTON_M, ancla);
+    const desde = ubicacion ?? ancla;
+    const p = aproximado
+      ? desplazar(desde, direccion, PASO_BOTON_M)
+      : moverDentroDelRadio(desde, direccion, PASO_BOTON_M, ancla);
     fijarUbicacion({ lat: p.lat, lon: p.lon });
   }
 
   function confirmarCoordenadas() {
     if (!ancla) return;
-    const r = coordenadasEscritas(latTexto, lonTexto, ancla);
+    const r = coordenadasEscritas(latTexto, lonTexto, ancla, { aproximado });
     if (r.tipo !== 'ok') {
       setErrorCoordenadas(r.mensaje);
       return;
@@ -809,6 +828,7 @@ export function FormularioReporte() {
 
   const estadoAvance: EstadoParaAvanzar = {
     ancla,
+    aproximado,
     ubicacion,
     resuelto,
     resolviendo,
@@ -827,7 +847,7 @@ export function FormularioReporte() {
   const irAdelante = () => {
     if (paso === 1 && mostrarCoordenadas && latTexto.trim() && lonTexto.trim()) {
       if (ancla) {
-        const r = coordenadasEscritas(latTexto, lonTexto, ancla);
+        const r = coordenadasEscritas(latTexto, lonTexto, ancla, { aproximado });
         if (r.tipo === 'ok') {
           mapa.current?.jumpTo({ center: [r.punto.lon, r.punto.lat] });
           fijarUbicacion({ lat: r.punto.lat, lon: r.punto.lon });
@@ -878,13 +898,16 @@ export function FormularioReporte() {
       if (!dispositivo) {
         const antes = ubicador.leer();
         setReleyendo(true);
-        const relectura = await ubicador.releer();
+        // En el modo aproximado la relectura vale con cualquier precisión; solo cuenta que no esté
+        // vencida y, como no hay radio, nunca vuelve «movido».
+        const relectura = await ubicador.releer(aproximado);
         setReleyendo(false);
         const decision = decidirEnvio({
           punto: ubicacion,
           relectura,
           anterior: antes.fase === 'lista' ? antes.ancla : null,
           ahora: Date.now(),
+          aproximado,
         });
         if (decision.tipo === 'vencida') {
           ubicador.reiniciar();
@@ -903,7 +926,7 @@ export function FormularioReporte() {
         }
         dispositivo = congelado.current.tomar(decision.lectura, Date.now());
       }
-      enviar.mutate(armarEnvio(datos, ubicacion, fotos, dispositivo));
+      enviar.mutate(armarEnvio(datos, ubicacion, fotos, dispositivo, aproximado));
     },
     (rechazados) => {
       // Cada error se muestra en su campo y se lleva a la persona al paso donde está. Antes todo
@@ -1002,7 +1025,9 @@ export function FormularioReporte() {
               estado={estadoUbicacion}
               alCompartir={() => ubicador.compartir()}
               alSimular={() => ubicador.simular()}
+              alAproximar={() => ubicador.aproximar()}
               aviso={avisoUbicacion}
+              reanudando={reanudarAproximada}
             />
           ) : (
             <>
@@ -1011,19 +1036,25 @@ export function FormularioReporte() {
                   className="map"
                   ariaLabel="Mapa para elegir la ubicación del reporte"
                   centro={centroDelPaso1(ubicacion, ancla)}
-                  zoom={17}
-                  circulo={{ lat: ancla.lat, lon: ancla.lon, radioM: RADIO_M }}
+                  zoom={aproximado ? 15 : 17}
+                  circulo={aproximado ? null : { lat: ancla.lat, lon: ancla.lon, radioM: RADIO_M }}
                   seleccionUbicacion={ubicacion ? { lat: ubicacion.lat, lon: ubicacion.lon } : null}
                   onUbicacion={elegirPunto}
                   alListo={(m) => {
                     mapa.current = m;
-                    // El círculo entero a la vista (y el punto, si quedó afuera), sea cual sea el
-                    // tamaño de la pantalla.
-                    m.fitBounds(encuadreDelPaso1(ancla, ubicacionRef.current), {
-                      // Arriba, lugar para el dibujo del marcador, que sale hacia arriba del punto.
-                      padding: { top: 56, bottom: 24, left: 24, right: 24 },
-                      duration: 0,
-                    });
+                    if (aproximado) {
+                      // Sin círculo que encuadrar: se abre centrado en la posición aproximada, a un
+                      // zoom que deja ver el barrio para poner el punto a mano.
+                      m.jumpTo({ center: centroDelPaso1(ubicacionRef.current, ancla), zoom: 15 });
+                    } else {
+                      // El círculo entero a la vista (y el punto, si quedó afuera), sea cual sea el
+                      // tamaño de la pantalla.
+                      m.fitBounds(encuadreDelPaso1(ancla, ubicacionRef.current), {
+                        // Arriba, lugar para el dibujo del marcador, que sale hacia arriba del punto.
+                        padding: { top: 56, bottom: 24, left: 24, right: 24 },
+                        duration: 0,
+                      });
+                    }
                   }}
                 />
                 <div className="flot right-3 bottom-3 grid gap-2">
@@ -1041,6 +1072,16 @@ export function FormularioReporte() {
                   </button>
                 </div>
               </div>
+
+              {aproximado ? (
+                <div className="px-5 pt-3">
+                  <Aviso tono="alerta" role="status" data-testid="aviso-ubicacion-aproximada">
+                    <b>Ubicación aproximada.</b> Poné el punto a mano donde se junta el agua: desde
+                    este dispositivo no comprobamos los {RADIO_M} m. Los técnicos lo verán como «sin
+                    comprobar con tu dispositivo».
+                  </Aviso>
+                </div>
+              ) : null}
 
               <div className="px-5 pt-3">
                 <p className="lbl" id="titulo-mover-punto">
@@ -1061,10 +1102,20 @@ export function FormularioReporte() {
                   ))}
                 </fieldset>
                 <p className="ayuda mt-2" data-testid="ayuda-circulo">
-                  El círculo marca {RADIO_M} m alrededor de tu ubicación (precisión de{' '}
-                  {Math.round(ancla.precisionM)} m) y el punto no puede salir de él. También podés
-                  arrastrar el marcador, tocar el mapa o, con el marcador elegido, usar las flechas
-                  del teclado.
+                  {aproximado ? (
+                    <>
+                      Poné el punto donde se junta el agua: podés moverlo por toda la ciudad.
+                      Arrastrá el marcador, tocá el mapa o, con el marcador elegido, usá las flechas
+                      del teclado.
+                    </>
+                  ) : (
+                    <>
+                      El círculo marca {RADIO_M} m alrededor de tu ubicación (precisión de{' '}
+                      {Math.round(ancla.precisionM)} m) y el punto no puede salir de él. También
+                      podés arrastrar el marcador, tocar el mapa o, con el marcador elegido, usar
+                      las flechas del teclado.
+                    </>
+                  )}
                 </p>
               </div>
 
@@ -1082,7 +1133,10 @@ export function FormularioReporte() {
                   <div className="tarjeta mt-2.5 space-y-3 p-4">
                     <p className="ayuda">
                       Alternativa sin arrastrar: escribí la latitud y la longitud en grados
-                      decimales (EPSG:4326). Tienen que quedar a {RADIO_M} m o menos de donde estás.
+                      decimales (EPSG:4326).{' '}
+                      {aproximado
+                        ? 'Puede ser cualquier punto de la ciudad donde se junta el agua.'
+                        : `Tienen que quedar a ${RADIO_M} m o menos de donde estás.`}
                     </p>
                     <div className="flex flex-wrap gap-3">
                       <div className="flex-1">
@@ -1174,7 +1228,13 @@ export function FormularioReporte() {
                     {resuelto.asignado_por_proximidad
                       ? `Asignada por proximidad, a ${Math.round(resuelto.distancia_m ?? 0)} m. `
                       : ''}
-                    <span data-testid="distancia-al-punto">{textoDistancia(ubicacion, ancla)}</span>{' '}
+                    {aproximado ? (
+                      ''
+                    ) : (
+                      <span data-testid="distancia-al-punto">
+                        {textoDistancia(ubicacion, ancla)}
+                      </span>
+                    )}{' '}
                     Arrastrá el marcador para ajustar el punto exacto.
                   </Aviso>
                 ) : (
@@ -1555,6 +1615,7 @@ export function FormularioReporte() {
             <dl className="mt-2">
               <FilaRevision
                 etiqueta="Lugar"
+                testId="revision-ubicacion"
                 valor={
                   <>
                     {resuelto?.unidad_vecinal
@@ -1565,6 +1626,17 @@ export function FormularioReporte() {
                       {etiquetaDistrito(resuelto?.distrito?.codigo)}
                       {resuelto?.version_capa ? ` · capa ${resuelto.version_capa}` : ''}
                     </span>
+                    {aproximado ? (
+                      <>
+                        <br />
+                        <span
+                          className="text-[13.5px] font-normal text-tinta-600"
+                          data-testid="revision-metodo-aproximado"
+                        >
+                          Ubicación aproximada · sin comprobar con tu dispositivo
+                        </span>
+                      </>
+                    ) : null}
                   </>
                 }
                 alEditar={volverAlPaso1}
@@ -1671,13 +1743,18 @@ function FilaRevision({
   etiqueta,
   valor,
   alEditar,
+  testId,
 }: {
   etiqueta: string;
   valor: React.ReactNode;
   alEditar: () => void;
+  testId?: string;
 }) {
   return (
-    <div className="flex items-start gap-3 border-b-[1.5px] border-filete py-3 text-[15.5px]">
+    <div
+      data-testid={testId}
+      className="flex items-start gap-3 border-b-[1.5px] border-filete py-3 text-[15.5px]"
+    >
       <dt className="flex-none basis-[92px] text-[14.5px] text-tinta-600">{etiqueta}</dt>
       <dd className="m-0 min-w-0 flex-1 font-semibold">{valor}</dd>
       <button

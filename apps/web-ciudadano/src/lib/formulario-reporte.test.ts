@@ -408,3 +408,61 @@ describe('la validación del formulario', () => {
     expect(r.values.agua_brota_sumidero).toBeNull();
   });
 });
+
+describe('camino de ubicación aproximada (ADR 0007)', () => {
+  it('«Continuar» del paso 1 no exige precisión del dispositivo ni radio', () => {
+    const base = estado({
+      aproximado: true,
+      ancla: { ...ANCLA, precisionM: 300 },
+      ubicacion: alNorte(5000),
+    });
+    expect(puedeAvanzar(1, base)).toBe(true);
+    // Pero sigue necesitando una unidad vecinal dentro de cobertura.
+    expect(puedeAvanzar(1, { ...base, resuelto: { dentro_cobertura: false } })).toBe(false);
+    expect(puedeAvanzar(1, { ...base, resolviendo: true })).toBe(false);
+    expect(puedeAvanzar(1, { ...base, ubicacion: null })).toBe(false);
+  });
+
+  it('el camino normal sigue exigiendo precisión y radio', () => {
+    expect(puedeAvanzar(1, estado({ ancla: { ...ANCLA, precisionM: 300 } }))).toBe(false);
+    expect(puedeAvanzar(1, estado({ ubicacion: alNorte(200) }))).toBe(false);
+  });
+
+  it('el envío manda ubicacion_aproximada: true y pasa el contrato', () => {
+    const cuerpo = armarEnvio(
+      {
+        ...valoresIniciales(),
+        lat: 0,
+        lon: 0,
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+        ubicacion_tipo: 'via_publica',
+      } as ValoresFormulario,
+      PUNTO,
+      [],
+      { ...DISPOSITIVO, precision_m: 300 },
+      true,
+    );
+    expect(cuerpo.ubicacion_aproximada).toBe(true);
+    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
+  });
+
+  it('el camino normal manda ubicacion_aproximada: false', () => {
+    const cuerpo = armarEnvio(
+      {
+        ...valoresIniciales(),
+        lat: 0,
+        lon: 0,
+        descripcion: 'Se junta el agua en la esquina',
+        profundidad_estimada: 'rodilla',
+        frecuencia: 'ocasional',
+        ubicacion_tipo: 'via_publica',
+      } as ValoresFormulario,
+      PUNTO,
+      [],
+      DISPOSITIVO,
+    );
+    expect(cuerpo.ubicacion_aproximada).toBe(false);
+  });
+});

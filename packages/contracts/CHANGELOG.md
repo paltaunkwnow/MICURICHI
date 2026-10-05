@@ -1,5 +1,46 @@
 # Changelog — contracts
 
+## 0.18.0 — 2026-10-04
+
+**Sin ruptura: camino de «ubicación aproximada» para dispositivos sin GPS preciso (ADR 0007).** Una
+computadora ubicada por Wi-Fi o IP declara una precisión de cientos de metros o varios kilómetros, y
+hoy no puede reportar (se exige 50 m o menos y un punto a 60 m o menos del dispositivo). Se agrega un
+camino **opcional**: el punto lo pone la persona a mano en cualquier lugar de la cobertura, el reporte
+se guarda como `aproximada` y los técnicos lo ven «sin comprobar». Valor de enum nuevo, campo opcional
+y código de error nuevo: nada rompe tipos ni el cable.
+
+- **`UBICACION_METODOS`** suma **`aproximada`** (ahora `['gps', 'manual', 'aproximada']`; tipo
+  `UbicacionMetodo`). `ReporteTecnicoSchema.ubicacion_metodo` lo acepta y el OpenAPI lo lista. Un
+  valor de enum nuevo no rompe a quien lo lee, pero sí a un `switch` exhaustivo o un
+  `Record<UbicacionMetodo, …>` que no lo contemple: lo contemplan panel-admin (`etiquetaMetodo`) y
+  api-core en sus propias tareas. `dist/dominio.json` no exporta este enum (no lo hacía), así que no
+  cambia.
+- **`ReporteCrearSchema.ubicacion_aproximada`**: `z.boolean().default(false)`, **opcional** en la
+  entrada. `true` pide el camino aproximado. Un cuerpo que no lo manda va por el camino normal, igual
+  que antes.
+- **`CODIGOS_UBICACION_DISPOSITIVO`** suma **`UBICACION_PRECISA_DISPONIBLE`** (422), junto a
+  `PRECISION_INSUFICIENTE`: se pidió `ubicacion_aproximada` pero el dispositivo llega a
+  `PRECISION_DISPOSITIVO_MAX_M` (50 m) o menos, así que tiene que usar el camino normal. api-core lo
+  comprueba sin gastar cupo. El array pasa de 3 a 4 códigos; lo consume web-ciudadano para sus
+  mensajes (su `Record<CodigoUbicacionDispositivo, …>` suma el texto del código nuevo en su tarea).
+- **`DispositivoSchema.precision_m`**: el tope físico que acota Zod sube de **10 000 a 100 000 m**.
+  Una laptop por Wi-Fi o IP declara varios km; con el tope viejo, una precisión de, p. ej., 30 000 m
+  daba **400 PAYLOAD_INVALIDO** en vez del **422** que la interfaz necesita para explicar qué pasa
+  (sin `ubicacion_aproximada` sigue siendo `PRECISION_INSUFICIENTE`; con el flag se evalúa el camino
+  aproximado). Zod sigue acotando solo el rango físico; los topes de negocio son 422 de api-core.
+- **`NOTA_METODOLOGICA`** suma una oración: algunos reportes se cargaron desde dispositivos sin GPS
+  preciso, su ubicación la puso la persona a mano, figuran como «aproximada» y no se comprobaron con
+  el dispositivo. Sigue en una sola línea y llega a `nota_metodologica` y al encabezado del CSV.
+- **OpenAPI**: el `422` de `POST /api/v1/reportes` documenta `UBICACION_PRECISA_DISPONIBLE`; el
+  componente `ReporteCrear` suma `ubicacion_aproximada` (no en `required`) y
+  `dispositivo.precision_m` queda con `maximum: 100000`; `ReporteTecnico.ubicacion_metodo` lista
+  `aproximada`.
+
+**Consumidores:** api-core (rama de `ubicacion_aproximada`, el 422 nuevo, método `aproximada`,
+distancia en null), packages/db (migración 0019 que suma el valor al enum `ubicacion_metodo`),
+web-ciudadano (el camino aproximado y el texto del 422 nuevo), panel-admin (etiqueta «Ubicación
+aproximada — sin comprobar con el dispositivo»), e2e.
+
 ## 0.17.0 — 2026-10-04
 
 **Sin ruptura: `ResolverRespuesta.manzana` queda obsoleto (siempre `null`).** geo-service deja de

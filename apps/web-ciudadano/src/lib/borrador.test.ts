@@ -57,6 +57,16 @@ describe('borrador del formulario de reporte', () => {
     expect(b?.ubicacion?.lat).toBeCloseTo(-17.78);
   });
 
+  it('recuerda el modo de ubicación aproximada (ADR 0007)', () => {
+    instalar(almacenFalso());
+    guardarBorrador({ ...BASE, aproximado: true });
+    expect(leerBorrador()?.aproximado).toBe(true);
+    // Por defecto (camino normal con GPS) no queda marcado.
+    instalar(almacenFalso());
+    guardarBorrador(BASE);
+    expect(leerBorrador()?.aproximado).toBe(false);
+  });
+
   it('conserva la clave de idempotencia: reintentar tras recargar no puede duplicar el reporte', () => {
     instalar(almacenFalso());
     guardarBorrador(BASE);

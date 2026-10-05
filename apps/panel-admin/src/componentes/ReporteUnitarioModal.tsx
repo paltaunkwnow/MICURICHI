@@ -6,6 +6,7 @@ import type { RefObject } from 'react';
 import { useCiudad, useFormato } from '@/lib/ciudad-contexto';
 import { useDialogoModal } from '@/lib/dialogo';
 import {
+  aclaracionMetodo,
   etiquetaCausa,
   etiquetaDistrito,
   etiquetaEstado,
@@ -50,6 +51,24 @@ function ajustarLineas(texto: string, ancho: number): string {
   return lineas.join('\n');
 }
 
+/** Sangría de los valores del .txt: el ancho de «Método de Captura:  ». */
+const SANGRIA_TXT = ' '.repeat(20);
+
+/**
+ * El valor del renglón «Método de Captura» del .txt. Con una aclaración (ubicación aproximada, ADR
+ * 0007) la suma debajo, sangrada bajo el valor y partida para que la ficha siga en `ANCHO_TXT`
+ * columnas.
+ */
+function metodoDeCapturaTxt(p: ReporteTecnicoFeature['properties']): string {
+  const etiqueta = etiquetaMetodo(p.ubicacion_metodo, p.distancia_dispositivo_m);
+  const aclaracion = aclaracionMetodo(p.ubicacion_metodo);
+  if (!aclaracion) return etiqueta;
+  const renglones = ajustarLineas(aclaracion, ANCHO_TXT - SANGRIA_TXT.length)
+    .split('\n')
+    .map((renglon) => `${SANGRIA_TXT}${renglon}`);
+  return [etiqueta, ...renglones].join('\n');
+}
+
 export function generarTextoReporteUnitario(
   f: ReporteTecnicoFeature,
   formato: { fechaHora: (f: string | null | undefined) => string; numero: (n: number) => string },
@@ -80,7 +99,7 @@ Distrito Municipal: ${p.distrito?.nombre || etiquetaDistrito(p.distrito?.codigo)
 Unidad Vecinal:     ${p.unidad_vecinal?.nombre || etiquetaUnidadVecinal(p.unidad_vecinal?.codigo) || 'Sin asignar'}
 Coordenadas WGS84:  Latitud: ${lat.toFixed(6)}, Longitud: ${lon.toFixed(6)}
 Tipo de Ubicación:  ${etiquetaUbicacionTipo(p.ubicacion_tipo)}
-Método de Captura:  ${etiquetaMetodo(p.ubicacion_metodo, p.distancia_dispositivo_m)}
+Método de Captura:  ${metodoDeCapturaTxt(p)}
 Precisión GPS:      ${precisionGps(p.precision_gps_m)}
 
 3. DATOS DEL REPORTE Y SEVERIDAD
@@ -165,6 +184,7 @@ export function ReporteUnitarioModal({
   const { fechaHora, numero } = formato;
   const p = reporte.properties;
   const [lon, lat] = reporte.geometry.coordinates;
+  const aclaracionUbicacion = aclaracionMetodo(p.ubicacion_metodo);
   const { dialogo, alTeclear } = useDialogoModal({ onCerrar, retorno });
 
   const imprimir = () => {
@@ -329,6 +349,9 @@ export function ReporteUnitarioModal({
                 <div>
                   <span className="text-tinta-600">Método de Captura:</span>{' '}
                   <b>{etiquetaMetodo(p.ubicacion_metodo, p.distancia_dispositivo_m)}</b>
+                  {aclaracionUbicacion ? (
+                    <span className="block text-xs text-tinta-600">{aclaracionUbicacion}</span>
+                  ) : null}
                 </div>
                 <div>
                   <span className="text-tinta-600">Precisión Declarada:</span>{' '}

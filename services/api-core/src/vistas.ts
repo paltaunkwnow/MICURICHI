@@ -9,6 +9,7 @@ import {
   type MiReporte,
   type ReportePublico,
   type ReporteTecnico,
+  type UbicacionMetodo,
 } from 'contracts';
 import { esEstadoPublico, esRetirado, esVerificado } from './visibilidad.js';
 
@@ -35,7 +36,7 @@ export interface FilaReporte {
   uv_nombre: string | null;
   version_capa: string | null;
   resolucion_flags: Record<string, unknown>;
-  ubicacion_metodo: 'gps' | 'manual';
+  ubicacion_metodo: UbicacionMetodo;
   precision_gps_m: string | null;
   /** Metros entre el punto y el teléfono al enviar (0013); null en los reportes anteriores. */
   distancia_dispositivo_m: number | null;

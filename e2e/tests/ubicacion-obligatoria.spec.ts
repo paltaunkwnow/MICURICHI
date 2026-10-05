@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 import {
   API,
   abrirFormulario,
+  botonUbicacionAproximada,
   compartirUbicacion,
   cuentaNuevaConSesion,
   cuentaNuevaEnElNavegador,
@@ -9,6 +10,7 @@ import {
   dispositivoEn,
   elegirPuntoPorCoordenadas,
   escribirCoordenadas,
+  esperarOfertaDeUbicacionAproximada,
   esperarPila,
   esperarPublicacion,
   GPS_EN_EL_CENTRO,
@@ -23,6 +25,7 @@ import {
   PUNTO_CENTRO,
   RADIO_DISPOSITIVO_M,
   REPORTES_POR_DIA,
+  recorrer,
   reporteValido,
   tocarCompartirUbicacion,
   vigilarSensores,
@@ -33,7 +36,10 @@ import {
  *
  * - Al abrir la web no se pide ni se lee nada: ni la ubicación, ni el permiso, ni la cámara. La
  *   ubicación se pide solo al tocar «Compartir mi ubicación» dentro del reporte.
- * - Sin ubicación, o con una peor que 50 m, no se reporta.
+ * - Sin ubicación no se reporta, ni siquiera por el camino aproximado: el mapa se centra en ella.
+ * - Con una peor que 50 m, el camino normal sigue cerrado (sin mapa ni «Continuar») hasta que el
+ *   teléfono llegue a 50 m. Desde el plan 2026-10-04 (ADR 0007) se ofrece además «Reportar con
+ *   ubicación aproximada», el camino de las computadoras, que cubre `ubicacion-aproximada.spec.ts`.
  * - El punto se mueve solo dentro de 60 m del teléfono, y api-core lo vuelve a comprobar: lo que
  *   la interfaz no deja hacer, un POST directo tampoco lo consigue.
  * - La posición del teléfono sirve para esa comprobación y no se guarda: el técnico ve la
@@ -49,18 +55,6 @@ test.beforeAll(async ({ request }) => {
 
 /** Coordenadas del teléfono de la suite, para buscarlas en lo que guarda y devuelve el servidor. */
 const COORDENADAS_DEL_TELEFONO = [PUNTO_CENTRO.lat, PUNTO_CENTRO.lon];
-
-/** Claves y números de un JSON, a cualquier profundidad. */
-function recorrer(valor: unknown, claves: string[] = [], numeros: number[] = []) {
-  if (typeof valor === 'number') numeros.push(valor);
-  else if (Array.isArray(valor)) for (const v of valor) recorrer(v, claves, numeros);
-  else if (valor && typeof valor === 'object')
-    for (const [k, v] of Object.entries(valor)) {
-      claves.push(k);
-      recorrer(v, claves, numeros);
-    }
-  return { claves, numeros };
-}
 
 test.describe('al abrir la web no se pide ni se lee nada', () => {
   // Con los dos permisos ya dados, pedir la ubicación o la cámara no mostraría ningún aviso: la
@@ -191,6 +185,9 @@ test.describe('sin ubicación no se reporta', () => {
     await expect(page.getByTestId('boton-reintentar-ubicacion')).toHaveText('Probar de nuevo');
     await expect(mapaDelPaso1(page)).toHaveCount(0);
     await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
+    // Sin la ubicación tampoco hay camino aproximado (ADR 0007): se pide aunque sea imprecisa, y
+    // sirve para centrar el mapa.
+    await expect(botonUbicacionAproximada(page)).toHaveCount(0);
 
     // «En cuanto la habilites, seguimos solos»: el formulario escucha el cambio del permiso.
     await context.grantPermissions(['geolocation']);
@@ -201,11 +198,15 @@ test.describe('sin ubicación no se reporta', () => {
   });
 });
 
-test.describe(`con una ubicación peor que ${PRECISION_DISPOSITIVO_MAX_M} m no se avanza`, () => {
+// El camino normal exige 50 m o menos. Con una lectura peor sigue cerrado (sin mapa ni «Continuar»),
+// pero ya no es un callejón sin salida: se ofrece «Reportar con ubicación aproximada» (ADR 0007), que
+// recorre `ubicacion-aproximada.spec.ts`. Acá se afirman las dos cosas a la vez: lo que se ofrece y
+// lo que sigue cerrado.
+test.describe(`con una ubicación peor que ${PRECISION_DISPOSITIVO_MAX_M} m el camino normal sigue cerrado y se ofrece el aproximado`, () => {
   const IMPRECISO = { ...GPS_EN_EL_CENTRO, accuracy: 200 };
   test.use({ geolocation: IMPRECISO, permissions: ['geolocation'] });
 
-  test('con 200 m muestra la precisión y no deja seguir hasta que el teléfono llega a 50 m', async ({
+  test('con 200 m muestra la precisión, ofrece la ubicación aproximada y no deja seguir por el camino normal hasta que el teléfono llega a 50 m', async ({
     page,
     context,
   }) => {
@@ -218,10 +219,13 @@ test.describe(`con una ubicación peor que ${PRECISION_DISPOSITIVO_MAX_M} m no s
       `Hace falta ${PRECISION_DISPOSITIVO_MAX_M} m o menos`,
     );
     await expect(page.getByRole('button', { name: 'Buscando tu ubicación…' })).toBeDisabled();
+    // El camino normal sigue cerrado: ofrecer el aproximado no abre el mapa ni habilita «Continuar».
     await expect(mapaDelPaso1(page)).toHaveCount(0);
     await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
+    await esperarOfertaDeUbicacionAproximada(page);
 
-    // El teléfono mejora mientras se sigue buscando (al salir afuera): llega sola.
+    // El teléfono mejora mientras se sigue buscando (al salir afuera): llega sola, por el camino
+    // normal y con su círculo, y ya no corresponde ofrecer el aproximado.
     await context.setGeolocation(GPS_EN_EL_CENTRO);
     await expect(mapaDelPaso1(page)).toBeVisible({ timeout: 30_000 });
     await expect(page.getByTestId('ayuda-circulo')).toContainText(
@@ -229,9 +233,10 @@ test.describe(`con una ubicación peor que ${PRECISION_DISPOSITIVO_MAX_M} m no s
     );
     await expect(page.getByTestId('ubicacion-resuelta')).toBeVisible();
     await expect(page.getByTestId('boton-siguiente')).toBeEnabled();
+    await expect(botonUbicacionAproximada(page)).toHaveCount(0);
   });
 
-  test('si a los 30 s no llega a 50 m, pide salir a un lugar abierto, apaga el GPS y ofrece reintentar', async ({
+  test('si a los 30 s no llega a 50 m, pide salir a un lugar abierto, apaga el GPS, ofrece reintentar y sigue ofreciendo la ubicación aproximada', async ({
     page,
   }) => {
     const sensores = await vigilarSensores(page);
@@ -249,6 +254,8 @@ test.describe(`con una ubicación peor que ${PRECISION_DISPOSITIVO_MAX_M} m no s
     await expect(page.getByTestId('boton-reintentar-ubicacion')).toHaveText('Reintentar');
     await expect(mapaDelPaso1(page)).toHaveCount(0);
     await expect(page.getByTestId('boton-siguiente')).toHaveCount(0);
+    // Vencido el plazo la lectura sigue siendo mala: es cuando más hace falta una salida.
+    await esperarOfertaDeUbicacionAproximada(page);
     expect((await sensores()).apagadas, 'el GPS se apaga al vencer el plazo').toBeGreaterThan(0);
   });
 });
@@ -295,6 +302,9 @@ test.describe(`el punto no sale del círculo de ${RADIO_DISPOSITIVO_M} m`, () =>
     // El método y la precisión los deriva el servidor (contracts 0.9.0).
     expect(Object.keys(cuerpo)).not.toContain('ubicacion_metodo');
     expect(Object.keys(cuerpo)).not.toContain('precision_gps_m');
+    // Con buena precisión se reporta por el camino normal: no se pide el aproximado (ADR 0007), que
+    // el servidor rechazaría con 50 m o menos. Viaje `false` o no viaje, el valor es el mismo.
+    expect(cuerpo.ubicacion_aproximada ?? false).toBe(false);
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
 
     // Lo que guardó: la distancia y la precisión, no la posición del teléfono.
@@ -427,7 +437,9 @@ test.describe('api-core vuelve a comprobar la ubicación', () => {
     for (const c of COORDENADAS_DEL_TELEFONO)
       expect(recorrer(cuerpo).numeros, `la respuesta no puede tener ${c}`).not.toContain(c);
 
-    // Los topes de negocio son 422 propios, no un 400 del esquema: la interfaz los explica.
+    // Los topes de negocio son 422 propios, no un 400 del esquema: la interfaz los explica. Sin
+    // `ubicacion_aproximada`, una precisión de más de 50 m sigue sin tener salida: el camino
+    // aproximado se pide con esa marca y tiene sus reglas en `ubicacion-aproximada.spec.ts`.
     const imprecisa = await enviar({
       dispositivo: dispositivoEn(PUNTO_CENTRO, { precisionM: 80 }),
     });

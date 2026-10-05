@@ -197,8 +197,21 @@ Para reportar hay que compartir la ubicación (plan 2026-09-26, pedidos E y F; c
   es negativa (0 si el reloj da la lectura en el futuro) y queda **congelada** para los reintentos
   tras un fallo dudoso (red, plazo, 5xx): el reintento es la misma petición. Un 4xx la suelta.
   `ubicacion_metodo` y `precision_gps_m` ya no se mandan: los deriva el servidor.
-- **Los 422** `PRECISION_INSUFICIENTE`, `POSICION_VENCIDA` y `UBICACION_FUERA_DE_RADIO` tienen
-  cada uno su texto (`src/lib/errores.ts`) y llevan al paso 1 a compartir la ubicación de nuevo.
+- **Ubicación aproximada (ADR 0007).** Cuando el dispositivo no llega a los
+  `PRECISION_DISPOSITIVO_MAX_M` m (una computadora ubicada por Wi-Fi o IP), el paso 1 ofrece
+  «Reportar con ubicación aproximada» ya con la primera lectura imprecisa, sin esperar los 30 s.
+  En ese camino el mapa se centra en la posición aproximada y **no hay círculo de 60 m**: el punto
+  se pone a mano en cualquier lugar de la cobertura (arrastre, flechas, «mover 5 m» o coordenadas),
+  la previsualización de la unidad vecinal sigue igual, un aviso «Ubicación aproximada» queda a la
+  vista y la revisión lo marca. Al enviar se relee la posición (tiene que tener
+  `POSICION_ANTIGUEDAD_MAX_S` o menos, con cualquier precisión) y viaja `ubicacion_aproximada: true`;
+  el borrador recuerda el modo. Si el GPS mejoró y el servidor responde `422
+  UBICACION_PRECISA_DISPONIBLE`, se vuelve al paso 1 a compartir la ubicación por el camino normal.
+  El modo sale de `esModoAproximado` (`src/lib/ubicacion-aproximada.ts`) y las reglas sin radio, de
+  `radio.ts` y `formulario-reporte.ts`.
+- **Los 422** `PRECISION_INSUFICIENTE`, `UBICACION_PRECISA_DISPONIBLE`, `POSICION_VENCIDA` y
+  `UBICACION_FUERA_DE_RADIO` tienen cada uno su texto (`src/lib/errores.ts`) y llevan al paso 1 a
+  compartir la ubicación de nuevo.
 - **«Ir a mi ubicación» del mapa** consulta el permiso al tocarlo: si ya se dio dentro de un
   reporte, centra el mapa; si no, muestra «Tu ubicación se pide solo al reportar un punto» junto a
   «Reportar un punto», sin disparar ningún aviso del navegador.

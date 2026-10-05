@@ -1,0 +1,5 @@
+# git status --porcelain
+?? docs/sdd/2026-10-04-reportar-desde-computadora/
+
+# HEAD
+9ef77296935b50db87c4265bd676f5942ec899a1 docs(claude): plan con el modelo más potente y subagentes por nivel

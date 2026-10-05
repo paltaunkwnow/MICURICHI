@@ -99,30 +99,73 @@ export function etiquetaCapa(c: TipoCapa | string) {
 }
 /**
  * Distancia entre el punto y el GPS del teléfono al enviar. `null` en los reportes anteriores a
- * la ubicación obligatoria (contracts 0.9.0); `undefined` si responde un api-core anterior, que
- * puede seguir corriendo mientras se despliega el nuevo.
+ * la ubicación obligatoria (contracts 0.9.0) y en los de ubicación aproximada (0.18.0), que no se
+ * comprueban contra el dispositivo; `undefined` si responde un api-core anterior, que puede seguir
+ * corriendo mientras se despliega el nuevo.
  */
 type DistanciaDispositivo = number | null | undefined;
 
 /**
- * Desde 0.9.0 el método lo deriva api-core: «gps» si el punto quedó a max(2 m, precisión
- * declarada) o menos del teléfono al enviar, así que puede estar a varios metros; «manual» si la
- * persona lo movió más allá, siempre dentro del radio. Cuántos metros lo dice la fila «Distancia
- * al dispositivo» (`distanciaDispositivo`): no se repite acá. Antes de 0.9.0 «manual» era un clic
- * en cualquier parte del mapa: sin distancia guardada no se promete nada.
+ * Cómo quedó fijado el punto, que lo deriva api-core:
+ * - «gps» (desde 0.9.0): el punto quedó a max(2 m, precisión declarada) o menos del teléfono al
+ *   enviar, así que puede estar a varios metros.
+ * - «manual»: la persona lo movió más allá, siempre dentro del radio de 60 m. Cuántos metros lo dice
+ *   la fila «Distancia al dispositivo» (`distanciaDispositivo`): no se repite acá. Antes de 0.9.0
+ *   «manual» era un clic en cualquier parte del mapa: sin distancia guardada no se promete nada.
+ * - «aproximada» (0.18.0, ADR 0007): el dispositivo no llegó a 50 m de precisión (una computadora
+ *   ubicada por Wi-Fi o IP), el punto lo puso la persona a mano y api-core no lo comprobó contra el
+ *   dispositivo ni guardó la distancia. Nunca se dice como «manual»: sería afirmar que se ajustó
+ *   cerca del teléfono, y no es cierto. Por qué no se comprobó lo explica `aclaracionMetodo`.
+ *
+ * El `switch` es exhaustivo a propósito: un método nuevo en `UBICACION_METODOS` rompe el typecheck
+ * acá, en vez de caer en el texto de otro.
  */
-export function etiquetaMetodo(m: UbicacionMetodo, distanciaM: DistanciaDispositivo) {
+export function etiquetaMetodo(m: UbicacionMetodo, distanciaM: DistanciaDispositivo): string {
   const sinDistancia = distanciaM === null || distanciaM === undefined;
-  if (m === 'gps') {
-    return sinDistancia
-      ? 'En la posición del teléfono'
-      : 'En la posición del teléfono (dentro de su margen de error)';
+  switch (m) {
+    case 'gps':
+      return sinDistancia
+        ? 'En la posición del teléfono'
+        : 'En la posición del teléfono (dentro de su margen de error)';
+    case 'manual':
+      return sinDistancia
+        ? 'Selección manual en el mapa, sin control de distancia al teléfono'
+        : 'Movido a mano por la persona';
+    case 'aproximada':
+      return 'Ubicación aproximada — sin comprobar con el dispositivo';
+    default: {
+      // Solo se llega con un valor que `contracts` no declara (un api-core más nuevo que el panel):
+      // en el tipo, `m` ya es `never`. Se muestra el código crudo antes que decir otra cosa.
+      const sinContemplar: never = m;
+      return `Método de ubicación sin descripción (${String(sinContemplar)})`;
+    }
   }
-  if (sinDistancia) return 'Selección manual en el mapa, sin control de distancia al teléfono';
-  return 'Movido a mano por la persona';
 }
 
-export function distanciaDispositivo(m: DistanciaDispositivo) {
+/** Lo que la etiqueta del método no alcanza a decir, por método. `Record`: todos tienen respuesta. */
+const ACLARACION_METODO: Record<UbicacionMetodo, string | null> = {
+  gps: null,
+  manual: null,
+  aproximada: 'El punto lo puso la persona a mano; su dispositivo no tenía GPS preciso.',
+};
+
+/**
+ * Una aclaración para quien tiene que decidir con el dato (el técnico), o `null` si la etiqueta
+ * alcanza. Va aparte de `etiquetaMetodo` para que esa siga siendo una sola línea corta, apta para
+ * una tabla o una ficha en texto plano.
+ */
+export function aclaracionMetodo(m: UbicacionMetodo): string | null {
+  return ACLARACION_METODO[m] ?? null;
+}
+
+/**
+ * Con una ubicación aproximada la distancia no existe (api-core la deja en `null` y no hay radio
+ * que comprobar), así que se dice que no aplica: el texto de un `null` cualquiera, «anterior a la
+ * ubicación obligatoria», sería falso. `metodo` es opcional para quien solo tiene la distancia: sin
+ * él, todo sigue como siempre.
+ */
+export function distanciaDispositivo(m: DistanciaDispositivo, metodo?: UbicacionMetodo): string {
+  if (metodo === 'aproximada') return 'No aplica: el punto no se comprobó contra el dispositivo';
   if (m === null || m === undefined) {
     return 'Sin dato: el reporte es anterior a la ubicación obligatoria';
   }

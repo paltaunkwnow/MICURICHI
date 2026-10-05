@@ -147,4 +147,6 @@ export const NOTA_METODOLOGICA =
   'no significa ausencia de anegamiento. ' +
   `Los reportes marcados «${ETIQUETAS.estado_publico.nuevo}» no fueron revisados por un técnico y pueden ser erróneos. ` +
   `El radio de ${CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M} m no prueba que el vecino estuviera en el lugar: ` +
-  'el GPS del teléfono se puede falsear.';
+  'el GPS del teléfono se puede falsear. ' +
+  'Algunos reportes se cargaron desde dispositivos sin GPS preciso, como computadoras: su ubicación ' +
+  'la puso la persona a mano, figura como «aproximada» y no se comprobó con el dispositivo.';
