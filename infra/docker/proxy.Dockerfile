@@ -10,7 +10,7 @@
 # Base fijada por versión Y digest, como las demás: una etiqueta sigue diciendo «2.11» mientras sirve
 # lo que haya en la caché. Dependabot (ecosistema docker, /infra/docker) propone las nuevas.
 # Actualizar a mano: `docker buildx imagetools inspect caddy:<versión>-alpine` y copiar el Digest.
-FROM caddy:2.11.4-alpine@sha256:6aeddd44c3078b0f9a35206472a11420648a79c184603ef95957d0a20044cb2b
+FROM caddy:2.11.7-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
 
 # 1) Sin root. La imagen oficial corre como root y le pone al binario la capability
 #    NET_BIND_SERVICE para poder abrir 80 y 443. Aquí escucha en 8080/8443 (el Compose publica 80 y
