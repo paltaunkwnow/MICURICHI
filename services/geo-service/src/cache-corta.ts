@@ -98,3 +98,35 @@ export class CacheCorta<T> {
     this.en = 0;
   }
 }
+
+/**
+ * Una `CacheCorta` por categoría (M3.4, ADR 0012, 0013). Las cifras públicas (agregados por UV y
+ * puntos críticos) pasaron a filtrarse por categoría, así que ya no sirve una sola copia: la de
+ * inundación y la de baches cuentan cosas distintas y no pueden compartir celda. Cada categoría
+ * tiene su propia `CacheCorta` con el MISMO TTL y la MISMA edad máxima, creada la primera vez que se
+ * pide. El conjunto de claves es el de categorías activas (una lectura con categoría inválida se
+ * corta con 400 antes de llegar acá), que es pequeño y fijo: no crece sin tope.
+ */
+export class CachePorCategoria<T> {
+  private readonly porClave = new Map<string, CacheCorta<T>>();
+
+  constructor(
+    private readonly ttlMs: number,
+    private readonly edadMaximaMs: number,
+  ) {}
+
+  /** La `CacheCorta` de una categoría; se crea con el TTL y la edad máxima comunes si no existía. */
+  para(categoria: string): CacheCorta<T> {
+    let cache = this.porClave.get(categoria);
+    if (!cache) {
+      cache = new CacheCorta<T>(this.ttlMs, this.edadMaximaMs);
+      this.porClave.set(categoria, cache);
+    }
+    return cache;
+  }
+
+  /** Invalida la copia de TODAS las categorías (p. ej. al cambiar una capa). */
+  invalidar(): void {
+    for (const cache of this.porClave.values()) cache.invalidar();
+  }
+}

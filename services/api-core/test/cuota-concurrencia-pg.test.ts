@@ -25,7 +25,12 @@
  * base existente. Sin esa variable se omite, con lo que el resto del monorepo sigue corriendo en
  * cualquier máquina sin Docker.
  */
-import { CONFIG_DOMINIO } from 'contracts';
+import {
+  CONFIG_DOMINIO,
+  crearRegistroCategorias,
+  DEFINICION_INUNDACION,
+  type DefinicionCategoriaCualquiera,
+} from 'contracts';
 import { aplicarMigraciones, ejecutorPg } from 'db';
 import { cargarCapasDePrueba } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
@@ -197,6 +202,73 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
   }, 180_000);
 
   /**
+   * Dos CATEGORÍAS a la vez (M3): cada una cuenta en su propia fila `reportes:<slug>`, así que una
+   * cuenta puede agotar inundación y seguir reportando baches. Con una categoría sintética activa
+   * (registro inyectado + catálogo), POR_DIA inundaciones y POR_DIA baches entran todos.
+   */
+  it('dos categorías a la vez: cada una tiene su cupo y no se roban turnos', async () => {
+    const DEF_BACHE = {
+      ...DEFINICION_INUNDACION,
+      slug: 'bache',
+      nombre: 'Baches (sintético)',
+    } as DefinicionCategoriaCualquiera;
+    const appMulti = await crearApp({
+      pool,
+      cfg: {
+        ...configDePrueba({ DATABASE_URL: urlBase }),
+        rutaOpenApi: '/no-existe.yaml',
+        rateLimitMax: 10_000,
+      },
+      resolver: resolverDePrueba,
+      almacen: new AlmacenMemoria(),
+      registro: crearRegistroCategorias([DEFINICION_INUNDACION, DEF_BACHE]),
+    });
+    const contarPorCategoria = async (): Promise<Record<string, number>> => {
+      const r = await pool.query<{ categoria: string; n: number }>(
+        `SELECT categoria, count(*)::int AS n FROM reporte
+          WHERE autor_id = (SELECT id FROM usuario WHERE email = $1) GROUP BY categoria`,
+        [CUENTAS.vecina],
+      );
+      return Object.fromEntries(r.rows.map((x) => [x.categoria, Number(x.n)]));
+    };
+    try {
+      await pool.query(`UPDATE categoria SET activa = true WHERE slug = 'bache'`);
+      await pool.query('DELETE FROM cupo_contador');
+      const cookie2 = await iniciarSesion(appMulti, CUENTAS.vecina);
+      const bache = {
+        lat: reporteValido.lat,
+        lon: reporteValido.lon,
+        dispositivo: reporteValido.dispositivo,
+        ubicacion_tipo: 'via_publica',
+        descripcion: reporteValido.descripcion,
+        categoria: 'bache',
+        detalle: { profundidad_estimada: 'rodilla', frecuencia: 'ocasional' },
+      };
+      const enviarA = (payload: unknown) =>
+        appMulti.inject({
+          method: 'POST',
+          url: '/api/v1/reportes',
+          payload: payload as Record<string, unknown>,
+          cookies: sesion(cookie2),
+        });
+      const antes = await contarPorCategoria();
+      const rs = await Promise.all([
+        ...Array.from({ length: POR_DIA + 2 }, () => enviarA(reporteValido)),
+        ...Array.from({ length: POR_DIA + 2 }, () => enviarA(bache)),
+      ]);
+      const reparto = contar(rs.map((r) => r.statusCode));
+      expect(reparto['201'], JSON.stringify(reparto)).toBe(2 * POR_DIA);
+      expect(reparto['429'], JSON.stringify(reparto)).toBe(2 * 2);
+      const despues = await contarPorCategoria();
+      expect((despues.inundacion ?? 0) - (antes.inundacion ?? 0)).toBe(POR_DIA);
+      expect((despues.bache ?? 0) - (antes.bache ?? 0)).toBe(POR_DIA);
+    } finally {
+      await pool.query(`UPDATE categoria SET activa = false WHERE slug = 'bache'`);
+      await appMulti.close();
+    }
+  }, 180_000);
+
+  /**
    * La demora sale del `n` del contador, en la misma transacción que el INSERT (ADR 0006): dos
    * envíos simultáneos de la misma cuenta se serializan sobre la fila del día y reciben uno el
    * 1.º turno (60 s) y el otro el 2.º (240 s), nunca los dos 60.
@@ -215,7 +287,7 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
       almacen: new AlmacenMemoria(),
     });
     try {
-      await pool.query('DELETE FROM cuota_reporte_diaria');
+      await pool.query('DELETE FROM cupo_contador');
       const cookieDemora = await iniciarSesion(conDemora, CUENTAS.vecina);
       const rs = await Promise.all(
         [0, 1].map((i) =>

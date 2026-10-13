@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Comprueba contra una base REAL que los roles de aplicación tienen exactamente los privilegios
- * de las migraciones 0008, 0009, 0014 y 0016: ni uno más, ni uno menos.
+ * de las migraciones 0008, 0009, 0014, 0016 y 0020: ni uno más, ni uno menos.
  *
  * Existe como script y no como test de Vitest porque las pruebas del monorepo corren sobre PGlite,
  * que es de un solo usuario y no tiene roles: allí no hay nada que comprobar. Esto se ejecuta
@@ -123,5 +123,5 @@ if (fallos.length) {
   process.exit(1);
 }
 console.log(
-  `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado en las migraciones 0008, 0009, 0014 y 0016`,
+  `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado en las migraciones 0008, 0009, 0014, 0016 y 0020`,
 );

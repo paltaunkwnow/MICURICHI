@@ -24,10 +24,14 @@ export async function rutasConfiguracion(app: FastifyInstance, dep: Dependencias
     { config: { rateLimit: { max: dep.cfg.rateLimitLecturasPorMinuto, timeWindow: 60_000 } } },
     async (_req, res) => {
       res.header('Cache-Control', CACHE_CONFIGURACION);
+      // Categorías activas en orden canónico (0.20.0): catálogo + registro, cacheado por el
+      // proveedor. Hoy, `['inundacion']`. Viaja junto a la ciudad para que la app sepa qué
+      // categorías ofrecer sin otra petición.
+      const categorias_activas = [...(await app.categorias.activas())];
       // Se valida contra el contrato antes de mandarla: una ciudad mal armada tiene que fallar
       // al arrancar (config.ts) y no llegar nunca a esta ruta, pero si llegara, mejor un 500 con
       // el motivo en el log que un `Intl` roto en el navegador de cada visitante.
-      return ConfiguracionPublicaSchema.parse({ ciudad: dep.cfg.ciudad });
+      return ConfiguracionPublicaSchema.parse({ ciudad: dep.cfg.ciudad, categorias_activas });
     },
   );
 }

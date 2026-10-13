@@ -573,9 +573,13 @@ describe('alta de cuenta ciudadana', () => {
       cookies: sesion(cookieVecina),
     });
     expect(yo.statusCode).toBe(200);
+    // Desde 0.20.0 (M3) suma `cupos` (por categoría activa) y `fotos_restantes_hoy`, ambos datos
+    // propios de quien pregunta. Sigue sin devolver la contraseña ni nada de otra cuenta.
     expect(Object.keys(yo.json()).sort()).toEqual([
+      'cupos',
       'demora_proximo_s',
       'email',
+      'fotos_restantes_hoy',
       'id',
       'nombre',
       'puede_reportar_desde',

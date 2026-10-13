@@ -1,4 +1,5 @@
 import {
+  CATEGORIA_TODAS,
   ExportarQuerySchema,
   type Indicadores,
   type IndicadoresFiltros,
@@ -11,6 +12,7 @@ import type pg from 'pg';
 import { z } from 'zod';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
+import { categoriaPanel } from '../categorias.js';
 import { seleccionarParaExportar } from '../consultas.js';
 import { condicionPublicado } from '../visibilidad.js';
 import { aFeature, vistaTecnica } from '../vistas.js';
@@ -87,16 +89,20 @@ const datosDeCapa = (
 const PUBLICADO = condicionPublicado('');
 
 /**
- * Condiciones de los filtros del panel (0.16.0) sobre la tabla `reporte_inundacion`, sin alias:
- * severidad EFECTIVA contra la lista, y distrito. `agregarParam` las ata al array de parámetros de
- * cada consulta (SQL parametrizado, nunca interpolado). Devuelve el SQL ya con el ` AND ` delante,
- * o '' si no hay filtros.
+ * Condiciones de los filtros del panel sobre la tabla `reporte`, sin alias: categoría (0.20.0),
+ * severidad EFECTIVA contra la lista (0.16.0), y distrito. `agregarParam` las ata al array de
+ * parámetros de cada consulta (SQL parametrizado, nunca interpolado). Devuelve el SQL ya con el
+ * ` AND ` delante, o '' si no hay filtros.
  */
 function condicionesFiltro(
   filtros: IndicadoresFiltros,
   agregarParam: (v: unknown) => string,
 ): string {
   const cond: string[] = [];
+  // Categoría (0.20.0): un slug concreto filtra; `todas` no. El `null` (desconocida) ya lo rechazó
+  // la ruta con 400 FILTROS_INVALIDOS, así que aquí es un slug o `todas`.
+  if (filtros.categoria && filtros.categoria !== CATEGORIA_TODAS)
+    cond.push(`categoria = ${agregarParam(filtros.categoria)}`);
   if (filtros.severidad?.length)
     cond.push(
       `COALESCE(severidad_manual, severidad_calculada) = ANY(${agregarParam(filtros.severidad)}::severidad[])`,
@@ -134,14 +140,17 @@ async function calcularIndicadores(
       }>(
         `SELECT estado::text AS estado, COALESCE(severidad_manual, severidad_calculada)::text AS severidad,
                 count(*)::int AS n
-           FROM reporte_inundacion WHERE ${PUBLICADO}${filtroPe} GROUP BY 1, 2`,
+           FROM reporte WHERE ${PUBLICADO}${filtroPe} GROUP BY 1, 2`,
         pe,
       );
-      // Recurrentes: solo por distrito (la columna existe en punto_critico), no por severidad.
+      // Recurrentes: por distrito y por categoría (ambas columnas existen en punto_critico), no por
+      // severidad (un punto agrupa varias severidades y su severidad_max no casa con la lista).
       const pc: unknown[] = [];
-      const filtroPc = filtros.distrito_id
-        ? ` AND distrito_id = $${pc.push(filtros.distrito_id)}`
-        : '';
+      let filtroPc =
+        filtros.categoria && filtros.categoria !== CATEGORIA_TODAS
+          ? ` AND categoria = $${pc.push(filtros.categoria)}`
+          : '';
+      if (filtros.distrito_id) filtroPc += ` AND distrito_id = $${pc.push(filtros.distrito_id)}`;
       const recurrentes = await pool.query<{ n: number }>(
         `SELECT count(*)::int AS n FROM punto_critico WHERE n_reportes >= 2${filtroPc}`,
         pc,
@@ -163,7 +172,7 @@ async function calcularIndicadores(
         n: number;
       }>(
         `SELECT a.distrito_id, c.nombre, a.n
-           FROM (SELECT distrito_id, count(*)::int AS n FROM reporte_inundacion
+           FROM (SELECT distrito_id, count(*)::int AS n FROM reporte
                   WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO}${filtroPd} GROUP BY distrito_id) a
            ${datosDeCapa('distrito_municipal', 'a.distrito_id', 'x.nombre')}
           ORDER BY a.n DESC, a.distrito_id`,
@@ -181,7 +190,7 @@ async function calcularIndicadores(
         n: number;
       }>(
         `SELECT a.unidad_vecinal_id, c.nombre, c.distrito_id, a.n
-           FROM (SELECT unidad_vecinal_id, count(*)::int AS n FROM reporte_inundacion
+           FROM (SELECT unidad_vecinal_id, count(*)::int AS n FROM reporte
                   WHERE estado = ANY($1::estado_reporte[]) AND ${PUBLICADO}${filtroPu} GROUP BY unidad_vecinal_id
                   ORDER BY count(*) DESC, unidad_vecinal_id LIMIT 50) a
            ${datosDeCapa('unidad_vecinal', 'a.unidad_vecinal_id', 'x.nombre, x.distrito_id')}
@@ -222,6 +231,12 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       return res.status(400).send({
         codigo: 'FILTROS_INVALIDOS',
         mensaje: q.error.issues.map((i) => i.message).join('; '),
+      });
+    // Panel: admite `todas` y cualquier categoría conocida; un slug desconocido es inválido.
+    if (!categoriaPanel(q.data.categoria).ok)
+      return res.status(400).send({
+        codigo: 'FILTROS_INVALIDOS',
+        mensaje: 'categoria: la categoría indicada no existe.',
       });
     const { filas, total } = await seleccionarParaExportar(dep.pool, {
       filtros: q.data,
@@ -285,6 +300,13 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       'estado_motivo',
       'fusionado_en_id',
       'fotos',
+      // Columnas de la plataforma multicategoría (0.20.0), al final para no mover las de inundación.
+      // En un reporte de otra categoría las columnas de inundación de arriba quedan vacías y lo
+      // propio viaja en `detalle` (JSON). `categoria` es siempre inundacion mientras sea la única
+      // categoría activa.
+      'categoria',
+      'subtipo',
+      'detalle',
     ];
     const lineas = [
       `# ${NOTA_METODOLOGICA}`,
@@ -329,9 +351,13 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
     enVuelo.clear();
   });
 
-  /** Clave estable de la combinación de filtros (severidad sin importar el orden). */
+  /** Clave estable de la combinación de filtros (severidad sin importar el orden, más categoría). */
   const claveFiltros = (f: IndicadoresFiltros): string =>
-    JSON.stringify({ s: [...(f.severidad ?? [])].sort(), d: f.distrito_id ?? null });
+    JSON.stringify({
+      s: [...(f.severidad ?? [])].sort(),
+      d: f.distrito_id ?? null,
+      c: f.categoria ?? null,
+    });
 
   app.get(
     '/api/v1/indicadores',
@@ -342,6 +368,12 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
         return res.status(400).send({
           codigo: 'FILTROS_INVALIDOS',
           mensaje: q.error.issues.map((i) => i.message).join('; '),
+        });
+      // Panel: admite `todas` y cualquier categoría conocida; un slug desconocido es inválido.
+      if (!categoriaPanel(q.data.categoria).ok)
+        return res.status(400).send({
+          codigo: 'FILTROS_INVALIDOS',
+          mensaje: 'categoria: la categoría indicada no existe.',
         });
       const clave = claveFiltros(q.data);
       const existente = enVuelo.get(clave);

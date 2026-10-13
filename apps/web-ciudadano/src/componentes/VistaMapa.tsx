@@ -1,7 +1,7 @@
 'use client';
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { CONFIG_DOMINIO } from 'contracts';
+import { useQuery } from '@tanstack/react-query';
+import { CONFIG_DOMINIO, type SlugCategoria } from 'contracts';
 import { ChevronLeft, Minus, Navigation, Plus, Search } from 'lucide-react';
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
@@ -13,7 +13,17 @@ import {
   obtenerReporte,
   obtenerReportes,
 } from '@/lib/api';
-import { tituloDelMapa } from '@/lib/ciudad';
+import {
+  conservarSoloDeLaMismaCategoria,
+  guardarPreferenciaCategoria,
+  hrefReportar,
+  reiniciarAlCambiarCategoria,
+  textoAnuncioCategoria,
+  textosParaCategoria,
+  urlTrasElegirCategoria,
+} from '@/lib/categoria';
+import { useCategoriaEfectiva, useCategorias } from '@/lib/categorias-contexto';
+import { etiquetaDelMapa, tituloDelMapa } from '@/lib/ciudad';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import {
   colorSeveridad,
@@ -39,6 +49,7 @@ import { ErrorDeCarga } from './ErrorDeCarga';
 import { HojaDetalle } from './HojaDetalle';
 import { LeyendaMapa } from './LeyendaMapa';
 import { MapaDiferido } from './MapaDiferido';
+import { SelectorCategoria } from './SelectorCategoria';
 import { TarjetaReporte } from './TarjetaReporte';
 import { useToast } from './Toast';
 
@@ -86,8 +97,29 @@ export function VistaMapa() {
   const toast = useToast();
   const ciudad = useCiudad();
 
+  /**
+   * La categoría que se muestra. Sale de la URL, de la preferencia del dispositivo o del defecto, y se
+   * resuelve en el cliente al montar (ADR 0014 y 0015): hasta entonces es `null` —el servidor y la
+   * hidratación— y NO se pide nada, para no traer ni un punto de una categoría que no es. Una vez que
+   * la persona elige otra en el selector, manda su elección.
+   */
+  const { activas, registro } = useCategorias();
+  const inicial = useCategoriaEfectiva();
+  const [elegida, setElegida] = useState<SlugCategoria | null>(null);
+  const categoria = elegida ?? inicial.categoria;
+  /** La categoría recién elegida cuyo «Mostrando X: N puntos» todavía no se anunció. */
+  const [anunciarCategoria, setAnunciarCategoria] = useState<SlugCategoria | null>(null);
+  /** Lo último que se anunció en la región viva: el cambio de categoría o una URL que no se pudo usar. */
+  const [mensajeVivo, setMensajeVivo] = useState('');
+  const definicion = categoria ? registro.obtener(categoria) : undefined;
+  const textos = useMemo(() => textosParaCategoria(registro, categoria), [registro, categoria]);
+  /** El mismo enlace a `/reportar` en todo el mapa: con dos o más categorías activas lleva la efectiva (D1). */
+  const enlaceReportar = hrefReportar({ categoria, cantidadActivas: activas.length });
+
   const filtros = useMemo(
     () => ({
+      // Toda lectura del mapa lleva la categoría efectiva (regla 3 del plan M4).
+      categoria: categoria ?? undefined,
       // Un filtro explícito (punto crítico, unidad vecinal o distrito) manda sobre la vista: si no, mover
       // el mapa un pixel borraría la selección que el vecino acaba de hacer.
       bbox: puntoCritico || unidadVecinal || distrito ? undefined : (bbox ?? undefined),
@@ -97,7 +129,7 @@ export function VistaMapa() {
       distrito_id: distrito?.id,
       limite: '300',
     }),
-    [bbox, severidad, puntoCritico, unidadVecinal, distrito],
+    [categoria, bbox, severidad, puntoCritico, unidadVecinal, distrito],
   );
 
   // `signal` viene de TanStack Query: al cambiar la vista, aborta la petición de la vista
@@ -105,6 +137,8 @@ export function VistaMapa() {
   const reportes = useQuery({
     queryKey: ['reportes', filtros],
     queryFn: ({ signal }) => obtenerReportes(filtros, signal),
+    // Sin la categoría resuelta no se pide nada: la lista queda en «Buscando puntos…», como mientras carga.
+    enabled: categoria !== null,
     // Sin `staleTime` propio: el cliente de consultas no deja caducar ['reportes'] (S31). Volver a
     // la pestaña o remontar el componente no repite una vista que ya se tiene.
     /**
@@ -113,8 +147,12 @@ export function VistaMapa() {
      * «Buscando puntos…» y el mapa se quedaba sin un solo punto durante el viaje de ida y
      * vuelta. Arrastrar el mapa era ver los puntos parpadear. Con los datos de la vista anterior
      * puestos, lo que se ve es lo último bueno hasta que llega lo siguiente.
+     *
+     * Pero SOLO si son de la misma categoría: `keepPreviousData` conservaba el dato previo sea cual
+     * fuere su clave, y al cambiar de categoría eso es mostrar los puntos de la otra mientras carga.
      */
-    placeholderData: keepPreviousData,
+    placeholderData: (previos, consultaPrevia) =>
+      conservarSoloDeLaMismaCategoria(categoria, previos, consultaPrevia?.queryKey),
   });
   const capas = useQuery({
     queryKey: ['capas'],
@@ -125,9 +163,12 @@ export function VistaMapa() {
   // prototipo. Sustituyen a la consulta de puntos críticos que hacía esta pantalla: el dato que
   // se muestra —cuántos vecinos reportaron este punto— ya viaja en cada reporte
   // (`n_reportes_punto`), así que era una petición de más en cada carga.
+  // La clave lleva la categoría y no tiene `placeholderData`: al cambiar de categoría el relleno de
+  // la anterior no se conserva (el prefijo ['agregados'] sigue siendo el de la política sin caducidad).
   const agregados = useQuery({
-    queryKey: ['agregados'],
-    queryFn: ({ signal }) => obtenerAgregados(signal),
+    queryKey: ['agregados', categoria],
+    queryFn: ({ signal }) => obtenerAgregados(categoria as SlugCategoria, signal),
+    enabled: categoria !== null,
   });
 
   const todas = reportes.data?.features ?? SIN_REPORTES;
@@ -225,6 +266,32 @@ export function VistaMapa() {
   const total = reportes.data?.total;
   const truncada = !busqueda && vistaTruncada(total, todas.length);
 
+  // Región viva. Una URL con una categoría que no se pudo usar se anuncia al montar (ADR 0015)...
+  useEffect(() => {
+    if (inicial.anuncio) setMensajeVivo(inicial.anuncio);
+  }, [inicial.anuncio]);
+  // ...y al cambiar de categoría se anuncia cuando llegan SUS datos (doc 14 §2.4): nunca con los de la
+  // vista anterior, que `conservarSoloDeLaMismaCategoria` no deja pasar.
+  useEffect(() => {
+    if (anunciarCategoria === null || anunciarCategoria !== categoria) return;
+    if (!reportes.data || reportes.isPlaceholderData) return;
+    setMensajeVivo(
+      textoAnuncioCategoria(
+        definicion?.nombre ?? anunciarCategoria,
+        reportes.data.total,
+        ciudad.locale,
+      ),
+    );
+    setAnunciarCategoria(null);
+  }, [
+    anunciarCategoria,
+    categoria,
+    definicion,
+    reportes.data,
+    reportes.isPlaceholderData,
+    ciudad.locale,
+  ]);
+
   /**
    * Lo que el mapa está dibujando, en texto, para quien no ve el lienzo. Un número dentro de un
    * círculo de WebGL no lo lee ningún lector de pantalla.
@@ -295,6 +362,60 @@ export function VistaMapa() {
     setPuntoCritico(null);
     setUnidadVecinal(null);
     setDistrito(null);
+  };
+
+  /**
+   * La persona elige otra categoría en el selector (ADR 0013, 0014, 0015 y 0016):
+   *  - los filtros se reinician por su alcance (`reiniciarAlCambiarCategoria`): se conservan el
+   *    encuadre, el distrito, la UV y la capa de fondo; se reinician la severidad y el punto crítico;
+   *    se limpian la selección, el detalle abierto y la búsqueda. El mapa no se mueve;
+   *  - la URL lleva la forma pública de la categoría (solo con dos o más activas, D1) y se guarda como
+   *    «última usada» en este dispositivo;
+   *  - el anuncio para lectores de pantalla sale cuando llegan los datos de la categoría nueva.
+   * Las consultas cambian de clave solas: ni la lista ni el relleno de la anterior se conservan.
+   */
+  const cambiarCategoria = (slug: SlugCategoria) => {
+    const def = registro.obtener(slug);
+    if (slug === categoria || !def) return;
+    const nuevo = reiniciarAlCambiarCategoria(
+      {
+        bbox,
+        distrito,
+        unidadVecinal,
+        capaVisible,
+        severidad,
+        puntoCritico,
+        seleccionado,
+        hojaAbierta: seleccionado !== null,
+        texto,
+        busqueda,
+        // Esta pantalla no tiene panel de filtros desplegable: no hay nada que cerrar.
+        panelFiltrosAbierto: false,
+      },
+      def,
+    );
+    if (tecleo.current) clearTimeout(tecleo.current);
+    setBbox(nuevo.bbox);
+    setDistrito(nuevo.distrito);
+    setUnidadVecinal(nuevo.unidadVecinal);
+    setCapaVisible(nuevo.capaVisible);
+    setSeveridad(nuevo.severidad);
+    setPuntoCritico(nuevo.puntoCritico);
+    setSeleccionado(nuevo.seleccionado);
+    setTexto(nuevo.texto);
+    setBusqueda(nuevo.busqueda);
+    setElegida(slug);
+    setAnunciarCategoria(slug);
+
+    guardarPreferenciaCategoria(slug);
+    const urlNueva = urlTrasElegirCategoria(window.location.href, slug, activas.length);
+    if (urlNueva) {
+      try {
+        window.history.replaceState(window.history.state, '', urlNueva);
+      } catch {
+        // Sin `history` o con restricciones: la URL queda como estaba, no es bloqueante.
+      }
+    }
   };
 
   const alSeleccionarDistrito = useCallback(
@@ -368,6 +489,16 @@ export function VistaMapa() {
       : unidadVecinal
         ? `${etiquetaUnidadVecinal(unidadVecinal.codigo)} · ${features.length} ${features.length === 1 ? 'punto' : 'puntos'}`
         : `${features.length} ${features.length === 1 ? 'punto' : 'puntos'} en esta vista · capa oficial vigente`;
+
+  /** Una pestaña por categoría activa; con menos de dos no dibuja nada (la pantalla es la de siempre). */
+  const selector = (testId: string, className: string) => (
+    <SelectorCategoria
+      categoria={categoria}
+      onCambiar={cambiarCategoria}
+      testId={testId}
+      className={className}
+    />
+  );
 
   const buscador = (
     <div>
@@ -505,7 +636,7 @@ export function VistaMapa() {
     <div className="flex min-h-0 flex-1 flex-col">
       {/* El título de la página no se dibuja: en móvil el mapa ocupa todo y en escritorio el
           encabezado de la lista ya dice cuántos puntos hay. Existe para los lectores de pantalla. */}
-      <h1 className="sr-only">{tituloDelMapa(ciudad)}</h1>
+      <h1 className="sr-only">{tituloDelMapa(ciudad, textos)}</h1>
       <div className="split min-h-0 flex-1 md:grid-cols-[400px_minmax(0,1fr)]">
         {/* Columna izquierda de escritorio: la lista manda, y al elegir un punto la reemplaza
             su detalle para que el mapa nunca quede tapado (W-01 / W-02 del prototipo). */}
@@ -525,6 +656,7 @@ export function VistaMapa() {
           ) : (
             <>
               <div className="cima">
+                {selector('selector-categoria', 'mb-3')}
                 {buscador}
                 <div className="mt-3">{chipsSeveridad}</div>
                 <div className="mt-4 flex items-baseline justify-between gap-3">
@@ -575,6 +707,8 @@ export function VistaMapa() {
                   <VacioLista
                     hayFiltros={hayFiltros || busqueda !== ''}
                     alLimpiar={limpiarFiltros}
+                    cuerpo={textos.listaVaciaCuerpo}
+                    enlace={enlaceReportar}
                   />
                 ) : (
                   features.map((f) => (
@@ -602,6 +736,8 @@ export function VistaMapa() {
         <div className="mapcol">
           <MapaDiferido
             className="map"
+            ariaLabel={etiquetaDelMapa(textos)}
+            claveDeDatos={categoria ?? undefined}
             reportes={featuresMapa}
             capas={capas.data ?? SIN_CAPAS}
             agregados={agregados.data ?? SIN_AGREGADOS}
@@ -623,9 +759,16 @@ export function VistaMapa() {
           <p className="sr-only" role="status" data-testid="resumen-mapa">
             {textoResumen}
           </p>
+          {/* Cambio de categoría y URL que no se pudo usar. Con una sola categoría y sin aviso, no existe. */}
+          {activas.length >= 2 || mensajeVivo ? (
+            <p className="sr-only" role="status" aria-live="polite" data-testid="anuncio-categoria">
+              {mensajeVivo}
+            </p>
+          ) : null}
 
           {/* Móvil: buscador y filtros flotan sobre el mapa (C-01). */}
           <div className="flot inset-x-3 top-3 md:hidden">
+            {selector('selector-categoria-movil', 'mb-2.5')}
             {buscador}
             <div className="mt-2.5 flex flex-wrap gap-2">{chipsSeveridad}</div>
           </div>
@@ -637,7 +780,7 @@ export function VistaMapa() {
             </span>
           </div>
           <div className="flot top-4 right-4 hidden md:block">
-            <Link href="/reportar" className="btn no-underline">
+            <Link href={enlaceReportar} className="btn no-underline">
               <Plus size={18} aria-hidden="true" />
               Reportar un punto
             </Link>
@@ -652,7 +795,7 @@ export function VistaMapa() {
           <div
             className={`flot pointer-events-none bottom-[104px] left-3 grid max-w-[280px] gap-2 md:bottom-4 md:left-4 ${seleccionado !== null ? 'bajo-hoja' : ''}`}
           >
-            <LeyendaMapa />
+            <LeyendaMapa categoria={activas.length >= 2 ? definicion : undefined} />
             <fieldset className="pointer-events-auto flex flex-wrap gap-2">
               <legend className="sr-only">Capas del mapa</legend>
               {CAPAS.map((c) => (
@@ -702,7 +845,7 @@ export function VistaMapa() {
           {seleccionado === null ? (
             <div className="flot inset-x-3 bottom-4 md:hidden">
               <Link
-                href="/reportar"
+                href={enlaceReportar}
                 className="btn btn-bloque no-underline"
                 data-testid="boton-reportar"
               >
@@ -733,6 +876,8 @@ export function VistaMapa() {
                   <VacioLista
                     hayFiltros={hayFiltros || busqueda !== ''}
                     alLimpiar={limpiarFiltros}
+                    cuerpo={textos.listaVaciaCuerpo}
+                    enlace={enlaceReportar}
                     compacto
                   />
                 </div>
@@ -755,10 +900,16 @@ export function VistaMapa() {
 function VacioLista({
   hayFiltros,
   alLimpiar,
+  cuerpo,
+  enlace,
   compacto = false,
 }: {
   hayFiltros: boolean;
   alLimpiar: () => void;
+  /** El texto del estado vacío sin filtros: es de la categoría (`textos.listaVaciaCuerpo`). */
+  cuerpo: string;
+  /** A dónde lleva «Reportar el primero acá»: `/reportar`, con la categoría si hay más de una activa. */
+  enlace: string;
   compacto?: boolean;
 }) {
   return (
@@ -771,7 +922,7 @@ function VacioLista({
       <p className="mt-2 text-[15px] text-tinta-600">
         {hayFiltros
           ? 'Probá con otra severidad, borrá el texto o mové el mapa para buscar en otra zona.'
-          : 'Que no haya puntos no significa que no se anegue. Si conocés un lugar donde se junta el agua, sos el primero en marcarlo.'}
+          : cuerpo}
       </p>
       {hayFiltros ? (
         <button type="button" className="btn btn-fantasma btn-sm mt-3" onClick={alLimpiar}>
@@ -779,7 +930,7 @@ function VacioLista({
         </button>
       ) : (
         <>
-          <Link href="/reportar" className="btn btn-sm mt-3 no-underline">
+          <Link href={enlace} className="btn btn-sm mt-3 no-underline">
             Reportar el primero acá
           </Link>
           <p className="ayuda mt-2">

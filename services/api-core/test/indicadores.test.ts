@@ -140,8 +140,12 @@ afterAll(async () => {
 const indicadores = (app: FastifyInstance) =>
   app.inject({ method: 'GET', url: '/api/v1/indicadores', cookies: sesion(cookieTecnico) });
 
-/** Consultas del cálculo: las que leen la tabla de reportes (la sesión no la toca). */
-const consultasDeReportes = () => espia.contar(/FROM\s+reporte_inundacion/i);
+/**
+ * Consultas del cálculo: las que leen la tabla de reportes (la sesión no la toca). Desde M3 el
+ * cálculo lee `reporte` (todas las categorías con filtro explícito), no la vista `reporte_inundacion`.
+ * El `\b` evita contar `reporte_inundacion` (de los INSERT de siembra) y `reporte_foto`.
+ */
+const consultasDeReportes = () => espia.contar(/FROM\s+reporte\b/i);
 
 describe('qué cuenta', () => {
   it('rechazados y duplicados solo en por_estado; el resto sobre nuevo, validado y resuelto', async () => {

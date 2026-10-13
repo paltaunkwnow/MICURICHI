@@ -97,7 +97,10 @@ describe('migración 0018 desde cero (base limpia)', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    // Hasta 0019: esta prueba lee los CHECK de `reporte_inundacion` por `::regclass` y re-ejecuta el
+    // SQL de la 0018 a mano (ALTER TABLE reporte_inundacion …). La 0020 convierte esa relación en
+    // VISTA, donde ni lo uno ni lo otro funcionan; migracion-0020 cubre el estado multicategoría.
+    await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {
@@ -183,7 +186,7 @@ describe('migración 0018 desde cero (base limpia)', () => {
   });
 
   it('volver a migrar no aplica nada y ejecutar el archivo a mano no cambia las restricciones', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0019' });
     expect(otra.aplicadas).toEqual([]);
     await ex.transaccion((tx) =>
       tx.ejecutar(readFileSync(join(DIRECTORIO_MIGRACIONES, ARCHIVO_0018), 'utf8')),
@@ -212,7 +215,8 @@ describe('migración 0018 con filas inválidas previas (no traba el despliegue)'
     await insertarReporte(ex, { estado: 'duplicado', estadoMotivo: '   ' }); // motivo en blanco
     await insertarReporte(ex, { estado: 'validado', fusionadoEnId: canonico!.id }); // fusión mal puesta
     reportesAntes = await leerReportes(ex);
-    resto = await aplicarMigraciones(ex);
+    // Hasta 0019 (ver el primer bloque): a partir de la 0020 `reporte_inundacion` es una vista.
+    resto = await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {
@@ -273,7 +277,8 @@ describe('migración 0018 con datos limpios previos (se valida)', () => {
       fusionadoEnId: canonico!.id,
     });
     reportesAntes = await leerReportes(ex);
-    await aplicarMigraciones(ex);
+    // Hasta 0019 (ver el primer bloque): a partir de la 0020 `reporte_inundacion` es una vista.
+    await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {

@@ -16,6 +16,7 @@ import { ComoFunciona } from '@/componentes/ComoFunciona';
 import { VistaPedirUbicacion } from '@/componentes/PedirUbicacion';
 import { Portada } from '@/componentes/Portada';
 import { VistaMapa } from '@/componentes/VistaMapa';
+import { conCategorias } from './categoria-de-prueba';
 import { ProveedorCiudad } from './ciudad-contexto';
 import { archivosDeLaApp, cuerposDeEfectos, leerFuente } from './fuente-para-pruebas';
 import type { EstadoUbicacionDispositivo } from './ubicacion-dispositivo';
@@ -117,7 +118,8 @@ describe('nada se pide ni se lee al cargar', () => {
           ProveedorCiudad,
           // Los hijos van como tercer argumento; el tipo del proveedor los pide en las props.
           { ciudad: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO } as ComponentProps<typeof ProveedorCiudad>,
-          hijo,
+          // El mapa y la portada leen las categorías activas del proveedor del layout raíz.
+          conCategorias(['inundacion'], hijo),
         ),
       );
     }

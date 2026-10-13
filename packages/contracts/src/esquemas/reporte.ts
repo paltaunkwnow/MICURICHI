@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizarSlugCategoria } from '../categorias/slugs.js';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import {
   CAUSAS_PRESUNTAS,
@@ -16,6 +17,7 @@ import {
 } from '../dominio/enums.js';
 import {
   BboxSchema,
+  CategoriaFiltroSchema,
   LatSchema,
   LonSchema,
   listaDesdeQuery,
@@ -156,7 +158,124 @@ export const ReporteCrearSchema = z
 export type ReporteCrear = z.infer<typeof ReporteCrearSchema>;
 export type ReporteCrearEntrada = z.input<typeof ReporteCrearSchema>;
 
+/**
+ * Forma NUEVA de `POST /api/v1/reportes` (0.20.0, ADR 0010, 0012): el núcleo común más `categoria`,
+ * `subtipo` y el `detalle` propio de cada categoría. Convive con `ReporteCrearSchema` (la forma
+ * plana de hoy, = inundación), que NO cambia. El núcleo REUTILIZA las definiciones de
+ * `ReporteCrearSchema.shape` (mismos rangos, defaults, nulabilidad y honeypot), sin duplicar ninguna
+ * lista; solo se dejan afuera los seis campos de dominio de inundación, que pasan a vivir en
+ * `detalle`.
+ *
+ * `detalle` es un objeto genérico en el contrato: api-core lo valida con el Zod ESTRICTO de la
+ * definición de la categoría (p. ej. `DetalleInundacionSchema`), que rechaza claves de más, y la
+ * base suma el CHECK de objeto y el tope de 8192 bytes. `categoria` se normaliza (alias → slug
+ * canónico); un valor desconocido queda en `null` y el servidor responde 422 CATEGORIA_NO_DISPONIBLE
+ * sin gastar cupo. El contrato NO valida si la categoría está activa (regla 3): eso lo decide el
+ * servidor con el catálogo.
+ */
+const nucleoReporte = ReporteCrearSchema.shape;
+export const ReporteCrearCategoriaSchema = z.object({
+  lat: nucleoReporte.lat,
+  lon: nucleoReporte.lon,
+  dispositivo: nucleoReporte.dispositivo,
+  ubicacion_aproximada: nucleoReporte.ubicacion_aproximada,
+  ubicacion_tipo: nucleoReporte.ubicacion_tipo,
+  descripcion: nucleoReporte.descripcion,
+  evento_en: nucleoReporte.evento_en,
+  fotos: nucleoReporte.fotos,
+  sitio_web: nucleoReporte.sitio_web,
+  categoria: z
+    .string()
+    .trim()
+    .transform((v) => normalizarSlugCategoria(v))
+    .meta({
+      description:
+        'Slug de la categoría del reporte. Se aceptan alias (plural, guion, mayúsculas, tildes); un ' +
+        'valor desconocido o una categoría inactiva da 422 CATEGORIA_NO_DISPONIBLE en el servidor, ' +
+        'sin gastar cupo.',
+    }),
+  subtipo: z.string().trim().min(1).max(100).nullable().optional().meta({
+    description:
+      'Subtipo propio de la categoría (p. ej. baches), validado por su definición; null o ausente si no aplica.',
+  }),
+  detalle: z.record(z.string(), z.unknown()).meta({
+    description:
+      'Respuestas propias de la categoría. api-core lo valida con el Zod estricto de la definición ' +
+      '(DetalleInundacionSchema para inundación); CHECK de objeto y tope de 8192 bytes en la base.',
+  }),
+});
+export type ReporteCrearCategoria = z.infer<typeof ReporteCrearCategoriaSchema>;
+
+/**
+ * ¿El cuerpo de `POST /api/v1/reportes` viene en la forma NUEVA (por categoría)? Lo es si trae
+ * `categoria` o `detalle`; si no, es la forma plana de hoy (= inundación). Función pura.
+ */
+export function esReporteCrearPorCategoria(cuerpo: unknown): boolean {
+  return (
+    typeof cuerpo === 'object' && cuerpo !== null && ('categoria' in cuerpo || 'detalle' in cuerpo)
+  );
+}
+
+/**
+ * Convierte un reporte en la forma PLANA (ya validada con `ReporteCrearSchema`) a la forma nueva por
+ * categoría: `categoria: 'inundacion'` y los seis campos de dominio movidos a `detalle`. Pura. El
+ * `detalle` resultante pasa `DetalleInundacionSchema` (lo comprueba contrato-0-20).
+ */
+export function reportePlanoACategoria(r: ReporteCrear): ReporteCrearCategoria {
+  const {
+    profundidad_estimada,
+    frecuencia,
+    causa_presunta,
+    sumidero_cercano,
+    sumidero_estado,
+    agua_brota_sumidero,
+    ...nucleo
+  } = r;
+  return {
+    ...nucleo,
+    categoria: 'inundacion',
+    detalle: {
+      profundidad_estimada,
+      frecuencia,
+      causa_presunta,
+      sumidero_cercano,
+      sumidero_estado,
+      agua_brota_sumidero,
+    },
+  };
+}
+
+/**
+ * Distingue la forma del cuerpo de `POST /api/v1/reportes` y lo deja SIEMPRE en la forma por
+ * categoría: la plana se valida con `ReporteCrearSchema` y se convierte (`categoria: 'inundacion'`);
+ * la nueva, con `ReporteCrearCategoriaSchema`. Pura: no decide códigos HTTP ni consulta el catálogo;
+ * devuelve el `ZodError` para que el servidor responda 400. api-core valida después el `detalle` con
+ * el Zod estricto de la categoría y su actividad con el catálogo (422 CATEGORIA_NO_DISPONIBLE).
+ */
+export function normalizarReporteCrear(cuerpo: unknown): {
+  forma: 'plana' | 'categoria';
+  resultado: { exito: true; datos: ReporteCrearCategoria } | { exito: false; error: z.ZodError };
+} {
+  if (esReporteCrearPorCategoria(cuerpo)) {
+    const r = ReporteCrearCategoriaSchema.safeParse(cuerpo);
+    return {
+      forma: 'categoria',
+      resultado: r.success ? { exito: true, datos: r.data } : { exito: false, error: r.error },
+    };
+  }
+  const r = ReporteCrearSchema.safeParse(cuerpo);
+  return {
+    forma: 'plana',
+    resultado: r.success
+      ? { exito: true, datos: reportePlanoACategoria(r.data) }
+      : { exito: false, error: r.error },
+  };
+}
+
 export const ReporteFiltrosSchema = PaginacionSchema.extend({
+  // Sin el parámetro = inundacion (ADR 0012). `todas` lo reconoce el esquema pero solo lo admiten
+  // las rutas del panel; en las públicas lo rechaza el servidor (CategoriaFiltroSchema).
+  categoria: CategoriaFiltroSchema,
   bbox: BboxSchema.optional(),
   estado: listaDesdeQuery(ESTADOS_REPORTE),
   severidad: listaDesdeQuery(SEVERIDADES),
@@ -197,6 +316,28 @@ export const ReportePublicoSchema = z.object({
   precision_degradada: z
     .boolean()
     .meta({ description: 'true si la coordenada tiene jitter (vivienda o predio)' }),
+  // Campos de la plataforma multitemática (0.20.0, ADR 0010, 0012). OPCIONALES hasta M4/M5 (regla 5
+  // del plan M3): api-core (M3.3) los manda siempre, pero volverlos obligatorios rompería el
+  // typecheck de las vistas de api-core y de los fixtures de las apps, que todavía no los construyen.
+  // Se heredan en ReporteTecnicoSchema y MiReporteSchema por .extend.
+  categoria: z.string().optional().meta({
+    description: 'Slug de la categoría del reporte (p. ej. inundacion). Obligatorio desde M4/M5.',
+  }),
+  subtipo: z.string().nullable().optional().meta({
+    description: 'Subtipo propio de la categoría; null si no aplica. Obligatorio desde M4/M5.',
+  }),
+  // En la vista PÚBLICA, api-core incluye en `detalle` SOLO los `camposPublicos` de la definición de
+  // la categoría (regla 4; para inundación, los mismos profundidad/frecuencia/causa que ya son
+  // públicos). La vista técnica (ReporteTecnico) trae el detalle completo. El contrato describe la
+  // forma (objeto); el recorte público lo hace api-core al construir la respuesta.
+  detalle: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .meta({
+      description:
+        'Respuestas propias de la categoría. En la vista pública, solo los camposPublicos de la ' +
+        'definición; completo en la vista técnica. Obligatorio desde M4/M5.',
+    }),
 });
 export type ReportePublico = z.infer<typeof ReportePublicoSchema>;
 
@@ -323,12 +464,30 @@ const ESTADOS_CON_MOTIVO: readonly EstadoReporte[] = [
   'duplicado',
 ];
 
+/**
+ * Un UUID completo o un ID corto de 8 hex (el prefijo del UUID). Es la MISMA expresión del canónico
+ * de `POST /reportes/:id/fusionar` y de `fusionado_en_id` de `PATCH /reportes/:id/estado` (decisión
+ * del usuario del 2026-10-08): el panel no deja pegar un ID a mano, pero la API acepta las dos formas
+ * en las dos rutas.
+ */
+export const ID_REPORTE_CORTO_O_UUID =
+  /^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i;
+
+const MENSAJE_ID_CANONICO =
+  'El identificador del reporte canónico debe ser un UUID o un ID corto de 8 caracteres.';
+
 /** Transiciones de la máquina de estados (CLAUDE.md §7.3). */
 export const ReporteCambiarEstadoSchema = z
   .object({
     estado: z.enum(ESTADOS_REPORTE),
     estado_motivo: z.string().trim().min(3).max(1000).optional(),
-    fusionado_en_id: z.uuid().optional(),
+    // Desde 0.20.0 acepta UUID o ID corto, igual que ReporteFusionarSchema.canonico_id: solo AMPLÍA
+    // lo que admitía (antes únicamente UUID).
+    fusionado_en_id: z
+      .string()
+      .trim()
+      .regex(ID_REPORTE_CORTO_O_UUID, MENSAJE_ID_CANONICO)
+      .optional(),
   })
   .superRefine((v, ctx) => {
     if (ESTADOS_CON_MOTIVO.includes(v.estado) && !v.estado_motivo) {
@@ -404,16 +563,18 @@ export const ReporteReclasificarSchema = z
 export type ReporteReclasificar = z.infer<typeof ReporteReclasificarSchema>;
 
 export const ReporteFusionarSchema = z.object({
-  canonico_id: z
-    .string()
-    .trim()
-    .regex(
-      /^[0-9a-f]{8}(-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/i,
-      'El identificador del reporte canónico debe ser un UUID o un ID corto de 8 caracteres.',
-    ),
+  canonico_id: z.string().trim().regex(ID_REPORTE_CORTO_O_UUID, MENSAJE_ID_CANONICO),
   motivo: z.string().trim().min(3).max(1000).default('Duplicado del mismo punto'),
 });
 export type ReporteFusionar = z.infer<typeof ReporteFusionarSchema>;
+
+/**
+ * Código de error (409) de fusionar un reporte con un canónico de OTRA categoría (0.20.0, ADR 0012,
+ * 0013): no se mezclan inventarios de categorías distintas. Lo comprueba el servidor (tiene la
+ * categoría de ambos reportes); el contrato solo nombra el código, como `CODIGO_CAPA_CAMBIO`. Vale
+ * para `POST /reportes/:id/fusionar` y para `PATCH /reportes/:id/estado` con destino `duplicado`.
+ */
+export const CODIGO_FUSION_ENTRE_CATEGORIAS = 'FUSION_ENTRE_CATEGORIAS';
 
 export const FotoSubidaSchema = z.object({
   objeto_key: z.string(),

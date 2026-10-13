@@ -85,6 +85,18 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(f.properties.severidad_calculada).toBe('media');
     expect(f.geometry.coordinates).toEqual([-63.195, -17.79]);
   });
+  it('la auditoría de crear guarda la regla E1 cuando la profundidad supera 70 cm (§9.1) y la categoría', async () => {
+    const r = await crear({ ...reporteValido, profundidad_estimada: 'mas_70' });
+    expect(r.statusCode, r.body.slice(0, 200)).toBe(201);
+    expect(r.json().properties.severidad).toBe('critica');
+    const a = await pool.query<{ despues: { reglas?: string[]; categoria?: string } }>(
+      `SELECT despues FROM auditoria WHERE entidad = 'reporte' AND entidad_id = $1 AND accion = 'crear'`,
+      [r.json().id],
+    );
+    // E1 se anota siempre que P = 4; la forma plana crea una inundación idéntica a la de hoy.
+    expect(a.rows[0]?.despues.reglas).toContain('E1');
+    expect(a.rows[0]?.despues.categoria).toBe('inundacion');
+  });
   it('mientras espera no sale en público; después, como nuevo sin verificar (contracts 0.11.0)', async () => {
     await enEspera(ex, id);
     const lista = await app.inject({ method: 'GET', url: '/api/v1/reportes' });
@@ -129,7 +141,11 @@ describe('camino crítico: crear → resolver UV → severidad → nuevo', () =>
     expect(ok.json().properties.validado_por).toBeTruthy();
     const pub = await app.inject({ method: 'GET', url: '/api/v1/reportes' });
     expect(pub.json().features.map((x: { id: string }) => x.id)).toContain(id);
-    expect(pub.json().features[0].properties.punto_critico_id).toBeTruthy();
+    // Busca ESTE reporte por id, no `features[0]`: la lista pública va por `creado_en DESC`, y en
+    // este bloque hay otros reportes recién creados (p. ej. el `mas_70` de la prueba de auditoría E1)
+    // que, como siguen en `nuevo`, no tienen punto crítico (§9.2). El validado sí lo tiene.
+    const mio = pub.json().features.find((x: { id: string }) => x.id === id);
+    expect(mio.properties.punto_critico_id).toBeTruthy();
   });
   it('respeta la máquina de estados (validado → nuevo no existe; rechazado requiere motivo; reabrir es de admin)', async () => {
     // Con motivo, para que lo que se compruebe sea la transición: desde contracts 0.6.0 pasar a

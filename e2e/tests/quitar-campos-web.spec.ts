@@ -184,10 +184,18 @@ test.describe('quitar campos del reporte · app pública', () => {
     await page.getByTestId('boton-enviar').click();
     const cuerpo = (await peticion).postDataJSON() as Record<string, unknown>;
 
-    for (const c of CAMPOS_QUITADOS) expect(Object.keys(cuerpo), c).not.toContain(c);
+    // Forma nueva del cuerpo (M4, D2): los campos propios de la inundación viajan dentro de
+    // `detalle`, no en el primer nivel. Los cuatro quitados no pueden estar en ninguno de los dos.
+    const detalle = cuerpo.detalle as Record<string, unknown>;
+    expect(detalle, 'el cuerpo trae `detalle`').toBeTruthy();
+    for (const c of CAMPOS_QUITADOS) {
+      expect(Object.keys(cuerpo), c).not.toContain(c);
+      expect(Object.keys(detalle), `${c} dentro de detalle`).not.toContain(c);
+    }
     // Lo que sí tiene que viajar.
-    expect(cuerpo.profundidad_estimada).toBeTruthy();
-    expect(cuerpo.frecuencia).toBeTruthy();
+    expect(cuerpo.categoria).toBe('inundacion');
+    expect(detalle.profundidad_estimada).toBeTruthy();
+    expect(detalle.frecuencia).toBeTruthy();
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
   });
 

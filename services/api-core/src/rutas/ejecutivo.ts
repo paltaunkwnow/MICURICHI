@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Dependencias } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { CACHE_PRIVADA } from '../cache.js';
+import { categoriaPanel } from '../categorias.js';
 import { condicionPublicado } from '../visibilidad.js';
 
 const DIAS_VENTANA: Record<VentanaResumen, number | null> = { '7d': 7, '30d': 30, todo: null };
@@ -32,8 +33,8 @@ interface FilaDistrito {
 }
 
 /**
- * Una sola pasada sobre `reporte_inundacion`, agrupada por distrito y cruzada con la capa
- * vigente para tener código y nombre, incluidos los distritos sin reportes.
+ * Una sola pasada sobre `reporte` (filtrada por categoría), agrupada por distrito y cruzada con la
+ * capa vigente para tener código y nombre, incluidos los distritos sin reportes.
  *
  * FULL JOIN y no LEFT JOIN desde la capa: un reporte resuelto con una versión de capa anterior
  * puede apuntar a un distrito que ya no está en la vigente. Con LEFT JOIN desaparecería de
@@ -49,11 +50,13 @@ const SQL_RESUMEN = `
 WITH r AS (
   SELECT distrito_id, estado::text AS estado,
          COALESCE(severidad_manual, severidad_calculada)::text AS severidad, creado_en
-  FROM reporte_inundacion
+  FROM reporte
   WHERE estado IN ('nuevo', 'validado', 'resuelto')
     -- Lo que todavía espera su publicar_en no lo ve nadie más que su autor (ADR 0006).
     AND ${condicionPublicado('')}
     AND ($1::timestamptz IS NULL OR creado_en >= $1::timestamptz)
+    -- Categoría (0.20.0): un slug concreto filtra; $2 NULL (todas) no filtra.
+    AND ($2::text IS NULL OR categoria = $2::text)
 ),
 agg AS (
   SELECT distrito_id,
@@ -121,11 +124,12 @@ function sumarActivas(a: ConteoActivas, b: ConteoActivas): ConteoActivas {
 async function calcularResumen(
   dep: Dependencias,
   ventana: VentanaResumen,
+  categoria: string | undefined,
 ): Promise<ResumenEjecutivo> {
   const ahora = new Date();
   const dias = DIAS_VENTANA[ventana];
   const desde = dias === null ? null : new Date(ahora.getTime() - dias * 86_400_000);
-  const r = await dep.pool.query<FilaDistrito>(SQL_RESUMEN, [desde]);
+  const r = await dep.pool.query<FilaDistrito>(SQL_RESUMEN, [desde, categoria ?? null]);
 
   let activas: ConteoActivas = {
     total: 0,
@@ -199,10 +203,9 @@ export async function rutasEjecutivo(app: FastifyInstance, dep: Dependencias) {
    * El contador de generación sube con cada moderación: una petición posterior no se sube a un
    * cálculo que ya había leído la base antes de moderar.
    */
-  const enVuelo = new Map<
-    VentanaResumen,
-    { generacion: number; promesa: Promise<ResumenEjecutivo> }
-  >();
+  // La clave de la deduplicación combina ventana y categoría: dos peticiones con categorías
+  // distintas no comparten el mismo cálculo (0.20.0).
+  const enVuelo = new Map<string, { generacion: number; promesa: Promise<ResumenEjecutivo> }>();
   let generacion = 0;
   invalidadores.set(app, () => {
     generacion++;
@@ -219,22 +222,33 @@ export async function rutasEjecutivo(app: FastifyInstance, dep: Dependencias) {
           codigo: 'FILTROS_INVALIDOS',
           mensaje: q.error.issues.map((i) => i.message).join('; '),
         });
+      // Panel: admite `todas` y cualquier categoría conocida; un slug desconocido es inválido.
+      const cat = categoriaPanel(q.data.categoria);
+      if (!cat.ok)
+        return res.status(400).send({
+          codigo: 'FILTROS_INVALIDOS',
+          mensaje: 'categoria: la categoría indicada no existe.',
+        });
       const ventana = q.data.ventana;
+      const clave = `${ventana}|${cat.slug ?? 'todas'}`;
       // Cifras internas del municipio: nunca en una caché compartida.
       res.header('Cache-Control', CACHE_PRIVADA);
 
-      const actual = enVuelo.get(ventana);
+      const actual = enVuelo.get(clave);
       let promesa: Promise<ResumenEjecutivo>;
       if (actual && actual.generacion === generacion) promesa = actual.promesa;
       else {
-        const calculo = calcularResumen(dep, ventana).finally(() => {
-          if (enVuelo.get(ventana)?.promesa === calculo) enVuelo.delete(ventana);
+        const calculo = calcularResumen(dep, ventana, cat.slug).finally(() => {
+          if (enVuelo.get(clave)?.promesa === calculo) enVuelo.delete(clave);
         });
-        enVuelo.set(ventana, { generacion, promesa: calculo });
+        enVuelo.set(clave, { generacion, promesa: calculo });
         promesa = calculo;
       }
       const valor = await promesa;
-      req.log.info({ ventana, activas: valor.activas.total }, 'resumen ejecutivo calculado');
+      req.log.info(
+        { ventana, categoria: cat.slug ?? 'todas', activas: valor.activas.total },
+        'resumen ejecutivo calculado',
+      );
       return valor;
     },
   );

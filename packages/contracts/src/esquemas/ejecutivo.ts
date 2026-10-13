@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CategoriaFiltroSchema } from './comunes.js';
 
 /**
  * Resumen del panel ejecutivo: `GET /api/v1/ejecutivo/resumen` (roles ejecutivo, tecnico, admin).
@@ -14,6 +15,8 @@ export type VentanaResumen = (typeof VENTANAS_RESUMEN)[number];
 
 export const ResumenEjecutivoQuerySchema = z.object({
   ventana: z.enum(VENTANAS_RESUMEN).default('todo'),
+  // Panel: admite `todas` (vista mixta) además de un slug. Sin el parámetro = inundacion (ADR 0012).
+  categoria: CategoriaFiltroSchema,
 });
 export type ResumenEjecutivoQuery = z.infer<typeof ResumenEjecutivoQuerySchema>;
 

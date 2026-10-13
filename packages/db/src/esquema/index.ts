@@ -184,8 +184,18 @@ export const puntoCritico = pgTable('punto_critico', {
   diametroM: numeric('diametro_m').notNull().default('0'),
   advertenciaDiametro: boolean('advertencia_diametro').notNull().default(false),
   calculadoEn: timestamp('calculado_en', { withTimezone: true }).notNull().defaultNow(),
+  /** Categoría del punto crítico (migración 0020): los existentes son de inundación. */
+  categoria: text('categoria').notNull().default('inundacion'),
 });
 
+/**
+ * Espejo de la VISTA de compatibilidad `reporte_inundacion` (migración 0020): los reportes de
+ * `reporte` con `categoria = 'inundacion'`. Sigue apuntando a `'reporte_inundacion'` para que api-core
+ * y geo-service NO cambien. La vista reporta todas sus columnas como NULL-ables sin DEFAULT (las
+ * vistas no tienen esas propiedades), así que `esquema-drizzle.test.ts` compara este espejo con la
+ * vista solo por nombre y tipo. Es el modelo de hoy; `reporte` (arriba) tiene además categoria,
+ * subtipo, detalle y detalle_version.
+ */
 export const reporteInundacion = pgTable(
   'reporte_inundacion',
   {
@@ -238,6 +248,93 @@ export const reporteInundacion = pgTable(
     ipHash: text('ip_hash'),
   },
   (t) => [index('reporte_estado_idx').on(t.estado), index('reporte_uv_idx').on(t.unidadVecinalId)],
+);
+
+/**
+ * Catálogo de categorías de la plataforma (migración 0020, ADR 0009). El admin activa cada una con
+ * auditoría; mientras haya una sola activa, la interfaz no muestra selector. El orden es el de
+ * `SLUGS_CATEGORIA` de contracts.
+ */
+export const categoria = pgTable('categoria', {
+  slug: text('slug').primaryKey(),
+  activa: boolean('activa').notNull().default(false),
+  orden: smallint('orden').notNull(),
+  activadaEn: timestamp('activada_en', { withTimezone: true }),
+  activadaPor: uuid('activada_por').references(() => usuario.id, { onDelete: 'set null' }),
+});
+
+/**
+ * Tabla de reportes del modelo multicategoría (migración 0020, ADR 0010): antes `reporte_inundacion`,
+ * renombrada. Lo común va tipado; `categoria` (FK al catálogo), `subtipo` y `detalle` jsonb
+ * (`detalle_version`) llevan lo propio de cada categoría. Las columnas de dominio de inundación
+ * (`profundidad_estimada`, `frecuencia`, `causa_presunta`, sumidero) conviven hasta M10 y, para
+ * inundación, su contenido se duplica en `detalle` (lo mantiene un disparador). api-core y
+ * geo-service NO consultan esta tabla directamente: usan la vista `reporte_inundacion`
+ * (`reporteInundacion`, abajo), filtrada a inundación.
+ */
+export const reporte = pgTable('reporte', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  geom: geometry('geom').notNull(),
+  geomPublico: geometry('geom_publico'),
+  creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  publicarEn: timestamp('publicar_en', { withTimezone: true }).notNull(),
+  actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+  eventoEn: timestamp('evento_en', { withTimezone: true }),
+  autorId: uuid('autor_id').references(() => usuario.id, { onDelete: 'set null' }),
+  distritoId: text('distrito_id').notNull(),
+  unidadVecinalId: text('unidad_vecinal_id').notNull(),
+  versionCapa: text('version_capa'),
+  resolucionFlags: jsonb('resolucion_flags').notNull().default({}),
+  ubicacionMetodo: ubicacionMetodoEnum('ubicacion_metodo').notNull(),
+  precisionGpsM: numeric('precision_gps_m'),
+  distanciaDispositivoM: smallint('distancia_dispositivo_m'),
+  ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
+  descripcion: text('descripcion').notNull(),
+  // Desde la 0020 estas tres son NULL-ables (otras categorías no las usan); un CHECK exige que
+  // inundación las traiga. causa_presunta conserva su DEFAULT 'desconocida'.
+  profundidadEstimada: profundidadEnum('profundidad_estimada'),
+  frecuencia: frecuenciaEnum('frecuencia'),
+  causaPresunta: causaEnum('causa_presunta').default('desconocida'),
+  sumideroCercano: sumideroCercanoEnum('sumidero_cercano'),
+  sumideroEstado: sumideroEstadoEnum('sumidero_estado'),
+  aguaBrotaSumidero: boolean('agua_brota_sumidero'),
+  severidadCalculada: severidadEnum('severidad_calculada').notNull(),
+  severidadPuntaje: integer('severidad_puntaje').notNull(),
+  severidadVersion: integer('severidad_version').notNull().default(2),
+  severidadManual: severidadEnum('severidad_manual'),
+  severidadMotivo: text('severidad_motivo'),
+  estado: estadoEnum('estado').notNull().default('nuevo'),
+  estadoMotivo: text('estado_motivo'),
+  fusionadoEnId: uuid('fusionado_en_id'),
+  puntoCriticoId: uuid('punto_critico_id').references(() => puntoCritico.id, {
+    onDelete: 'set null',
+  }),
+  validadoPor: uuid('validado_por').references(() => usuario.id, { onDelete: 'set null' }),
+  validadoEn: timestamp('validado_en', { withTimezone: true }),
+  ipHash: text('ip_hash'),
+  // Columnas del modelo multicategoría (0020).
+  categoria: text('categoria').notNull().default('inundacion'),
+  subtipo: text('subtipo'),
+  detalle: jsonb('detalle').notNull().default({}),
+  detalleVersion: smallint('detalle_version').notNull().default(1),
+});
+
+/**
+ * Contador genérico de cupo por regla (migración 0020, ADR 0017). Reemplaza a `cuota_reporte_diaria`
+ * en M10. Upsert atómico por `(usuario_id, clave, ventana_inicio)`. Nadie lo usa hasta M3.
+ */
+export const cupoContador = pgTable(
+  'cupo_contador',
+  {
+    usuarioId: uuid('usuario_id')
+      .notNull()
+      .references(() => usuario.id, { onDelete: 'cascade' }),
+    clave: text('clave').notNull(),
+    ventanaInicio: timestamp('ventana_inicio', { withTimezone: true }).notNull(),
+    n: integer('n').notNull(),
+    actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.usuarioId, t.clave, t.ventanaInicio] })],
 );
 
 export const reporteFoto = pgTable('reporte_foto', {

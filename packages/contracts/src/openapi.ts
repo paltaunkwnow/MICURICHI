@@ -30,6 +30,7 @@ import {
   MiReporteSchema,
   MisReportesSchema,
   ReporteCambiarEstadoSchema,
+  ReporteCrearCategoriaSchema,
   ReporteCrearSchema,
   ReporteFeatureCollectionSchema,
   ReporteFeatureSchema,
@@ -45,6 +46,7 @@ import {
 export const COMPONENTES = {
   ErrorApi: ErrorApiSchema,
   ReporteCrear: ReporteCrearSchema,
+  ReporteCrearCategoria: ReporteCrearCategoriaSchema,
   ReporteFiltros: ReporteFiltrosSchema,
   ReporteFeature: ReporteFeatureSchema,
   ReporteFeatureCollection: ReporteFeatureCollectionSchema,
@@ -154,7 +156,13 @@ export function construirOpenApi(): Record<string, unknown> {
           'reportes',
           {
             security: seguridadSesion,
-            requestBody: { required: true, content: json(ref('ReporteCrear')) },
+            requestBody: {
+              required: true,
+              // Dos formas (0.20.0, ADR 0012): la PLANA de hoy (ReporteCrear, = inundación) y la
+              // nueva por categoría (ReporteCrearCategoria). El servidor distingue por la presencia
+              // de categoria/detalle; sin ninguna de las dos se interpreta como inundación.
+              content: json({ oneOf: [ref('ReporteCrear'), ref('ReporteCrearCategoria')] }),
+            },
             responses: {
               '201': {
                 description:
@@ -176,10 +184,11 @@ export function construirOpenApi(): Record<string, unknown> {
                   `POSICION_VENCIDA: dispositivo.antiguedad_s mayor a ${CONFIG_DOMINIO.POSICION_ANTIGUEDAD_MAX_S} s. ` +
                   `UBICACION_FUERA_DE_RADIO: el punto está a más de ${metros(RADIO_M + TOLERANCIA_M)} m de dispositivo (el radio de ${RADIO_M} m más ${metros(TOLERANCIA_M)} m de tolerancia por el redondeo de las coordenadas; la interfaz recorta el punto al radio sin tolerancia); con ubicacion_aproximada no se comprueba. ` +
                   'Se comprueban en ese orden, después de validar el cuerpo y antes de resolver la ubicación, y no gastan cupo. ' +
-                  'FUERA_DE_COBERTURA: el punto no cae en el municipio',
+                  'FUERA_DE_COBERTURA: el punto no cae en el municipio. ' +
+                  'CATEGORIA_NO_DISPONIBLE: la categoría del reporte (forma nueva) es desconocida o no está activa; se comprueba antes de gastar cupo',
               ),
               '429': error(
-                `CUOTA_DE_REPORTES: la cuenta ya creó sus ${POR_DIA} reportes de hoy (día calendario en la zona horaria de la ciudad), con el mensaje «Ya enviaste los ${POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.» y Retry-After con los segundos que faltan hasta la próxima medianoche local. O rate limit por IP, también con Retry-After`,
+                `CUOTA_DE_REPORTES: la cuenta ya creó sus ${POR_DIA} reportes de hoy EN ESA CATEGORÍA (día calendario en la zona horaria de la ciudad; el cupo de reportes es por categoría, ADR 0017), con el mensaje «Ya enviaste los ${POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.», detalles.categoria con el slug del cupo agotado y Retry-After con los segundos que faltan hasta la próxima medianoche local. O rate limit por IP, también con Retry-After`,
               ),
             },
           },
@@ -194,6 +203,9 @@ export function construirOpenApi(): Record<string, unknown> {
                 description: 'FeatureCollection pública (Cache-Control: public, no-cache)',
                 content: json(ref('ReporteFeatureCollection')),
               },
+              '400': error(
+                'CATEGORIA_NO_DISPONIBLE: la categoría del filtro es desconocida o no está activa. En la ruta pública, categoria=todas también se rechaza (es solo del panel)',
+              ),
             },
           },
         ),
@@ -292,7 +304,8 @@ export function construirOpenApi(): Record<string, unknown> {
               ),
               '404': error('NO_EXISTE: no existe o todavía espera su publicar_en'),
               '409': error(
-                'TRANSICION_NO_PERMITIDA: la transición no existe desde el estado actual',
+                'TRANSICION_NO_PERMITIDA: la transición no existe desde el estado actual. ' +
+                  'FUSION_ENTRE_CATEGORIAS: con destino duplicado, el canónico (fusionado_en_id) es de otra categoría',
               ),
             },
           },
@@ -330,7 +343,8 @@ export function construirOpenApi(): Record<string, unknown> {
             '403': error('SIN_PERMISO'),
             '404': error('NO_EXISTE'),
             '409': error(
-              'TRANSICION_NO_PERMITIDA: el canónico debe existir, ser otro y estar validado',
+              'TRANSICION_NO_PERMITIDA: el canónico debe existir, ser otro y estar validado. ' +
+                'FUSION_ENTRE_CATEGORIAS: el canónico es de otra categoría',
             ),
           },
         }),
@@ -688,12 +702,16 @@ export function construirOpenApi(): Record<string, unknown> {
           `Reportes publicados por UV (${VISTA_PUBLICA}), con n_verificados y severidad_max_verificada, que solo cuentan validado y resuelto: la coropleta pública usa severidad_max_verificada y pinta neutra la UV que solo tiene reportes sin verificar. Los puntos críticos se arman solo con verificados.`,
           'geo',
           {
+            parameters: [categoriaParam()],
             responses: {
               '200': {
                 description: 'Lista',
                 headers: cacheControl(CIFRAS_PUBLICAS),
                 content: json({ type: 'array', items: ref('AgregadoUv') }),
               },
+              '400': error(
+                'CATEGORIA_NO_DISPONIBLE: la categoría es desconocida o no está activa (ruta pública: una sola categoría, sin todas)',
+              ),
             },
           },
         ),
@@ -708,6 +726,7 @@ export function construirOpenApi(): Record<string, unknown> {
               schema: { type: 'string' },
               description: 'minLon,minLat,maxLon,maxLat',
             },
+            categoriaParam(),
           ],
           responses: {
             '200': {
@@ -715,6 +734,9 @@ export function construirOpenApi(): Record<string, unknown> {
               headers: cacheControl(CIFRAS_PUBLICAS),
               content: json({ type: 'array', items: ref('PuntoCritico') }),
             },
+            '400': error(
+              'CATEGORIA_NO_DISPONIBLE: la categoría es desconocida o no está activa (ruta pública: una sola categoría, sin todas)',
+            ),
           },
         }),
       },
@@ -744,6 +766,18 @@ export function construirOpenApi(): Record<string, unknown> {
 
 function idParam() {
   return { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } };
+}
+
+/** Parámetro de query `categoria` de las rutas públicas de geo-service (una sola categoría). */
+function categoriaParam() {
+  return {
+    name: 'categoria',
+    in: 'query',
+    required: false,
+    description:
+      'Slug de la categoría (sin el parámetro = inundacion; acepta alias). Una categoría desconocida o inactiva da 400 CATEGORIA_NO_DISPONIBLE; todas no se admite en estas rutas públicas',
+    schema: { type: 'string' },
+  };
 }
 
 const INMUTABLE =

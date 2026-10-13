@@ -44,7 +44,10 @@ export function rangoDeIdCorto(prefijo: string): [string, string] {
  * es la visibilidad de la ruta (visibilidad.ts), ya como literal.
  */
 export function sqlResolverIdCorto(condicionSql: string): string {
-  return `SELECT id::text FROM reporte_inundacion
+  // Tabla `reporte` (todas las categorías desde la 0020): el ID corto es un prefijo del UUID y es
+  // global, no de una categoría. La visibilidad (`condicionSql`) y, en la ruta pública, la
+  // comprobación de categoría activa sobre la fila ya resuelta, deciden si se devuelve.
+  return `SELECT id::text FROM reporte
     WHERE id BETWEEN $1::uuid AND $2::uuid AND ${condicionSql} LIMIT 2`;
 }
 

@@ -1,13 +1,26 @@
+import type { DefinicionCategoriaCualquiera } from 'contracts';
 import { BadgeCheck } from 'lucide-react';
 import { COLOR_UV_SIN_VERIFICAR, ESTILO_ESTADO, TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
+import { iconoDeCategoria } from './categorias/iconos';
 import { IconoSinVerificar } from './IconoSinVerificar';
 
 /**
  * Leyenda del mapa público: qué significa el icono de las pastillas y por qué hay barrios grises.
  * Los reportes se publican sin revisión previa (contracts 0.11.0), así que distinguir lo
  * verificado de lo que no es parte de leer el mapa, no un detalle.
+ *
+ * Con dos o más categorías activas el mapa le pasa la efectiva y la leyenda abre con una línea con su
+ * icono y su nombre (doc 14 §2.4: identidad = icono + nombre). Sin `categoria` —una sola activa— la
+ * leyenda es la de siempre.
  */
-export function LeyendaMapa({ className = '' }: { className?: string }) {
+export function LeyendaMapa({
+  className = '',
+  categoria,
+}: {
+  className?: string;
+  categoria?: DefinicionCategoriaCualquiera | null | undefined;
+}) {
+  const IconoCategoria = categoria ? iconoDeCategoria(categoria.icono) : null;
   return (
     <section
       /*
@@ -22,6 +35,16 @@ export function LeyendaMapa({ className = '' }: { className?: string }) {
       aria-label="Leyenda del mapa"
       data-testid="leyenda-mapa"
     >
+      {categoria && IconoCategoria ? (
+        <span
+          className="flex items-center gap-1.5 font-bold"
+          style={{ color: categoria.colores.c7 }}
+          data-testid="leyenda-categoria"
+        >
+          <IconoCategoria size={14} strokeWidth={2.4} aria-hidden="true" />
+          {categoria.nombre}
+        </span>
+      ) : null}
       <span
         className="flex items-center gap-1.5 font-bold"
         style={{ color: ESTILO_ESTADO.nuevo.texto }}

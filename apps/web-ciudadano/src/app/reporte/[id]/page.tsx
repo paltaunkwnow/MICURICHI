@@ -7,6 +7,8 @@ import { useParams } from 'next/navigation';
 import { HojaDetalle } from '@/componentes/HojaDetalle';
 import { MapaDiferido } from '@/componentes/MapaDiferido';
 import { ErrorApi, obtenerReporte } from '@/lib/api';
+import { categoriaDeReporte, textosParaCategoria } from '@/lib/categoria';
+import { useCategorias } from '@/lib/categorias-contexto';
 import { mensajeDeError } from '@/lib/errores';
 import { tituloReporte } from '@/lib/formato';
 
@@ -18,6 +20,7 @@ import { tituloReporte } from '@/lib/formato';
 export default function DetalleReporte() {
   const params = useParams<{ id: string }>();
   const id = params?.id ?? '';
+  const { registro } = useCategorias();
   const consulta = useQuery({
     queryKey: ['reporte', id],
     queryFn: ({ signal }) => obtenerReporte(id, signal),
@@ -58,13 +61,14 @@ export default function DetalleReporte() {
   }
 
   const reporte = consulta.data;
+  const textos = textosParaCategoria(registro, categoriaDeReporte(reporte.properties));
   const detalle = (testId: string) => (
     <HojaDetalle reporte={reporte} conEnlace={false} testId={testId} />
   );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <h1 className="sr-only">Punto de inundación en {tituloReporte(reporte.properties)}</h1>
+      <h1 className="sr-only">{`${textos.puntoSingular} en ${tituloReporte(reporte.properties)}`}</h1>
       <div className="split min-h-0 flex-1 md:grid-cols-[400px_minmax(0,1fr)]">
         <div className="lado">
           <div className="lista pt-[18px]">

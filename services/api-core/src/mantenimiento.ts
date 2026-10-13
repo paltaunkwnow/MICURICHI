@@ -3,6 +3,7 @@
  * fotos huérfanas (base + objeto en el almacén). Vive en el servidor, no en `crearApp`,
  * para que los tests no queden con un temporizador abierto.
  */
+import { REGISTRO_CATEGORIAS, type RegistroCategorias } from 'contracts';
 import {
   ejecutarMantenimiento,
   ejecutorPg,
@@ -43,6 +44,9 @@ export function programarMantenimiento(
   almacen: Almacen,
   cfg: ConfigApi,
   log: FastifyBaseLogger,
+  // Registro de categorías para el radio de recurrencia del recálculo de puntos críticos. Por
+  // defecto `REGISTRO_CATEGORIAS` (producción); las pruebas podrían inyectar uno sintético.
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
 ): { detener(): void } {
   const pasada = async () => {
     // Con varias réplicas, este temporizador corre en TODAS. Antes las tres hacían a la vez el
@@ -88,8 +92,9 @@ export function programarMantenimiento(
         log.info({ rellenados }, 'mantenimiento: geom_publico completado');
         // Los puntos críticos derivan su centroide publicable del de sus miembros: mientras
         // faltaba alguno quedaron en NULL y no se publicaban. Ahora ya se pueden construir.
-        await recalcularPuntosCriticos(ejecutorPg(pool)).catch((e) =>
-          log.error({ err: e }, 'mantenimiento: no se pudieron recalcular los puntos críticos'),
+        await recalcularPuntosCriticos(ejecutorPg(pool), undefined, undefined, registro).catch(
+          (e) =>
+            log.error({ err: e }, 'mantenimiento: no se pudieron recalcular los puntos críticos'),
         );
       }
       // Recálculo pendiente. Un reporte publicable sin punto crítico solo puede venir de dos
@@ -99,14 +104,14 @@ export function programarMantenimiento(
       if (!rellenados) {
         const pendientes = await pool.query<{ hay: boolean }>(
           `SELECT EXISTS (
-              SELECT 1 FROM reporte_inundacion
+              SELECT 1 FROM reporte
                WHERE estado IN (${LITERAL_ESTADOS_VERIFICADOS}) AND punto_critico_id IS NULL
              ) AS hay`,
         );
         if (pendientes.rows[0]?.hay) {
           log.info('mantenimiento: hay reportes sin punto crítico; recalculando');
-          await recalcularPuntosCriticos(ejecutorPg(pool)).catch((e) =>
-            log.error({ err: e }, 'mantenimiento: falló el recálculo de puntos críticos'),
+          await recalcularPuntosCriticos(ejecutorPg(pool), undefined, undefined, registro).catch(
+            (e) => log.error({ err: e }, 'mantenimiento: falló el recálculo de puntos críticos'),
           );
         }
       }

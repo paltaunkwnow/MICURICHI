@@ -153,6 +153,10 @@ describe('geo-service caído: crear un reporte es 503, no 500', () => {
           ],
           rowCount: 1,
         };
+      // El catálogo de categorías (M3): la validación de categoría activa corre ANTES del resolver,
+      // así que el pool de mentira tiene que responder que inundación está activa; si no, el reporte
+      // moriría en un 422 CATEGORIA_NO_DISPONIBLE que no tiene nada que ver con lo que se comprueba.
+      if (/FROM categoria/.test(sql)) return { rows: [{ slug: 'inundacion' }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
     connect: async () => ({ query: async () => ({ rows: [] }), release() {} }),

@@ -12,14 +12,14 @@ cada cosa, para que quien toque el código sepa qué invariante puede estar romp
 
 | Activo | Por qué importa | Dónde vive |
 |---|---|---|
-| **Ubicación exacta de un reporte de vivienda** | Es lo más sensible del sistema: dice dónde vive una persona que además declaró que se le inunda la casa | `reporte_inundacion.geom` |
-| Ubicación publicable | Lo que sí puede ver cualquiera | `reporte_inundacion.geom_publico` |
+| **Ubicación exacta de un reporte de vivienda** | Es lo más sensible del sistema: dice dónde vive una persona que además declaró que se le inunda la casa | `reporte.geom` (hasta la migración 0020, `reporte_inundacion`, hoy su vista de compatibilidad) |
+| Ubicación publicable | Lo que sí puede ver cualquiera | `reporte.geom_publico` |
 | Reportes sin verificar | Se publican sin moderación previa, con «NO SE HA VERIFICADO», pasada su demora (ADR 0006): pueden contener datos personales o errores hasta que un técnico los retire. Mientras esperan no los ve nadie más que su autor (§7.3) | `estado = 'nuevo'`, `publicar_en` |
 | Posición del teléfono al reportar | Dice dónde estaba la persona, que suele ser su casa. **No se guarda**: solo se usa para comprobar el radio de 60 m | Solo en memoria de la petición; queda `distancia_dispositivo_m` redondeada |
 | Fotografías | Pueden mostrar una fachada, una cara o una matrícula, y las de reportes sin verificar se ven en público | Disco de la VPS (o S3), servidas por api-core |
 | Cuentas de técnico, admin y ejecutivo | Técnico y admin ven TODA la ubicación exacta; el ejecutivo, solo cifras | `usuario`, `sesion` |
 | Cuentas de ciudadano | Correo y nombre de quien reporta. Nunca se publican | `usuario` |
-| `ip_hash` | Dato personal seudonimizado del antispam | `reporte_inundacion.ip_hash`, borrado a los 30 días |
+| `ip_hash` | Dato personal seudonimizado del antispam | `reporte.ip_hash`, borrado a los 30 días |
 | Credenciales de infraestructura | Base de datos, MinIO, token interno, sales | Variables de entorno, nunca en el repositorio |
 
 **Ver el mapa no necesita cuenta y nunca la va a necesitar.** Lo que sí la exige, desde la Fase 5,
@@ -148,7 +148,7 @@ Tres roles, tres trabajos:
 |---|---|---|
 | `curichi` | Migraciones, seeds, ETL | Dueño del esquema: DDL |
 | `curichi_api` | api-core en ejecución | DML acotado tabla por tabla (0008) y, en `usuario`, columna por columna (0009) |
-| `curichi_geo` | geo-service en ejecución | `SELECT` sobre cinco tablas y nada más |
+| `curichi_geo` | geo-service en ejecución | Solo `SELECT`, tabla por tabla (la matriz exacta está en `packages/db/src/cli/matriz-privilegios.mjs`); desde la 0020, también sobre el catálogo `categoria`, `reporte` y la vista `reporte_inundacion`. Ninguna función ejecutable |
 
 Ninguno de los dos roles de aplicación tiene `SUPERUSER`, `CREATEROLE`, `CREATEDB` ni `BYPASSRLS`,
 ni es dueño de ninguna tabla, ni puede `CREATE` en ningún esquema.
@@ -175,7 +175,8 @@ Tres capas de comprobación:
 2. La migración `0008_privilegios_minimos.sql` concede exactamente lo necesario.
 3. Los servicios comprueban al arrancar que su rol no tiene privilegios de más y **en producción se
    niegan a servir** si los tiene (`packages/db/src/privilegios.ts`). geo-service comprueba además
-   que no puede escribir en `reporte_inundacion`.
+   que no puede escribir en `reporte` (la tabla de todas las categorías desde la migración 0020; la
+   vista `reporte_inundacion` no cuenta).
 
 Para auditar en cualquier momento: `pnpm privilegios` compara la realidad contra la matriz y falla
 si sobra o falta algo.
