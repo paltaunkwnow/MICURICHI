@@ -30,7 +30,7 @@ ARG NODE_MAYOR=24
 # --- 1) Dependencias del workspace ------------------------------------------------------------
 # El contexto de build es la RAÍZ del repositorio: pnpm necesita ver el workspace entero para
 # resolver los enlaces `workspace:*` (contracts y db).
-FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS deps
+FROM node:24.21.0-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS deps
 ENV PNPM_HOME=/pnpm CI=1
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -63,7 +63,7 @@ RUN pnpm --filter contracts build \
 RUN pnpm --filter "${PAQUETE}" --prod --legacy deploy /salida
 
 # --- 3) Imagen final --------------------------------------------------------------------------
-FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
+FROM node:24.21.0-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20 AS runtime
 ARG NODE_MAYOR
 ARG PAQUETE
 ARG PUERTO=3001
