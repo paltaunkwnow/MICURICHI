@@ -122,7 +122,7 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
 
   it(`${LIMITE + 8} subidas simultáneas de una cuenta dejan exactamente ${LIMITE}`, async () => {
     await pool.query('DELETE FROM reporte_foto');
-    await pool.query('DELETE FROM cuota_reporte_diaria');
+    await pool.query('DELETE FROM cupo_contador');
     const rs = await Promise.all(Array.from({ length: LIMITE + 8 }, () => subir(cookieVecina)));
     const reparto = contar(rs.map((r) => r.statusCode));
     // Ni un 5xx: esperar el bloqueo de la fila del cupo del día no es un error.
@@ -137,7 +137,7 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
 
   it('dos cuentas a la vez no se estorban: el bloqueo es por fila de cuenta y día', async () => {
     await pool.query('DELETE FROM reporte_foto');
-    await pool.query('DELETE FROM cuota_reporte_diaria');
+    await pool.query('DELETE FROM cupo_contador');
     const rs = await Promise.all([
       ...Array.from({ length: 8 }, () => subir(cookieVecina)),
       ...Array.from({ length: 8 }, () => subir(cookieVecino)),

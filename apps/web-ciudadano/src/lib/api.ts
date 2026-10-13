@@ -5,12 +5,13 @@ import type {
   MiReporteFeature,
   MisReportes,
   PuntoCritico,
-  ReporteCrearEntrada,
   ReporteFeatureCollection,
   ResolverRespuesta,
   SesionActual,
+  SlugCategoria,
   Usuario,
 } from 'contracts';
+import type { CuerpoReporte } from './formulario-reporte';
 
 export class ErrorApi extends Error {
   constructor(
@@ -171,8 +172,11 @@ export function resolverPunto(lat: number, lon: number, signal?: AbortSignal) {
  *
  * La respuesta es la vista del autor (contracts 0.11.0), con `segundos_para_publicar`: de ahí
  * parte la cuenta regresiva de la confirmación.
+ *
+ * `payload` va en la forma por categoría (D2 del plan M4): `{ …núcleo, categoria, detalle }`. La API
+ * acepta además la forma plana (clientes viejos), pero la web manda siempre la nueva.
  */
-export function crearReporte(payload: ReporteCrearEntrada, claveIdempotencia?: string) {
+export function crearReporte(payload: CuerpoReporte, claveIdempotencia?: string) {
   return pedir<MiReporteFeature>(
     '/api/v1/reportes',
     {
@@ -272,6 +276,13 @@ export function obtenerPuntosCriticos(bbox?: string, signal?: AbortSignal) {
   });
 }
 
-export function obtenerAgregados(signal?: AbortSignal) {
-  return pedir<AgregadoUv[]>('/geo/v1/agregados/unidades-vecinales', { signal });
+/**
+ * Agregados por unidad vecinal de UNA categoría activa (M3, ADR 0012): sin el parámetro geo-service
+ * respondería con inundaciones, así que el mapa siempre manda la efectiva.
+ */
+export function obtenerAgregados(categoria: SlugCategoria, signal?: AbortSignal) {
+  return pedir<AgregadoUv[]>(
+    `/geo/v1/agregados/unidades-vecinales?categoria=${encodeURIComponent(categoria)}`,
+    { signal },
+  );
 }

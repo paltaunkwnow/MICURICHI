@@ -6,7 +6,12 @@
  * `statement_timeout`.
  */
 import { ejecutorPg, recalcularPuntosCriticos } from 'db';
-import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
+import {
+  type BaseEfimera,
+  cargarCapasDePrueba,
+  insertarReporte,
+  levantarBaseEfimera,
+} from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -262,6 +267,49 @@ describe('fusión en cadena: X→B y después B→C', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().properties.estado).toBe('duplicado');
     expect(r.json().properties.fusionado_en_id).toBe(can);
+  });
+
+  it('PATCH /estado también acepta un ID corto en fusionado_en_id (como POST /fusionar)', async () => {
+    const sitio = sitioNuevo();
+    const can = await validado(sitio);
+    const dup = await validado({ lon: sitio.lon + 0.00005, lat: sitio.lat });
+    const r = await cambiarEstado(dup, {
+      estado: 'duplicado',
+      estado_motivo: 'Duplicado por PATCH con ID corto',
+      fusionado_en_id: can.slice(0, 8),
+    });
+    expect(r.statusCode, r.body.slice(0, 300)).toBe(200);
+    expect(r.json().properties.estado).toBe('duplicado');
+    expect(r.json().properties.fusionado_en_id).toBe(can);
+  });
+});
+
+describe('fusión entre categorías (CA8, ADR 0012, 0013)', () => {
+  it('409 FUSION_ENTRE_CATEGORIAS si el canónico es de OTRA categoría, por PATCH y por POST', async () => {
+    const inund = await validado();
+    // Un bache validado y publicado (categoría sintética insertada por SQL, sin pasar por el POST).
+    const sitio = sitioNuevo();
+    const bache = await insertarReporte(ex, sitio.lon, sitio.lat, 'validado', 'media', 'bache');
+
+    const porPatch = await cambiarEstado(inund, {
+      estado: 'duplicado',
+      estado_motivo: 'Supuesto duplicado entre categorías',
+      fusionado_en_id: bache,
+    });
+    expect(porPatch.statusCode, porPatch.body.slice(0, 300)).toBe(409);
+    expect(porPatch.json().codigo).toBe('FUSION_ENTRE_CATEGORIAS');
+
+    const porPost = await app.inject({
+      method: 'POST',
+      url: `/api/v1/reportes/${inund}/fusionar`,
+      payload: { canonico_id: bache, motivo: 'Supuesto duplicado entre categorías' },
+      cookies: sesion(cookieTecnico),
+    });
+    expect(porPost.statusCode).toBe(409);
+    expect(porPost.json().codigo).toBe('FUSION_ENTRE_CATEGORIAS');
+
+    // El reporte de inundación quedó intacto: la fusión cruzada no lo tocó.
+    expect(await fila(inund)).toMatchObject({ estado: 'validado', fusionado_en_id: null });
   });
 });
 

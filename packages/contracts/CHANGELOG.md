@@ -1,5 +1,180 @@
 # Changelog — contracts
 
+## 0.21.0 — 2026-10-10
+
+**Sin ruptura: textos de pantalla por categoría (M4, ADR 0009, 0021).** Aditivo. No cambia ningún
+esquema Zod ni el OpenAPI (`openapi/openapi.yaml` y `dist/dominio.json` quedan byte a byte iguales).
+Con una sola categoría activa no cambia nada visible.
+
+- **`DefinicionCategoria.textos?`** (`src/categorias/textos.ts`): los textos de pantalla que la web
+  pública tenía fijos con «inundación» y «agua» pasan a la definición de la categoría, para que la
+  web (M4.2–M4.4) los tome del registro y una categoría nueva (Baches, M6) solo traiga los suyos. El
+  campo es **opcional** en la definición y cada campo es opcional dentro de `textos`, así las
+  definiciones sintéticas de las pruebas de api-core y geo-service siguen compilando sin cambios.
+  - Campos: `puntosDelMapa` (fragmento del título y el `aria-label` del mapa), `puntoSingular`
+    (fragmento del h1 del detalle), `listaVaciaCuerpo` (cuerpo del estado vacío de la lista),
+    `tituloPaso2` (título del paso 2 del formulario), `avisoPercepcion` (fragmento del aviso de
+    percepción del detalle) y `descripcionReportar` (descripción de la página `/reportar`). Se
+    prefieren fragmentos que el consumidor compone a plantillas con marcadores (ver el JSDoc).
+  - **`DEFINICION_INUNDACION.textos`** los trae con los literales **idénticos** a los de hoy.
+- **`textosDeCategoria(def)`** (misma ruta): función pura de respaldo que devuelve los textos con
+  todos los campos resueltos (`TextosCategoriaResueltos`), rellenando los que falten desde `nombre`,
+  `nombreCorto` y `descripcion` con una regla simple y documentada. Así ningún consumidor inventa su
+  propio respaldo.
+- Pruebas: `test/contrato-0-21.test.ts` (composición exacta de los literales de hoy, respaldo y
+  opcionalidad). La prueba de versión de `contrato-0-16` pasó a un piso «≥» para no editarla en cada
+  hito, sin tocar su invariante (package.json = cabecera del CHANGELOG).
+
+## 0.20.0 — 2026-10-09
+
+**Sin ruptura: el contrato de M3, núcleo consciente de la categoría (ADR 0010, 0012, 0013, 0017).**
+Es el paso M3 del roadmap (`docs/arquitectura/14`): api-core y geo-service pasan a trabajar **por
+categoría** sobre la tabla `reporte`. Todo es **aditivo** y respeta la compatibilidad de la ADR 0012:
+**sin el parámetro `categoria`, todo se comporta como hoy (inundación)**. Los clientes viejos y la PWA
+cacheada siguen funcionando. La **contracción** de los campos planos y de la vista queda para una
+versión posterior (M10); 13.2 §8.3 la llamaba «0.20», pero la 0.19 usó ese número para el registro de
+M1, así que la 0.20 es aditiva.
+
+- **Filtro `categoria`** (`CategoriaFiltroSchema`, `CATEGORIA_TODAS`, tipo `FiltroCategoria`, en
+  `esquemas/comunes.ts`), sumado a `ReporteFiltrosSchema`, `IndicadoresFiltrosSchema`,
+  `ResumenEjecutivoQuerySchema` (y por extensión a `ExportarQuerySchema`) y a las dos query de
+  geo-service.
+  - Ausente o vacío → `inundacion`; acepta alias (plural, guion, mayúsculas, tildes) vía
+    `normalizarSlugCategoria`; un valor desconocido → `null`.
+  - **`todas`** lo reconoce SIEMPRE el esquema; que una ruta lo admita lo decide el **servidor** (plan
+    M3, «un campo que el servidor valida»): las rutas del panel sí, las públicas no. Así el mismo
+    `ReporteFiltrosSchema` sirve a `GET /reportes` (público) y a `GET /tecnico/reportes` (panel).
+  - El contrato **no** valida si la categoría está activa (regla 3): eso lo resuelve el servidor con
+    el catálogo (`CATEGORIA_NO_DISPONIBLE`).
+- **Respuestas aditivas**: `ReportePublicoSchema` suma `categoria`, `subtipo` (nullable) y `detalle`
+  (objeto), heredados por `ReporteTecnicoSchema` y `MiReporteSchema`. En la vista **pública**, api-core
+  pone en `detalle` **solo** los `camposPublicos` de la definición (regla 4); la técnica trae el
+  detalle completo. **Los tres son opcionales** (regla 5 del plan M3): api-core los manda, pero
+  volverlos obligatorios rompería el `typecheck` de sus vistas y de los *fixtures* de las apps, que no
+  se tocan en M3; pasan a obligatorios en M4/M5. Los campos planos de inundación (`profundidad_estimada`…)
+  **siguen** hasta la contracción (M10).
+- **`ReporteCrearCategoriaSchema`** (forma nueva de `POST /api/v1/reportes`) junto a
+  `ReporteCrearSchema` (forma plana, **sin cambios**). El núcleo (lat, lon, `dispositivo`,
+  `ubicacion_aproximada`, `ubicacion_tipo`, `descripcion`, `evento_en`, `fotos`, honeypot) **reutiliza**
+  `ReporteCrearSchema.shape` sin duplicar listas; suma `categoria` (slug normalizado), `subtipo?` y
+  `detalle` (objeto; api-core lo valida con el Zod estricto de la definición). Funciones puras:
+  `esReporteCrearPorCategoria(cuerpo)` (distingue por `categoria`/`detalle`),
+  `reportePlanoACategoria(r)` (plana → nueva, `categoria: 'inundacion'`, los 6 campos a `detalle`) y
+  `normalizarReporteCrear(cuerpo)` (las compone y devuelve la forma por categoría o el `ZodError`).
+- **`DetalleInundacionSchema` ahora es `strictObject`**: rechaza claves de más (api-core lo usa para
+  validar el `detalle`). No cambia la equivalencia con `ReporteCrearSchema` (contrato-0-19): ningún caso
+  trae claves sobrantes en esos seis campos.
+- **`ReporteCambiarEstadoSchema.fusionado_en_id`**: acepta **UUID o ID corto de 8 hex**, la misma
+  expresión que `ReporteFusionarSchema.canonico_id`, extraída a `ID_REPORTE_CORTO_O_UUID` (decisión del
+  usuario del 2026-10-08). Solo **amplía** lo que aceptaba (antes solo UUID). En el OpenAPI el campo
+  pasa de `format: uuid` a `pattern`.
+- **`SesionActualSchema`** suma `cupos` (`{ <slug>: { restantes, demora_proximo_s, puede_reportar_desde } }`
+  por categoría activa) y `fotos_restantes_hoy` (de las 12 por día **globales**, ADR 0017). Los campos
+  de hoy (`reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde`) siguen y valen para
+  inundación. Los dos nuevos son **opcionales** (regla 5): los *fixtures* `: SesionActual` de
+  web-ciudadano no los construyen.
+- **`ConfiguracionPublicaSchema`** suma `categorias_activas` (lista de slugs en orden canónico;
+  `string[]`, no enum, para admitir una categoría sintética de prueba). **Opcional** (regla 5).
+- **`SeveridadCategoria.calcular`** suma al resultado `reglas?: readonly string[]` (**opcional**, aditivo):
+  las reglas de escalamiento aplicadas, en orden (p. ej. `['E1']` de inundación cuando la profundidad
+  supera 70 cm, §9.1). `DEFINICION_INUNDACION` las devuelve (de `calcularSeveridad`); api-core las anota
+  en la auditoría de creación cuando están, como hacía antes. Una categoría que no escala las omite.
+- **Códigos de error nuevos**, donde viven los demás (como `CODIGO_CAPA_CAMBIO`):
+  `CODIGO_CATEGORIA_NO_DISPONIBLE = 'CATEGORIA_NO_DISPONIBLE'` (en `categorias/index.ts`; **400** en
+  lecturas públicas, **422** en `POST /reportes`) y `CODIGO_FUSION_ENTRE_CATEGORIAS =
+  'FUSION_ENTRE_CATEGORIAS'` (en `esquemas/reporte.ts`; **409**). Los estados HTTP los fija cada ruta
+  del servidor; el contrato solo nombra los códigos.
+- **`429 CUOTA_DE_REPORTES`**: el cupo de reportes es **por categoría**; el OpenAPI documenta
+  `detalles.categoria` con el slug del cupo agotado.
+- **geo-service** (`esquemas/geo.ts`): `GeoAgregadosQuerySchema` y `GeoPuntosCriticosQuerySchema` con
+  `categoria` (sin parámetro = inundación; rutas públicas, sin `todas`); `AgregadoUvSchema` y
+  `PuntoCriticoSchema` suman `categoria` **opcional** (aditivo; M3.4 la completa). El OpenAPI documenta
+  el parámetro y el 400.
+- **OpenAPI** regenerado (**cambia a propósito**, aditivo): componente nuevo `ReporteCrearCategoria`;
+  `POST /reportes` con `requestBody` `oneOf [ReporteCrear, ReporteCrearCategoria]`, el 422 con
+  `CATEGORIA_NO_DISPONIBLE` y el 429 con `detalles.categoria`; `GET /reportes` con 400; `PATCH
+  /estado` y `POST /fusionar` con `FUSION_ENTRE_CATEGORIAS`; las dos rutas de geo-service con el
+  parámetro `categoria` y el 400; `ReporteCambiarEstado.fusionado_en_id` con `pattern`; los esquemas
+  de respuesta con los campos aditivos opcionales.
+
+**D3 (ADR 0023), «v2 extendida».** La frecuencia `agua_estancada` (F = 5, migración 0017) amplió el
+rango de la severidad a 13 **sin subir `severidad_version`**: las combinaciones anteriores dan el mismo
+puntaje y la misma banda, así que no se migran datos. Las etiquetas de `permanente` («Cada lluvia») y
+`cada_lluvia_fuerte` («Solo cuando llueve fuerte») cambiaron sin migrar: los reportes anteriores se
+cargaron con los textos de entonces. `dominio/severidad.ts` **no cambia** en 0.20.0.
+
+**Consumidores:** api-core (M3.3 lecturas por categoría, M3.6 escrituras, cupo por categoría con
+`cupo_contador`, fusión dentro de la categoría, `/auth/yo` con `cupos`), geo-service (M3.4 agregados y
+puntos críticos por categoría), packages/db (M3.2 DBSCAN particionado). Las apps se tocan en M4/M5; su
+`typecheck` y sus pruebas quedan **iguales a la línea base** gracias a la regla 5. `dist/dominio.json`
+no cambia.
+
+## 0.19.0 — 2026-10-07
+
+**Sin ruptura: registro de categorías y sus políticas, con Inundaciones como única definición
+(ADR 0009, 0014–0017, 0019, 0021, 0022).** Es el paso M1 del roadmap de la plataforma multitemática
+(`docs/arquitectura/14-decisiones-m0-y-plan-m1.md`): la lógica de cada categoría pasa a describirse
+como datos —textos, esquema del detalle, severidad versionada, preguntas del paso 2, filtros con
+alcance, radio de recurrencia y regla de cupo—, y las políticas de preferencia/URL, alcance de filtros
+y cupo se declaran en `contracts` para que todas las partes las lean de un solo lugar. Todo es
+**aditivo**: **no hay cambios de API ni de OpenAPI** (`openapi/openapi.yaml` regenera byte a byte
+idéntico). `ReporteCrearSchema`, `dominio/severidad.ts` y el resto de las exportaciones previas no
+cambian, ni de forma ni de comportamiento.
+
+- **`categorias/tipos.ts`** (solo tipos): `DefinicionCategoria<D, S>` (`D` es el detalle inferido del
+  esquema Zod; `S` es el slug y por defecto `SlugCategoria`), `OpcionPregunta`, `TipoPregunta`,
+  `Pregunta`, `AlcanceFiltro` (`'global' | 'categoria'`, ADR 0016), `FiltroDef`, `AmbitoCupo`,
+  `VentanaCupo`, `ReglaCupo` (ADR 0017), `GeometriaCategoria` (hoy solo `'punto'`, ADR 0019),
+  `ColoresCategoria` (`c1`, `c5`, `c7`, ADR 0022), `SeveridadCategoria<D>` y `CampoExportacion<D>`.
+  El icono es el nombre de `lucide-react` como cadena y el paso 2 especial es un identificador
+  (`componenteEspecialPaso2`): `contracts` no importa React ni conoce componentes.
+- **`categorias/slugs.ts`**: `SLUGS_CATEGORIA` (`inundacion`, `bache`, `area_verde`, `basura`, en el
+  orden de presentación; tipo `SlugCategoria`), `normalizarSlugCategoria(valor)` (acepta singular y
+  plural, guion o guion bajo, mayúsculas y tildes; devuelve el slug canónico o `null`) y
+  `slugParaUrl(slug)` (`area_verde` → `area-verde`, ADR 0015). Que un slug esté en la lista no lo
+  activa: la lista de activas la fija cada instalación.
+- **`categorias/resolver.ts`**: `resolverCategoriaInicial({ url, guardada, activas })`, función pura
+  con la prioridad del ADR 0015 —URL válida y activa, preferencia guardada válida y activa,
+  `inundacion` si está activa, primera activa en el orden canónico— que nunca devuelve una categoría
+  inactiva. Devuelve `{ slug, origen, urlInvalida, urlInactiva }`; con `activas` vacía, `slug: null` y
+  `origen: 'ninguna'`. Tipos asociados: `EntradaResolverCategoria`, `GuardadaCategoria` (el JSON
+  `{v, slug}` del ADR 0014), `OrigenCategoria` y `ResultadoCategoriaInicial`.
+- **`categorias/inundacion/esquema.ts`**: `DetalleInundacionSchema` y `DetalleInundacion`. Los seis
+  campos de dominio (`profundidad_estimada`, `frecuencia`, `causa_presunta`, `sumidero_cercano`,
+  `sumidero_estado`, `agua_brota_sumidero`) **se toman de `ReporteCrearSchema.shape`**, así que no
+  duplican ninguna lista de enums, default ni nulabilidad. La única regla que **se reescribe** es la
+  del sumidero (sin sumidero cercano no hay estado ni brote), porque en `ReporteCrearSchema` está
+  embebida en su `superRefine`, que no se exporta ni se toca. La prueba de equivalencia de
+  `test/contrato-0-19.test.ts` ata las dos: el detalle acepta y rechaza lo mismo que
+  `ReporteCrearSchema` en esos campos (casos válidos, inválidos por la regla del sumidero, por enum y
+  por campo ausente).
+- **`categorias/inundacion/definicion.ts`**: `DEFINICION_INUNDACION`, tomada de las fuentes
+  existentes sin reescribir cifras ni textos. La **severidad v2 se reexporta**
+  (`SEVERIDAD_VERSION` y `calcularSeveridad` de `dominio/severidad.ts`, sin moverlas ni tocarlas);
+  el radio de recurrencia (`recurrenciaRadioM`) sale de `CONFIG_DOMINIO.RECURRENCIA_RADIO_M`; la
+  regla de cupo (`cuenta+categoria`, `dia_local`) lee su límite de
+  `CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA`, sin un literal; la nota metodológica es
+  `NOTA_METODOLOGICA`; los textos y las opciones de las preguntas salen de `ETIQUETAS` donde ya
+  existen. La severidad es un filtro de alcance `categoria` (se reinicia al cambiar de categoría, ADR
+  0016) y el paso 2 apunta al componente especial `inundacion/paso2` con la referencia corporal (ADR
+  0021).
+- **`categorias/index.ts`** (re-exportado por `src/index.ts`): `REGISTRO_CATEGORIAS` (hoy **solo
+  Inundaciones**), la fábrica `crearRegistroCategorias(definiciones)` (exige slugs únicos y devuelve
+  un `RegistroCategorias` con `definiciones`, `slugs`, `obtener` y `tiene`) y
+  `DefinicionCategoriaCualquiera` (la definición con el detalle sin tipar y el slug como `string`,
+  para colecciones heterogéneas). La fábrica admite una categoría sintética sin tocar el núcleo ni el
+  registro de la instalación; lo prueba el caso sintético de la misma prueba.
+- **`dist/dominio.json`**: sin cambios (comparado antes y después del build, idéntico). El archivo
+  no incluye la versión del paquete y `scripts/generar.ts` no lo alimenta con el registro.
+
+**Consumidores:** ninguno todavía; hoy nadie usa lo nuevo. Lo consumen, según el roadmap (M2–M4):
+packages/db (M2: catálogo de categorías y contador de cupo genérico, a partir de `ReglaCupo`),
+api-core (M3: unión discriminada de detalle por `esquemaDetalle`, cupo por categoría, filtro por
+categoría), web-ciudadano y panel-admin (M4: selector, preferencia local, prioridad de URL con
+`resolverCategoriaInicial` y `normalizarSlugCategoria`, reinicio de filtros por `AlcanceFiltro`, paso
+2 desde `preguntas`). Las categorías Baches, Basura y Áreas verdes se suman después (M6–M8), cada una
+con su definición en `src/categorias/<slug>/` y una línea en el registro.
+
 ## 0.18.0 — 2026-10-04
 
 **Sin ruptura: camino de «ubicación aproximada» para dispositivos sin GPS preciso (ADR 0007).** Una

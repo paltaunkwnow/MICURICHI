@@ -17,8 +17,9 @@ import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
 import type { ReporteFeature } from '@/lib/api';
-import { centroDeCiudad } from '@/lib/ciudad';
+import { centroDeCiudad, etiquetaDelMapa } from '@/lib/ciudad';
 import { useCiudad } from '@/lib/ciudad-contexto';
+import { limpiarConteosDeCapas } from '@/lib/conteos-mapa';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
 import {
   BANDAS_CLUSTER,
@@ -132,7 +133,16 @@ export interface PropsMapa {
   centro?: [number, number];
   zoom?: number;
   className?: string;
+  /** Nombre accesible del mapa. Sin valor, el de la categoría por defecto (`etiquetaDelMapa()`). */
   ariaLabel?: string;
+  /**
+   * Identifica la serie de datos que muestran `reportes` y `agregados` (en el mapa público, la
+   * categoría). Cuando CAMBIA, el mapa descarta lo que tenía pintado por unidad vecinal y distrito
+   * —el relleno y los conteos de las etiquetas— hasta que lleguen los agregados nuevos: sin esto, la
+   * lista vacía que llega mientras carga la categoría nueva dejaría pintado el de la anterior. Sin
+   * valor, o mientras no cambie, no hace nada.
+   */
+  claveDeDatos?: string;
   /** Deja el mapa quieto (vista de contexto en una tarjeta o en la revisión del reporte). */
   fijo?: boolean;
   /**
@@ -315,7 +325,8 @@ export function Mapa({
   centro,
   zoom,
   className = '',
-  ariaLabel = 'Mapa de puntos de inundación',
+  claveDeDatos,
+  ariaLabel = etiquetaDelMapa(),
   fijo = false,
   encuadrarACapas = false,
   onResumen,
@@ -347,6 +358,8 @@ export function Mapa({
   const marcador = useRef<maplibregl.Marker | null>(null);
   const pines = useRef(new Map<string, maplibregl.Marker>());
   const listo = useRef(false);
+  /** La `claveDeDatos` con la que se pintaron los conteos por última vez. */
+  const claveDeDatosAplicada = useRef(claveDeDatos);
   /** Último valor escrito en el estilo, para no reescribirlo y provocar otro repintado. */
   const visibilidadPuntos = useRef<boolean | null>(null);
   const filtroElegido = useRef<string>(SIN_SELECCION);
@@ -816,10 +829,16 @@ export function Mapa({
   useEffect(() => {
     if (mapa.current && listo.current) {
       encuadrar(mapa.current, capas);
+      // Cambió la serie de datos (la categoría): antes de pintar lo nuevo se descarta lo de la
+      // anterior. Pasar de «sin clave» a la primera no es un cambio: todavía no había nada pintado.
+      const anterior = claveDeDatosAplicada.current;
+      claveDeDatosAplicada.current = claveDeDatos;
+      if (anterior !== undefined && anterior !== claveDeDatos)
+        reiniciarConteos(mapa.current, capas, agregados.length === 0);
       aplicarCapas(mapa.current, capas, agregados);
       ajustarVisibilidadCapas(mapa.current, capaVisible);
     }
-  }, [capas, agregados, capaVisible]);
+  }, [capas, agregados, capaVisible, claveDeDatos]);
 
   // `seleccionado` y `destacado` se leen por ref dentro de `sincronizarPines`, así que Biome no
   // ve la lectura; son justo los cambios que tienen que repintar la pastilla (oscura al elegirla,
@@ -1224,12 +1243,14 @@ async function fusionarConteosEnLaCapa(
   porUv: Map<string, number>,
   porDistrito: Map<string, number>,
   estadosUv: Map<string, EstadoUv>,
+  // Solo al cambiar de categoría con las tablas vacías: deja las etiquetas con el nombre a secas.
+  conTablaVacia = false,
 ) {
   if (c.modo !== 'geojson') return;
   if ((c.bytes_web ?? Number.POSITIVE_INFINITY) > MAX_BYTES_ETIQUETA) return;
   const esUv = c.capa === 'unidad_vecinal';
   const tabla = esUv ? porUv : porDistrito;
-  if (tabla.size === 0) return;
+  if (tabla.size === 0 && !conTablaVacia) return;
   let verificados = 0;
   for (const e of estadosUv.values()) verificados += e.nVerificados;
   // La URL lleva la huella del contenido: la misma versión recargada con otra geometría es otra.
@@ -1263,6 +1284,27 @@ async function fusionarConteosEnLaCapa(
     fuente.setData(datos);
   } catch {
     // Sin conteo en la etiqueta: la capa sigue dibujándose con su nombre y su relleno.
+  }
+}
+
+/**
+ * Cambió la categoría: se quita el relleno por `feature-state` de las capas, se olvidan las fusiones
+ * que recuerda `yaFusionadas` (volver a una categoría ya vista la daría por escrita cuando en la
+ * fuente quedaron los conteos de la otra) y, si la categoría nueva todavía no trae agregados, las
+ * etiquetas vuelven al nombre a secas. Con agregados ya a mano (la categoría estaba en caché) eso
+ * último no hace falta: `aplicarCapas` los escribe enseguida.
+ */
+function reiniciarConteos(m: MapaGl, capas: CapaInfo[], sinAgregados: boolean) {
+  for (const c of limpiarConteosDeCapas(m, capas)) {
+    const prefijo = `capa-${c.capa}|`;
+    let habiaFusion = false;
+    for (const clave of [...yaFusionadas])
+      if (clave.startsWith(prefijo)) {
+        yaFusionadas.delete(clave);
+        habiaFusion = true;
+      }
+    if (habiaFusion && sinAgregados)
+      void fusionarConteosEnLaCapa(m, c, new Map(), new Map(), new Map(), true);
   }
 }
 

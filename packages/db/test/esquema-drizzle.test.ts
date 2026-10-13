@@ -87,6 +87,16 @@ function defaultDrizzle(c: PgColumn): string | null {
   return String(d);
 }
 
+/** relkind de la relación: 'r' tabla base, 'v' vista. Para distinguir el espejo de la vista. */
+const relkindDe = async (ex: Ejecutor, esquemaSql: string, nombre: string) =>
+  (
+    await ex.consultar<{ relkind: string }>(
+      `SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = $1 AND c.relname = $2`,
+      [esquemaSql, nombre],
+    )
+  )[0]?.relkind;
+
 describe('esquema Drizzle ↔ base migrada desde cero', () => {
   it('cada tabla del espejo tiene exactamente las columnas de la base, con su tipo, nulabilidad y DEFAULT', async () => {
     const diferencias: string[] = [];
@@ -103,11 +113,18 @@ describe('esquema Drizzle ↔ base migrada desde cero', () => {
         diferencias.push(`${nombre}: la tabla no existe en la base`);
         continue;
       }
+      // Un espejo que apunta a una VISTA (desde la 0020, `reporte_inundacion`) se compara relajado:
+      // las vistas reportan TODAS sus columnas como NULL-ables y sin DEFAULT (no tienen esas
+      // propiedades) y exponen columnas de más (la vista es `SELECT *` de `reporte`). Se comprueba
+      // solo que cada columna del espejo exista en la vista con el mismo tipo; la nulabilidad, el
+      // DEFAULT y la forma exacta se verifican sobre la tabla base `reporte` y en migracion-0020.
+      const esVista = (await relkindDe(ex, esquemaSql, cfg.name)) === 'v';
       const enBase = new Map(filas.map((f) => [f.column_name, f]));
       const enEspejo = new Map(cfg.columns.map((c) => [c.name, c]));
-      for (const nombreColumna of enBase.keys())
-        if (!enEspejo.has(nombreColumna))
-          diferencias.push(`${nombre}.${nombreColumna}: está en la base y falta en Drizzle`);
+      if (!esVista)
+        for (const nombreColumna of enBase.keys())
+          if (!enEspejo.has(nombreColumna))
+            diferencias.push(`${nombre}.${nombreColumna}: está en la base y falta en Drizzle`);
       for (const [nombreColumna, columna] of enEspejo) {
         const b = enBase.get(nombreColumna);
         if (!b) {
@@ -118,6 +135,7 @@ describe('esquema Drizzle ↔ base migrada desde cero', () => {
           diferencias.push(
             `${nombre}.${nombreColumna}: tipo ${tipoBase(b)} en la base, ${columna.getSQLType()} en Drizzle`,
           );
+        if (esVista) continue; // la vista no tiene nulabilidad ni DEFAULT propios
         if ((b.is_nullable === 'NO') !== columna.notNull)
           diferencias.push(
             `${nombre}.${nombreColumna}: ${b.is_nullable === 'NO' ? 'NOT NULL' : 'admite NULL'} en la base, al revés en Drizzle`,

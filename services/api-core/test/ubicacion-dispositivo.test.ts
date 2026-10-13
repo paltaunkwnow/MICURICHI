@@ -75,9 +75,11 @@ async function cuantosReportes(): Promise<number> {
 }
 
 async function turnoGastado(): Promise<boolean> {
+  // Desde M3 el cupo de reportes vive en `cupo_contador` (clave `reportes:<categoría>`).
   const r = await pool.query<{ gastado: boolean }>(
-    `SELECT COALESCE(sum(c.reportes_n), 0) > 0 AS gastado
-       FROM cuota_reporte_diaria c JOIN usuario u ON u.id = c.usuario_id WHERE u.email = $1`,
+    `SELECT COALESCE(sum(c.n), 0) > 0 AS gastado
+       FROM cupo_contador c JOIN usuario u ON u.id = c.usuario_id
+      WHERE u.email = $1 AND c.clave LIKE 'reportes:%'`,
     [CUENTAS.vecina],
   );
   return r.rows[0]!.gastado;

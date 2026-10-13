@@ -7,6 +7,8 @@ import {
   coordenadaPublica,
   type EstadoReporte,
   type MiReporte,
+  REGISTRO_CATEGORIAS,
+  type RegistroCategorias,
   type ReportePublico,
   type ReporteTecnico,
   type UbicacionMetodo,
@@ -42,6 +44,12 @@ export interface FilaReporte {
   distancia_dispositivo_m: number | null;
   ubicacion_tipo: 'via_publica' | 'vivienda_o_predio' | 'otro';
   descripcion: string;
+  /** Categoría del reporte (migración 0020). Hoy casi siempre `inundacion`. */
+  categoria: string;
+  /** Subtipo propio de la categoría; null si no aplica (inundación no tiene). */
+  subtipo: string | null;
+  /** Respuestas propias de la categoría (jsonb). En inundación, lo arma el disparador de la 0020. */
+  detalle: Record<string, unknown>;
   profundidad_estimada: ReportePublico['profundidad_estimada'];
   frecuencia: ReportePublico['frecuencia'];
   causa_presunta: ReportePublico['causa_presunta'];
@@ -71,13 +79,17 @@ export const SELECT_REPORTE = `
          r.distrito_id, d.codigo AS distrito_codigo, d.nombre AS distrito_nombre,
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
          r.ubicacion_metodo, r.precision_gps_m, r.distancia_dispositivo_m, r.ubicacion_tipo, r.descripcion,
+         r.categoria, r.subtipo, r.detalle,
          r.profundidad_estimada, r.frecuencia, r.causa_presunta,
          r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,
          r.estado, r.estado_motivo, r.fusionado_en_id, r.punto_critico_id, pc.n_reportes AS n_reportes_punto,
          r.validado_por, r.validado_en,
          (SELECT array_agg(f.objeto_key ORDER BY f.creado_en) FROM reporte_foto f WHERE f.reporte_id = r.id AND f.exif_sanitizado) AS fotos
-  FROM reporte_inundacion r
+  -- Tabla reporte (todas las categorías desde la 0020), NO la vista reporte_inundacion: las
+  -- lecturas filtran la categoría explícitamente (consultas.ts, id-reporte.ts). Las escrituras de
+  -- moderación siguen por la vista (M3b).
+  FROM reporte r
   -- Se une por (id, version_capa) y NO contra la vista vigente. Para eso está version_capa
   -- (§7.1): es la versión con la que se resolvió el reporte. Uniendo contra la vigente, el día
   -- que el municipio activa una entrega nueva todos los reportes anteriores se quedan sin
@@ -96,6 +108,25 @@ export function urlFoto(base: string, key: string) {
 
 /** Propiedades comunes a las tres vistas, con el estado tal cual está en la base. */
 type PropsBase = Omit<ReportePublico, 'estado'> & { estado: EstadoReporte; verificado: boolean };
+
+/**
+ * Detalle que ve el PÚBLICO: solo los `camposPublicos` de la definición de la categoría (regla 4
+ * del plan M3; para inundación, profundidad/frecuencia/causa, los mismos que ya eran públicos). Sin
+ * definición en el registro (categoría que no debería estar activa) el detalle va vacío: nunca se
+ * expone una clave que la definición no declaró pública (§13).
+ */
+export function detallePublico(
+  detalle: Record<string, unknown>,
+  categoria: string,
+  registro: RegistroCategorias,
+): Record<string, unknown> {
+  const def = registro.obtener(categoria);
+  if (!def) return {};
+  const recorte: Record<string, unknown> = {};
+  for (const campo of def.camposPublicos)
+    if (Object.hasOwn(detalle, campo)) recorte[campo] = detalle[campo];
+  return recorte;
+}
 
 /**
  * `salJitter` es un secreto del servidor. Sin él la semilla del desplazamiento sería el `id`
@@ -150,6 +181,10 @@ function vistaBase(
         : null,
       descripcion: f.descripcion,
       fotos: (f.fotos ?? []).map((k) => urlFoto(urlBase, k)),
+      // Comunes a las tres vistas (0.20.0). El `detalle` NO va aquí: la vista pública lo recorta a
+      // los campos públicos y la técnica/mía lo llevan completo, así que cada una lo agrega.
+      categoria: f.categoria,
+      subtipo: f.subtipo,
       profundidad_estimada: f.profundidad_estimada,
       frecuencia: f.frecuencia,
       causa_presunta: f.causa_presunta,
@@ -172,12 +207,17 @@ export function vistaPublica(
   f: FilaReporte,
   urlBase: string,
   salJitter: string,
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
 ): { lon: number; lat: number; props: ReportePublico } {
   const base = vistaBase(f, urlBase, salJitter, false);
   const estado = base.props.estado;
   if (!esEstadoPublico(estado))
     throw new Error(`vista pública de un reporte en estado no público (${estado})`);
-  return { ...base, props: { ...base.props, estado } };
+  // Solo los campos públicos de la categoría: la vista pública nunca expone el detalle completo.
+  return {
+    ...base,
+    props: { ...base.props, estado, detalle: detallePublico(f.detalle, f.categoria, registro) },
+  };
 }
 
 export function vistaTecnica(
@@ -191,6 +231,8 @@ export function vistaTecnica(
     lat: base.lat,
     props: {
       ...base.props,
+      // La vista técnica lleva el detalle COMPLETO (no el recorte público).
+      detalle: f.detalle,
       ubicacion_metodo: f.ubicacion_metodo,
       precision_gps_m: f.precision_gps_m === null ? null : Number(f.precision_gps_m),
       distancia_dispositivo_m: f.distancia_dispositivo_m,
@@ -227,6 +269,8 @@ export function vistaMiReporte(
     ...base,
     props: {
       ...base.props,
+      // Su autor ve el detalle COMPLETO de su reporte, sea de la categoría que sea.
+      detalle: f.detalle,
       publicar_en: iso(f.publicar_en)!,
       segundos_para_publicar: f.segundos_para_publicar,
       retirado: esRetirado(f.estado),

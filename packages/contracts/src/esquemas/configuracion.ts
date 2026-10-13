@@ -59,5 +59,18 @@ export const CiudadSchema = z.object({
 });
 export type Ciudad = z.infer<typeof CiudadSchema>;
 
-export const ConfiguracionPublicaSchema = z.object({ ciudad: CiudadSchema });
+export const ConfiguracionPublicaSchema = z.object({
+  ciudad: CiudadSchema,
+  /**
+   * Slugs de las categorías activas de la instalación, en el orden canónico de presentación (0.20.0,
+   * ADR 0012). Hoy, `['inundacion']`. Es un `string[]` (no un enum) para no atar el contrato a las
+   * cuatro categorías iniciales ni a una categoría sintética de prueba; cada app normaliza con
+   * `normalizarSlugCategoria`. OPCIONAL hasta M4/M5 (regla 5 del plan M3): api-core lo manda, pero
+   * volverlo obligatorio rompería el typecheck de api-core y de los fixtures de las apps.
+   */
+  categorias_activas: z.array(z.string()).optional().meta({
+    description:
+      'Slugs de las categorías activas, en orden canónico (p. ej. ["inundacion"]). Obligatorio desde M4/M5.',
+  }),
+});
 export type ConfiguracionPublica = z.infer<typeof ConfiguracionPublicaSchema>;

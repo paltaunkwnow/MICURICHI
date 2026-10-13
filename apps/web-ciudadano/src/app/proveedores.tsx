@@ -1,13 +1,22 @@
 'use client';
 
 import { QueryClientProvider } from '@tanstack/react-query';
-import type { Ciudad } from 'contracts';
+import type { Ciudad, SlugCategoria } from 'contracts';
 import { type ReactNode, useEffect, useState } from 'react';
 import { ProveedorToast } from '@/componentes/Toast';
+import { ProveedorCategorias } from '@/lib/categorias-contexto';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 import { crearClienteDeConsultas } from '@/lib/consultas';
 
-export function Proveedores({ ciudad, children }: { ciudad: Ciudad; children: ReactNode }) {
+export function Proveedores({
+  ciudad,
+  categoriasActivas,
+  children,
+}: {
+  ciudad: Ciudad;
+  categoriasActivas: readonly SlugCategoria[];
+  children: ReactNode;
+}) {
   // Sin tráfico automático: ver `src/lib/consultas.ts`.
   const [cliente] = useState(crearClienteDeConsultas);
   useEffect(() => {
@@ -17,9 +26,11 @@ export function Proveedores({ ciudad, children }: { ciudad: Ciudad; children: Re
   }, []);
   return (
     <ProveedorCiudad ciudad={ciudad}>
-      <QueryClientProvider client={cliente}>
-        <ProveedorToast>{children}</ProveedorToast>
-      </QueryClientProvider>
+      <ProveedorCategorias activas={categoriasActivas}>
+        <QueryClientProvider client={cliente}>
+          <ProveedorToast>{children}</ProveedorToast>
+        </QueryClientProvider>
+      </ProveedorCategorias>
     </ProveedorCiudad>
   );
 }

@@ -253,7 +253,9 @@ const COMPROBACIONES = {
   fotos: 'SELECT count(*) FROM reporte_foto',
   auditoria: 'SELECT count(*) FROM auditoria',
   migraciones: 'SELECT count(*) FROM _migraciones',
-  indices_reporte: "SELECT count(*) FROM pg_indexes WHERE tablename = 'reporte_inundacion'",
+  // Migración 0020 (ADR 0011): la tabla pasa de `reporte_inundacion` a `reporte` y la vista no tiene índices.
+  indices_reporte:
+    "SELECT count(*) FROM pg_indexes WHERE schemaname = 'public' AND tablename IN ('reporte', 'reporte_inundacion')",
   puntos_criticos: 'SELECT count(*) FROM punto_critico',
 };
 

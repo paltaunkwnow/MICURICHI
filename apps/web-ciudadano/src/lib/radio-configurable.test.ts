@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ComoFunciona } from '@/componentes/ComoFunciona';
 import { VistaPedirUbicacion } from '@/componentes/PedirUbicacion';
 import { Portada } from '@/componentes/Portada';
+import { conCategorias } from './categoria-de-prueba';
 import { ProveedorCiudad } from './ciudad-contexto';
 
 const OTRO_RADIO_M = 75;
@@ -36,7 +37,8 @@ function conProveedores(hijo: ReactNode) {
     createElement(
       ProveedorCiudad,
       { ciudad: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO } as ComponentProps<typeof ProveedorCiudad>,
-      hijo,
+      // La portada lee las categorías activas del proveedor del layout raíz.
+      conCategorias(['inundacion'], hijo),
     ),
   );
 }

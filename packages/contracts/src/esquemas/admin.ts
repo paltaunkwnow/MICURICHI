@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import { SEVERIDADES, TIPOS_CAPA } from '../dominio/enums.js';
-import { listaDesdeQuery } from './comunes.js';
+import { CategoriaFiltroSchema, listaDesdeQuery } from './comunes.js';
 import { ReporteFiltrosSchema, ReporteTecnicoFeatureSchema } from './reporte.js';
 
 export const CapaVersionSchema = z.object({
@@ -63,6 +63,8 @@ export type ExportacionGeoJson = z.infer<typeof ExportacionGeoJsonSchema>;
 export const IndicadoresFiltrosSchema = z.object({
   severidad: listaDesdeQuery(SEVERIDADES),
   distrito_id: z.string().min(1).optional(),
+  // Panel: admite `todas` además de un slug. Sin el parámetro = inundacion (0.20.0, ADR 0012).
+  categoria: CategoriaFiltroSchema,
 });
 export type IndicadoresFiltros = z.infer<typeof IndicadoresFiltrosSchema>;
 

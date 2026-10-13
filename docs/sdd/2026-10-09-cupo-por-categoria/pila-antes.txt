@@ -1,0 +1,2 @@
+minio running healthy
+postgis running healthy

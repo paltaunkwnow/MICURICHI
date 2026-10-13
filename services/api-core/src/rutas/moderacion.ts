@@ -1,4 +1,5 @@
 import {
+  CODIGO_FUSION_ENTRE_CATEGORIAS,
   ReporteCambiarEstadoSchema,
   ReporteFusionarSchema,
   ReporteReclasificarSchema,
@@ -7,7 +8,7 @@ import {
 } from 'contracts';
 import { ejecutorPg, recalcularEntornoDeReporte } from 'db';
 import type { FastifyInstance } from 'fastify';
-import type { Dependencias } from '../app.js';
+import { type Dependencias, registroDe } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { obtenerReporte } from '../consultas.js';
 import { IdReporteParam, resolverIdReporte } from '../id-reporte.js';
@@ -18,6 +19,10 @@ import { invalidarAgregadosEnVuelo } from './admin.js';
 const AFECTA_PUNTOS = new Set(['validado', 'resuelto']);
 
 export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
+  // Registro inyectado (o `REGISTRO_CATEGORIAS`): da el radio de recurrencia por categoría al
+  // recálculo del entorno. La moderación opera sobre la tabla `reporte` (todas las categorías
+  // desde la 0020), con el filtro de visibilidad de siempre (M3b, CA8).
+  const registro = registroDe(dep);
   type ResultadoCambio =
     | { ok: false; error: 400 | 403 | 404 | 409; codigo: string; mensaje: string }
     | { ok: true; fila: FilaReporte };
@@ -73,8 +78,11 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         id: string;
         estado: string;
         estado_motivo: string | null;
+        categoria: string;
       }>(
-        `SELECT id::text, estado::text, estado_motivo FROM reporte_inundacion
+        // Tabla `reporte` (todas las categorías desde la 0020), no la vista: la moderación opera
+        // sobre cualquier categoría. Se trae `categoria` para rechazar una fusión entre categorías.
+        `SELECT id::text, estado::text, estado_motivo, categoria::text FROM reporte
           WHERE id = ANY($1::uuid[]) AND ${condicionPublicado('')} ORDER BY id FOR UPDATE`,
         [fusionadoEn ? [id, fusionadoEn] : [id]],
       );
@@ -106,6 +114,18 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
           await cliente.query('ROLLBACK');
           return noPermitida('El reporte canónico no existe o no está publicado.');
         }
+        // No se mezclan inventarios de categorías distintas (ADR 0012, 0013). Se mira con las dos
+        // filas ya bloqueadas, antes del estado del canónico: una fusión cruzada no se arregla
+        // validando el canónico.
+        if (canonicoFila.categoria !== actual.categoria) {
+          await cliente.query('ROLLBACK');
+          return {
+            ok: false,
+            error: 409,
+            codigo: CODIGO_FUSION_ENTRE_CATEGORIAS,
+            mensaje: 'No se puede fusionar reportes de categorías distintas.',
+          };
+        }
         if (canonicoFila.estado !== 'validado') {
           await cliente.query('ROLLBACK');
           return noPermitida(
@@ -114,7 +134,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         }
       }
       await cliente.query(
-        `UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = $3, fusionado_en_id = $4, actualizado_en = now(),
+        `UPDATE reporte SET estado = $2::estado_reporte, estado_motivo = $3, fusionado_en_id = $4, actualizado_en = now(),
            validado_por = CASE WHEN $2 = 'validado' THEN $5::uuid ELSE validado_por END,
            validado_en = CASE WHEN $2 = 'validado' THEN now() ELSE validado_en END
          WHERE id = $1`,
@@ -138,7 +158,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         // B→C dejaban a X apuntando a un duplicado, y la cadena crecía con cada fusión.
         await cliente.query(
           `WITH reapuntados AS (
-             UPDATE reporte_inundacion SET fusionado_en_id = $2, actualizado_en = now()
+             UPDATE reporte SET fusionado_en_id = $2, actualizado_en = now()
               WHERE fusionado_en_id = $1
              RETURNING id::text AS id
            )
@@ -181,7 +201,13 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
    */
   async function recalcularPuntosDelEntorno(reporteId: string): Promise<void> {
     try {
-      const r = await recalcularEntornoDeReporte(ejecutorPg(dep.pool), reporteId);
+      const r = await recalcularEntornoDeReporte(
+        ejecutorPg(dep.pool),
+        reporteId,
+        undefined,
+        undefined,
+        registro,
+      );
       // La componente encadenó más reportes de la cuenta y el recálculo quedó pendiente para el
       // mantenimiento. No es un error de la moderación —el cambio de estado ya está guardado—
       // pero sí una señal de que en esa zona el radio de recurrencia está agrupando de más
@@ -209,7 +235,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         .transaccion(async (tx) => {
           await tx.ejecutar("SET LOCAL lock_timeout = '2s'");
           await tx.consultar(
-            'DELETE FROM punto_critico WHERE id = (SELECT punto_critico_id FROM reporte_inundacion WHERE id = $1)',
+            'DELETE FROM punto_critico WHERE id = (SELECT punto_critico_id FROM reporte WHERE id = $1)',
             [reporteId],
           );
         })
@@ -301,7 +327,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
       try {
         await cliente.query('BEGIN');
         const bloqueado = await cliente.query<{ estado: string; severidad_manual: string | null }>(
-          `SELECT estado::text, severidad_manual::text FROM reporte_inundacion
+          `SELECT estado::text, severidad_manual::text FROM reporte
             WHERE id = $1 AND ${condicionPublicado('')} FOR UPDATE`,
           [targetId],
         );
@@ -312,7 +338,7 @@ export async function rutasModeracion(app: FastifyInstance, dep: Dependencias) {
         }
         estadoActual = actual.estado;
         await cliente.query(
-          'UPDATE reporte_inundacion SET severidad_manual = $2::severidad, severidad_motivo = $3, actualizado_en = now() WHERE id = $1',
+          'UPDATE reporte SET severidad_manual = $2::severidad, severidad_motivo = $3, actualizado_en = now() WHERE id = $1',
           [
             targetId,
             b.data.severidad_manual,

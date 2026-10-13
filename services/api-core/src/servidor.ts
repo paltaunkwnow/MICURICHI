@@ -2,6 +2,7 @@ import { cerrarWorkersDePassword, crearPool, esperarBaseDeDatos, verificarPrivil
 import { AlmacenDisco } from './almacen.js';
 import { AlmacenS3, leerConfigS3 } from './almacen-s3.js';
 import { crearApp } from './app.js';
+import { verificarReglasDeCupoActivas } from './categorias.js';
 import { avisosDeConfiguracion, leerConfig } from './config.js';
 import { programarMantenimiento } from './mantenimiento.js';
 import { opcionesLogger } from './registro.js';
@@ -59,6 +60,10 @@ try {
     registrar: (m) => app.log.warn(m),
   });
   app.log.info(`base de datos como «${privilegios.usuario}» (sin privilegios de administración)`);
+  // Reglas de cupo de las categorías activas (ADR 0017, M3): si alguna trae un ámbito o una ventana
+  // que api-core no sabe aplicar, no se arranca. El cupo es un control antiabuso, y cobrarlo mal (o
+  // no cobrarlo) es peor que no servir. Lee el catálogo, así que va aquí y no en `leerConfig`.
+  await verificarReglasDeCupoActivas(pool);
   // Se comprueba ANTES de escuchar: si las credenciales o el bucket están mal, es mejor no
   // arrancar que aceptar reportes y perder sus fotos una por una.
   if (almacenS3) await almacenS3.comprobar();

@@ -6,7 +6,8 @@
  * ni fijado al compilar. El layout raíz la lee en el servidor (`ciudad-servidor.ts`) y la reparte
  * por contexto (`ciudad-contexto.tsx`); estas son las reglas puras, sin React ni red.
  */
-import type { Ciudad } from 'contracts';
+import type { Ciudad, TextosCategoriaResueltos } from 'contracts';
+import { TEXTOS_CATEGORIA_POR_DEFECTO } from './categoria';
 
 export type { Ciudad };
 
@@ -18,9 +19,23 @@ export function centroDeCiudad(ciudad: Pick<Ciudad, 'centro'>): [number, number]
   return [ciudad.centro.lon, ciudad.centro.lat];
 }
 
+/** Lo que el mapa nombra de una categoría: los puntos, en plural (`textos.puntosDelMapa`, 0.21.0). */
+export type TextosDelMapa = Pick<TextosCategoriaResueltos, 'puntosDelMapa'>;
+
+/**
+ * Nombre accesible del mapa: «Mapa de puntos de inundación». Sin `textos`, el de la categoría por
+ * defecto de la plataforma (ADR 0012).
+ */
+export function etiquetaDelMapa(textos: TextosDelMapa = TEXTOS_CATEGORIA_POR_DEFECTO): string {
+  return `Mapa de ${textos.puntosDelMapa}`;
+}
+
 /** Título de la pantalla del mapa (lo leen los lectores de pantalla). */
-export function tituloDelMapa(ciudad: Pick<Ciudad, 'nombre'>): string {
-  return `Mapa de puntos de inundación de ${ciudad.nombre}`;
+export function tituloDelMapa(
+  ciudad: Pick<Ciudad, 'nombre'>,
+  textos: TextosDelMapa = TEXTOS_CATEGORIA_POR_DEFECTO,
+): string {
+  return `${etiquetaDelMapa(textos)} de ${ciudad.nombre}`;
 }
 
 /** Descripción de la portada para buscadores y enlaces compartidos. */

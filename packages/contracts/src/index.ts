@@ -1,3 +1,4 @@
+export * from './categorias/index.js';
 export * from './dominio/config.js';
 export * from './dominio/enums.js';
 export * from './dominio/geo.js';
