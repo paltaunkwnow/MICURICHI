@@ -1,6 +1,6 @@
 import type { CapaInfo } from 'contracts';
 import { describe, expect, it, vi } from 'vitest';
-import { limpiarConteosDeCapas } from './conteos-mapa';
+import { fusionarDatosVigentes, invalidarFusion, limpiarConteosDeCapas } from './conteos-mapa';
 
 /**
  * Al cambiar de categoría el relleno por unidad vecinal y distrito de la anterior no puede quedar
@@ -63,5 +63,53 @@ describe('limpiarConteosDeCapas', () => {
     ]);
     expect(resultado).toHaveLength(2);
     expect(m.removeFeatureState).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('fusiones asíncronas de etiquetas', () => {
+  const pendiente = () => {
+    let resolver!: (v: string) => void;
+    const promesa = new Promise<string>((r) => {
+      resolver = r;
+    });
+    return { promesa, resolver };
+  };
+  it.each(['A', 'limpieza'])(
+    'una respuesta de %s no pisa los datos nuevos de B',
+    async (anterior) => {
+      const mapa = {};
+      const fuente = {};
+      const escribir = vi.fn();
+      const vieja = pendiente();
+      const nueva = pendiente();
+      const a = fusionarDatosVigentes(mapa, 'uv', anterior, fuente, () => vieja.promesa, escribir);
+      invalidarFusion(mapa, 'uv');
+      const b = fusionarDatosVigentes(mapa, 'uv', 'B', fuente, () => nueva.promesa, escribir);
+      nueva.resolver('B: 5');
+      await b;
+      vieja.resolver('A: 99');
+      await a;
+      expect(escribir.mock.calls).toEqual([['B: 5']]);
+    },
+  );
+  it('no comparte deduplicación entre mapas ni entre fuentes reemplazadas', async () => {
+    const mapa = {};
+    const fuente = {};
+    const cargar = vi.fn(async () => 'datos');
+    const escribir = vi.fn();
+    await fusionarDatosVigentes(mapa, 'uv', 'serie', fuente, cargar, escribir);
+    await fusionarDatosVigentes(mapa, 'uv', 'serie', fuente, cargar, escribir);
+    await fusionarDatosVigentes({}, 'uv', 'serie', fuente, cargar, escribir);
+    await fusionarDatosVigentes(mapa, 'uv', 'serie', {}, cargar, escribir);
+    expect(escribir).toHaveBeenCalledTimes(3);
+  });
+  it('un fallo permite reintentar la misma serie', async () => {
+    const mapa = {};
+    const fuente = {};
+    const cargar = vi.fn().mockRejectedValueOnce(new Error('sin red')).mockResolvedValue('ok');
+    const escribir = vi.fn();
+    await fusionarDatosVigentes(mapa, 'uv', 'serie', fuente, cargar, escribir);
+    await fusionarDatosVigentes(mapa, 'uv', 'serie', fuente, cargar, escribir);
+    expect(escribir).toHaveBeenCalledExactlyOnceWith('ok');
   });
 });

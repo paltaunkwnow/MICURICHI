@@ -4,6 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import PaginaIndicadores from '@/app/(panel)/indicadores/page';
+import { ProveedorCategoriasPanel } from '@/lib/categorias-contexto';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
 import { resumenDeEjemplo } from '@/lib/ejecutivo.fixture';
@@ -44,7 +45,19 @@ function renderIndicadores(resumen: ResumenEjecutivo | undefined): string {
     createElement(
       ProveedorCiudad,
       { ciudad: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO },
-      createElement(QueryClientProvider, { client: cliente }, createElement(PaginaIndicadores)),
+      createElement(
+        ProveedorCategoriasPanel,
+        {
+          inicial: {
+            configuracion: {
+              ciudad: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO,
+              categorias_activas: ['inundacion'],
+            },
+            aviso: null,
+          },
+        },
+        createElement(QueryClientProvider, { client: cliente }, createElement(PaginaIndicadores)),
+      ),
     ),
   );
 }

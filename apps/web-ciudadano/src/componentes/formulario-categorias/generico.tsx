@@ -165,6 +165,28 @@ function CuerpoPaso2Generico({ form, valores, errores, definicion }: PropsCuerpo
   const errorDetalle = (errores.detalle as Record<string, { message?: string }> | undefined) ?? {};
   return (
     <>
+      {definicion.subtipos?.length ? (
+        <fieldset className="mt-5">
+          <legend className="lbl">Subtipo</legend>
+          <div className="grid gap-2.5">
+            {definicion.subtipos.map((opcion) => (
+              <Opcion
+                key={opcion.valor}
+                nombre="subtipo"
+                valor={opcion.valor}
+                texto={opcion.etiqueta}
+                detalle={opcion.ayuda}
+                marcado={valores.subtipo === opcion.valor}
+                onCambio={() => {
+                  form.setValue('subtipo', opcion.valor);
+                  form.clearErrors('subtipo');
+                }}
+              />
+            ))}
+          </div>
+          <MensajeDeCampo campo="subtipo" mensaje={errores.subtipo?.message} />
+        </fieldset>
+      ) : null}
       {definicion.preguntas.map((pregunta) => (
         <div key={pregunta.id}>
           <PreguntaDeclarativa pregunta={pregunta} detalle={detalle} setDetalle={setDetalle} />
@@ -194,17 +216,42 @@ function CuerpoPaso2Generico({ form, valores, errores, definicion }: PropsCuerpo
 export function crearAdaptadorGenerico(
   def: DefinicionCategoriaCualquiera,
 ): AdaptadorFormularioCategoria {
+  const subtipos = def.subtipos ?? [];
+  const subtipoValido = (valor: unknown) =>
+    subtipos.length === 0
+      ? valor === undefined || valor === null
+      : subtipos.some((opcion) => opcion.valor === valor);
+  const esquemaSubtipo = z
+    .string()
+    .nullable()
+    .optional()
+    .refine(subtipoValido, 'Elegí un subtipo válido.');
   return {
     slug: def.slug,
     CuerpoPaso2: CuerpoPaso2Generico,
-    valoresIniciales: () => ({ detalle: {} }),
+    valoresIniciales: () => ({
+      detalle: {},
+      subtipo: undefined,
+      ubicacion_tipo: def.ubicacionTipoPorDefecto,
+    }),
     aDetalle: (valores) => detalleDe(valores),
+    subtipo: (valores) => valores.subtipo,
     puedeAvanzarPaso2: (valores) =>
+      subtipoValido(valores.subtipo) &&
       def.preguntas.filter((p) => p.obligatoria).every((p) => respondida(p, detalleDe(valores))),
-    pasoDeCampo: { detalle: 2 },
-    filasRevision: (valores) => filasRevisionDeclarativas(def, detalleDe(valores)),
+    pasoDeCampo: { detalle: 2, subtipo: 2 },
+    filasRevision: (valores) => {
+      const opcion = subtipos.find((o) => o.valor === valores.subtipo);
+      return [
+        ...(opcion ? [{ etiqueta: 'Subtipo', valor: opcion.etiqueta, paso: 2 }] : []),
+        ...filasRevisionDeclarativas(def, detalleDe(valores)),
+      ];
+    },
     previsualizarSeveridad: (valores) => previsualizarSeveridadGenerica(def, valores),
-    esquemaFormulario: NUCLEO_SCHEMA.extend({ detalle: def.esquemaDetalle }),
+    esquemaFormulario: NUCLEO_SCHEMA.extend({
+      detalle: def.esquemaDetalle,
+      subtipo: esquemaSubtipo,
+    }),
     prepararParaValidar: (valores) => ({
       ubicacion_tipo: valores.ubicacion_tipo,
       descripcion: valores.descripcion,
@@ -212,6 +259,7 @@ export function crearAdaptadorGenerico(
       fotos: valores.fotos,
       sitio_web: valores.sitio_web,
       detalle: detalleDe(valores),
+      subtipo: valores.subtipo,
     }),
   };
 }

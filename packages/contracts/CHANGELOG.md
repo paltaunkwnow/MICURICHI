@@ -1,5 +1,26 @@
 # Changelog — contracts
 
+## 0.22.0 — 2026-10-15
+
+**Ampliación compatible de la exportación GeoJSON (M5.0).** `ExportacionGeoJsonSchema.features`
+conserva el feature técnico anterior como primera rama y suma una variante derivada del mismo
+esquema. Esta variante exige `categoria` explícita, no vacía y distinta del literal `inundacion`,
+y admite `null` en `profundidad_estimada`, `frecuencia` y `causa_presunta`. Los otros tres campos
+planos de agua ya admitían nulos. Así acepta la representación multitemática de la migración 0020
+sin inventar datos de inundación.
+
+- El legado sin categoría y todos los payloads antes válidos se conservan, también los de otras
+  categorías con enums no nulos. Inundaciones y el legado siguen rechazando nulos en esos tres
+  enums. La exportación no normaliza slugs ni comprueba registro o actividad de categorías.
+- Geometría, propiedades técnicas, metadatos, totales y truncamiento conservan su validación.
+  `ReportePublicoSchema`, `ReporteTecnicoSchema` y sus features generales no cambian.
+- La unión y la condición de categoría quedan representadas en el OpenAPI generado mediante
+  `anyOf`, `minLength` y `pattern`, además de validarse con Zod. El tipo inferido
+  `ExportacionGeoJson` incluye los tres enums nullable.
+- Pruebas: `test/contrato-0-22.test.ts`, con compatibilidad, colecciones mixtas, nulos por
+  categoría, inválidos comunes/técnicos y representación OpenAPI. No se modifica ninguna prueba
+  anterior ni se activan nuevas categorías.
+
 ## 0.21.0 — 2026-10-10
 
 **Sin ruptura: textos de pantalla por categoría (M4, ADR 0009, 0021).** Aditivo. No cambia ningún

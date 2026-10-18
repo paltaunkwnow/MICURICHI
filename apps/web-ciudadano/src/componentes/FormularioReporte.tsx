@@ -111,6 +111,7 @@ import {
 } from '@/lib/ubicacion-dispositivo';
 import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { AccesoRequerido } from './AccesoRequerido';
+import { AnuncioCategoria } from './AnuncioCategoria';
 import { Aviso } from './Aviso';
 import { ErrorDeFoto, PieDeRevision } from './AvisosDelReporte';
 import { CamaraReporte } from './CamaraReporte';
@@ -341,11 +342,15 @@ export function FormularioReporte() {
     [],
   );
 
+  const tipoLugarElegido = useRef(false);
   const form = useForm<ValoresFormulario>({
     resolver,
     context: { ubicacion },
     mode: 'onSubmit',
-    defaultValues: { ...valoresIniciales(), ...(adaptador?.valoresIniciales() ?? {}) },
+    defaultValues: {
+      ...valoresIniciales(definicion?.ubicacionTipoPorDefecto),
+      ...(adaptador?.valoresIniciales() ?? {}),
+    },
   });
   const valores = form.watch();
 
@@ -433,6 +438,7 @@ export function FormularioReporte() {
     // No se restaura un borrador de otra categoría (ADR 0021): sus respuestas del paso 2 no servirían.
     const b = leerBorrador(categoriaForm ?? undefined);
     if (b && borradorTieneContenido(b)) {
+      tipoLugarElegido.current = b.valores.ubicacion_tipo !== undefined;
       claveEnvio.current = b.clave;
       form.reset({ ...form.getValues(), ...b.valores });
       setFotos(b.fotos);
@@ -478,7 +484,11 @@ export function FormularioReporte() {
     olvidarBorrador();
     claveEnvio.current = nuevaClaveIdempotencia();
     congelado.current.soltar();
-    form.reset({ ...valoresIniciales(), ...(adaptador?.valoresIniciales() ?? {}) });
+    tipoLugarElegido.current = false;
+    form.reset({
+      ...valoresIniciales(definicion?.ubicacionTipoPorDefecto),
+      ...(adaptador?.valoresIniciales() ?? {}),
+    });
     setResolviendo(false);
     setFotos([]);
     // Una foto a medio subir es del formulario que se descarta: su miniatura se suelta con las
@@ -520,7 +530,13 @@ export function FormularioReporte() {
     if (!def) return;
     const nuevo = adaptadorFormularioDe(def);
     setCategoriaElegida(slug);
-    form.reset(valoresTrasCambiarCategoria(form.getValues(), nuevo.valoresIniciales()));
+    form.reset(
+      valoresTrasCambiarCategoria(
+        form.getValues(),
+        { ...valoresIniciales(def.ubicacionTipoPorDefecto), ...nuevo.valoresIniciales() },
+        tipoLugarElegido.current,
+      ),
+    );
     form.clearErrors();
     const nuevaUrl = urlTrasElegirCategoria(window.location.href, slug, activas.length);
     if (nuevaUrl) {
@@ -965,13 +981,7 @@ export function FormularioReporte() {
         <p className="sr-only" aria-live="polite">
           Paso {paso} de {PASOS}
         </p>
-        {/* Anuncio de D1: solo aparece si la URL traía una categoría inválida o inactiva. Con una
-            sola categoría activa y sin parámetro, no hay anuncio y el DOM es el de siempre. */}
-        {anuncioCategoria ? (
-          <p className="sr-only" aria-live="assertive" data-testid="anuncio-categoria">
-            {anuncioCategoria}
-          </p>
-        ) : null}
+        <AnuncioCategoria mensaje={anuncioCategoria} />
 
         {/* Cuántos le quedan hoy a la cuenta. Es aviso, no control: decide el servidor al enviar. */}
         {reportesRestantesHoy !== null ? (
@@ -1499,6 +1509,7 @@ export function FormularioReporte() {
                     texto={ETIQUETAS.ubicacion_tipo[t]}
                     marcado={valores.ubicacion_tipo === t}
                     onCambio={() => {
+                      tipoLugarElegido.current = true;
                       form.setValue('ubicacion_tipo', t);
                       form.clearErrors('ubicacion_tipo');
                     }}

@@ -159,8 +159,10 @@ Desde M4 la web trabaja **por categoría** (ADR [0009](../../docs/decisiones/000
 `contracts` (0.21.0). Una `DefinicionCategoria` trae los textos de pantalla, el icono (su nombre),
 los colores, las `preguntas` del paso 2, el esquema del `detalle`, la severidad, los filtros con
 alcance y los `camposPublicos`; el código común lee eso y no pregunta por una categoría concreta
-(ADR 0009 §6.3). **Con una sola categoría activa no cambia nada visible**: sin selector, los mismos
-textos, pasos, `name` y `data-testid`, y la URL no lleva `?categoria=`.
+(ADR 0009 §6.3). Con una sola categoría activa no aparece selector y se conservan pasos,
+`name`, `data-testid` y URL sin `?categoria=`. En el cierre de M4 se corrigió el texto de cupo:
+«Te quedan N reportes hoy», sin un máximo supuesto. El anuncio de categoría mantiene una región
+invisible vacía desde el montaje y actualiza su contenido después, incluso con una sola activa.
 
 ### Cuáles hay
 
@@ -231,7 +233,7 @@ mirando el `alcance` de cada `FiltroDef` de la definición **nueva**, no una lis
 | Selección, hoja de detalle, búsqueda escrita | Se limpian |
 
 Además se guarda la preferencia, se corrige la URL (D1) y la región `aria-live`
-(`data-testid="anuncio-categoria"`, que solo existe con dos o más activas o con un aviso que dar)
+(`data-testid="anuncio-categoria"`, presente y vacía antes de actualizar el mensaje)
 anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categoría nueva**
 (`textoAnuncioCategoria`). La URL no guarda los demás filtros del mapa: siguen en memoria.
 
@@ -249,7 +251,8 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
   quedan en «Buscando puntos…» hasta que llegan los de la nueva. Los agregados no tienen
   `placeholderData`, y `Mapa` recibe `claveDeDatos={categoria}`: cuando cambia, descarta el relleno
   y los conteos por unidad vecinal y distrito de la anterior (`limpiarConteosDeCapas`,
-  `src/lib/conteos-mapa.ts`).
+  `src/lib/conteos-mapa.ts`). Las fusiones asíncronas de etiquetas se invalidan por mapa y fuente:
+  una respuesta tardía de otra serie o de una limpieza no puede sobrescribir la vigente.
 - **Sigue sin haber tráfico automático**: la categoría es un parámetro, no una petición nueva.
   Cambiar de categoría pide la nueva una vez; `['reportes']` y `['agregados']` mantienen
   `staleTime: Infinity`, así que volver a una ya vista usa lo que siga en memoria.
@@ -294,8 +297,9 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
   adaptador (`adaptadorFormularioDe(definicion)`, `src/componentes/formulario-categorias/`) lo
   propio: `CuerpoPaso2`, `ExtraPaso3`, `valoresIniciales`, `puedeAvanzarPaso2`, `pasoDeCampo`,
   `filasRevision`, `previsualizarSeveridad`, `aDetalle`, `subtipo` y el esquema de validación
-  (`esquemaFormulario`, `prepararParaValidar`). El adaptador es `ADAPTADORES_FORMULARIO[slug]` o,
-  si no hay, el **declarativo** de su definición:
+  (`esquemaFormulario`, `prepararParaValidar`). Se resuelve por
+  `ADAPTADORES_FORMULARIO[definicion.componenteEspecialPaso2]`; si el identificador está ausente,
+  usa el **declarativo**. Un identificador presente sin registro falla explícitamente:
   - **Inundaciones** (componente especial, `inundacion.tsx`): el paso 2 de siempre, extraído sin
     cambios —fecha del evento, profundidad, frecuencia y severidad con su puntaje—, y el bloque de
     causa y sumidero del paso 3, con la lógica condicional del sumidero que una `Pregunta` no
@@ -303,7 +307,10 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
   - **Declarativo** (`generico.tsx`, `crearAdaptadorGenerico`): dibuja las `preguntas` de la
     definición (`opcion_unica`, `opcion_multiple`, `booleana`) bajo `detalle.<id>`, exige las
     `obligatoria`, valida el núcleo más `def.esquemaDetalle`, arma la revisión desde las respuestas
-    y previsualiza la banda con `def.severidad.calcular` (sin puntaje).
+    y previsualiza la banda con `def.severidad.calcular` (sin puntaje). Si la definición ofrece
+    `subtipos`, pide elegir una opción y la conserva en revisión, borrador y envío. Aplica
+    `ubicacionTipoPorDefecto`; al cambiar categoría conserva el tipo de lugar ya elegido por la
+    persona, y si no lo eligió adopta el defecto nuevo. Un borrador restaurado conserva su lugar.
 - **El cuerpo** (D2 del plan M4). `armarEnvio` manda **la forma por categoría para todas, también
   Inundaciones**: `{ lat, lon, dispositivo, ubicacion_aproximada, ubicacion_tipo, descripcion,
   evento_en, fotos, sitio_web, categoria, detalle, subtipo? }` (`CuerpoReporte`, de
@@ -314,8 +321,9 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
 - **El borrador es del formato 3** y guarda la `categoria` (ver
   [El formulario no pierde lo escrito](#el-formulario-no-pierde-lo-escrito)).
 - **Cupo y demora por categoría.** `restantesDeCategoria` y `demoraDeCategoria`
-  (`src/lib/cupo.ts`, `src/lib/publicacion.ts`) leen `cupos[categoria]` de `GET /auth/yo`: 3
-  reportes por día **por categoría**; el cupo de fotos (12) es global. Si falta, caen a los campos
+  (`src/lib/cupo.ts`, `src/lib/publicacion.ts`) leen `cupos[categoria]` de `GET /auth/yo`:
+  restantes y demora por categoría. El límite predeterminado es 3, configurable en el servidor;
+  la UI no lo supone a partir del contrato. El cupo de fotos (12) es global. Si falta, caen a los campos
   sueltos (`reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde`), que valen para
   Inundaciones y para un api-core anterior a 0.20.0. Con el cupo de la categoría agotado se avisa
   antes de pedir la ubicación. Un `CATEGORIA_NO_DISPONIBLE` del servidor tiene su texto en
@@ -334,27 +342,22 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
    (`componentes/categorias/iconos.ts`; si falta, se usa el pin de mapa). Con eso ya funcionan el
    selector, las lecturas, los textos, el detalle y la tarjeta genéricos, el paso 2 declarativo, el
    borrador, el cupo y los enlaces.
-3. **Cuándo hace falta algo especial** (se registra por slug y el código común no cambia):
+3. **Cuándo hace falta algo especial** (el código común no cambia):
    - un **presentador** (`PRESENTADORES` en `categorias/registro.ts`) si el detalle o la tarjeta no
      se arman con «etiqueta de la pregunta, etiqueta de la opción» sobre `camposPublicos`;
    - un **adaptador de formulario** (`ADAPTADORES_FORMULARIO` en
      `formulario-categorias/registro.ts`) si el paso 2 necesita algo que `Pregunta` no expresa:
      preguntas condicionales como las del sumidero, controles propios o una severidad con puntaje.
-     Hoy solo Inundaciones registra ambos. El adaptador se elige por `definicion.slug`; la web no
-     lee `componenteEspecialPaso2`.
+     Hoy solo Inundaciones registra ambos. El presentador se elige por slug y el adaptador por
+     `definicion.componenteEspecialPaso2`, con error explícito si falta ese identificador en el registro.
 4. **Pruebas**: Vitest con una segunda categoría sintética (`src/lib/categoria-de-prueba.ts`,
    `REGISTRO_DOS_CATEGORIAS`), que solo importan los `*.test.ts`: no hay una categoría de prueba
    en el bundle. El E2E del cambio de categoría pasa a M6 (D3 del plan M4), cuando exista una
    segunda real.
-5. **Lo que la web todavía no lee de la definición**, a resolver al sumar la segunda:
-   - `subtipos`: el adaptador declarativo no los dibuja ni los envía (`AdaptadorEnvio.subtipo` es
-     opcional y `crearAdaptadorGenerico` no lo define); una categoría con subtipos necesita
-     soporte en el genérico o un adaptador propio;
-   - `ubicacionTipoPorDefecto`: el formulario arranca siempre en `via_publica`
-     (`valoresIniciales` de `formulario-reporte.ts`);
-   - `cupo.limite`: `textoCupo`, `TEXTO_CUPO_AGOTADO` y `/como-funciona` toman el límite de
-     `CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA` y no dicen que el cupo es por categoría, y
-     `/cuenta` (`PanelCuenta`) muestra el cupo de los campos sueltos (Inundaciones).
+5. **Cupo efectivo:** la UI consume restantes y demora del servidor, porque el límite de la
+   definición puede ser sustituido por la configuración de la instalación. `/cuenta` muestra
+   aún los campos sueltos de Inundaciones; el selector de cupos de cuenta queda para una fase
+   posterior. Subtipos y ubicación por defecto ya están cubiertos por el formulario común.
 6. **Escrito todavía para Inundaciones**: la portada (`/inicio`), `descripcionDeInicio`
    (`src/lib/ciudad.ts`) y `CupoAgotado`.
 

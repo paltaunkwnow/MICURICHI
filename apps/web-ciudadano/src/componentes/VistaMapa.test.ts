@@ -41,10 +41,10 @@ afterEach(() => vi.unstubAllGlobals());
 describe('el mapa con una sola categoría activa es el de siempre', () => {
   const { marcado, peticiones } = pantalla(['inundacion']);
 
-  it('sin selector ni región de anuncio', () => {
+  it('sin selector y con región de anuncio vacía desde el primer render', () => {
     expect(marcado).not.toContain('tablist');
     expect(marcado).not.toContain('role="tab"');
-    expect(marcado).not.toContain('anuncio-categoria');
+    expect(marcado).toContain('data-testid="anuncio-categoria"></p>');
     expect(marcado).not.toContain('selector-categoria');
   });
 

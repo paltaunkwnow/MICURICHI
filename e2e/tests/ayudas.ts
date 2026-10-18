@@ -271,13 +271,15 @@ export const ETIQUETA_PUBLICA = {
   resuelto: 'Resuelto',
 } as const;
 
-/** «Te quedan N de 3 reportes hoy» (`cupo-reportes` del formulario y `cupo-cuenta` de la cuenta). */
+/** Restantes informados por el servidor, sin suponer el límite de la instalación. */
 export function textoCupo(restantes: number) {
-  return `Te quedan ${restantes} de ${REPORTES_POR_DIA} reportes hoy`;
+  return `Te quedan ${restantes} reportes hoy`;
 }
 
-/** El mensaje del 429 `CUOTA_DE_REPORTES`, el mismo en api-core y en la app pública. */
-export const TEXTO_CUPO_AGOTADO = `Ya enviaste los ${REPORTES_POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.`;
+/** Aviso visual de cupo agotado; el error HTTP mantiene su contrato anterior. */
+export const TEXTO_CUPO_AGOTADO =
+  'Agotaste el cupo de reportes de hoy para esta categoría. Vas a poder enviar otro mañana.';
+export const TEXTO_CUPO_AGOTADO_API = `Ya enviaste los ${REPORTES_POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.`;
 
 /** Lo que dice la cuenta regresiva de la confirmación (`cuenta-regresiva`) al llegar a cero. */
 export const TEXTO_YA_PUBLICADO = 'Ya está publicado · recargá el mapa para verlo';

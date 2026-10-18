@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReporteFeature } from '@/lib/api';
 import { centroDeCiudad, etiquetaDelMapa } from '@/lib/ciudad';
 import { useCiudad } from '@/lib/ciudad-contexto';
-import { limpiarConteosDeCapas } from '@/lib/conteos-mapa';
+import { fusionarDatosVigentes, invalidarFusion, limpiarConteosDeCapas } from '@/lib/conteos-mapa';
 import { colorSeveridad, etiquetaSeveridad } from '@/lib/formato';
 import {
   BANDAS_CLUSTER,
@@ -1090,7 +1090,7 @@ const esCapaDibujada = (capa: string): capa is CapaDibujada =>
  * lee de un vistazo, igual que en el prototipo. El conteo se toma de los agregados de
  * geo-service, que ya vienen por unidad vecinal y con su distrito.
  */
-function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
+export function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
   const porUv = new Map(agregados.map((a) => [a.unidad_vecinal_id, a.n_reportes]));
   // El color de gravedad de cada UV sale solo de lo verificado (`verificacion.ts`).
   const estadosUv = new Map(agregados.map((a) => [a.unidad_vecinal_id, estadoDeUv(a)]));
@@ -1117,8 +1117,9 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
       const cambio = apuntarFuenteA(existente, c, origen);
       if (cambio !== 'otro-modo') {
         actualizarConteos(m, c, porUv, porDistrito, estadosUv);
-        if (cambio === 'cambiada')
-          void fusionarConteosEnLaCapa(m, c, porUv, porDistrito, estadosUv);
+        // La geometría suele conservar la URL al cambiar la serie. El control de fusiones
+        // deduplica la serie vigente y descarta cualquier respuesta anterior.
+        void fusionarConteosEnLaCapa(m, c, porUv, porDistrito, estadosUv);
         continue;
       }
       for (const sufijo of ['-relleno', '-linea', '-nombre'])
@@ -1216,7 +1217,6 @@ function aplicarCapas(m: MapaGl, capas: CapaInfo[], agregados: AgregadoUv[]) {
  * 378 KB, las dos por debajo del tope, así que las dos llevan su conteo escrito.
  */
 const MAX_BYTES_ETIQUETA = 600_000;
-const yaFusionadas = new Set<string>();
 
 /**
  * Colores de distrito del prototipo. Se reparten por el código de la capa, de forma estable, para
@@ -1251,58 +1251,54 @@ async function fusionarConteosEnLaCapa(
   const esUv = c.capa === 'unidad_vecinal';
   const tabla = esUv ? porUv : porDistrito;
   if (tabla.size === 0 && !conTablaVacia) return;
-  let verificados = 0;
-  for (const e of estadosUv.values()) verificados += e.nVerificados;
   // La URL lleva la huella del contenido: la misma versión recargada con otra geometría es otra.
   // Los verificados también cuentan: la marca «NO SE HA VERIFICADO» de la etiqueta cambia con ellos.
-  const clave = `capa-${c.capa}|${c.url}|${[...tabla.values()].reduce((a, b) => a + b, 0)}|${esUv ? verificados : ''}`;
-  if (yaFusionadas.has(clave)) return;
-  yaFusionadas.add(clave);
+  const clave = JSON.stringify([c.url, [...tabla], esUv ? [...estadosUv] : []]);
   const fuente = m.getSource(`capa-${c.capa}`) as maplibregl.GeoJSONSource | undefined;
   if (!fuente) return;
-  try {
-    // El mapa ya pidió esta misma URL, así que sale de la caché del navegador.
-    const r = await fetch(c.url);
-    // Un 410 CAPA_CAMBIO trae un error en JSON, no la capa: meterlo en la fuente la borraría.
-    // Ese mismo 410 le llega al mapa, que vuelve a pedir la lista de capas.
-    if (!r.ok) return;
-    const datos = (await r.json()) as GeoJSON.FeatureCollection;
-    // Mientras bajaba, la fuente pudo pasar a otra huella: no se le pisa con la vieja.
-    if (urlDeFuente(fuente) !== c.url) return;
-    for (const f of datos.features ?? []) {
-      const p = (f.properties ?? {}) as Record<string, unknown>;
-      const n = tabla.get(String(p.id ?? '')) ?? 0;
-      p.n = n;
-      p.etiqueta = etiquetaDeUv(String(p.nombre ?? ''), {
-        n,
-        // En distritos no se marca: la marca es de la gravedad por barrio, que es por UV.
-        nVerificados: esUv ? (estadosUv.get(String(p.id ?? ''))?.nVerificados ?? 0) : n,
-      });
-      p.color = colorDeUnidad(String(p.distrito_id || p.id || ''));
-      f.properties = p;
-    }
-    fuente.setData(datos);
-  } catch {
-    // Sin conteo en la etiqueta: la capa sigue dibujándose con su nombre y su relleno.
-  }
+  await fusionarDatosVigentes(
+    m,
+    `capa-${c.capa}`,
+    clave,
+    fuente,
+    async () => {
+      // El mapa ya pidió esta misma URL, así que sale de la caché del navegador.
+      const r = await fetch(c.url);
+      // Un 410 CAPA_CAMBIO trae un error en JSON, no la capa: meterlo en la fuente la borraría.
+      // Ese mismo 410 le llega al mapa, que vuelve a pedir la lista de capas.
+      if (!r.ok) throw new Error('Capa no disponible');
+      return (await r.json()) as GeoJSON.FeatureCollection;
+    },
+    (datos) => {
+      // Mientras bajaba, la fuente pudo pasar a otra huella: no se le pisa con la vieja.
+      if (m.getSource(`capa-${c.capa}`) !== fuente || urlDeFuente(fuente) !== c.url) return;
+      for (const f of datos.features ?? []) {
+        const p = (f.properties ?? {}) as Record<string, unknown>;
+        const n = tabla.get(String(p.id ?? '')) ?? 0;
+        p.n = n;
+        p.etiqueta = etiquetaDeUv(String(p.nombre ?? ''), {
+          n,
+          // En distritos no se marca: la marca es de la gravedad por barrio, que es por UV.
+          nVerificados: esUv ? (estadosUv.get(String(p.id ?? ''))?.nVerificados ?? 0) : n,
+        });
+        p.color = colorDeUnidad(String(p.distrito_id || p.id || ''));
+        f.properties = p;
+      }
+      fuente.setData(datos);
+    },
+  );
 }
 
 /**
  * Cambió la categoría: se quita el relleno por `feature-state` de las capas, se olvidan las fusiones
- * que recuerda `yaFusionadas` (volver a una categoría ya vista la daría por escrita cuando en la
+ * que recuerda el control de fusiones (volver a una categoría ya vista la daría por escrita cuando en la
  * fuente quedaron los conteos de la otra) y, si la categoría nueva todavía no trae agregados, las
  * etiquetas vuelven al nombre a secas. Con agregados ya a mano (la categoría estaba en caché) eso
  * último no hace falta: `aplicarCapas` los escribe enseguida.
  */
-function reiniciarConteos(m: MapaGl, capas: CapaInfo[], sinAgregados: boolean) {
+export function reiniciarConteos(m: MapaGl, capas: CapaInfo[], sinAgregados: boolean) {
   for (const c of limpiarConteosDeCapas(m, capas)) {
-    const prefijo = `capa-${c.capa}|`;
-    let habiaFusion = false;
-    for (const clave of [...yaFusionadas])
-      if (clave.startsWith(prefijo)) {
-        yaFusionadas.delete(clave);
-        habiaFusion = true;
-      }
+    const habiaFusion = invalidarFusion(m, `capa-${c.capa}`);
     if (habiaFusion && sinAgregados)
       void fusionarConteosEnLaCapa(m, c, new Map(), new Map(), new Map(), true);
   }

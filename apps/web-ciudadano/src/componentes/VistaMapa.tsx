@@ -42,6 +42,7 @@ import {
 } from '@/lib/mapa-datos';
 import { useUbicacionUsuario } from '@/lib/useUbicacionUsuario';
 import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
+import { AnuncioCategoria } from './AnuncioCategoria';
 import { Aviso } from './Aviso';
 import { AvisoUbicacionAlReportar } from './AvisoUbicacionAlReportar';
 import { BarraInferior } from './BarraInferior';
@@ -759,12 +760,7 @@ export function VistaMapa() {
           <p className="sr-only" role="status" data-testid="resumen-mapa">
             {textoResumen}
           </p>
-          {/* Cambio de categoría y URL que no se pudo usar. Con una sola categoría y sin aviso, no existe. */}
-          {activas.length >= 2 || mensajeVivo ? (
-            <p className="sr-only" role="status" aria-live="polite" data-testid="anuncio-categoria">
-              {mensajeVivo}
-            </p>
-          ) : null}
+          <AnuncioCategoria mensaje={mensajeVivo} />
 
           {/* Móvil: buscador y filtros flotan sobre el mapa (C-01). */}
           <div className="flot inset-x-3 top-3 md:hidden">

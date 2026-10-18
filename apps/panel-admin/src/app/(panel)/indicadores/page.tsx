@@ -1,6 +1,6 @@
 'use client';
 
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import type { Severidad } from 'contracts';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useMemo } from 'react';
@@ -9,6 +9,8 @@ import { CapaAnterior } from '@/componentes/CapaAnterior';
 import { FiltroSeveridad } from '@/componentes/indicadores/FiltroSeveridad';
 import { PestanasPorSeveridad } from '@/componentes/indicadores/PestanasPorSeveridad';
 import { TortaReportes } from '@/componentes/indicadores/TortaReportes';
+import { SeleccionCategoriaPanel } from '@/componentes/SeleccionCategoriaPanel';
+import { useCategoriaPanel } from '@/lib/categoria-panel';
 import { consultaIndicadores, consultaResumenEjecutivo } from '@/lib/consultas';
 import { distritosCapaAnterior } from '@/lib/ejecutivo';
 import { alternarEnLista } from '@/lib/filtros';
@@ -62,27 +64,43 @@ export default function Indicadores() {
 }
 
 function ContenidoIndicadores() {
+  const ambito = useCategoriaPanel();
+  const categoria = ambito.categoria;
+  const habilitada = categoria !== null;
   const sp = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
 
   // Severidades elegidas y distrito seleccionado viven en la URL (?severidad=…&distrito=…), para
   // poder compartir el enlace y para que el sondeo de 10 s siga pidiendo lo mismo.
-  const estado = useMemo(() => leerEstadoTorta(new URLSearchParams(sp.toString())), [sp]);
-  const paramsBase = useMemo(() => paramsIndicadores(estado.severidades), [estado.severidades]);
+  const estado = useMemo(() => {
+    const e = leerEstadoTorta(new URLSearchParams(sp.toString()));
+    return ambito.cambioAmbito ? { ...e, severidades: [] } : e;
+  }, [sp, ambito.cambioAmbito]);
+  const paramsBase = useMemo(
+    () => ({ ...paramsIndicadores(estado.severidades), categoria: categoria ?? undefined }),
+    [estado.severidades, categoria],
+  );
   // La torta de UV se acota al distrito elegido con una segunda consulta (`distrito_id`), que solo
   // sale cuando hay un distrito seleccionado.
   const paramsDistrito = useMemo(
-    () => paramsIndicadores(estado.severidades, estado.distrito || undefined),
-    [estado.severidades, estado.distrito],
+    () => ({
+      ...paramsIndicadores(estado.severidades, estado.distrito || undefined),
+      categoria: categoria ?? undefined,
+    }),
+    [estado.severidades, estado.distrito, categoria],
   );
 
   const navegar = useCallback(
     (nuevo: EstadoTorta) => {
-      const q = serializarEstadoTorta(nuevo).toString();
+      const siguiente = new URLSearchParams(sp.toString());
+      siguiente.delete('severidad');
+      siguiente.delete('distrito');
+      for (const [k, v] of serializarEstadoTorta(nuevo)) siguiente.set(k, v);
+      const q = siguiente.toString();
       router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
     },
-    [pathname, router],
+    [pathname, router, sp],
   );
   const alternarSeveridad = useCallback(
     (s: Severidad) =>
@@ -104,23 +122,25 @@ function ContenidoIndicadores() {
   );
 
   const consulta = useQuery({
-    ...consultaIndicadores(paramsBase),
-    placeholderData: keepPreviousData,
+    ...consultaIndicadores(paramsBase, habilitada),
   });
   // Los números de los botones de «Por severidad» salen de los indicadores SIN filtro de severidad,
   // así no cambian al filtrar. Sin filtro tiene la misma clave que `consulta` y no sale ninguna
   // petición extra; con filtro es una consulta más, que sigue el sondeo de 10 s como las demás. Su
   // clave nunca cambia: no hay un «dato anterior» que mantener (`keepPreviousData` no haría nada).
-  const conteos = useQuery(consultaIndicadores(PARAMS_CONTEOS_PESTANAS));
-  const resumen = useQuery(consultaResumenEjecutivo());
+  const conteos = useQuery(
+    consultaIndicadores(
+      { ...PARAMS_CONTEOS_PESTANAS, categoria: categoria ?? undefined },
+      habilitada,
+    ),
+  );
+  const resumen = useQuery(consultaResumenEjecutivo(categoria ?? undefined, habilitada));
   const consultaUvDistrito = useQuery({
-    ...consultaIndicadores(paramsDistrito),
-    placeholderData: keepPreviousData,
-    enabled: estado.distrito !== '',
+    ...consultaIndicadores(paramsDistrito, habilitada && estado.distrito !== ''),
   });
 
-  const capaAnterior = resumen.data ? distritosCapaAnterior(resumen.data) : [];
-  const d = consulta.data;
+  const capaAnterior = habilitada && resumen.data ? distritosCapaAnterior(resumen.data) : [];
+  const d = habilitada ? consulta.data : undefined;
 
   const porcionesDistrito = useMemo(
     () =>
@@ -134,7 +154,7 @@ function ContenidoIndicadores() {
   );
 
   // Fuente de la torta de UV: la consulta acotada si hay distrito; si no, la base (toda la ciudad).
-  const datosUv = estado.distrito ? consultaUvDistrito.data : d;
+  const datosUv = !habilitada ? undefined : estado.distrito ? consultaUvDistrito.data : d;
   const porcionesUv = useMemo(
     () =>
       calcularPorciones(
@@ -170,6 +190,15 @@ function ContenidoIndicadores() {
         </p>
       </div>
 
+      <SeleccionCategoriaPanel ambito={ambito} tipo="indicadores" />
+      <Aviso tipo="alerta">{ambito.aviso}</Aviso>
+      {categoria && categoria !== 'inundacion' && (
+        <p className="ayuda">
+          {categoria === 'todas'
+            ? 'Todas incluye el historial de categorías inactivas. Se cuentan bandas comunes; los puntajes de modelos distintos no se comparan.'
+            : ambito.registro.obtener(categoria)?.notaMetodologica}
+        </p>
+      )}
       <FiltroSeveridad seleccionadas={estado.severidades} onAlternar={alternarSeveridad} />
 
       <Aviso tipo="alerta" testId="indicadores-sin-actualizar">
@@ -178,7 +207,11 @@ function ContenidoIndicadores() {
           : null}
       </Aviso>
 
-      {consulta.isPending ? (
+      {!habilitada ? (
+        <p role="status">
+          Sin categoría seleccionada. No hay categorías disponibles para consultar.
+        </p>
+      ) : consulta.isPending ? (
         <p aria-live="polite">Calculando indicadores…</p>
       ) : !d ? (
         <p className="error" aria-live="polite">
@@ -194,7 +227,7 @@ function ContenidoIndicadores() {
 
           <PestanasPorSeveridad
             seleccionadas={estado.severidades}
-            conteos={conteos.data ?? null}
+            conteos={conteos.error ? null : (conteos.data ?? null)}
             onElegir={elegirPestana}
           />
 
@@ -246,7 +279,7 @@ function ContenidoIndicadores() {
                 vacioTexto="No hay reportes con estas severidades."
                 accion={{
                   modo: 'enlace',
-                  href: (p) => urlBandejaUv(p.id, estado.severidades),
+                  href: (p) => urlBandejaUv(p.id, estado.severidades, categoria ?? undefined),
                   pista: 'Abrir la bandeja filtrada por esta unidad vecinal',
                 }}
               />
@@ -259,7 +292,14 @@ function ContenidoIndicadores() {
             </Aviso>
           ) : null}
 
-          {capaAnterior.length ? <CapaAnterior filas={capaAnterior} /> : null}
+          {capaAnterior.length ? (
+            <CapaAnterior
+              filas={capaAnterior}
+              tituloActivas={
+                categoria === 'inundacion' ? 'Inundaciones activas' : 'Reportes activos'
+              }
+            />
+          ) : null}
         </>
       )}
     </div>

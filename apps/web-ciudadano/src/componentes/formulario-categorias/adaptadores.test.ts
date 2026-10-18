@@ -59,7 +59,7 @@ describe('el registro de adaptadores de formulario', () => {
     const bache = adaptadorFormularioDe(DEFINICION_BACHE_DE_PRUEBA);
     expect(bache).not.toBe(ADAPTADOR_INUNDACION);
     expect(bache.slug).toBe('bache');
-    expect(Object.keys(ADAPTADORES_FORMULARIO)).toEqual(['inundacion']);
+    expect(Object.keys(ADAPTADORES_FORMULARIO)).toEqual(['inundacion/paso2']);
   });
 
   it('el código común no pregunta por una categoría concreta (ADR 0009 §6.3)', () => {
@@ -209,12 +209,12 @@ describe('renderizador declarativo (categoría sin componente especial)', () => 
 
   it('la previsualización usa def.severidad.calcular y muestra SOLO la banda', () => {
     const adaptador = adaptadorFormularioDe(DEFINICION_BACHE_DE_PRUEBA);
-    // El esquema de la categoría de prueba es el de inundación: con un detalle válido da la banda.
+    // Las respuestas que ofrece el formulario satisfacen su esquema sintético.
     const sev = adaptador.previsualizarSeveridad({
       detalle: {
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-        causa_presunta: 'desconocida',
+        tamano: 'grande',
+        hay_riesgo: false,
+        afecta_a: [],
       },
     } as unknown as ValoresFormulario);
     expect(sev).toEqual({ banda: 'media' });

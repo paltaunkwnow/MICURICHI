@@ -68,3 +68,15 @@ e2e/tests/formulario-sumidero-y-fotos.spec.ts
 docs/decisiones/0015-prioridad-url-y-categoria-guardada.md
 docs/arquitectura/14-decisiones-m0-y-plan-m1.md
 apps/web-ciudadano/README.md
+apps/web-ciudadano/src/componentes/ComoFunciona.tsx
+apps/web-ciudadano/src/componentes/PanelCuenta.tsx
+apps/web-ciudadano/src/lib/cupo.test.ts
+apps/web-ciudadano/src/lib/errores.test.ts
+e2e/scripts/correr-local.mjs
+e2e/tests/ayudas.ts
+e2e/tests/cuenta-ciudadana.spec.ts
+apps/web-ciudadano/src/componentes/AnuncioCategoria.test.ts
+apps/web-ciudadano/src/componentes/AnuncioCategoria.tsx
+apps/web-ciudadano/src/componentes/formulario-categorias/generico.test.ts
+apps/web-ciudadano/src/componentes/formulario-categorias/registro.test.ts
+apps/web-ciudadano/src/componentes/Mapa-conteos.test.ts

@@ -39,6 +39,7 @@ export const PASOS_REPORTE = 4;
 export type ValoresFormulario = Omit<ReporteCrearEntrada, 'dispositivo'> & {
   /** Respuestas propias de una categoría con paso 2 declarativo (renderizador común). */
   detalle?: Record<string, unknown>;
+  subtipo?: string | null;
 };
 
 /** El cuerpo de `POST /api/v1/reportes` en la forma por categoría (D2 del plan M4). */
@@ -122,9 +123,11 @@ export function crearResolverFormulario(
  * categoría lo agrega el adaptador (`adaptador.valoresIniciales()`): el armazón los combina. Cada
  * llamada da un objeto nuevo, para que «Empezar de nuevo» no herede las fotos del anterior.
  */
-export function valoresIniciales(): Partial<ValoresFormulario> {
+export function valoresIniciales(
+  ubicacionTipo: ValoresFormulario['ubicacion_tipo'] = 'via_publica',
+): Partial<ValoresFormulario> {
   return {
-    ubicacion_tipo: 'via_publica',
+    ubicacion_tipo: ubicacionTipo,
     descripcion: '',
     fotos: [],
     sitio_web: '',
@@ -155,9 +158,11 @@ const CAMPOS_NUCLEO_CONSERVADOS = [
 export function valoresTrasCambiarCategoria(
   valores: ValoresFormulario,
   inicialesCategoriaNueva: Partial<ValoresFormulario>,
+  conservarTipoElegido = true,
 ): ValoresFormulario {
   const base: Record<string, unknown> = { ...valoresIniciales(), ...inicialesCategoriaNueva };
   for (const campo of CAMPOS_NUCLEO_CONSERVADOS) {
+    if (campo === 'ubicacion_tipo' && !conservarTipoElegido) continue;
     if (valores[campo] !== undefined) base[campo] = valores[campo];
   }
   return base as ValoresFormulario;

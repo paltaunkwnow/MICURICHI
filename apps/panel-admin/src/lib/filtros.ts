@@ -1,9 +1,14 @@
 import {
   BboxSchema,
+  type ConfiguracionPublica,
   ESTADOS_REPORTE,
   type EstadoReporte,
+  normalizarSlugCategoria,
+  REGISTRO_CATEGORIAS,
+  type RegistroCategorias,
   SEVERIDADES,
   type Severidad,
+  slugParaUrl,
 } from 'contracts';
 import type { ParametrosConsulta } from './api';
 
@@ -12,6 +17,7 @@ export const LIMITE_PAGINA = 50;
 
 /** Filtros de la tabla; viven en la URL para poder compartir enlaces. */
 export interface FiltrosReportes {
+  categoria?: string;
   estado: EstadoReporte[];
   severidad: Severidad[];
   distrito_id: string;
@@ -59,6 +65,7 @@ function bboxValido(valor: string | null): string {
 export function leerFiltros(sp: URLSearchParams): FiltrosReportes {
   const pagina = Number.parseInt(sp.get('pagina') ?? '1', 10);
   return {
+    ...(sp.has('categoria') ? { categoria: sp.get('categoria') ?? '' } : {}),
     estado: listaValida(sp.get('estado'), ESTADOS_REPORTE),
     severidad: listaValida(sp.get('severidad'), SEVERIDADES),
     distrito_id: sp.get('distrito_id')?.trim() ?? '',
@@ -73,6 +80,7 @@ export function leerFiltros(sp: URLSearchParams): FiltrosReportes {
 /** Serializa a la URL solo lo que tiene valor (la página 1 se omite). */
 export function serializarFiltros(f: FiltrosReportes): URLSearchParams {
   const sp = new URLSearchParams();
+  if (f.categoria) sp.set('categoria', categoriaParaUrl(f.categoria));
   if (f.estado.length) sp.set('estado', f.estado.join(','));
   if (f.severidad.length) sp.set('severidad', f.severidad.join(','));
   if (f.distrito_id) sp.set('distrito_id', f.distrito_id);
@@ -97,6 +105,7 @@ export function parametrosConsulta(f: FiltrosReportes): ParametrosConsulta {
 export function parametrosExportacion(f: FiltrosReportes): ParametrosConsulta {
   const filtroDeZona = f.distrito_id !== '' || f.unidad_vecinal_id !== '';
   return {
+    ...(f.categoria ? { categoria: f.categoria } : {}),
     estado: f.estado.length ? f.estado.join(',') : undefined,
     severidad: f.severidad.length ? f.severidad.join(',') : undefined,
     distrito_id: f.distrito_id || undefined,
@@ -138,4 +147,68 @@ export function hayFiltros(f: FiltrosReportes) {
 
 export function alternarEnLista<T>(lista: T[], valor: T): T[] {
   return lista.includes(valor) ? lista.filter((v) => v !== valor) : [...lista, valor];
+}
+
+export function disponiblesPanel(
+  configuracion: ConfiguracionPublica | null,
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
+) {
+  const slugs = [...new Set(configuracion?.categorias_activas ?? [])];
+  return slugs.flatMap((slug) => {
+    const definicion = registro.obtener(slug);
+    return definicion ? [definicion] : [];
+  });
+}
+
+export function resolverCategoriaPanel(
+  valor: string | null,
+  disponibles: readonly string[],
+  conocida = true,
+) {
+  if (!conocida) return { categoria: null, canonicalizar: false, cambioAmbito: false, aviso: null };
+  const inicial = disponibles.includes('inundacion') ? 'inundacion' : (disponibles[0] ?? null);
+  const normalizada = valor === 'todas' ? 'todas' : (normalizarSlugCategoria(valor ?? '') ?? valor);
+  const categoria =
+    disponibles.length === 1
+      ? (disponibles[0] ?? null)
+      : normalizada === 'todas' && disponibles.length > 1
+        ? 'todas'
+        : normalizada && disponibles.includes(normalizada)
+          ? normalizada
+          : inicial;
+  const canonicalizar =
+    valor !== null && valor !== (categoria === null ? null : categoriaParaUrl(categoria));
+  const invalida = valor !== null && (categoria === null || normalizada !== categoria);
+  return {
+    categoria,
+    canonicalizar,
+    cambioAmbito: invalida,
+    aviso: invalida
+      ? 'La categoría de la URL no está disponible. Se ajustó la selección del panel.'
+      : null,
+  };
+}
+
+export function cambiarCategoriaFiltros(
+  filtros: FiltrosReportes,
+  categoria: string,
+): FiltrosReportes {
+  return { ...filtros, categoria, severidad: [], pagina: 1 };
+}
+
+export function categoriaParaUrl(categoria: string): string {
+  const conocida = normalizarSlugCategoria(categoria);
+  return conocida ? slugParaUrl(conocida) : categoria;
+}
+
+/** Se aplica antes de crear parámetros/queries, sin esperar el commit de canonicalización. */
+export function filtrosDelAmbitoPanel(
+  sp: URLSearchParams,
+  ambito: { categoria: string | null; cambioAmbito: boolean },
+): FiltrosReportes {
+  return {
+    ...leerFiltros(sp),
+    categoria: ambito.categoria ?? '',
+    ...(ambito.cambioAmbito ? { severidad: [], pagina: 1 } : {}),
+  };
 }

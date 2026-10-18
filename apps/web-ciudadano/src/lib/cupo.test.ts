@@ -65,10 +65,11 @@ describe('cuántos reportes le quedan hoy a la cuenta', () => {
     expect(reportesRestantes(null)).toBeNull();
   });
 
-  it('«Te quedan N de 3 reportes hoy»', () => {
-    expect(textoCupo(1)).toBe('Te quedan 1 de 3 reportes hoy');
-    expect(textoCupo(3)).toBe('Te quedan 3 de 3 reportes hoy');
-    expect(textoCupo(0)).toBe('Te quedan 0 de 3 reportes hoy');
+  it('muestra los restantes sin inventar el límite de la instalación', () => {
+    expect(textoCupo(1)).toBe('Te quedan 1 reportes hoy');
+    expect(textoCupo(3)).toBe('Te quedan 3 reportes hoy');
+    expect(textoCupo(0)).toBe('Te quedan 0 reportes hoy');
+    expect(textoCupo(5)).toBe('Te quedan 5 reportes hoy');
   });
 });
 
@@ -99,9 +100,9 @@ describe('la puerta del cupo del formulario', () => {
       const html = renderToStaticMarkup(createElement(CupoAgotado));
       expect(html).toContain(TEXTO_CUPO_AGOTADO);
       expect(TEXTO_CUPO_AGOTADO).toBe(
-        'Ya enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.',
+        'Agotaste el cupo de reportes de hoy para esta categoría. Vas a poder enviar otro mañana.',
       );
-      expect(html).toContain('Te quedan 0 de 3 reportes hoy');
+      expect(html).toContain('Te quedan 0 reportes hoy');
       expect(html).toMatch(/data-testid="cupo-agotado"/);
       expect(html).not.toContain('boton-compartir-ubicacion');
       expect(html).not.toMatch(/Sacar foto/);

@@ -25,6 +25,23 @@ pnpm --filter contracts typecheck
 
 Regla: todo cambio aquí es cambio de contrato. Se anuncia en el plan de la tarea, se versiona en `CHANGELOG.md` y lo revisa la Parte 3.
 
+## Exportación GeoJSON multitemática (0.22.0)
+
+`ExportacionGeoJsonSchema` conserva el feature técnico legado y acepta además una variante
+con `categoria` explícita, no vacía y distinta del literal `inundacion`: sus campos planos
+`profundidad_estimada`, `frecuencia` y `causa_presunta` admiten `null`, como requiere la
+representación de otras categorías en la migración 0020. Los otros tres campos planos de agua
+ya admitían nulos. Una colección puede mezclar ambas representaciones.
+
+Los payloads antes válidos se conservan, incluidos el legado sin categoría y otras categorías
+con enums no nulos. Inundaciones y el legado siguen exigiendo los tres enums no nulos. La
+geometría, las propiedades técnicas y los metadatos de exportación mantienen su validación.
+La condición también se publica en OpenAPI mediante la unión y el patrón de categoría.
+
+Esta ampliación se limita a la exportación y a su tipo inferido `ExportacionGeoJson`; los
+esquemas generales públicos y técnicos no cambian. No normaliza slugs ni comprueba actividad
+de categorías. Pruebas focales: `pnpm --filter contracts exec vitest run test/contrato-0-22.test.ts`.
+
 ## Categorías (registro y políticas)
 
 Desde la 0.19.0 la plataforma describe cada categoría de reporte como **datos**, en un registro común, en vez de ramificar por categoría en cada parte (ADR [0009](../../docs/decisiones/0009-nucleo-y-registro-de-categorias.md)). Una `DefinicionCategoria` reúne los textos, el icono (su nombre como cadena: este paquete no importa React), los colores (ADR [0022](../../docs/decisiones/0022-paleta-e-iconografia-de-categorias.md)), el esquema Zod del detalle, la severidad versionada, las preguntas declarativas del paso 2 (ADR [0021](../../docs/decisiones/0021-formularios-por-categoria.md)), los filtros con su alcance (ADR [0016](../../docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md)), el radio de recurrencia, la regla de cupo (ADR [0017](../../docs/decisiones/0017-cupo-por-categoria-configurable.md)) y la geometría (hoy solo punto, ADR [0019](../../docs/decisiones/0019-areas-verdes-con-point.md)).

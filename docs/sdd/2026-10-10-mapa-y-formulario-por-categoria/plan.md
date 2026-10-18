@@ -1,5 +1,43 @@
 # Plan de la corrida M4 — Mapa y formulario por categoría (web pública)
 
+## Continuación autorizada en Codex — 2026-10-13
+
+**Ampliaciones autorizadas por el usuario el 2026-10-14:** ante otro fallo de los subagentes
+por límite de uso, el principal puede implementar y probar directamente; la revisión independiente
+se mantiene pendiente hasta completarla. Se autorizaron `e2e/scripts/correr-local.mjs` (solo la
+consulta de existencia desde `postgres`), los dos mensajes UI de `e2e/tests/ayudas.ts` y la
+separación de la expectativa HTTP en `e2e/tests/cuenta-ciudadana.spec.ts`. No cambia el cupo
+de tres envíos de la instalación E2E ni el rechazo del cuarto. Se corrige deliberadamente el
+texto UI para no afirmar un límite que `/auth/yo` no entrega. El nodo invisible estable de
+anuncio es una excepción documentada al DOM idéntico, conservando la presentación visual.
+
+El usuario pidió: «continua y haz los pendientes de M4 y esas cosas necesarias para poder
+cerrarlo y avanzar en el proyecto». Se retoma esta corrida y sus CA, sin reiniciar el desarrollo.
+
+- Rama de continuación: `codex/cierre-m4`, desde el respaldo `09930a3`. La foto original
+  `refs/sdd/mapa-y-formulario-por-categoria` y `linea-base.md` se conservan como comparación.
+- Cambios de documentación de la auditoría anterior declarados y preservados: README raíz,
+  `docs/README.md`, `ContextosySkills/README.md`, `VentanaContexto.md` y auditoría recuperada.
+- Trabajo: revisión independiente de los CA y de la equivalencia de pruebas; correcciones
+  necesarias dentro de `apps/web-ciudadano/`; actualización del README de esa app y documentos
+  de corrida; verificación estática, suites, build/OpenAPI y E2E sobre `curichi_e2e`.
+- Primera corrección a evaluar: registro por `componenteEspecialPaso2`, subtipos y ubicación
+  por defecto del adaptador genérico, texto de cupo y anuncio accesible. No activar categorías.
+- No se amplía el contrato HTTP ni se editan servicios/DB/infra sin identificar primero esa
+  necesidad. Las dos E2E ya autorizadas mantienen su alcance; no se crea la spec diferida a M6.
+- El principal coordina y documenta. Un implementador escribe web, un revisor lee y un
+  verificador prepara el entorno. Implementador y verificador ejecutan pruebas en turnos;
+  nunca en paralelo. Auditoría/revisión finales independientes de quien implementa.
+- Adaptación operativa: las rutas reales son `.agents/skills/sdd/` y `.codex/agents/`; se usan
+  subagentes de Codex con el modelo heredado disponible, sin fingir que están disponibles
+  los alias de modelos/herramientas de Claude. No se modifica su configuración.
+- Se conserva la autorización de ventana E2E; no se toca `curichi` ni `curichi_revision`,
+  no se reconstruye la pila habitual y no se realizan commits, push ni instalaciones.
+- Cierre: `verificacion.md` e `informe.md`, CA por CA, con evidencia y pendientes explícitos.
+  Una regresión bloquea el cierre. M5 no empieza dentro de esta corrida.
+
+---
+
 - **Estado:** **APROBADO** por el usuario el 2026-10-10.
   - **D1:** `?categoria=` en la URL solo con dos o más categorías activas.
   - **D2:** la forma nueva del cuerpo para todas las categorías.

@@ -335,6 +335,23 @@ Ajustado al código real [RECOMENDACIÓN]:
 
 ## 5. Roadmap actualizado
 
+> **Actualización posterior del 2026-10-15 — M5 aprobada:** el usuario aprobó
+> `docs/sdd/2026-10-15-panel-por-categoria/plan.md`, con inicio en Inundaciones, detalle/ficha
+> completos e historial completo en «Todas». Autorizó por separado seis archivos de contracts
+> para corregir la exportación multitemática (0.22.0); ver `ampliacion-exportacion.md` en esa
+> corrida. **Cierre consolidado el 2026-10-17:** M5.0–5.5 y revisión independiente completas,
+> panel 551/52, E2E 132/132 e integridad/limpieza confirmadas. La expectativa de enlace E2E
+> aprobada en `ampliacion-e2e-mapa.md` pasó G4 completo posterior 43/43. Ver `informe.md`.
+> M6 Baches requiere plan y decisiones de campos/severidad/radio. No se activan
+> categorías, no hay despliegue y no se hacen nuevos commits/push.
+
+> **Actualización del 2026-10-15:** M4 cerrada y verificada en local; evidencia en
+> `docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md`. Incluye la corrección
+> aprobada Zod/CSP de ambas apps, sin relajar la política. Se conservan rojos ajenos y una
+> intermitencia inicial de cámara. M5 tiene plan propuesto en
+> `docs/sdd/2026-10-15-panel-por-categoria/plan.md`, pendiente de decisiones/aprobación y FB.
+> No se implementa M5 por cerrar M4 ni se activan categorías nuevas.
+
 > **Nota del 2026-10-09 (avance).** Todo sin commit, a pedido del usuario: se commitea al final.
 >
 > | Fase | Estado | Corrida |

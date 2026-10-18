@@ -171,10 +171,21 @@ test.describe('bandeja técnica · mapa reactivo', () => {
     // Tocar el punto abre la tarjeta con «Ver detalle» (no navega sola) y resalta la fila.
     const tarjeta = page.getByTestId('popup-punto');
     await expect(tarjeta).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('popup-ver-detalle')).toHaveAttribute(
-      'href',
-      `/reportes/${idReporte}`,
-    );
+    const href = await page.getByTestId('popup-ver-detalle').getAttribute('href');
+    expect(href).toBeTruthy();
+    if (!href) throw new Error('La tarjeta debe enlazar al detalle del reporte.');
+    const destino = new URL(href, PANEL);
+    expect(destino.origin).toBe(new URL(PANEL).origin);
+    expect(destino.pathname).toBe(`/reportes/${idReporte}`);
+    expect(destino.searchParams.get('categoria')).toBe('inundacion');
+    const volver = destino.searchParams.get('volver');
+    expect(volver).toBeTruthy();
+    if (!volver) throw new Error('El detalle debe conservar el retorno a la bandeja.');
+    const retorno = new URL(volver, PANEL);
+    expect(retorno.origin).toBe(new URL(PANEL).origin);
+    expect(retorno.pathname).toBe('/reportes');
+    expect(retorno.searchParams.get('categoria')).toBe('inundacion');
+    expect(retorno.searchParams.get('unidad_vecinal_id')).toBe(uvId);
     await expect(fila).toHaveClass(/\bon\b/);
     // No cambió el filtro de la zona de abajo: sigue la misma UV, no se eligió otra.
     expect(new URL(page.url()).searchParams.get('unidad_vecinal_id')).toBe(uvId);

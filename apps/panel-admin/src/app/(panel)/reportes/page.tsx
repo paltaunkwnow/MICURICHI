@@ -1,6 +1,6 @@
 'use client';
 
-import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { Download } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -8,30 +8,31 @@ import { Aviso, type TipoAviso } from '@/componentes/Aviso';
 import { FiltrosDeReportes } from '@/componentes/FiltrosReportes';
 import { Mapa } from '@/componentes/Mapa';
 import { Paginacion } from '@/componentes/Paginacion';
+import { SeleccionCategoriaPanel } from '@/componentes/SeleccionCategoriaPanel';
 import { TablaReportes } from '@/componentes/TablaReportes';
 import { exportarGeoJson, urlExportar } from '@/lib/api';
+import { useCategoriaPanel } from '@/lib/categoria-panel';
 import { useFormato } from '@/lib/ciudad-contexto';
 import {
   consultaCapasMapa,
   consultaDistritos,
   consultaReportes,
   consultaUnidadesVecinales,
+  crearControlMovimientoMapa,
 } from '@/lib/consultas';
 import { avisoExportacion, mensajeErrorExportacion } from '@/lib/exportacion';
 import {
   CAMBIO_LIMPIAR_FILTROS,
   type FiltrosReportes,
+  filtrosDelAmbitoPanel,
   hayFiltros,
   LIMITE_PAGINA,
-  leerFiltros,
   parametrosConsulta,
   parametrosExportacion,
   serializarFiltros,
 } from '@/lib/filtros';
 import { AVISO_BANDEJA_PUBLICOS } from '@/lib/publicacion';
-
-/** Quietud del mapa antes de mover el bbox a la URL (igual que la app pública). */
-const ESPERA_MOVIMIENTO_MS = 400;
+import { textoConteo } from '@/lib/seleccion-panel';
 
 /** Guarda en el equipo un archivo ya recibido, con el nombre que mandó el servidor. */
 function descargar(texto: string, nombre: string, tipo: string) {
@@ -67,8 +68,16 @@ function Reportes() {
   const pathname = usePathname();
   const formato = useFormato();
   const { numero } = formato;
+  const ambito = useCategoriaPanel();
 
-  const filtros = useMemo(() => leerFiltros(new URLSearchParams(sp.toString())), [sp]);
+  const filtros = useMemo(
+    () =>
+      filtrosDelAmbitoPanel(new URLSearchParams(sp.toString()), {
+        categoria: ambito.categoria,
+        cambioAmbito: ambito.cambioAmbito,
+      }),
+    [sp, ambito.categoria, ambito.cambioAmbito],
+  );
   const params = useMemo(() => parametrosConsulta(filtros), [filtros]);
   const paramsExportacion = useMemo(() => parametrosExportacion(filtros), [filtros]);
 
@@ -78,10 +87,6 @@ function Reportes() {
       router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
     },
     [pathname, router],
-  );
-  const cambiarFiltros = useCallback(
-    (cambios: Partial<FiltrosReportes>) => navegar({ ...filtros, ...cambios, pagina: 1 }),
-    [filtros, navegar],
   );
 
   // La tabla sigue al mapa. El interruptor arranca encendido; cuando lo está, al quedarse quieto el
@@ -93,39 +98,59 @@ function Reportes() {
   const seguirMapaRef = useRef(seguirMapa);
   seguirMapaRef.current = seguirMapa;
   const ultimoBbox = useRef('');
-  const temporizador = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (temporizador.current) clearTimeout(temporizador.current);
+  const controlMapa = useMemo(
+    () =>
+      crearControlMovimientoMapa({
+        leerFiltros: () => filtrosRef.current,
+        activo: () => seguirMapaRef.current && Boolean(filtrosRef.current.categoria),
+        navegar,
+      }),
+    [navegar],
+  );
+  controlMapa.confirmar(filtros);
+  useEffect(() => {
+    controlMapa.iniciar();
+    const cambiarVisibilidad = () => controlMapa.cambiarVisibilidad();
+    document.addEventListener('visibilitychange', cambiarVisibilidad);
+    return () => {
+      document.removeEventListener('visibilitychange', cambiarVisibilidad);
+      controlMapa.destruir();
+    };
+  }, [controlMapa]);
+  const navegarManual = useCallback(
+    (nuevos: FiltrosReportes) => {
+      controlMapa.cancelar();
+      navegar(nuevos);
     },
-    [],
+    [controlMapa, navegar],
+  );
+  const cambiarFiltros = useCallback(
+    (cambios: Partial<FiltrosReportes>) => navegarManual({ ...filtros, ...cambios, pagina: 1 }),
+    [filtros, navegarManual],
   );
 
   const alMover = useCallback(
     (bbox: string) => {
       // Se recuerda la vista aunque no estemos siguiendo, para aplicarla al encender el interruptor.
       ultimoBbox.current = bbox;
-      if (!seguirMapaRef.current || bbox === filtrosRef.current.bbox) return;
-      if (temporizador.current) clearTimeout(temporizador.current);
-      temporizador.current = setTimeout(
-        () => navegar({ ...filtrosRef.current, bbox, pagina: 1 }),
-        ESPERA_MOVIMIENTO_MS,
-      );
+      controlMapa.mover(bbox);
     },
-    [navegar],
+    [controlMapa],
   );
 
   const alternarSeguir = useCallback(
     (valor: boolean) => {
       setSeguirMapa(valor);
-      navegar({ ...filtrosRef.current, bbox: valor ? ultimoBbox.current : '', pagina: 1 });
+      navegarManual({ ...filtrosRef.current, bbox: valor ? ultimoBbox.current : '', pagina: 1 });
     },
-    [navegar],
+    [navegarManual],
   );
 
   // Se refresca sola cada 10 s (`lib/consultas.ts`); al cambiar de filtro se sigue viendo la
   // página anterior hasta que llega la nueva.
-  const reportes = useQuery({ ...consultaReportes(params), placeholderData: keepPreviousData });
+  const reportes = useQuery(
+    consultaReportes(params, { controlMapa, habilitada: ambito.categoria !== null }),
+  );
   const distritos = useQuery(consultaDistritos());
   const unidadesVecinales = useQuery(consultaUnidadesVecinales());
   const capas = useQuery(consultaCapasMapa());
@@ -134,8 +159,7 @@ function Reportes() {
   // los puntos de la zona aparezcan en el mapa y no solo los 50 de la página de la tabla.
   const paramsMapa = useMemo(() => ({ ...paramsExportacion, limite: '500' }), [paramsExportacion]);
   const reportesMapa = useQuery({
-    ...consultaReportes(paramsMapa),
-    placeholderData: keepPreviousData,
+    ...consultaReportes(paramsMapa, { controlMapa, habilitada: ambito.categoria !== null }),
   });
 
   /**
@@ -143,14 +167,35 @@ function Reportes() {
    * revisión y cuántos de esos son críticos. Se piden con `limite=1` porque lo único que se usa
    * es el `total` que devuelve la API, no las filas.
    */
-  const nuevos = useQuery(consultaReportes({ estado: 'nuevo', limite: '1' }));
+  const nuevos = useQuery(
+    consultaReportes(
+      { estado: 'nuevo', limite: '1', categoria: ambito.categoria ?? undefined },
+      { habilitada: ambito.categoria !== null },
+    ),
+  );
   const criticos = useQuery(
-    consultaReportes({ estado: 'nuevo', severidad: 'critica', limite: '1' }),
+    consultaReportes(
+      {
+        estado: 'nuevo',
+        severidad: 'critica',
+        limite: '1',
+        categoria: ambito.categoria ?? undefined,
+      },
+      { habilitada: ambito.categoria !== null },
+    ),
   );
 
-  const features = reportes.data?.features ?? [];
-  const total = reportes.data?.total ?? 0;
+  const hayAmbito = ambito.categoria !== null;
+  const features = hayAmbito ? (reportes.data?.features ?? []) : [];
+  const total = hayAmbito ? (reportes.data?.total ?? 0) : 0;
   const [resaltado, setResaltado] = useState<string | null>(null);
+  const ambitoResaltado = useRef(ambito.categoria);
+  useEffect(() => {
+    if (ambitoResaltado.current !== ambito.categoria) {
+      ambitoResaltado.current = ambito.categoria;
+      setResaltado(null);
+    }
+  }, [ambito.categoria]);
   const tablaRef = useRef<HTMLDivElement>(null);
 
   // Clic en un punto del mapa: NO navega. Resalta su fila y la lleva a la vista; el detalle se abre
@@ -169,7 +214,11 @@ function Reportes() {
     null,
   );
   const exportar = useMutation({
-    mutationFn: () => exportarGeoJson(paramsExportacion),
+    mutationFn: () => {
+      if (ambito.categoria === null)
+        throw new Error('No hay una categoría disponible para exportar.');
+      return exportarGeoJson(paramsExportacion);
+    },
     onMutate: () => setAvisoExportar(null),
     onSuccess: (r) => {
       descargar(r.texto, r.nombreArchivo, 'application/geo+json');
@@ -181,15 +230,21 @@ function Reportes() {
 
   return (
     <div className="flex flex-col gap-6">
+      <Aviso tipo="alerta">
+        {ambito.aviso ??
+          (ambito.categoria === null ? 'No hay categorías disponibles para consultar.' : null)}
+      </Aviso>
       {/* Cabecera y aviso de exportación van juntos: vacío, el aviso no suma un hueco más. */}
       <div>
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl">Reportes</h1>
             <p className="text-tinta-600">
-              {reportes.data
-                ? `${numero(total)} reportes con los filtros actuales`
-                : 'Tabla y mapa sincronizados con los filtros'}
+              {!hayAmbito
+                ? 'Sin categoría seleccionada · —'
+                : reportes.data
+                  ? `${textoConteo({ valor: total, exacto: reportes.data.total_exacto !== false }, numero)} reportes con los filtros actuales`
+                  : 'Tabla y mapa sincronizados con los filtros'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -198,14 +253,19 @@ function Reportes() {
               className="btn btn-secundario"
               data-testid="exportar-geojson"
               onClick={() => exportar.mutate()}
-              disabled={exportar.isPending}
+              disabled={ambito.categoria === null || exportar.isPending}
               aria-busy={exportar.isPending || undefined}
             >
               <Download size={18} aria-hidden="true" />
               {exportar.isPending ? 'Exportando…' : 'Exportar GeoJSON'}
             </button>
             <a
-              href={urlExportar('csv', paramsExportacion)}
+              href={ambito.categoria === null ? undefined : urlExportar('csv', paramsExportacion)}
+              aria-disabled={ambito.categoria === null || undefined}
+              tabIndex={ambito.categoria === null ? -1 : undefined}
+              onClick={(e) => {
+                if (ambito.categoria === null) e.preventDefault();
+              }}
               download
               className="btn btn-secundario"
               data-testid="exportar-csv"
@@ -226,14 +286,26 @@ function Reportes() {
         </p>
       </div>
 
+      <SeleccionCategoriaPanel
+        ambito={ambito}
+        tipo="reportes"
+        onCambiar={(categoria) => {
+          controlMapa.cancelar();
+          setResaltado(null);
+          ambito.cambiar(categoria);
+        }}
+      />
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(320px,38%)]">
         <section className="flex min-w-0 flex-col gap-4" aria-label="Filtros y tabla de reportes">
-          <FiltrosDeReportes
-            filtros={filtros}
-            distritos={distritos.data ?? []}
-            unidadesVecinales={unidadesVecinales.data ?? []}
-            onCambiar={cambiarFiltros}
-          />
+          <fieldset disabled={!hayAmbito} className="m-0 min-w-0 border-0 p-0">
+            <FiltrosDeReportes
+              filtros={filtros}
+              distritos={distritos.data ?? []}
+              unidadesVecinales={unidadesVecinales.data ?? []}
+              onCambiar={cambiarFiltros}
+            />
+          </fieldset>
           {(distritos.error || unidadesVecinales.error) && (
             <Aviso tipo="alerta">
               No se pudieron cargar las capas administrativas para los selectores. Verificá que
@@ -242,7 +314,7 @@ function Reportes() {
           )}
 
           <Aviso tipo="error">
-            {reportes.error
+            {hayAmbito && reportes.error
               ? reportes.data
                 ? `No se pudo actualizar la tabla (${reportes.error.message}). Se muestran los últimos datos recibidos.`
                 : `No se pudieron cargar los reportes: ${reportes.error.message}`
@@ -250,7 +322,12 @@ function Reportes() {
           </Aviso>
 
           <div className="tarjeta p-2 lg:p-4" ref={tablaRef}>
-            {reportes.isPending ? (
+            {!hayAmbito ? (
+              <p className="p-4 text-tinta-600" role="status">
+                Sin categoría seleccionada. La lista y los conteos están pendientes de una categoría
+                disponible.
+              </p>
+            ) : reportes.isPending ? (
               <p className="p-4 text-tinta-600" role="status">
                 Cargando reportes…
               </p>
@@ -291,17 +368,24 @@ function Reportes() {
                   reportes={features}
                   seleccionado={resaltado}
                   onSeleccionar={setResaltado}
+                  categoria={ambito.categoria}
+                  mostrarCategoria={
+                    ambito.disponibles.length > 1 || ambito.categoria !== 'inundacion'
+                  }
+                  registro={ambito.registro}
+                  volver={`${pathname}?${serializarFiltros(filtros)}`}
                 />
               </div>
             )}
           </div>
 
-          {total > 0 && (
+          {hayAmbito && total > 0 && (
             <Paginacion
               pagina={filtros.pagina}
               limite={LIMITE_PAGINA}
               total={total}
-              onCambiar={(pagina) => navegar({ ...filtros, pagina })}
+              totalExacto={reportes.data?.total_exacto !== false}
+              onCambiar={(pagina) => navegarManual({ ...filtros, pagina })}
             />
           )}
         </section>
@@ -314,6 +398,7 @@ function Reportes() {
             <input
               type="checkbox"
               checked={seguirMapa}
+              disabled={!hayAmbito}
               onChange={(e) => alternarSeguir(e.target.checked)}
               className="h-4 w-4 accent-verde-700"
               data-testid="seguir-mapa"
@@ -322,13 +407,22 @@ function Reportes() {
           </label>
           <div className="mapa-panel">
             <Mapa
-              reportes={reportesMapa.data?.features ?? features}
+              reportes={hayAmbito ? (reportesMapa.data?.features ?? features) : []}
+              ambito={ambito.categoria}
+              registro={ambito.registro}
+              volver={`${pathname}?${serializarFiltros(filtros)}`}
               capas={capas.data ?? []}
               onSeleccionar={seleccionarPunto}
-              onSeleccionarDistrito={(d) =>
-                cambiarFiltros({ distrito_id: d.id, unidad_vecinal_id: '' })
+              onSeleccionarDistrito={
+                !hayAmbito
+                  ? undefined
+                  : (d) => cambiarFiltros({ distrito_id: d.id, unidad_vecinal_id: '' })
               }
-              onSeleccionarUv={(u) => cambiarFiltros({ unidad_vecinal_id: u.id, distrito_id: '' })}
+              onSeleccionarUv={
+                !hayAmbito
+                  ? undefined
+                  : (u) => cambiarFiltros({ unidad_vecinal_id: u.id, distrito_id: '' })
+              }
               onMover={alMover}
               mostrarZonaCentro
               seleccionado={resaltado}
@@ -340,9 +434,33 @@ function Reportes() {
           <dl className="grid grid-cols-3 gap-3">
             {(
               [
-                [nuevos.data ? numero(nuevos.data.total) : '—', 'sin revisar'],
-                [criticos.data ? numero(criticos.data.total) : '—', 'críticos pendientes'],
-                [reportes.data ? numero(total) : '—', 'con estos filtros'],
+                [
+                  textoConteo(
+                    hayAmbito && nuevos.data && !nuevos.error
+                      ? { valor: nuevos.data.total, exacto: nuevos.data.total_exacto !== false }
+                      : undefined,
+                    numero,
+                  ),
+                  'sin revisar',
+                ],
+                [
+                  textoConteo(
+                    hayAmbito && criticos.data && !criticos.error
+                      ? { valor: criticos.data.total, exacto: criticos.data.total_exacto !== false }
+                      : undefined,
+                    numero,
+                  ),
+                  'críticos pendientes',
+                ],
+                [
+                  textoConteo(
+                    hayAmbito && reportes.data && !reportes.error
+                      ? { valor: total, exacto: reportes.data.total_exacto !== false }
+                      : undefined,
+                    numero,
+                  ),
+                  'con estos filtros',
+                ],
               ] as Array<[string, string]>
             ).map(([valor, etiqueta]) => (
               <div key={etiqueta} className="kpi">

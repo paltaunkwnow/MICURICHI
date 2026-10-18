@@ -351,6 +351,7 @@ describe('el envío (forma por categoría, D2 del plan M4)', () => {
     expect(cuerpo.dispositivo).toBe(DISPOSITIVO);
     expect(cuerpo.dispositivo.antiguedad_s).toBe(4);
     expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse(cuerpo.detalle).success).toBe(true);
   });
 
   it('ya no manda ubicacion_metodo ni precision_gps_m: los deriva el servidor', () => {
@@ -533,6 +534,10 @@ describe('camino de ubicación aproximada (ADR 0007)', () => {
     );
     expect(cuerpo.ubicacion_aproximada).toBe(true);
     expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse(cuerpo.detalle).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse({}).success).toBe(false);
+    expect(cuerpo.dispositivo.precision_m).toBe(300);
+    expect(cuerpo.dispositivo.antiguedad_s).toBe(DISPOSITIVO.antiguedad_s);
   });
 
   it('el camino normal manda ubicacion_aproximada: false', () => {

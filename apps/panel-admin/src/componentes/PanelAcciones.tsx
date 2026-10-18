@@ -1,13 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  type PuntoLatLon,
-  type ReporteTecnicoFeature,
-  type Rol,
-  SEVERIDADES,
-  type Severidad,
-} from 'contracts';
+import { type PuntoLatLon, type Rol, SEVERIDADES, type Severidad } from 'contracts';
 import { Check, EyeOff, GitMerge, RotateCcw, Wrench, X } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { Aviso, type TipoAviso } from '@/componentes/Aviso';
@@ -27,6 +21,7 @@ import {
   cuerpoCambioEstado,
   TEXTOS_ACCION,
 } from '@/lib/moderacion';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
 
 function describirError(e: unknown): string {
   if (e instanceof ErrorApi) {
@@ -103,10 +98,18 @@ export function PanelAcciones({
   // sale únicamente con el formulario de fusión abierto (`lib/fusion-cercana.ts`).
   const [lon, lat] = reporte.geometry.coordinates;
   const centro = useMemo<PuntoLatLon>(() => ({ lon, lat }), [lon, lat]);
-  const busqueda = useQuery(consultaCandidatosFusion(centro, radioFusion, accion === 'fusionar'));
+  const categoria = p.categoria ?? 'inundacion';
+  const busqueda = useQuery(
+    consultaCandidatosFusion(centro, radioFusion, accion === 'fusionar', categoria),
+  );
   const cercanos = useMemo(
-    () => candidatosCercanos(busqueda.data?.features ?? [], { id: p.id, centro }, radioFusion),
-    [busqueda.data, p.id, centro, radioFusion],
+    () =>
+      candidatosCercanos(
+        busqueda.data?.features ?? [],
+        { id: p.id, centro, categoria },
+        radioFusion,
+      ),
+    [busqueda.data, p.id, centro, radioFusion, categoria],
   );
   const avisoDeRecorte = busqueda.data
     ? avisoRecorte(busqueda.data.features.length, busqueda.data.total)

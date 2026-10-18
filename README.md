@@ -1,18 +1,25 @@
 # Mi Curichi
 
-Plataforma web de **reporte ciudadano georreferenciado de puntos de inundación**.
+Plataforma municipal de **reportes ciudadanos georreferenciados**. Inundaciones es la categoría
+implementada; la ampliación a Baches, Áreas verdes y Basura comparte el mismo núcleo.
+
+> **Continuidad, 2026-10-15:** estado verificado, pruebas actuales y próximos pasos en
+> [VentanaContexto.md](VentanaContexto.md). M0–M4 tienen cierre local documentado; ver el
+> [informe M4](docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md).
+> Las otras categorías aún no están habilitadas por
+> el registro de la aplicación.
 
 En Santa Cruz de la Sierra hay calles que se anegan cada vez que llueve fuerte. Los vecinos saben
 exactamente cuáles, pero el municipio no tiene un inventario de eso: ni dónde, ni con qué
 frecuencia, ni con cuánta agua, ni a quién afecta. Mi Curichi es ese inventario, y lo llena la
 gente que vive ahí.
 
-Un vecino marca el punto en el mapa desde el celular, dice hasta dónde llegó el agua y cuánto
-tardó en irse, y adjunta una foto. El sistema calcula una **severidad reproducible** con una
+Un vecino marca el punto en el mapa desde el celular, dice hasta dónde llegó el agua y con qué
+frecuencia ocurre, y puede sacar una foto. El sistema calcula una **severidad reproducible** con una
 tabla publicada, cruza el punto por *point-in-polygon* con el **distrito municipal** y la **unidad
-vecinal** oficiales, y lo deja en cola. Un técnico lo valida, lo rechaza o lo fusiona con otro.
-Solo entonces aparece en el mapa público, con la ubicación degradada si el reporte era de una
-vivienda.
+vecinal** oficiales y fija una demora de publicación. Al vencer, aparece en el mapa público como
+«NO SE HA VERIFICADO», con la ubicación degradada si corresponde a una vivienda. Después un
+técnico lo valida, lo rechaza o lo fusiona con otro; el rechazo o la fusión lo retiran del mapa.
 
 > *Curichi*: en el habla cruceña, un bajío donde el agua se estanca.
 
@@ -69,8 +76,9 @@ escribiendo solo el usuario, sin `@curichi.local`. Con `Mi-Curichi.exe` las dire
 - Desde la app pública también se puede **crear una cuenta nueva** en «Crear cuenta»; siempre
   queda con rol `ciudadano`.
 - La cuenta de usuario normal **no entra al panel técnico**: el panel lo dice y la API responde 403.
-- Cada cuenta puede enviar **3 reportes y 12 fotos por día** (a medianoche vuelve a empezar). Un
-  reporte aparece en el mapa 1 minuto después de enviarlo, o 4 minutos desde el 2.º del día, con la
+- Cada cuenta puede enviar **3 reportes por categoría y 12 fotos en total por día**, con límites
+  configurables (a medianoche vuelve a empezar). Un reporte aparece en el mapa 1 minuto después
+  de enviarlo, o 4 minutos desde el 2.º del día en esa categoría, con la
   etiqueta «NO SE HA VERIFICADO» hasta que un técnico lo valide. Para probar más envíos seguidos,
   usá varias cuentas o subí `REPORTES_POR_DIA_POR_CUENTA` **solo en desarrollo**.
 - El administrador y el técnico también pueden entrar a la app pública. Ahí ven el mismo mapa que
@@ -91,8 +99,14 @@ escribiendo solo el usuario, sin `@curichi.local`. Con `Mi-Curichi.exe` las dire
 
 ## Estado
 
-**Fase 1 (local), completa.** Corre entera en una máquina. **No hay despliegue público ni está
-desplegada en ningún sitio.**
+**Desarrollo local, ampliación multitemática en curso.** La plataforma de inundaciones tiene
+verificaciones en local. M4 está cerrada: 645 pruebas web, tipos/builds y recorrido E2E; incluye
+la corrección de Zod/CSP en ambas apps. Se conservan los rojos ajenos y una intermitencia inicial
+de cámara, detallados en el informe. [M5 está cerrada en local](docs/sdd/2026-10-15-panel-por-categoria/informe.md):
+panel por categoría, contrato de exportación 0.22.0, revisiones independientes, 551 pruebas del
+panel y 132/132 E2E. Cierre documental consolidado el 2026-10-17; ninguna categoría nueva activada.
+M6–M10 siguen pendientes. **No hay despliegue
+público acreditado.** La auditoría del 2026-10-13 no inició ni migró la pila habitual.
 
 ### Qué funciona
 
@@ -102,14 +116,17 @@ desplegada en ningún sitio.**
 | **Reporte ciudadano** | Formulario de 4 pasos: ubicación del teléfono obligatoria (se pide al reportar, nunca al abrir la página) con el punto ajustable dentro de 60 m, foto opcional con la cámara dentro de la página, previsualización de la unidad vecinal antes de enviar, borrador que sobrevive a una recarga, cuenta regresiva hasta que se publica y «Mis reportes» |
 | **Cuentas de ciudadano** | Alta, ingreso, cierre de sesión. **Reportar exige cuenta; ver el mapa no** |
 | **Panel técnico** | Login, tabla y mapa sincronizados, filtros, validar/rechazar/fusionar/reclasificar, exportación CSV y GeoJSON, indicadores, coropletas, gestión de capas |
-| **Panel ejecutivo** | `localhost:3100/ejecutivo`. Dónde y cuánto se inunda, sin moderar ni exportar: pestañas por severidad (crítica, media, baja), gráficas por distrito y actualización cada 10 s |
+| **Panel ejecutivo** | `localhost:3100/ejecutivo`. Dónde y cuánto se inunda, sin moderar ni exportar: pestañas por severidad, gráficas y mapa de distritos/UV, actualización cada 10 s |
 | **Geoespacial** | PIP con índice GIST, bordes, huecos y fuera de cobertura; capas como GeoJSON o teselas vectoriales al vuelo; puntos críticos por DBSCAN |
 | **ETL** | Shapefile → GeoJSON → PostGIS, reproducible con un comando, con reporte de calidad |
 | **Seguridad** | Roles de PostgreSQL con privilegios mínimos, separación estricta de vista pública y técnica, cuota antiabuso por cuenta, EXIF eliminado, contenedores endurecidos. Ver [SECURITY.md](SECURITY.md) |
 
-### Qué no está implementado
+### Qué falta o queda fuera de alcance
 
-- **Despliegue.** No hay dominio ni CDN, ni ninguna instalación en marcha. Lo necesario para
+- **Categorías nuevas:** Baches, Basura y Áreas verdes esperan sus módulos M6–M8.
+  M4 y M5 están cerradas en local. La siguiente etapa es planear Baches, sus datos y
+  severidad antes de activarla. Ver [roadmap](docs/arquitectura/14-decisiones-m0-y-plan-m1.md).
+- **Despliegue público.** No hay una instalación pública acreditada. La configuración para
   instalarla en una ciudad ya está en el Compose y lo publica el CI: imágenes de las dos apps, proxy
   de entrada con TLS automático (probado en local con la CA interna, **no** con certificados
   públicos), respaldos cifrados y monitoreo con alertas (perfiles `respaldos` y `observabilidad`;
@@ -392,9 +409,10 @@ Y entonces:
 5. Tocá «Compartir mi ubicación» (el navegador pide el permiso recién ahí), ajustá el punto dentro
    de los 60 m, completá los 4 pasos y enviá. Queda en estado `nuevo` y ves una cuenta regresiva:
    **1 minuto** después se publica en el mapa con «NO SE HA VERIFICADO» (4 minutos si es el 2.º o
-   el 3.º del día). Recargá el mapa para verlo; mientras espera, solo lo ves vos, en «Mis reportes».
-6. Enviá dos más. El 4.º del día sale **429** con `CUOTA_DE_REPORTES`: **3 reportes por cuenta y
-   por día**; al día siguiente vuelve a empezar.
+   el 3.º del día en esa categoría). Recargá el mapa para verlo; mientras espera, solo lo ves vos,
+   en «Mis reportes».
+6. Enviá dos más en la misma categoría. Con el límite por defecto, el 4.º del día sale **429**
+   con `CUOTA_DE_REPORTES`: **3 reportes por cuenta, categoría y día**; al día siguiente se reinicia.
 7. Entrá al panel en <http://localhost:3100> con `tecnico@curichi.local` /
    `tecnico` (la bandeja se actualiza sola cada 10 s), buscá el reporte y validalo.
 8. Recargá el mapa público: ahora dice «Verificado».
@@ -406,7 +424,7 @@ Y entonces:
 | | Ver el mapa | Crear reporte | Moderar, exportar | Administrar |
 |---|---|---|---|---|
 | **Sin cuenta** | ✅ | ❌ | ❌ | ❌ |
-| **`ciudadano`** | ✅ | ✅ (3 por día) | ❌ | ❌ |
+| **`ciudadano`** | ✅ | ✅ (3 por categoría/día, configurable) | ❌ | ❌ |
 | **`tecnico`** | ✅ | ✅ | ✅ | ❌ |
 | **`admin`** | ✅ | ✅ | ✅ | ✅ |
 
@@ -416,15 +434,16 @@ Y entonces:
   campo de rol y, por si acaso, el rol de PostgreSQL con el que corre la API **no tiene permiso
   para escribir la columna `rol`**. La escalada no depende de que el código sea cuidadoso.
 - Las cuentas técnicas se crean fuera de la aplicación, con el rol dueño de la base.
-- **3 reportes y 12 fotos por cuenta y por día** calendario (en `ZONA_HORARIA`). Se cuentan en la
-  base con un `INSERT … ON CONFLICT DO UPDATE … WHERE` atómico dentro de la misma transacción que
+- **3 reportes por categoría y 12 fotos globales por cuenta y por día** calendario (en
+  `ZONA_HORARIA`), con límites configurables. Se cuentan en `cupo_contador` con un
+  `INSERT … ON CONFLICT DO UPDATE … WHERE` atómico dentro de la misma transacción que
   inserta, así que ni la concurrencia ni los reintentos lo saltan: una prueba contra PostgreSQL
   real (`cuota-concurrencia-pg.test.ts`) exige que 50 envíos simultáneos dejen exactamente 3.
 - Cambiar de IP **no** devuelve el turno: el límite es de la cuenta. El límite por IP sigue
   existiendo y es independiente, y el alta de cuentas tiene además un tope diario por IP
   (`ALTAS_POR_DIA_POR_IP`, 10), porque cada cuenta nueva multiplica el cupo.
 - Sin moderación previa: un reporte se publica solo, con «NO SE HA VERIFICADO», 1 minuto después
-  de enviarlo (4 desde el 2.º del día). Rechazarlo o fusionarlo lo saca del mapa, y el admin puede
+  de enviarlo (4 desde el 2.º del día en esa categoría). Rechazarlo o fusionarlo lo saca del mapa, y el admin puede
   retirar uno ya verificado.
 
 ### Cuentas de desarrollo
@@ -650,7 +669,7 @@ demás.
   consultado *antes* de verificar la contraseña. Ningún token en `localStorage` ni en la URL.
 - **Autorización**: rol exigido por ruta. El autor de un reporte sale **siempre** de la sesión; el
   esquema de entrada no tiene campo de autor, de rol ni de estado.
-- **Antiabuso**: cuenta obligatoria para escribir, 3 reportes y 12 fotos por cuenta y por día
+- **Antiabuso**: cuenta obligatoria para escribir, 3 reportes por categoría y 12 fotos globales por cuenta/día
   (atómico en la base), el punto a 60 m o menos de la posición que informa el teléfono (que no se
   guarda), límites por IP para reportes, lecturas, ingresos y altas de cuenta (con tope diario),
   idempotencia por cuenta en la creación y honeypot en el formulario.
@@ -693,7 +712,7 @@ dice qué se probó y qué no.
 | El mapa no carga y la consola habla del *worker* | El worker de MapLibre se sirve desde `public/maplibre/`. Si falta, `pnpm --filter web-ciudadano build` lo vuelve a copiar |
 | No puedo iniciar sesión y api-core responde 401 | Con `COOKIE_SEGURA=1` sobre `http://` el navegador no devuelve la cookie. En local tiene que valer `0` |
 | Inicio sesión en el panel y me saca al momento | La sesión caduca por inactividad (`SESION_IDLE_HORAS`) además de por tiempo total. Con relojes desfasados entre el contenedor y la máquina también pasa |
-| **429 `CUOTA_DE_REPORTES` al enviar el 4.º reporte del día** | Es el cupo: **3 reportes y 12 fotos por cuenta y por día**, que vuelve a empezar a medianoche (`Retry-After` dice cuánto falta). No es un fallo. Para probar con más, creá cuentas nuevas o subí `REPORTES_POR_DIA_POR_CUENTA` (y `FOTOS_POR_DIA_POR_CUENTA`) **solo en desarrollo** |
+| **429 `CUOTA_DE_REPORTES` al enviar el 4.º reporte del día en una categoría** | Es el cupo por defecto: **3 reportes por categoría y 12 fotos globales por cuenta/día**, que se reinicia a medianoche (`Retry-After` dice cuánto falta). Para probar con más, creá cuentas nuevas o ajustá `REPORTES_POR_DIA_POR_CUENTA` y, para fotos, `FOTOS_POR_DIA_POR_CUENTA` **solo en desarrollo** |
 | **429 al crear cuentas seguidas** | Límite de altas por IP: 5 por hora (`REGISTRO_MAX_POR_IP`) y 10 por día (`ALTAS_POR_DIA_POR_IP`). En desarrollo se suben esas dos variables |
 | **Envié un reporte y no aparece en el mapa** | Se publica 1 minuto después de enviarlo, o 4 desde el 2.º del día, y la página pública no se actualiza sola: recargala. Mientras espera, lo ves en «Mis reportes» y nadie más lo ve, técnicos incluidos |
 | `pnpm etl:run` no encuentra los shapefiles | `data/raw/<version>/` está vacío. Es normal en un clon limpio: usá las capas sintéticas |

@@ -11,12 +11,13 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { obtenerVersionesCapas } from '@/lib/api';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { etiquetaRol } from '@/lib/formato';
 import { hayPlanoDeReferencia } from '@/lib/plano';
 import { enlacesPara, hayVersionCapaPendiente } from '@/lib/roles';
+import { urlPanel } from '@/lib/seleccion-panel';
 import { useCerrarSesion, useUsuarioActual } from '@/lib/sesion';
 
 const ICONOS: Record<string, LucideIcon> = {
@@ -30,6 +31,7 @@ const ICONOS: Record<string, LucideIcon> = {
 export function BarraLateral() {
   const usuario = useUsuarioActual();
   const ruta = usePathname();
+  const sp = useSearchParams();
   const salir = useCerrarSesion();
   const ciudad = useCiudad();
   const esAdmin = usuario.rol === 'admin';
@@ -65,7 +67,11 @@ export function BarraLateral() {
           return (
             <Link
               key={href}
-              href={href}
+              href={
+                ['/reportes', '/indicadores', '/ejecutivo'].includes(href)
+                  ? urlPanel(href, sp.get('categoria'))
+                  : href
+              }
               className="enlace-lateral"
               aria-current={activo ? 'page' : undefined}
             >

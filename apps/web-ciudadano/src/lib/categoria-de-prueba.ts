@@ -12,6 +12,7 @@ import {
   type SlugCategoria,
 } from 'contracts';
 import { type ComponentProps, createElement, type ReactElement, type ReactNode } from 'react';
+import { z } from 'zod';
 import type { ReporteFeature } from './api';
 import { ProveedorCategorias } from './categorias-contexto';
 
@@ -23,6 +24,19 @@ export const DEFINICION_BACHE_DE_PRUEBA = {
   descripcion: 'Dónde está roto el pavimento, según los vecinos.',
   icono: 'TrafficCone',
   colores: { c1: '#F6EDE3', c5: '#9C6A35', c7: '#7A4E1E' },
+  esquemaDetalle: z.strictObject({
+    tamano: z.enum(['chico', 'grande']),
+    hay_riesgo: z.boolean(),
+    afecta_a: z.array(z.enum(['autos', 'motos'])),
+    interna: z.string().optional(),
+  }),
+  severidad: {
+    ...DEFINICION_INUNDACION.severidad,
+    calcular: (detalle: { hay_riesgo: boolean }) => ({
+      puntaje: detalle.hay_riesgo ? 2 : 1,
+      banda: detalle.hay_riesgo ? 'alta' : 'media',
+    }),
+  },
   textos: {
     puntosDelMapa: 'puntos de bache',
     puntoSingular: 'Punto de bache',

@@ -10,6 +10,41 @@
  */
 import type { CapaInfo } from 'contracts';
 
+type Fusion = { clave: string; fuente: object };
+const fusiones = new WeakMap<object, Map<string, Fusion>>();
+
+/** Invalida también las peticiones pendientes, aunque la geometría conserve su URL. */
+export function invalidarFusion(mapa: object, id: string): boolean {
+  return fusiones.get(mapa)?.delete(id) ?? false;
+}
+
+/** Solo la última serie solicitada para esta fuente puede publicar sus etiquetas. */
+export async function fusionarDatosVigentes<T>(
+  mapa: object,
+  id: string,
+  clave: string,
+  fuente: object,
+  cargar: () => Promise<T>,
+  aplicar: (datos: T) => void,
+): Promise<void> {
+  let porFuente = fusiones.get(mapa);
+  if (!porFuente) {
+    porFuente = new Map();
+    fusiones.set(mapa, porFuente);
+  }
+  const anterior = porFuente.get(id);
+  if (anterior?.clave === clave && anterior.fuente === fuente) return;
+  const actual = { clave, fuente };
+  porFuente.set(id, actual);
+  try {
+    const datos = await cargar();
+    if (porFuente.get(id) === actual) aplicar(datos);
+  } catch {
+    // Permite reintentar un fallo sin invalidar una petición más nueva.
+    if (porFuente.get(id) === actual) porFuente.delete(id);
+  }
+}
+
 /** Lo mínimo del mapa de MapLibre que usa la limpieza. */
 export interface MapaConConteos {
   getSource(id: string): unknown;

@@ -1,12 +1,20 @@
 # ContextosySkills — continuidad de contexto de Claude Code
 
+> **Continuidad con Astra/Codex, 2026-10-13:** leer primero
+> [VentanaContexto.md](../VentanaContexto.md), en la raíz. Por pedido del usuario, ese documento
+> se actualiza en hitos, decisiones, cambios de fase, sesiones extensas y antes de compactaciones
+> anticipables, con controles preventivos si no hay indicador fiable de contexto. No depende
+> del umbral del 70 %. Los snapshots y hooks de esta carpeta se conservan como antecedentes de
+> Claude; no se ha verificado que esos hooks se ejecuten en Codex.
+
 Carpeta **exclusiva** para snapshots de continuidad de las sesiones de Claude Code en este repo.
 
 - **No** es documentación del proyecto.
 - **No** forma parte de la aplicación.
 - **No** se mezcla con `docs/`.
 
-Creada el 2026-10-07, en la FASE 2. La política vigente es la del 2026-10-07 (FASE 3, §3).
+Creada el 2026-10-07, en la FASE 2. La política de §3 describe los snapshots de Claude;
+la política actual para `VentanaContexto.md` es la indicada arriba y en su sección F.
 
 ## 1. Para qué sirve
 
@@ -31,7 +39,7 @@ código:
 Un snapshot **no copia** la documentación permanente: la **enlaza** y guarda solo lo necesario para
 retomar.
 
-## 3. Política de snapshots (vigente desde el 2026-10-07)
+## 3. Política de snapshots de Claude (establecida el 2026-10-07)
 
 ### Cuándo se crea uno
 
@@ -117,8 +125,8 @@ Solo técnicas **realmente usadas** en la sesión. Formato de cada una:
 
 Usa mecanismos **reales** de Claude Code, verificados el 2026-10-07 con Claude Code 2.1.288.
 
-- **Configuración:** `.claude/settings.local.json`. Es local de esta máquina, no está versionado y no
-  toca la configuración del equipo.
+- **Configuración:** `.claude/settings.local.json`. Es específica de esta máquina; está versionada
+  en el respaldo `09930a3`. No implica que los hooks estén activos en otra aplicación o equipo.
 - **Script:** `ContextosySkills/hooks/contexto.mjs`.
 
 | Hook | Evento real | Qué hace |
@@ -189,8 +197,8 @@ Lo ignora git mediante su propio `.gitignore`.
    - `SessionStart` pide completar el esqueleto;
    - un transcript de subagente se ignora.
 
-   `PostToolUse` está activo en vivo en la sesión. `PreCompact` y `SessionStart` reales se ejercitan
-   en la próxima compactación.
+   Esa verificación correspondía a la sesión de Claude del 2026-10-07. Los snapshots posteriores
+   documentan su continuidad; no constituye una comprobación de hooks en Codex.
 6. El hook corre `node` en **cada** uso de herramienta (unos 100 ms en Windows). Para apagarlo, quitá
    el bloque `hooks` de `.claude/settings.local.json`.
 
@@ -225,10 +233,12 @@ Lo ignora git mediante su propio `.gitignore`.
 |---|---|---|---|
 | 1 | 2026-10-07 | Cierre de la FASE 2 (contexto ≈ 39 %) | **Anterior**: se escribía al cerrar una fase |
 | 2 | 2026-10-07 | Cierre de la FASE 3 (contexto 58,7 %) | **Anterior**: se escribía al cerrar una fase |
-| 3 | 2026-10-07 | Contexto > 70 % (70,6 %), durante M0 | **Vigente**: esqueleto automático (`PostToolUse`), completado por Claude |
+| 3 | 2026-10-07 | Contexto > 70 % (70,6 %), durante M0 | Política de Claude del 2026-10-07: esqueleto automático, completado |
+| 4 | 2026-10-10 (fecha UTC del encabezado) | Contexto estimado 70,2 %; continuidad del núcleo multitemático | Política de Claude del 2026-10-07; completado |
+| 5 | 2026-10-10 | Contexto estimado 78,1 %; M3b pendiente en ese momento | Política de Claude del 2026-10-07; completado |
 
-Los snapshots 1 y 2 se conservan por trazabilidad. Desde el 2026-10-07 **no** se crean snapshots por
-debajo del 70 %.
+Los cinco snapshots se conservan por trazabilidad. La regla de no crear snapshots por debajo del
+70 % corresponde a este mecanismo de Claude; no limita la actualización de `VentanaContexto.md`.
 
 ## 11. Historial de la política
 
@@ -236,3 +246,4 @@ debajo del 70 %.
 |---|---|---|
 | 2026-10-07 (FASE 2) | Hook de aviso al 70 % y al 85 % (dos avisos por ciclo); Claude escribía el snapshot. Además se escribía uno al cerrar cada fase | Primera versión |
 | 2026-10-07 (FASE 3) | **Solo > 70 %, uno por ciclo**, con el esqueleto creado por el hook, marca anti-duplicado, solo el hilo principal, `PreCompact` como respaldo solo > 70 %, sin snapshots al cerrar fases | Pedido del usuario: evitar snapshots prematuros o duplicados |
+| 2026-10-13 (Astra/Codex) | `VentanaContexto.md` en la raíz, actualizado en hitos y de forma preventiva; sin afirmar porcentajes ni ejecución de hooks no verificados | Nuevo pedido explícito de continuidad. Se conservan los snapshots históricos y el script sin cambios |

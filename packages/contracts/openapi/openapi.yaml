@@ -2857,333 +2857,670 @@ components:
         features:
           type: array
           items:
-            type: object
-            properties:
-              type:
-                type: string
-                const: Feature
-              id:
-                type: string
-                format: uuid
-                pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-              geometry:
-                type: object
+            anyOf:
+              - type: object
                 properties:
                   type:
                     type: string
-                    const: Point
-                  coordinates:
-                    type: array
-                    prefixItems:
-                      - type: number
-                        minimum: -180
-                        maximum: 180
-                        description: Longitud WGS84 (EPSG:4326)
-                      - type: number
-                        minimum: -90
-                        maximum: 90
-                        description: Latitud WGS84 (EPSG:4326)
-                    items: false
-                    minItems: 2
-                    maxItems: 2
-                required:
-                  - type
-                  - coordinates
-                description: "Coordenada exacta: sin jitter ni redondeo"
-              properties:
-                type: object
-                properties:
+                    const: Feature
                   id:
                     type: string
                     format: uuid
                     pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                  creado_en:
-                    type: string
-                    format: date-time
-                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
-                  evento_en:
-                    anyOf:
-                      - type: string
-                        format: date-time
-                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
-                      - type: "null"
-                  distrito:
-                    anyOf:
-                      - type: object
-                        properties:
-                          id:
-                            type: string
-                          codigo:
-                            type: string
-                          nombre:
-                            type: string
-                        required:
-                          - id
-                          - codigo
-                          - nombre
-                      - type: "null"
-                  unidad_vecinal:
-                    anyOf:
-                      - type: object
-                        properties:
-                          id:
-                            type: string
-                          codigo:
-                            type: string
-                          nombre:
-                            type: string
-                        required:
-                          - id
-                          - codigo
-                          - nombre
-                      - type: "null"
-                  descripcion:
-                    type: string
-                  fotos:
-                    type: array
-                    items:
-                      type: string
-                    description: URLs servidas por api-core, ya sin EXIF
-                  profundidad_estimada:
-                    type: string
-                    enum:
-                      - tobillo
-                      - rodilla
-                      - muslo
-                      - mas_70
-                  frecuencia:
-                    type: string
-                    enum:
-                      - primera_vez
-                      - ocasional
-                      - cada_lluvia_fuerte
-                      - permanente
-                      - agua_estancada
-                  causa_presunta:
-                    type: string
-                    enum:
-                      - sumidero_tapado
-                      - falta_sumidero
-                      - hundimiento_pavimento
-                      - contrapendiente
-                      - colector_saturado
-                      - desborde_cauce
-                      - desconocida
-                  severidad:
-                    type: string
-                    enum:
-                      - baja
-                      - media
-                      - alta
-                      - critica
-                    description: Severidad efectiva = manual si existe, si no la calculada
-                  severidad_calculada:
-                    type: string
-                    enum:
-                      - baja
-                      - media
-                      - alta
-                      - critica
-                  estado:
-                    type: string
-                    enum:
-                      - nuevo
-                      - validado
-                      - duplicado
-                      - rechazado
-                      - resuelto
-                  verificado:
-                    type: boolean
-                    description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
-                      que se publica sin moderación previa como «NO SE HA
-                      VERIFICADO»
-                  punto_critico_id:
-                    anyOf:
-                      - type: string
+                  geometry:
+                    type: object
+                    properties:
+                      type:
+                        type: string
+                        const: Point
+                      coordinates:
+                        type: array
+                        prefixItems:
+                          - type: number
+                            minimum: -180
+                            maximum: 180
+                            description: Longitud WGS84 (EPSG:4326)
+                          - type: number
+                            minimum: -90
+                            maximum: 90
+                            description: Latitud WGS84 (EPSG:4326)
+                        items: false
+                        minItems: 2
+                        maxItems: 2
+                    required:
+                      - type
+                      - coordinates
+                    description: "Coordenada exacta: sin jitter ni redondeo"
+                  properties:
+                    type: object
+                    properties:
+                      id:
+                        type: string
                         format: uuid
                         pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                      - type: "null"
-                  n_reportes_punto:
-                    anyOf:
-                      - type: integer
-                        minimum: -9007199254740991
-                        maximum: 9007199254740991
-                      - type: "null"
-                  precision_degradada:
-                    type: boolean
-                    description: true si la coordenada tiene jitter (vivienda o predio)
-                  categoria:
-                    description: Slug de la categoría del reporte (p. ej. inundacion). Obligatorio
-                      desde M4/M5.
-                    type: string
-                  subtipo:
-                    description: Subtipo propio de la categoría; null si no aplica. Obligatorio
-                      desde M4/M5.
-                    type:
-                      - string
-                      - "null"
-                  detalle:
-                    description: Respuestas propias de la categoría. En la vista pública, solo los
-                      camposPublicos de la definición; completo en la vista
-                      técnica. Obligatorio desde M4/M5.
-                    type: object
-                    propertyNames:
-                      type: string
-                    additionalProperties: {}
-                  ubicacion_metodo:
-                    type: string
-                    enum:
-                      - gps
-                      - manual
-                      - aproximada
-                    description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
-                      del margen de error del dispositivo (a
-                      dispositivo.precision_m o menos de su posición al enviar,
-                      y con 2 m como margen mínimo), manual si quedó más lejos,
-                      siempre dentro del radio. El margen existe porque dos
-                      lecturas del GPS difieren varios metros aunque nadie mueva
-                      el punto. aproximada (desde 0.18.0, ADR 0007): el reporte
-                      entró por el camino de ubicación aproximada (dispositivo
-                      sin GPS preciso); el punto lo puso la persona a mano y no
-                      se comprobó contra la posición del dispositivo (los
-                      técnicos lo ven «sin comprobar»)"
-                  precision_gps_m:
-                    description: Precisión que declaró el dispositivo al enviar, en metros
-                    type:
-                      - number
-                      - "null"
-                  distancia_dispositivo_m:
-                    anyOf:
-                      - type: integer
-                        minimum: 0
-                        maximum: 1000
-                      - type: "null"
-                    description: Distancia redondeada, en metros, entre el punto y la posición del
-                      dispositivo al enviar; null en los reportes anteriores a
-                      0.9.0. La posición del dispositivo no se guarda
-                  ubicacion_tipo:
-                    type: string
-                    enum:
-                      - via_publica
-                      - vivienda_o_predio
-                      - otro
-                  sumidero_cercano:
-                    anyOf:
-                      - type: string
+                      creado_en:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      evento_en:
+                        anyOf:
+                          - type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          - type: "null"
+                      distrito:
+                        anyOf:
+                          - type: object
+                            properties:
+                              id:
+                                type: string
+                              codigo:
+                                type: string
+                              nombre:
+                                type: string
+                            required:
+                              - id
+                              - codigo
+                              - nombre
+                          - type: "null"
+                      unidad_vecinal:
+                        anyOf:
+                          - type: object
+                            properties:
+                              id:
+                                type: string
+                              codigo:
+                                type: string
+                              nombre:
+                                type: string
+                            required:
+                              - id
+                              - codigo
+                              - nombre
+                          - type: "null"
+                      descripcion:
+                        type: string
+                      fotos:
+                        type: array
+                        items:
+                          type: string
+                        description: URLs servidas por api-core, ya sin EXIF
+                      profundidad_estimada:
+                        type: string
                         enum:
-                          - si
-                          - no
-                      - type: "null"
-                  sumidero_estado:
-                    anyOf:
-                      - type: string
+                          - tobillo
+                          - rodilla
+                          - muslo
+                          - mas_70
+                      frecuencia:
+                        type: string
                         enum:
-                          - tapado
-                          - no_tapado
-                      - type: "null"
-                  agua_brota_sumidero:
-                    type:
-                      - boolean
-                      - "null"
-                  severidad_manual:
-                    anyOf:
-                      - type: string
+                          - primera_vez
+                          - ocasional
+                          - cada_lluvia_fuerte
+                          - permanente
+                          - agua_estancada
+                      causa_presunta:
+                        type: string
+                        enum:
+                          - sumidero_tapado
+                          - falta_sumidero
+                          - hundimiento_pavimento
+                          - contrapendiente
+                          - colector_saturado
+                          - desborde_cauce
+                          - desconocida
+                      severidad:
+                        type: string
                         enum:
                           - baja
                           - media
                           - alta
                           - critica
-                      - type: "null"
-                  severidad_motivo:
-                    type:
-                      - string
-                      - "null"
-                  severidad_puntaje:
-                    type: integer
-                    minimum: -9007199254740991
-                    maximum: 9007199254740991
-                  estado_motivo:
-                    type:
-                      - string
-                      - "null"
-                  fusionado_en_id:
-                    anyOf:
-                      - type: string
-                        format: uuid
-                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                      - type: "null"
-                  validado_por:
-                    anyOf:
-                      - type: string
-                        format: uuid
-                        pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                      - type: "null"
-                  validado_en:
-                    anyOf:
-                      - type: string
+                        description: Severidad efectiva = manual si existe, si no la calculada
+                      severidad_calculada:
+                        type: string
+                        enum:
+                          - baja
+                          - media
+                          - alta
+                          - critica
+                      estado:
+                        type: string
+                        enum:
+                          - nuevo
+                          - validado
+                          - duplicado
+                          - rechazado
+                          - resuelto
+                      verificado:
+                        type: boolean
+                        description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                          que se publica sin moderación previa como «NO SE HA
+                          VERIFICADO»
+                      punto_critico_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      n_reportes_punto:
+                        anyOf:
+                          - type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          - type: "null"
+                      precision_degradada:
+                        type: boolean
+                        description: true si la coordenada tiene jitter (vivienda o predio)
+                      categoria:
+                        description: Slug de la categoría del reporte (p. ej. inundacion). Obligatorio
+                          desde M4/M5.
+                        type: string
+                      subtipo:
+                        description: Subtipo propio de la categoría; null si no aplica. Obligatorio
+                          desde M4/M5.
+                        type:
+                          - string
+                          - "null"
+                      detalle:
+                        description: Respuestas propias de la categoría. En la vista pública, solo los
+                          camposPublicos de la definición; completo en la vista
+                          técnica. Obligatorio desde M4/M5.
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties: {}
+                      ubicacion_metodo:
+                        type: string
+                        enum:
+                          - gps
+                          - manual
+                          - aproximada
+                        description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+                          del margen de error del dispositivo (a
+                          dispositivo.precision_m o menos de su posición al
+                          enviar, y con 2 m como margen mínimo), manual si quedó
+                          más lejos, siempre dentro del radio. El margen existe
+                          porque dos lecturas del GPS difieren varios metros
+                          aunque nadie mueva el punto. aproximada (desde 0.18.0,
+                          ADR 0007): el reporte entró por el camino de ubicación
+                          aproximada (dispositivo sin GPS preciso); el punto lo
+                          puso la persona a mano y no se comprobó contra la
+                          posición del dispositivo (los técnicos lo ven «sin
+                          comprobar»)"
+                      precision_gps_m:
+                        description: Precisión que declaró el dispositivo al enviar, en metros
+                        type:
+                          - number
+                          - "null"
+                      distancia_dispositivo_m:
+                        anyOf:
+                          - type: integer
+                            minimum: 0
+                            maximum: 1000
+                          - type: "null"
+                        description: Distancia redondeada, en metros, entre el punto y la posición del
+                          dispositivo al enviar; null en los reportes anteriores
+                          a 0.9.0. La posición del dispositivo no se guarda
+                      ubicacion_tipo:
+                        type: string
+                        enum:
+                          - via_publica
+                          - vivienda_o_predio
+                          - otro
+                      sumidero_cercano:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - si
+                              - no
+                          - type: "null"
+                      sumidero_estado:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - tapado
+                              - no_tapado
+                          - type: "null"
+                      agua_brota_sumidero:
+                        type:
+                          - boolean
+                          - "null"
+                      severidad_manual:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - baja
+                              - media
+                              - alta
+                              - critica
+                          - type: "null"
+                      severidad_motivo:
+                        type:
+                          - string
+                          - "null"
+                      severidad_puntaje:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      estado_motivo:
+                        type:
+                          - string
+                          - "null"
+                      fusionado_en_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      validado_por:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      validado_en:
+                        anyOf:
+                          - type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          - type: "null"
+                      actualizado_en:
+                        type: string
                         format: date-time
                         pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
-                      - type: "null"
-                  actualizado_en:
+                      version_capa:
+                        type:
+                          - string
+                          - "null"
+                      resolucion_flags:
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties: {}
+                      autor_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                    required:
+                      - id
+                      - creado_en
+                      - evento_en
+                      - distrito
+                      - unidad_vecinal
+                      - descripcion
+                      - fotos
+                      - profundidad_estimada
+                      - frecuencia
+                      - causa_presunta
+                      - severidad
+                      - severidad_calculada
+                      - estado
+                      - verificado
+                      - punto_critico_id
+                      - n_reportes_punto
+                      - precision_degradada
+                      - ubicacion_metodo
+                      - precision_gps_m
+                      - distancia_dispositivo_m
+                      - ubicacion_tipo
+                      - sumidero_cercano
+                      - sumidero_estado
+                      - agua_brota_sumidero
+                      - severidad_manual
+                      - severidad_motivo
+                      - severidad_puntaje
+                      - estado_motivo
+                      - fusionado_en_id
+                      - validado_por
+                      - validado_en
+                      - actualizado_en
+                      - version_capa
+                      - resolucion_flags
+                      - autor_id
+                required:
+                  - type
+                  - id
+                  - geometry
+                  - properties
+              - type: object
+                properties:
+                  type:
                     type: string
-                    format: date-time
-                    pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
-                  version_capa:
-                    type:
-                      - string
-                      - "null"
-                  resolucion_flags:
+                    const: Feature
+                  id:
+                    type: string
+                    format: uuid
+                    pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                  geometry:
                     type: object
-                    propertyNames:
-                      type: string
-                    additionalProperties: {}
-                  autor_id:
-                    anyOf:
-                      - type: string
+                    properties:
+                      type:
+                        type: string
+                        const: Point
+                      coordinates:
+                        type: array
+                        prefixItems:
+                          - type: number
+                            minimum: -180
+                            maximum: 180
+                            description: Longitud WGS84 (EPSG:4326)
+                          - type: number
+                            minimum: -90
+                            maximum: 90
+                            description: Latitud WGS84 (EPSG:4326)
+                        items: false
+                        minItems: 2
+                        maxItems: 2
+                    required:
+                      - type
+                      - coordinates
+                    description: "Coordenada exacta: sin jitter ni redondeo"
+                  properties:
+                    type: object
+                    properties:
+                      id:
+                        type: string
                         format: uuid
                         pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
-                      - type: "null"
+                      creado_en:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      evento_en:
+                        anyOf:
+                          - type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          - type: "null"
+                      distrito:
+                        anyOf:
+                          - type: object
+                            properties:
+                              id:
+                                type: string
+                              codigo:
+                                type: string
+                              nombre:
+                                type: string
+                            required:
+                              - id
+                              - codigo
+                              - nombre
+                          - type: "null"
+                      unidad_vecinal:
+                        anyOf:
+                          - type: object
+                            properties:
+                              id:
+                                type: string
+                              codigo:
+                                type: string
+                              nombre:
+                                type: string
+                            required:
+                              - id
+                              - codigo
+                              - nombre
+                          - type: "null"
+                      descripcion:
+                        type: string
+                      fotos:
+                        type: array
+                        items:
+                          type: string
+                        description: URLs servidas por api-core, ya sin EXIF
+                      profundidad_estimada:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - tobillo
+                              - rodilla
+                              - muslo
+                              - mas_70
+                          - type: "null"
+                      frecuencia:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - primera_vez
+                              - ocasional
+                              - cada_lluvia_fuerte
+                              - permanente
+                              - agua_estancada
+                          - type: "null"
+                      causa_presunta:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - sumidero_tapado
+                              - falta_sumidero
+                              - hundimiento_pavimento
+                              - contrapendiente
+                              - colector_saturado
+                              - desborde_cauce
+                              - desconocida
+                          - type: "null"
+                      severidad:
+                        type: string
+                        enum:
+                          - baja
+                          - media
+                          - alta
+                          - critica
+                        description: Severidad efectiva = manual si existe, si no la calculada
+                      severidad_calculada:
+                        type: string
+                        enum:
+                          - baja
+                          - media
+                          - alta
+                          - critica
+                      estado:
+                        type: string
+                        enum:
+                          - nuevo
+                          - validado
+                          - duplicado
+                          - rechazado
+                          - resuelto
+                      verificado:
+                        type: boolean
+                        description: true si un técnico lo revisó (validado o resuelto); false en nuevo,
+                          que se publica sin moderación previa como «NO SE HA
+                          VERIFICADO»
+                      punto_critico_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      n_reportes_punto:
+                        anyOf:
+                          - type: integer
+                            minimum: -9007199254740991
+                            maximum: 9007199254740991
+                          - type: "null"
+                      precision_degradada:
+                        type: boolean
+                        description: true si la coordenada tiene jitter (vivienda o predio)
+                      categoria:
+                        type: string
+                        minLength: 1
+                        pattern: ^(?!inundacion$)
+                      subtipo:
+                        description: Subtipo propio de la categoría; null si no aplica. Obligatorio
+                          desde M4/M5.
+                        type:
+                          - string
+                          - "null"
+                      detalle:
+                        description: Respuestas propias de la categoría. En la vista pública, solo los
+                          camposPublicos de la definición; completo en la vista
+                          técnica. Obligatorio desde M4/M5.
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties: {}
+                      ubicacion_metodo:
+                        type: string
+                        enum:
+                          - gps
+                          - manual
+                          - aproximada
+                        description: "Lo deriva el servidor desde 0.9.0: gps si el punto quedó dentro
+                          del margen de error del dispositivo (a
+                          dispositivo.precision_m o menos de su posición al
+                          enviar, y con 2 m como margen mínimo), manual si quedó
+                          más lejos, siempre dentro del radio. El margen existe
+                          porque dos lecturas del GPS difieren varios metros
+                          aunque nadie mueva el punto. aproximada (desde 0.18.0,
+                          ADR 0007): el reporte entró por el camino de ubicación
+                          aproximada (dispositivo sin GPS preciso); el punto lo
+                          puso la persona a mano y no se comprobó contra la
+                          posición del dispositivo (los técnicos lo ven «sin
+                          comprobar»)"
+                      precision_gps_m:
+                        description: Precisión que declaró el dispositivo al enviar, en metros
+                        type:
+                          - number
+                          - "null"
+                      distancia_dispositivo_m:
+                        anyOf:
+                          - type: integer
+                            minimum: 0
+                            maximum: 1000
+                          - type: "null"
+                        description: Distancia redondeada, en metros, entre el punto y la posición del
+                          dispositivo al enviar; null en los reportes anteriores
+                          a 0.9.0. La posición del dispositivo no se guarda
+                      ubicacion_tipo:
+                        type: string
+                        enum:
+                          - via_publica
+                          - vivienda_o_predio
+                          - otro
+                      sumidero_cercano:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - si
+                              - no
+                          - type: "null"
+                      sumidero_estado:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - tapado
+                              - no_tapado
+                          - type: "null"
+                      agua_brota_sumidero:
+                        type:
+                          - boolean
+                          - "null"
+                      severidad_manual:
+                        anyOf:
+                          - type: string
+                            enum:
+                              - baja
+                              - media
+                              - alta
+                              - critica
+                          - type: "null"
+                      severidad_motivo:
+                        type:
+                          - string
+                          - "null"
+                      severidad_puntaje:
+                        type: integer
+                        minimum: -9007199254740991
+                        maximum: 9007199254740991
+                      estado_motivo:
+                        type:
+                          - string
+                          - "null"
+                      fusionado_en_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      validado_por:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                      validado_en:
+                        anyOf:
+                          - type: string
+                            format: date-time
+                            pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                          - type: "null"
+                      actualizado_en:
+                        type: string
+                        format: date-time
+                        pattern: ^(?:(?:\d\d[2468][048]|\d\d[13579][26]|\d\d0[48]|[02468][048]00|[13579][26]00)-02-29|\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\d|30)|(?:02)-(?:0[1-9]|1\d|2[0-8])))T(?:(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|([+-](?:[01]\d|2[0-3]):[0-5]\d)))$
+                      version_capa:
+                        type:
+                          - string
+                          - "null"
+                      resolucion_flags:
+                        type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties: {}
+                      autor_id:
+                        anyOf:
+                          - type: string
+                            format: uuid
+                            pattern: ^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$
+                          - type: "null"
+                    required:
+                      - id
+                      - creado_en
+                      - evento_en
+                      - distrito
+                      - unidad_vecinal
+                      - descripcion
+                      - fotos
+                      - profundidad_estimada
+                      - frecuencia
+                      - causa_presunta
+                      - severidad
+                      - severidad_calculada
+                      - estado
+                      - verificado
+                      - punto_critico_id
+                      - n_reportes_punto
+                      - precision_degradada
+                      - categoria
+                      - ubicacion_metodo
+                      - precision_gps_m
+                      - distancia_dispositivo_m
+                      - ubicacion_tipo
+                      - sumidero_cercano
+                      - sumidero_estado
+                      - agua_brota_sumidero
+                      - severidad_manual
+                      - severidad_motivo
+                      - severidad_puntaje
+                      - estado_motivo
+                      - fusionado_en_id
+                      - validado_por
+                      - validado_en
+                      - actualizado_en
+                      - version_capa
+                      - resolucion_flags
+                      - autor_id
                 required:
+                  - type
                   - id
-                  - creado_en
-                  - evento_en
-                  - distrito
-                  - unidad_vecinal
-                  - descripcion
-                  - fotos
-                  - profundidad_estimada
-                  - frecuencia
-                  - causa_presunta
-                  - severidad
-                  - severidad_calculada
-                  - estado
-                  - verificado
-                  - punto_critico_id
-                  - n_reportes_punto
-                  - precision_degradada
-                  - ubicacion_metodo
-                  - precision_gps_m
-                  - distancia_dispositivo_m
-                  - ubicacion_tipo
-                  - sumidero_cercano
-                  - sumidero_estado
-                  - agua_brota_sumidero
-                  - severidad_manual
-                  - severidad_motivo
-                  - severidad_puntaje
-                  - estado_motivo
-                  - fusionado_en_id
-                  - validado_por
-                  - validado_en
-                  - actualizado_en
-                  - version_capa
-                  - resolucion_flags
-                  - autor_id
-            required:
-              - type
-              - id
-              - geometry
-              - properties
+                  - geometry
+                  - properties
       required:
         - type
         - nota_metodologica
