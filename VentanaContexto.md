@@ -64,7 +64,14 @@ Playwright 1.63.0 y Biome 2.5.13. Fotos en disco o almacenamiento S3 compatible.
   La continuación de M4 se detalla en C. Los cambios posteriores a `09930a3` son precisamente
   los que se consolidan en la publicación autorizada del 18/10; comprobar la rama remota/PR.
 
-**Tarea activa del 18/10:** publicación del estado local en `interfaz-prueba` y apertura de PR.
+**Publicación confirmada el 18/10:** se creó y subió `interfaz-prueba`, con el commit de
+consolidación `82914f1ffb8fc2b0f77f2c51964c1c3c70427bf6` (121 archivos locales).
+PR **[#23](https://github.com/paltaunkwnow/MICURICHI/pull/23)** abierto hacia `main`, sin
+merge. Se verificó el mismo SHA en GitHub y el repositorio local; pre-commit/commit-msg
+aprobaron sin alterar contenido. Esta nota se registra después en un commit documental;
+para el último HEAD exacto consultar Git y la rama remota. El árbol se entrega limpio.
+
+**Petición del 18/10 completada:** publicación del estado local y apertura del PR #23.
 La preparación M6 del 17/10 fue solo lectura de roadmap, prototipo y contratos; sus dos
 subagentes de diagnóstico terminaron por límite de uso, sin informes entregados ni cambios
 funcionales. No existe aún un plan M6 aprobado ni definición real de Baches. Tras publicar,
