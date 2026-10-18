@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { normalizarSlugCategoria, type SlugCategoria } from '../categorias/slugs.js';
 
 export const LatSchema = z
   .number()
@@ -43,6 +44,49 @@ export const UnidadAdministrativaSchema = z.object({
   nombre: z.string(),
 });
 export type UnidadAdministrativa = z.infer<typeof UnidadAdministrativaSchema>;
+
+/** Valor del filtro `categoria` cuando se piden TODAS las categorías (solo en las rutas del panel). */
+export const CATEGORIA_TODAS = 'todas';
+
+/** Lo que devuelve el filtro `categoria` ya normalizado: un slug canónico o el centinela `todas`. */
+export type FiltroCategoria = SlugCategoria | typeof CATEGORIA_TODAS;
+
+/**
+ * Campo de query `categoria` de los filtros de lectura (ADR 0012, 0013). Lo comparten
+ * `ReporteFiltrosSchema`, `IndicadoresFiltrosSchema`, `ResumenEjecutivoQuerySchema` (y por extensión
+ * `ExportarQuerySchema`) y las consultas de geo-service.
+ *
+ * - **Ausente o vacío → `inundacion`**: la pieza de compatibilidad clave (ADR 0012). Sin el
+ *   parámetro, todo se comporta como hoy.
+ * - **Alias conocido** (plural, guion o guion bajo, mayúsculas, tildes) → su slug canónico, vía
+ *   `normalizarSlugCategoria`.
+ * - **`todas`** → `CATEGORIA_TODAS`. El contrato lo reconoce SIEMPRE; que una ruta lo admita o no lo
+ *   decide el SERVIDOR (opción «un campo que el servidor valida» del plan M3): las rutas públicas lo
+ *   rechazan y las del panel (`/tecnico/reportes`, `/exportar`, `/indicadores`, `/ejecutivo/resumen`)
+ *   lo aceptan. Por eso el mismo esquema sirve a `GET /reportes` (público) y a `GET /tecnico/reportes`
+ *   (panel), que comparten `ReporteFiltrosSchema`.
+ * - **Cualquier otro valor → `null`**: el servidor lo trata como `CATEGORIA_NO_DISPONIBLE`. El
+ *   contrato NO valida si la categoría está ACTIVA (regla 3): eso lo resuelve el servidor con el
+ *   catálogo, y responde igual (`null` = desconocida, o un slug conocido pero inactivo).
+ *
+ * El tipo de salida es `FiltroCategoria | null`.
+ */
+export const CategoriaFiltroSchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v): FiltroCategoria | null => {
+    if (v === undefined || v === '') return 'inundacion';
+    if (v.toLowerCase() === CATEGORIA_TODAS) return CATEGORIA_TODAS;
+    return normalizarSlugCategoria(v);
+  })
+  .meta({
+    description:
+      'Filtra por categoría. Sin el parámetro = inundacion (compatibilidad, ADR 0012). Acepta alias ' +
+      '(plural, guion, mayúsculas, tildes). «todas» solo en las rutas del panel; en las públicas la ' +
+      'rechaza el servidor. Un slug desconocido o inactivo da 400/422 CATEGORIA_NO_DISPONIBLE (lo ' +
+      'decide el servidor con el catálogo, no el contrato).',
+  });
 
 /** Convierte "a,b,c" o ["a","b"] en lista; útil para filtros por query string. */
 export function listaDesdeQuery<T extends readonly string[]>(valores: T) {

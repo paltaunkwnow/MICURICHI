@@ -17,6 +17,8 @@ export interface ResumenMantenimiento {
   clavesIdempotenciaBorradas: number;
   /** Filas de `cuota_reporte_diaria` de días anteriores al de hoy en la ciudad (migración 0014). */
   cuotasDiariasBorradas: number;
+  /** Filas de `cupo_contador` cuya ventana empezó antes de hoy en la ciudad (migración 0020). */
+  cupoContadorBorrado: number;
 }
 
 export interface OpcionesMantenimiento {
@@ -53,8 +55,10 @@ export async function ejecutarMantenimiento(
   const sesiones = await ex.consultar<{ id: string }>(
     'DELETE FROM sesion WHERE expira_en < now() RETURNING id',
   );
+  // Sobre `reporte` (todas las categorías desde la 0020), no sobre la vista `reporte_inundacion`: la
+  // retención de `ip_hash` vale igual para cualquier categoría.
   const ips = await ex.consultar<{ id: string }>(
-    `UPDATE reporte_inundacion SET ip_hash = NULL
+    `UPDATE reporte SET ip_hash = NULL
      WHERE ip_hash IS NOT NULL AND creado_en < now() - ($1 || ' days')::interval
      RETURNING id::text`,
     [String(dias)],
@@ -80,10 +84,21 @@ export async function ejecutarMantenimiento(
   );
   // El cupo de un día que ya pasó no frena a nadie. «Hoy» es el día de la ciudad y no el de la
   // sesión de PostgreSQL: con `current_date` en UTC, a las 20:00 de La Paz se borraría la fila de
-  // hoy y la cuenta recuperaría sus turnos.
+  // hoy y la cuenta recuperaría sus turnos. Esta tabla quedó sin uso desde M3b (la reemplaza
+  // `cupo_contador`); se retira en M10.
   const cuotas = await ex.consultar<{ usuario_id: string }>(
     `DELETE FROM cuota_reporte_diaria
      WHERE dia < (COALESCE($1::timestamptz, now()) AT TIME ZONE $2)::date
+     RETURNING usuario_id::text`,
+    [o.ahora?.toISOString() ?? null, zona],
+  );
+  // Ventanas de cupo (0020) cuyo día en la ciudad ya pasó: igual que la cuota diaria, se decide con
+  // el día local y no con el `current_date` (UTC) de la sesión de PostgreSQL. Desde M3b api-core
+  // escribe la tabla (claves `reportes:<categoria>` y `fotos:cuenta`) y esto borra las ventanas
+  // cuyo día ya pasó.
+  const cupo = await ex.consultar<{ usuario_id: string }>(
+    `DELETE FROM cupo_contador
+     WHERE (ventana_inicio AT TIME ZONE $2)::date < (COALESCE($1::timestamptz, now()) AT TIME ZONE $2)::date
      RETURNING usuario_id::text`,
     [o.ahora?.toISOString() ?? null, zona],
   );
@@ -94,5 +109,6 @@ export async function ejecutarMantenimiento(
     intentosLoginBorrados: intentos.length,
     clavesIdempotenciaBorradas: claves.length,
     cuotasDiariasBorradas: cuotas.length,
+    cupoContadorBorrado: cupo.length,
   };
 }

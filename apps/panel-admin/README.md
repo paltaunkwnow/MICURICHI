@@ -10,6 +10,54 @@ pnpm --filter panel-admin test       # Vitest
 pnpm --filter panel-admin build      # imagen de producción: .next/standalone (ver abajo)
 ```
 
+## Panel por categoría (M5)
+
+La disponibilidad es la intersección ordenada de `categorias_activas` de la configuración y el
+registro de `contracts`. Inundaciones sigue siendo la única definición real registrada; las
+definiciones sintéticas se inyectan únicamente en pruebas y no activan categorías.
+
+- Con una categoría se oculta el selector. Con varias ofrece «Todas» y las disponibles; empieza
+  en Inundaciones salvo una selección válida en la URL. El panel no usa la preferencia del mapa
+  público. «Todas» incluye el historial de categorías inactivas que devuelve la API autorizada.
+- La selección viaja en `?categoria=` entre bandeja, detalle, indicadores y ejecutivo. Cambiar
+  categoría conserva zona/estado/fechas y vista del mapa; reinicia severidad, página y selección
+  del reporte. También se aplica antes de la primera consulta si cambia la disponibilidad.
+  En ejecutivo, A→B→A reinicia siempre la pestaña de severidad. El mapa conserva centro/zoom
+  durante caché→respuesta fresca; una nueva selección de UV o activar el ajuste a puntos sí
+  permite encuadrar explícitamente.
+- Sin categoría efectiva no se consumen filas, puntos ni KPI de la caché: se muestra estado sin
+  selección y «—». Exportación y reintento de datos quedan deshabilitados. Un fallo de configuración
+  conserva el último valor validado con aviso, sin inferir actividad de categorías.
+- Los conteos del selector no dependen de filtros de trabajo: bandeja usa `total` de publicados
+  en todos los estados; indicadores, `total` vigente; ejecutivo, `activas.total` de todo el
+  historial. Carga/error muestra «—» y una cota no exacta se muestra con «≥». Con selector oculto
+  no se abren consultas extra para estos conteos.
+- «Todas» usa columnas comunes y la categoría de cada reporte. Inundaciones conserva sus columnas
+  de profundidad/frecuencia. CSV y GeoJSON usan la categoría y filtros efectivos sin la paginación
+  de tabla; el GeoJSON conserva validación de `contracts` y aviso de truncamiento.
+
+El detalle por ID se presenta con **la categoría recibida**, aunque se llegue desde «Todas».
+El adaptador de Inundaciones conserva su presentación; otras definiciones usan esquema, preguntas,
+opciones, subtipo y nota. Un detalle incompatible (incluido `null` explícito) o una definición
+ausente muestra comunes y aviso, sin volcar JSON en HTML ni aplicar factores de agua. El fallback
+plano antiguo solo se usa cuando `detalle` está ausente (`undefined`). La ficha imprimible, TXT
+y GeoJSON conservan categoría, respuestas y trazabilidad técnica. La versión mostrada es la de la
+**definición disponible**; la API no devuelve la versión histórica de detalle/severidad del reporte.
+El panel no recalcula la severidad enviada por el servidor.
+
+En indicadores, categoría se conserva en cifras, tortas, capa anterior y enlace UV→bandeja.
+El ejecutivo conserva «Crítica = alta + crítica», `ventana=todo`, las dos gráficas y «Otros», sin
+período, exportación ni moderación. Inundaciones conserva sus textos/modelo; otras categorías y
+«Todas» usan bandas comunes sin inventar rangos o combinar puntajes de modelos distintos.
+
+En el ejecutivo, «Todas» pide el resumen histórico al endpoint autorizado. Mapa y UV usan solo
+categorías disponibles, una consulta pública por categoría, nunca `categoria=todas`, con máximo
+300 puntos y coordenadas públicas por consulta. El límite de puntos y la diferencia de universo
+con el historial inactivo se explican en pantalla. Un mapa parcial identifica categorías faltantes;
+las UV se suman solo con respuestas completas e identidad territorial compatible, se ordenan por
+total combinado y no reciben una severidad conjunta inventada. No se usan endpoints técnicos
+para obtener esos datos del ejecutivo.
+
 ## Una imagen, cualquier ciudad: variables de tiempo de ejecución
 
 Mi Curichi se instala una vez por ciudad con la **misma imagen**. El panel no tiene ninguna
@@ -107,21 +155,22 @@ La interfaz reproduce el prototipo funcional que entregó el usuario
 | `/indicadores` | M-09 | Conteos por severidad, distrito y unidad vecinal, y la tabla «De una capa anterior» (distritos que ya no están en la capa vigente). «Por severidad» son botones («Todo» y las cuatro severidades, cada uno con su número): una severidad deja el filtro en solo esa y «Todo» lo quita. Comparten la URL (`?severidad=`) con la fila «Filtrar por severidad» —con dos elegidas arriba quedan presionadas las dos— y sus números salen de los indicadores sin filtro de severidad, así que no cambian al filtrar (`src/lib/indicadores-pestanas.ts`) |
 | `/capas` | A-02 | Versiones cargadas por el ETL y activación de la vigente |
 | `/plano` | A-06 | Plano oficial de zonificación como referencia, con su advertencia. Solo en la instalación de Santa Cruz de la Sierra (ver arriba) |
-| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin), siempre sobre el histórico: la cifra de inundaciones activas con «N verificadas · M en revisión», pestañas Crítica (crítica + alta) / Media / Baja / Todas, «Inundaciones activas por distrito» (con «Otros» para una capa anterior o sin distrito, así las barras suman el total) y «Cómo va el trabajo». Sin mapa ni selector de período. «Significado de los niveles de severidad» muestra la fórmula, los puntos de cada respuesta y el rango de puntaje de cada nivel, todo de `contracts` (`src/lib/severidad.ts`): no dice qué hace el municipio con cada nivel. El rol ejecutivo solo ve esta ruta |
+| `/ejecutivo` | — | Panel ejecutivo (roles ejecutivo, técnico y admin), siempre sobre el histórico: cifra de reportes activos con verificados y en revisión, pestañas Crítica (crítica + alta) / Media / Baja / Todas, activas por distrito (con «Otros») y «Cómo va el trabajo». Incluye mapa de distritos/UV y selección de UV. Sin período, moderación ni exportación. La fórmula y rangos de Inundaciones se muestran solo en esa categoría; las demás usan su modelo disponible y bandas comunes. El rol ejecutivo solo ve esta ruta |
 
 El texto de estado usa las palabras del técnico («Validado», «Duplicado»), no las del vecino: acá
 se trabaja con la máquina de estados de `CLAUDE.md` §7.3.
 
 ### Fusionar solo con reportes cercanos
 
-«Fusionar» ofrece, para elegir el reporte canónico, solo los reportes **validados a 100 m o menos
+«Fusionar» ofrece, para elegir el reporte canónico, solo los reportes **de la categoría del origen, validados a 100 m o menos
 de la coordenada exacta** del reporte, sin el propio y del más cercano al más lejano. Cada opción
 dice el ID corto, la UV, la distancia («a 35 m») y el comienzo de la descripción; no hay campo para
 pegar un ID. Sin ninguno, el panel lo dice y ofrece buscar hasta 300 m y hasta 1 km (solo los
 radios mayores al vigente). «Confirmar fusión» queda deshabilitado mientras no haya uno elegido.
 
-Es una restricción de la interfaz: api-core sigue aceptando como canónico cualquier reporte
-`validado` (`CLAUDE.md` §7.3), sin cambios de API ni de contrato. La búsqueda usa el filtro `bbox`
+La API exige la misma categoría y responde `409 FUSION_ENTRE_CATEGORIAS` ante una fusión cruzada;
+el panel conserva ese rechazo sin buscar una alternativa. La búsqueda usa categoría en parámetro y
+clave, y descarta candidatos ajenos aunque una respuesta los incluya. Usa el filtro `bbox`
 de `GET /api/v1/tecnico/reportes` (hasta 100 validados, del más reciente al más antiguo) con una
 caja que contiene el círculo del radio, y la distancia exacta se mide en el cliente con
 `distanciaMetros` de `contracts`, la misma cuenta del radio de 60 m (`src/lib/fusion-cercana.ts`).
@@ -193,6 +242,11 @@ con el panel abierto no mantiene viva la sesión para siempre. La primera carga 
 refrescos la llevan aunque esa primera carga haya fallado. Si un refresco falla, se siguen viendo
 los últimos datos con un aviso, y el formulario de moderación abierto no se pierde.
 
+El lector completo de configuración pública usado por el proveedor de categorías envía
+`credentials: 'omit'`, también al renovar cada cinco minutos o al volver a la pestaña. Esa
+consulta pública no necesita la cookie y no renueva la inactividad de la sesión. El lector de
+ciudad legado y las consultas manuales de datos conservan su comportamiento.
+
 La lista de capas del mapa (`/geo/v1/capas`, liviana y `no-cache`) vence a los 60 s: al volver a la
 pestaña o abrir otra pantalla con mapa se pide de nuevo. Cada capa se sirve en una URL con la
 huella de su contenido; si un administrador activa otra versión con el mapa abierto, las teselas
@@ -213,11 +267,39 @@ Esta app no tiene una suite Playwright propia: el recorrido que la atraviesa (ci
 técnico valida → aparece en el mapa público → sale en la exportación), la accesibilidad de sus
 pantallas y los contratos de la API se cubren desde la suite transversal de `e2e/`.
 
+El runner transversal `e2e/scripts/correr-local.mjs` usa la base aislada `curichi_e2e` y comprueba
+RAM/puertos antes de arrancar. La verificación de M5 se coordina en una ventana aparte, con un
+solo ejecutor; no usar bases habituales ni sembrarlas para probar este panel. Build, navegador,
+DOM, teclado, CSP y E2E final corresponden al verificador independiente. Las pruebas unitarias
+con dos definiciones sintéticas no acreditan una instalación con dos categorías reales activas.
+
+## Verificación del paquete y criterios de M5
+
 ```bash
-pnpm db:local          # terminal 1
-pnpm db:seed:samples
-pnpm --filter e2e test:e2e
+pnpm --config.verify-deps-before-run=false --filter panel-admin exec vitest run --maxWorkers=1
+pnpm --config.verify-deps-before-run=false --filter panel-admin typecheck
+pnpm --config.verify-deps-before-run=false exec biome check apps/panel-admin --reporter=summary
 ```
 
-La Definition of Done de `CLAUDE.md` §4.3 y §4.4 pide además una suite propia por app; queda
-pendiente de decidir si aporta algo sobre la transversal o si se consolida allí.
+Vitest del panel no necesita DB. Medir RAM antes (1500 MiB para estáticos; 2500 MiB para E2E),
+ejecutar un pesado por vez y, al usar Turbo, `--concurrency=1`. No instalar herramientas para
+repetir las pruebas: usar el pnpm/dependencias locales ya preparados. Salidas de esta corrida,
+preflights y checkpoints quedan en `.turbo/m5-2026-10-15/`, sin secretos.
+
+| Criterio | Pruebas del paquete (rutas bajo `src/`) |
+|---|---|
+| CA1 disponibilidad y cero | `lib/m5-categorias.test.ts`, `lib/m5-2-transicion-cache.test.ts`, `lib/m5-5-reintentar.test.ts` |
+| CA2 URL, cambios y retorno | `lib/m5-categorias.test.ts`, `lib/m5-2-transicion-ambito.test.ts`, `lib/m5-2.test.ts`, `lib/m5-5.test.ts`, `lib/m5-5-pestana-transicion.test.ts`, `componentes/Mapa-transicion.test.ts` |
+| CA3 claves, caché y parciales | `lib/m5-categorias.test.ts`, `lib/m5-2-transicion-cache.test.ts`, `lib/m5-4.test.ts`, `lib/consultas.test.ts` |
+| CA4 conteos por universo | `lib/m5-2.test.ts`, `lib/m5-4.test.ts`, `componentes/indicadores/PestanasPorSeveridad.test.ts` |
+| CA5 tabla, tarjetas y exportación | `lib/m5-2.test.ts`, `componentes/TablaReportes.test.ts`, `lib/api.test.ts`, `lib/exportacion.test.ts` |
+| CA6 indicadores y modelos ejecutivos | `lib/m5-4.test.ts`, `lib/indicadores-torta.test.ts`, `componentes/CapaAnterior.test.ts`, `componentes/ejecutivo/PanelEjecutivo.test.ts` |
+| CA7 públicos/geo e historial | `lib/m5-categorias.test.ts`, `lib/m5-4.test.ts`, `lib/m5-5.test.ts` |
+| CA8 detalle y fichas | `lib/m5-3.test.ts`, `lib/m5-5.test.ts`, `componentes/ReporteUnitarioModal.test.ts`, `componentes/FactoresSeveridad.test.ts` |
+| CA9 fusión | `lib/m5-3.test.ts`, `lib/m5-5.test.ts`, `lib/fusion-cercana.test.ts`, `componentes/PanelAcciones.test.ts` |
+| CA10 roles, sondeo y fronteras | `lib/sondeo-mapa.test.ts`, `lib/consultas.test.ts`, `lib/roles.test.ts`, `lib/next-config.test.ts`, `proxy.test.ts` |
+| CA11 selector y anuncio | `lib/m5-2.test.ts`, `componentes/SelectorCategoria.test.ts`; DOM/teclado/lector reales pendientes de verificación independiente |
+| CA12 regresión, límites y README | suite P2 completa, typecheck, Biome e inventario de checkpoints; dictámenes/F4 independientes pendientes |
+
+Esta tabla describe cobertura unitaria y de render/consultas controladas; no sustituye E2E,
+revisión independiente, lector de pantalla real o verificación de la imagen desplegada.

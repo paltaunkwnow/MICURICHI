@@ -1,5 +1,11 @@
 # Corridas del proceso /sdd
 
+Continuidad al 2026-10-17:
+
+- [M4: mapa y formulario](2026-10-10-mapa-y-formulario-por-categoria/informe.md): cerrada en local, con intermitencia y rojos ajenos registrados.
+- [Zod y CSP](2026-10-15-csp-zod/verificacion.md): corrección aprobada y verificada en producción local.
+- [M5: panel por categoría](2026-10-15-panel-por-categoria/informe.md): cerrada en local, contracts 0.22.0, panel 551/52 y E2E 132/132. Ajuste de expectativa de enlace aprobado y verificado; rojos ajenos declarados.
+
 Cada cambio que pasa por `/sdd` deja aquí una carpeta `<aaaa-mm-dd>-<slug>/` (el slug es el de
 la rama) con seis archivos, más los auxiliares de la corrida:
 

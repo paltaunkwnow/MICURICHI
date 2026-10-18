@@ -1,8 +1,11 @@
 /**
- * La consulta EXACTA de los agregados usa el índice parcial `reporte_agregado_uv` (migración
- * 0015). El índice solo sirve si la condición es un literal que implica su predicado: con
- * `estado = ANY($n)` PostgreSQL no lo puede demostrar y recorre la tabla entera. Base propia:
- * necesita miles de filas para que el planificador elija el índice.
+ * La consulta EXACTA de los agregados usa el índice parcial `reporte_agregado_uv` (migración 0015,
+ * ampliado en la 0020 con `categoria` en el INCLUDE). El índice solo sirve si la condición es un
+ * literal que implica su predicado: con `estado = ANY($n)` PostgreSQL no lo puede demostrar y
+ * recorre la tabla entera. Desde M3.4 la consulta filtra además por `categoria = $1` (la ruta pasa
+ * el slug): `categoria` está en el INCLUDE, de modo que sigue siendo un Index Only Scan (el filtro
+ * de categoría se resuelve como Filter sobre la columna incluida). Base propia: necesita miles de
+ * filas para que el planificador elija el índice.
  */
 import { ejecutorPg } from 'db';
 import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
@@ -34,8 +37,9 @@ beforeAll(async () => {
       FROM generate_series(1, 4000) AS i,
            LATERAL (SELECT ST_SetSRID(ST_MakePoint(-63.2 + (i % 100) * 0.0003,
                                                    -17.8 + (i / 100) * 0.0005), 4326) AS p) AS g`);
-  // Deja el mapa de visibilidad al día para el Index Only Scan.
-  await pool.query('VACUUM ANALYZE reporte_inundacion');
+  // Deja el mapa de visibilidad al día para el Index Only Scan. Se hace sobre `reporte` (la tabla
+  // real desde la 0020; `reporte_inundacion` es una vista y VACUUM sobre una vista no hace nada).
+  await pool.query('VACUUM ANALYZE reporte');
 }, 240_000);
 
 afterAll(async () => {
@@ -50,7 +54,11 @@ it('los agregados por UV son un Index Only Scan sobre reporte_agregado_uv', asyn
     // Sin recorrido secuencial ni por mapa de bits: queda ver cuál de los índices elige.
     await cliente.query('SET LOCAL enable_seqscan = off');
     await cliente.query('SET LOCAL enable_bitmapscan = off');
-    const r = await cliente.query<{ 'QUERY PLAN': string }>(`EXPLAIN ${SQL_AGREGADOS_UV}`);
+    // Con el parámetro ligado a 'inundacion' (todas las filas insertadas son de esa categoría), el
+    // EXPLAIN planifica con el valor real: igual que lo ejecuta la ruta.
+    const r = await cliente.query<{ 'QUERY PLAN': string }>(`EXPLAIN ${SQL_AGREGADOS_UV}`, [
+      'inundacion',
+    ]);
     const plan = r.rows.map((f) => f['QUERY PLAN']).join('\n');
     expect(plan, plan).toMatch(/Index Only Scan using reporte_agregado_uv/);
   } finally {

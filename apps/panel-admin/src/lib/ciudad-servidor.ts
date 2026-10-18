@@ -13,13 +13,23 @@
 import type { Ciudad } from 'contracts';
 import { connection } from 'next/server';
 import { cache } from 'react';
-import { crearLectorDeCiudad } from './configuracion';
+import { crearLectorDeCiudad, crearLectorDeConfiguracion } from './configuracion';
 import { urlDeApiCore } from './servicios';
 
 const leerCiudad = crearLectorDeCiudad({
   // En cada consulta, no al cargar el módulo: la misma imagen sirve en cualquier despliegue.
   urlBase: () => urlDeApiCore(process.env),
   registrar: (mensaje, causa) => console.error(mensaje, causa),
+});
+
+const leerConfiguracion = crearLectorDeConfiguracion({
+  esperarRenovacion: true,
+  urlBase: () => urlDeApiCore(process.env),
+  registrar: (mensaje, causa) => console.error(mensaje, causa),
+});
+export const obtenerConfiguracion = cache(async () => {
+  await connection();
+  return leerConfiguracion();
 });
 
 export const obtenerCiudad = cache(async (): Promise<Ciudad> => {

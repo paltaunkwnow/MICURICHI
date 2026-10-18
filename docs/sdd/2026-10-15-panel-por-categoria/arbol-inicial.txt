@@ -1,0 +1,86 @@
+M5: estado inicial antes de modificar funcionalidad; cambios anteriores se conservan.
+git status --short:
+ M ContextosySkills/README.md
+ M README.md
+ M apps/web-ciudadano/README.md
+ M apps/web-ciudadano/src/componentes/ComoFunciona.tsx
+ M apps/web-ciudadano/src/componentes/FormularioReporte.tsx
+ M apps/web-ciudadano/src/componentes/Mapa.tsx
+ M apps/web-ciudadano/src/componentes/PanelCuenta.tsx
+ M apps/web-ciudadano/src/componentes/VistaMapa.test.ts
+ M apps/web-ciudadano/src/componentes/VistaMapa.tsx
+ M apps/web-ciudadano/src/componentes/formulario-categorias/adaptadores.test.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/generico.tsx
+ M apps/web-ciudadano/src/componentes/formulario-categorias/registro.ts
+ M apps/web-ciudadano/src/lib/categoria-de-prueba.ts
+ M apps/web-ciudadano/src/lib/conteos-mapa.test.ts
+ M apps/web-ciudadano/src/lib/conteos-mapa.ts
+ M apps/web-ciudadano/src/lib/cupo.test.ts
+ M apps/web-ciudadano/src/lib/cupo.ts
+ M apps/web-ciudadano/src/lib/errores.test.ts
+ M apps/web-ciudadano/src/lib/formulario-reporte.test.ts
+ M apps/web-ciudadano/src/lib/formulario-reporte.ts
+ M docs/README.md
+ M docs/arquitectura/14-decisiones-m0-y-plan-m1.md
+ M docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/archivos.txt
+ M docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/plan.md
+ M docs/sdd/README.md
+ M e2e/scripts/correr-local.mjs
+ M e2e/tests/ayudas.ts
+ M e2e/tests/cuenta-ciudadana.spec.ts
+?? VentanaContexto.md
+?? apps/panel-admin/src/instrumentation-client.ts
+?? apps/web-ciudadano/src/componentes/AnuncioCategoria.test.ts
+?? apps/web-ciudadano/src/componentes/AnuncioCategoria.tsx
+?? apps/web-ciudadano/src/componentes/Mapa-conteos.test.ts
+?? apps/web-ciudadano/src/componentes/formulario-categorias/generico.test.ts
+?? apps/web-ciudadano/src/componentes/formulario-categorias/registro.test.ts
+?? apps/web-ciudadano/src/instrumentation-client.ts
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/auditoria-recuperada.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/correcciones-cierre.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/pila-cierre-2026-10-15.txt
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/preparacion-verificacion-codex.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/revision-cierre.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/revision-correcciones.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/verificacion-ejecucion.md
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/verificacion.md
+?? docs/sdd/2026-10-15-csp-zod/archivos.txt
+?? docs/sdd/2026-10-15-csp-zod/implementacion.md
+?? docs/sdd/2026-10-15-csp-zod/linea-base.md
+?? docs/sdd/2026-10-15-csp-zod/plan.md
+?? docs/sdd/2026-10-15-csp-zod/revision.md
+?? docs/sdd/2026-10-15-csp-zod/verificacion.md
+?? docs/sdd/2026-10-15-panel-por-categoria/plan.md
+git diff --stat:
+ ContextosySkills/README.md                         | 29 +++++---
+ README.md                                          | 61 ++++++++++------
+ apps/web-ciudadano/README.md                       | 45 ++++++------
+ .../web-ciudadano/src/componentes/ComoFunciona.tsx |  3 +-
+ .../src/componentes/FormularioReporte.tsx          | 31 +++++---
+ apps/web-ciudadano/src/componentes/Mapa.tsx        | 84 +++++++++++-----------
+ apps/web-ciudadano/src/componentes/PanelCuenta.tsx |  4 +-
+ .../src/componentes/VistaMapa.test.ts              |  4 +-
+ apps/web-ciudadano/src/componentes/VistaMapa.tsx   |  8 +--
+ .../formulario-categorias/adaptadores.test.ts      | 10 +--
+ .../componentes/formulario-categorias/generico.tsx | 56 +++++++++++++--
+ .../componentes/formulario-categorias/registro.ts  | 43 ++++++++++-
+ apps/web-ciudadano/src/lib/categoria-de-prueba.ts  | 14 ++++
+ apps/web-ciudadano/src/lib/conteos-mapa.test.ts    | 50 ++++++++++++-
+ apps/web-ciudadano/src/lib/conteos-mapa.ts         | 35 +++++++++
+ apps/web-ciudadano/src/lib/cupo.test.ts            | 13 ++--
+ apps/web-ciudadano/src/lib/cupo.ts                 | 11 +--
+ apps/web-ciudadano/src/lib/errores.test.ts         |  4 +-
+ .../src/lib/formulario-reporte.test.ts             |  5 ++
+ apps/web-ciudadano/src/lib/formulario-reporte.ts   |  9 ++-
+ docs/README.md                                     |  6 +-
+ docs/arquitectura/14-decisiones-m0-y-plan-m1.md    |  7 ++
+ .../archivos.txt                                   | 12 ++++
+ .../plan.md                                        | 38 ++++++++++
+ docs/sdd/README.md                                 |  6 ++
+ e2e/scripts/correr-local.mjs                       |  2 +-
+ e2e/tests/ayudas.ts                                | 10 +--
+ e2e/tests/cuenta-ciudadana.spec.ts                 |  4 +-
+ 28 files changed, 451 insertions(+), 153 deletions(-)
+Hashes completos en .turbo/m5-2026-10-15/arbol-antes.json; SHA256 del inventario:
+21dc72bcb481045ffa4a31810c2a4bd7e304f19f30a75931486635f42d2fd585

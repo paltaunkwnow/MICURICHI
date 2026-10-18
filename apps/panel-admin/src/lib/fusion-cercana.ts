@@ -1,9 +1,5 @@
-import {
-  dentroDelRadio,
-  distanciaMetros,
-  type PuntoLatLon,
-  type ReporteTecnicoFeature,
-} from 'contracts';
+import { dentroDelRadio, distanciaMetros, type PuntoLatLon } from 'contracts';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
 import type { ParametrosConsulta } from './api';
 import { etiquetaUnidadVecinal, idCorto } from './formato';
 
@@ -78,8 +74,10 @@ export function cajaDeBusqueda(centro: PuntoLatLon, radioM: number): string {
 export function parametrosCandidatosFusion(
   centro: PuntoLatLon,
   radioM: number,
+  categoria?: string,
 ): ParametrosConsulta {
   return {
+    ...(categoria ? { categoria } : {}),
     estado: 'validado',
     bbox: cajaDeBusqueda(centro, radioM),
     limite: String(LIMITE_CANDIDATOS_FUSION),
@@ -117,14 +115,19 @@ export function descripcionCorta(texto: string): string {
  */
 export function candidatosCercanos(
   features: readonly ReporteTecnicoFeature[],
-  propio: { id: string; centro: PuntoLatLon },
+  propio: { id: string; centro: PuntoLatLon; categoria?: string },
   radioM: number,
 ): CandidatoFusion[] {
   const idPropio = propio.id.toLowerCase();
   const candidatos: CandidatoFusion[] = [];
   for (const f of features) {
     const p = f.properties;
-    if (p.estado !== 'validado' || p.id.toLowerCase() === idPropio) continue;
+    if (
+      p.estado !== 'validado' ||
+      p.id.toLowerCase() === idPropio ||
+      (p.categoria ?? 'inundacion') !== (propio.categoria ?? 'inundacion')
+    )
+      continue;
     const punto: PuntoLatLon = { lon: f.geometry.coordinates[0], lat: f.geometry.coordinates[1] };
     if (!dentroDelRadio(punto, propio.centro, { radioM })) continue;
     candidatos.push({

@@ -1,10 +1,18 @@
-import { CONFIG_DOMINIO, type Dispositivo, ReporteCrearSchema } from 'contracts';
+import {
+  CONFIG_DOMINIO,
+  DetalleInundacionSchema,
+  type Dispositivo,
+  normalizarReporteCrear,
+  ReporteCrearCategoriaSchema,
+} from 'contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { ADAPTADOR_INUNDACION } from '@/componentes/formulario-categorias/inundacion';
 import {
   armarEnvio,
   campoFechaDesdeIso,
   camposSinLugar,
   centroDelPaso1,
+  crearResolverFormulario,
   type EstadoParaAvanzar,
   isoDesdeCampoFecha,
   limitesFechaEvento,
@@ -12,12 +20,12 @@ import {
   pasoDelError,
   problemaFechaEvento,
   puedeAvanzar,
-  resolverFormulario,
   respuestasSumidero,
   type Ubicacion,
   ubicacionDelEnlace,
   type ValoresFormulario,
   valoresIniciales,
+  valoresTrasCambiarCategoria,
 } from './formulario-reporte';
 
 /**
@@ -46,19 +54,30 @@ const DISPOSITIVO: Dispositivo = {
   antiguedad_s: 4,
 };
 
+/** Valores de un reporte de inundación completo (núcleo + respuestas del paso 2). */
+function valoresInundacion(extra: Partial<ValoresFormulario> = {}): ValoresFormulario {
+  return {
+    ...valoresIniciales(),
+    ...ADAPTADOR_INUNDACION.valoresIniciales(),
+    lat: 0,
+    lon: 0,
+    descripcion: 'Se junta el agua en la esquina',
+    profundidad_estimada: 'rodilla',
+    frecuencia: 'ocasional',
+    ubicacion_tipo: 'via_publica',
+    ...extra,
+  } as ValoresFormulario;
+}
+
 function estado(parcial: Partial<EstadoParaAvanzar> = {}): EstadoParaAvanzar {
   return {
     ancla: ANCLA,
     ubicacion: PUNTO,
     resuelto: { dentro_cobertura: true },
     resolviendo: false,
-    profundidad_estimada: 'rodilla',
-    frecuencia: 'ocasional',
-    evento_en: null,
     descripcion: 'Se junta el agua en la esquina',
     subiendoFoto: false,
     enviando: false,
-    ahora: new Date(2026, 8, 26, 10, 0),
     ...parcial,
   };
 }
@@ -133,15 +152,22 @@ describe('paso 2: la fecha del evento (contracts 0.6.0 rechaza futuras y de más
     expect(campoFechaDesdeIso(iso)).toBe('2026-09-20');
   });
 
-  it('una fecha futura o de hace más de un año no deja continuar y lo dice', () => {
+  it('una fecha futura o de hace más de un año no deja avanzar del paso 2 y lo dice', () => {
     const ahora = new Date(2026, 8, 26, 10, 0);
     const futura = isoDesdeCampoFecha('2026-09-27', ahora);
     const vieja = isoDesdeCampoFecha('2025-09-20', ahora);
     expect(problemaFechaEvento(futura, ahora)).toMatch(/posterior a hoy/);
     expect(problemaFechaEvento(vieja, ahora)).toMatch(/último año/);
-    expect(puedeAvanzar(2, estado({ ahora, evento_en: futura }))).toBe(false);
-    expect(puedeAvanzar(2, estado({ ahora, evento_en: vieja }))).toBe(false);
-    expect(puedeAvanzar(2, estado({ ahora, evento_en: null }))).toBe(true);
+    // El avance del paso 2 lo decide el adaptador de la categoría (ADR 0021).
+    expect(
+      ADAPTADOR_INUNDACION.puedeAvanzarPaso2(valoresInundacion({ evento_en: futura }), ahora),
+    ).toBe(false);
+    expect(
+      ADAPTADOR_INUNDACION.puedeAvanzarPaso2(valoresInundacion({ evento_en: vieja }), ahora),
+    ).toBe(false);
+    expect(
+      ADAPTADOR_INUNDACION.puedeAvanzarPaso2(valoresInundacion({ evento_en: null }), ahora),
+    ).toBe(true);
   });
 
   describe('contra el contrato, con el reloj simulado', () => {
@@ -149,7 +175,7 @@ describe('paso 2: la fecha del evento (contracts 0.6.0 rechaza futuras y de más
       vi.useRealTimers();
     });
     const aceptaElContrato = (iso: string | null) =>
-      ReporteCrearSchema.shape.evento_en.safeParse(iso).success;
+      ReporteCrearCategoriaSchema.shape.evento_en.safeParse(iso).success;
 
     it('el día más viejo del calendario lo acepta el contrato aunque se envíe a última hora', () => {
       vi.useFakeTimers();
@@ -191,33 +217,52 @@ describe('paso 2: la fecha del evento (contracts 0.6.0 rechaza futuras y de más
   });
 
   it('un error lleva al paso de su campo, no a la revisión (TRASPASO §3.8)', () => {
+    const mapa = ADAPTADOR_INUNDACION.pasoDeCampo;
     expect(pasoDelError(['evento_en'])).toBe(2);
     expect(pasoDelError(['descripcion', 'evento_en'])).toBe(2);
-    expect(pasoDelError(['agua_brota_sumidero'])).toBe(3);
-    expect(pasoDelError(['sumidero_estado'])).toBe(3);
-    expect(pasoDelError(['lat'])).toBe(1);
-    expect(pasoDelError(['fotos.0'])).toBe(3);
-    expect(pasoDelError(['campo_desconocido'])).toBe(4);
+    expect(pasoDelError(['agua_brota_sumidero'], mapa)).toBe(3);
+    expect(pasoDelError(['sumidero_estado'], mapa)).toBe(3);
+    expect(pasoDelError(['profundidad_estimada'], mapa)).toBe(2);
+    expect(pasoDelError(['lat'], mapa)).toBe(1);
+    expect(pasoDelError(['fotos.0'], mapa)).toBe(3);
+    expect(pasoDelError(['campo_desconocido'], mapa)).toBe(4);
   });
 
   it('lo que no tiene un control donde mostrarse se dice en la revisión', () => {
-    expect(camposSinLugar(['evento_en', 'sitio_web', 'root', 'fotos.1'])).toEqual([
+    const mapa = ADAPTADOR_INUNDACION.pasoDeCampo;
+    expect(camposSinLugar(['evento_en', 'sitio_web', 'root', 'fotos.1'], mapa)).toEqual([
       'sitio_web',
       'root',
     ]);
-    expect(camposSinLugar(['descripcion'])).toEqual([]);
+    expect(camposSinLugar(['descripcion'], mapa)).toEqual([]);
+  });
+});
+
+describe('paso 2: avance de Inundaciones (profundidad y frecuencia obligatorias)', () => {
+  const ahora = new Date(2026, 8, 26, 10, 0);
+  it('necesita profundidad y frecuencia', () => {
+    expect(ADAPTADOR_INUNDACION.puedeAvanzarPaso2(valoresInundacion(), ahora)).toBe(true);
+    expect(
+      ADAPTADOR_INUNDACION.puedeAvanzarPaso2(
+        valoresInundacion({ profundidad_estimada: undefined }),
+        ahora,
+      ),
+    ).toBe(false);
+    expect(
+      ADAPTADOR_INUNDACION.puedeAvanzarPaso2(valoresInundacion({ frecuencia: undefined }), ahora),
+    ).toBe(false);
   });
 });
 
 describe('paso 3: sumidero y fotos', () => {
-  it('«el agua brota» empieza sin contestar, no en «no»', () => {
-    const v = valoresIniciales();
+  it('«el agua brota» empieza sin contestar, no en «no» (iniciales de la categoría)', () => {
+    const v = ADAPTADOR_INUNDACION.valoresIniciales();
     expect(v.agua_brota_sumidero).toBeNull();
     expect(v.sumidero_cercano).toBeNull();
     expect(v.sumidero_estado).toBeNull();
     // Cada llamada da un objeto nuevo: «Empezar de nuevo» no puede heredar lo del anterior.
-    expect(valoresIniciales()).not.toBe(v);
-    expect(valoresIniciales().fotos).not.toBe(v.fotos);
+    expect(ADAPTADOR_INUNDACION.valoresIniciales()).not.toBe(v);
+    expect(valoresIniciales().fotos).not.toBe(valoresIniciales().fotos);
   });
 
   it('sin sumidero cerca no queda ni estado ni «brota» (contracts 0.6.0)', () => {
@@ -254,22 +299,10 @@ describe('paso 3: sumidero y fotos', () => {
     expect(mosaicoDeFotos({ subidas: 0, subiendo: false }).completas).toBe(false);
     expect(puedeAvanzar(3, estado())).toBe(true);
     expect(puedeAvanzar(4, estado())).toBe(true);
-    const cuerpo = armarEnvio(
-      {
-        ...valoresIniciales(),
-        lat: 0,
-        lon: 0,
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-        ubicacion_tipo: 'via_publica',
-      },
-      PUNTO,
-      [],
-      DISPOSITIVO,
-    );
+    const cuerpo = armarEnvio(valoresInundacion(), PUNTO, [], DISPOSITIVO, ADAPTADOR_INUNDACION);
     expect(cuerpo.fotos).toEqual([]);
-    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
+    expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse(cuerpo.detalle).success).toBe(true);
   });
 
   it('mientras sube una foto no se puede continuar ni enviar', () => {
@@ -282,17 +315,22 @@ describe('paso 3: sumidero y fotos', () => {
   });
 });
 
-describe('el envío', () => {
+describe('el envío (forma por categoría, D2 del plan M4)', () => {
   // Los campos ocultos del formulario traen otra ubicación: la que vale es la del estado.
-  const datos: ValoresFormulario = {
-    ...valoresIniciales(),
-    lat: 0,
-    lon: 0,
-    descripcion: 'Se junta el agua en la esquina',
-    profundidad_estimada: 'rodilla',
-    frecuencia: 'ocasional',
-    ubicacion_tipo: 'via_publica',
-  };
+  const datos = valoresInundacion({ lat: 0, lon: 0 });
+
+  it('el cuerpo lleva categoria, detalle y el núcleo; nada plano de inundación', () => {
+    const cuerpo = armarEnvio(datos, PUNTO, [], DISPOSITIVO, ADAPTADOR_INUNDACION);
+    expect(cuerpo.categoria).toBe('inundacion');
+    expect(cuerpo.detalle).toMatchObject({
+      profundidad_estimada: 'rodilla',
+      frecuencia: 'ocasional',
+      causa_presunta: 'desconocida',
+    });
+    // Los seis campos de dominio van SOLO dentro de `detalle`, no en el primer nivel (D2).
+    expect(Object.keys(cuerpo)).not.toContain('profundidad_estimada');
+    expect(Object.keys(cuerpo)).not.toContain('sumidero_cercano');
+  });
 
   it('la ubicación viaja desde el estado, sin la marca de precargada', () => {
     const cuerpo = armarEnvio(
@@ -300,6 +338,7 @@ describe('el envío', () => {
       { lat: -17.7, lon: -63.1, precargada: true },
       [{ objeto_key: 'a.jpg' }],
       DISPOSITIVO,
+      ADAPTADOR_INUNDACION,
     );
     expect(cuerpo.lat).toBe(-17.7);
     expect(cuerpo.lon).toBe(-63.1);
@@ -308,18 +347,20 @@ describe('el envío', () => {
   });
 
   it('lleva la posición del teléfono tal como quedó congelada, y pasa el contrato', () => {
-    const cuerpo = armarEnvio(datos, PUNTO, [], DISPOSITIVO);
+    const cuerpo = armarEnvio(datos, PUNTO, [], DISPOSITIVO, ADAPTADOR_INUNDACION);
     expect(cuerpo.dispositivo).toBe(DISPOSITIVO);
     expect(cuerpo.dispositivo.antiguedad_s).toBe(4);
-    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
+    expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse(cuerpo.detalle).success).toBe(true);
   });
 
   it('ya no manda ubicacion_metodo ni precision_gps_m: los deriva el servidor', () => {
     // Un borrador de antes de contracts 0.9.0 los puede traer en los valores.
     const viejos = { ...datos, ubicacion_metodo: 'gps', precision_gps_m: 12 } as ValoresFormulario;
-    const cuerpo = armarEnvio(viejos, PUNTO, [], DISPOSITIVO);
+    const cuerpo = armarEnvio(viejos, PUNTO, [], DISPOSITIVO, ADAPTADOR_INUNDACION);
     expect(Object.keys(cuerpo)).not.toContain('ubicacion_metodo');
     expect(Object.keys(cuerpo)).not.toContain('precision_gps_m');
+    expect(Object.keys(cuerpo.detalle)).not.toContain('ubicacion_metodo');
   });
 
   it('el sumidero sale coherente aunque algo incoherente haya quedado en el formulario', () => {
@@ -328,27 +369,92 @@ describe('el envío', () => {
       PUNTO,
       [],
       DISPOSITIVO,
+      ADAPTADOR_INUNDACION,
     );
-    expect(cuerpo.sumidero_estado).toBeNull();
-    expect(cuerpo.agua_brota_sumidero).toBeNull();
+    expect(cuerpo.detalle.sumidero_estado).toBeNull();
+    expect(cuerpo.detalle.agua_brota_sumidero).toBeNull();
+  });
+
+  it('EQUIVALENCIA: el cuerpo nuevo y el plano de antes guardan lo mismo (normalizarReporteCrear)', () => {
+    const valores = valoresInundacion({
+      lat: 0,
+      lon: 0,
+      causa_presunta: 'sumidero_tapado',
+      sumidero_cercano: 'si',
+      sumidero_estado: 'tapado',
+      agua_brota_sumidero: true,
+      evento_en: null,
+    });
+    const cuerpoNuevo = armarEnvio(
+      valores,
+      PUNTO,
+      [{ objeto_key: 'a.webp' }],
+      DISPOSITIVO,
+      ADAPTADOR_INUNDACION,
+    );
+    // La forma PLANA de antes: núcleo + los seis campos de inundación en el primer nivel.
+    const cuerpoPlano = {
+      lat: PUNTO.lat,
+      lon: PUNTO.lon,
+      dispositivo: DISPOSITIVO,
+      ubicacion_aproximada: false,
+      ubicacion_tipo: 'via_publica',
+      descripcion: 'Se junta el agua en la esquina',
+      evento_en: null,
+      profundidad_estimada: 'rodilla',
+      frecuencia: 'ocasional',
+      causa_presunta: 'sumidero_tapado',
+      sumidero_cercano: 'si',
+      sumidero_estado: 'tapado',
+      agua_brota_sumidero: true,
+      fotos: ['a.webp'],
+      sitio_web: '',
+    };
+    const nuevo = normalizarReporteCrear(cuerpoNuevo);
+    const plano = normalizarReporteCrear(cuerpoPlano);
+    expect(nuevo.forma).toBe('categoria');
+    expect(plano.forma).toBe('plana');
+    expect(nuevo.resultado.exito && plano.resultado.exito).toBe(true);
+    if (nuevo.resultado.exito && plano.resultado.exito)
+      expect(nuevo.resultado.datos).toEqual(plano.resultado.datos);
   });
 });
 
-describe('la validación del formulario', () => {
+describe('cambio de categoría en el paso 1 (ADR 0021)', () => {
+  it('conserva el núcleo (ubicación, tipo de lugar, descripción, fotos) y reinicia el paso 2', () => {
+    const actuales = valoresInundacion({
+      lat: -17.7,
+      lon: -63.1,
+      ubicacion_tipo: 'vivienda_o_predio',
+      descripcion: 'Un texto que ya escribí',
+      profundidad_estimada: 'muslo',
+      frecuencia: 'permanente',
+      fotos: ['x.webp'],
+    });
+    const nuevos = valoresTrasCambiarCategoria(actuales, { detalle: {} });
+    // Se conserva el núcleo.
+    expect(nuevos.lat).toBe(-17.7);
+    expect(nuevos.lon).toBe(-63.1);
+    expect(nuevos.ubicacion_tipo).toBe('vivienda_o_predio');
+    expect(nuevos.descripcion).toBe('Un texto que ya escribí');
+    expect(nuevos.fotos).toEqual(['x.webp']);
+    // Se reinician las respuestas del paso 2 de la categoría anterior.
+    expect(nuevos.profundidad_estimada).toBeUndefined();
+    expect(nuevos.frecuencia).toBeUndefined();
+    // Se adoptan los iniciales de la categoría nueva.
+    expect(nuevos.detalle).toEqual({});
+  });
+});
+
+describe('la validación del formulario (núcleo + detalle con def.esquemaDetalle)', () => {
+  const resolverFormulario = crearResolverFormulario(ADAPTADOR_INUNDACION);
   const opciones = { fields: {}, shouldUseNativeValidation: false } as Parameters<
     typeof resolverFormulario
   >[2];
 
   it('valida todo el contrato menos la posición del teléfono, que se agrega al enviar', async () => {
     const r = await resolverFormulario(
-      {
-        ...valoresIniciales(),
-        lat: -17.78,
-        lon: -63.18,
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-      } as ValoresFormulario,
+      valoresInundacion({ lat: -17.78, lon: -63.18 }),
       undefined,
       opciones,
     );
@@ -358,12 +464,7 @@ describe('la validación del formulario', () => {
 
   it('los errores son los de las respuestas, nunca el de «dispositivo»', async () => {
     const r = await resolverFormulario(
-      {
-        ...valoresIniciales(),
-        lat: -17.78,
-        lon: -63.18,
-        descripcion: 'corto',
-      } as ValoresFormulario,
+      valoresInundacion({ lat: -17.78, lon: -63.18, descripcion: 'corto' }),
       undefined,
       opciones,
     );
@@ -372,13 +473,11 @@ describe('la validación del formulario', () => {
   });
 
   it('toma lat y lon de contexto.ubicacion si los valores no los traen', async () => {
+    const sinPunto = valoresInundacion();
+    delete (sinPunto as Record<string, unknown>).lat;
+    delete (sinPunto as Record<string, unknown>).lon;
     const r = await resolverFormulario(
-      {
-        ...valoresIniciales(),
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-      } as ValoresFormulario,
+      sinPunto,
       { ubicacion: { lat: -17.78, lon: -63.18 } },
       opciones,
     );
@@ -389,17 +488,13 @@ describe('la validación del formulario', () => {
 
   it('normaliza sumidero_cercano=no para evitar conflictos de validación', async () => {
     const r = await resolverFormulario(
-      {
-        ...valoresIniciales(),
+      valoresInundacion({
         lat: -17.78,
         lon: -63.18,
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
         sumidero_cercano: 'no',
         sumidero_estado: 'tapado',
         agua_brota_sumidero: true,
-      } as ValoresFormulario,
+      }),
       undefined,
       opciones,
     );
@@ -430,38 +525,28 @@ describe('camino de ubicación aproximada (ADR 0007)', () => {
 
   it('el envío manda ubicacion_aproximada: true y pasa el contrato', () => {
     const cuerpo = armarEnvio(
-      {
-        ...valoresIniciales(),
-        lat: 0,
-        lon: 0,
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-        ubicacion_tipo: 'via_publica',
-      } as ValoresFormulario,
+      valoresInundacion({ lat: 0, lon: 0 }),
       PUNTO,
       [],
       { ...DISPOSITIVO, precision_m: 300 },
+      ADAPTADOR_INUNDACION,
       true,
     );
     expect(cuerpo.ubicacion_aproximada).toBe(true);
-    expect(ReporteCrearSchema.safeParse(cuerpo).success).toBe(true);
+    expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse(cuerpo.detalle).success).toBe(true);
+    expect(DetalleInundacionSchema.safeParse({}).success).toBe(false);
+    expect(cuerpo.dispositivo.precision_m).toBe(300);
+    expect(cuerpo.dispositivo.antiguedad_s).toBe(DISPOSITIVO.antiguedad_s);
   });
 
   it('el camino normal manda ubicacion_aproximada: false', () => {
     const cuerpo = armarEnvio(
-      {
-        ...valoresIniciales(),
-        lat: 0,
-        lon: 0,
-        descripcion: 'Se junta el agua en la esquina',
-        profundidad_estimada: 'rodilla',
-        frecuencia: 'ocasional',
-        ubicacion_tipo: 'via_publica',
-      } as ValoresFormulario,
+      valoresInundacion({ lat: 0, lon: 0 }),
       PUNTO,
       [],
       DISPOSITIVO,
+      ADAPTADOR_INUNDACION,
     );
     expect(cuerpo.ubicacion_aproximada).toBe(false);
   });

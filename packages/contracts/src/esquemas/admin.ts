@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CONFIG_DOMINIO } from '../dominio/config.js';
 import { SEVERIDADES, TIPOS_CAPA } from '../dominio/enums.js';
-import { listaDesdeQuery } from './comunes.js';
+import { CategoriaFiltroSchema, listaDesdeQuery } from './comunes.js';
 import { ReporteFiltrosSchema, ReporteTecnicoFeatureSchema } from './reporte.js';
 
 export const CapaVersionSchema = z.object({
@@ -33,6 +33,21 @@ export type ExportarQuery = z.infer<typeof ExportarQuerySchema>;
 
 const Conteo = z.number().int().nonnegative();
 
+// Solo la exportación admite planos nulos fuera de Inundaciones. La rama técnica original
+// permanece intacta para conservar todos los payloads antes válidos, incluido el legado.
+const PropiedadesTecnicas = ReporteTecnicoFeatureSchema.shape.properties;
+const ReporteExportacionOtraCategoriaSchema = ReporteTecnicoFeatureSchema.extend({
+  properties: PropiedadesTecnicas.extend({
+    categoria: z
+      .string()
+      .min(1)
+      .regex(/^(?!inundacion$)/),
+    profundidad_estimada: PropiedadesTecnicas.shape.profundidad_estimada.nullable(),
+    frecuencia: PropiedadesTecnicas.shape.frecuencia.nullable(),
+    causa_presunta: PropiedadesTecnicas.shape.causa_presunta.nullable(),
+  }),
+});
+
 /**
  * Respuesta de `GET /api/v1/exportar?formato=geojson`. `total` cuenta la selección entera sin
  * tope; si no cabe en `limite`, el archivo trae `exportados` features y `truncado = true`, para
@@ -49,7 +64,7 @@ export const ExportacionGeoJsonSchema = z.object({
   truncado: z
     .boolean()
     .meta({ description: 'true si total > exportados: el archivo no trae toda la selección' }),
-  features: z.array(ReporteTecnicoFeatureSchema),
+  features: z.array(z.union([ReporteTecnicoFeatureSchema, ReporteExportacionOtraCategoriaSchema])),
 });
 export type ExportacionGeoJson = z.infer<typeof ExportacionGeoJsonSchema>;
 
@@ -63,6 +78,8 @@ export type ExportacionGeoJson = z.infer<typeof ExportacionGeoJsonSchema>;
 export const IndicadoresFiltrosSchema = z.object({
   severidad: listaDesdeQuery(SEVERIDADES),
   distrito_id: z.string().min(1).optional(),
+  // Panel: admite `todas` además de un slug. Sin el parámetro = inundacion (0.20.0, ADR 0012).
+  categoria: CategoriaFiltroSchema,
 });
 export type IndicadoresFiltros = z.infer<typeof IndicadoresFiltrosSchema>;
 

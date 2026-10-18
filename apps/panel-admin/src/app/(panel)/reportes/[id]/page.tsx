@@ -1,34 +1,28 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { ETIQUETAS } from 'contracts';
 import { ArrowLeft, Check, Copy, FileText, TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { type ReactNode, useRef, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { ChipEstado, ChipSeveridad } from '@/componentes/ChipSeveridad';
 import { Dato } from '@/componentes/Dato';
+import { DatosCategoriaReporte } from '@/componentes/DatosCategoriaReporte';
 import { DatosUbicacion } from '@/componentes/DatosUbicacion';
 import { FactoresSeveridad } from '@/componentes/FactoresSeveridad';
+import { InsigniaCategoria } from '@/componentes/InsigniaCategoria';
 import { Mapa } from '@/componentes/Mapa';
 import { PanelAcciones } from '@/componentes/PanelAcciones';
 import { ReporteUnitarioModal } from '@/componentes/ReporteUnitarioModal';
 import { VisibilidadPublica } from '@/componentes/VisibilidadPublica';
 import { ErrorApi } from '@/lib/api';
+import { useCategoriasPanel } from '@/lib/categorias-contexto';
 import { useFormato } from '@/lib/ciudad-contexto';
 import { consultaCapasMapa, consultaReporte } from '@/lib/consultas';
-import {
-  avisosResolucion,
-  etiquetaCausa,
-  etiquetaFrecuencia,
-  etiquetaProfundidad,
-  etiquetaSeveridad,
-  etiquetaSiNo,
-  etiquetaSumideroCercano,
-  etiquetaSumideroEstado,
-  idCorto,
-} from '@/lib/formato';
+import { avisosResolucion, etiquetaSeveridad, idCorto } from '@/lib/formato';
+import { presentarReporte } from '@/lib/presentacion-reporte';
+import { retornoBandeja, urlDetallePanel } from '@/lib/seleccion-panel';
 import { useUsuarioActual } from '@/lib/sesion';
 
 function BotonCopiar({ texto, etiqueta = 'Copiar' }: { texto: string; etiqueta?: string }) {
@@ -67,6 +61,9 @@ function Bloque({ titulo, children }: { titulo: string; children: ReactNode }) {
 export default function PaginaDetalleReporte() {
   const { id } = useParams<{ id: string }>();
   const usuario = useUsuarioActual();
+  const { registro } = useCategoriasPanel();
+  const sp = useSearchParams();
+  const volver = retornoBandeja(new URLSearchParams(sp.toString()));
   const { fechaHora, numero } = useFormato();
   const [mostrarUnitario, setMostrarUnitario] = useState(false);
   // El botón que abre la ficha: al cerrarla, el foco vuelve a él (accesibilidad del diálogo).
@@ -88,7 +85,7 @@ export default function PaginaDetalleReporte() {
     const noExiste = reporte.error instanceof ErrorApi && reporte.error.estado === 404;
     return (
       <div className="flex flex-col items-start gap-4">
-        <Link href="/reportes" className="btn btn-secundario">
+        <Link href={volver} className="btn btn-secundario">
           <ArrowLeft size={18} aria-hidden="true" />
           Volver a la tabla
         </Link>
@@ -103,16 +100,14 @@ export default function PaginaDetalleReporte() {
 
   const f = reporte.data;
   const p = f.properties;
+  const vista = presentarReporte(p, registro);
   const [lon, lat] = f.geometry.coordinates;
   const avisos = avisosResolucion(p.resolucion_flags);
 
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <Link
-          href="/reportes"
-          className="inline-flex items-center gap-1 font-semibold text-agua-500"
-        >
+        <Link href={volver} className="inline-flex items-center gap-1 font-semibold text-agua-500">
           <ArrowLeft size={18} aria-hidden="true" />
           Volver a la tabla
         </Link>
@@ -129,6 +124,7 @@ export default function PaginaDetalleReporte() {
           Reporte <span className="font-mono text-2xl">{idCorto(p.id)}</span>
           <BotonCopiar texto={p.id} etiqueta="Copiar ID" />
         </h1>
+        <InsigniaCategoria categoria={p.categoria ?? 'inundacion'} registro={registro} />
         <ChipSeveridad severidad={p.severidad} grande />
         <ChipEstado estado={p.estado} grande data-testid="estado-actual" />
         <p className="text-tinta-600">Creado el {fechaHora(p.creado_en)}</p>
@@ -168,19 +164,9 @@ export default function PaginaDetalleReporte() {
           <Bloque titulo="Evento reportado">
             <dl className="lista-datos">
               <Dato etiqueta="Fecha del evento">{fechaHora(p.evento_en)}</Dato>
-              <Dato etiqueta={ETIQUETAS.campos.profundidad_estimada}>
-                {etiquetaProfundidad(p.profundidad_estimada)}
-              </Dato>
-              <Dato etiqueta="Frecuencia">{etiquetaFrecuencia(p.frecuencia)}</Dato>
-              <Dato etiqueta="Causa presunta">{etiquetaCausa(p.causa_presunta)}</Dato>
-              <Dato etiqueta={ETIQUETAS.campos.sumidero_cercano}>
-                {p.sumidero_cercano ? etiquetaSumideroCercano(p.sumidero_cercano) : 'Sin dato'}
-              </Dato>
-              <Dato etiqueta={ETIQUETAS.campos.sumidero_estado}>
-                {p.sumidero_estado ? etiquetaSumideroEstado(p.sumidero_estado) : 'Sin dato'}
-              </Dato>
-              <Dato etiqueta="Agua brota del sumidero">{etiquetaSiNo(p.agua_brota_sumidero)}</Dato>
             </dl>
+            <DatosCategoriaReporte reporte={p} registro={registro} />
+            <p className="ayuda mt-3">{vista.nota}</p>
             <h3 className="mt-4 mb-1 text-lg">Descripción</h3>
             <p className="whitespace-pre-line">{p.descripcion}</p>
           </Bloque>
@@ -220,7 +206,10 @@ export default function PaginaDetalleReporte() {
               <Dato etiqueta="Motivo del estado">{p.estado_motivo}</Dato>
               <Dato etiqueta="Fusionado en">
                 {p.fusionado_en_id ? (
-                  <Link href={`/reportes/${p.fusionado_en_id}`} className="text-agua-500 underline">
+                  <Link
+                    href={urlDetallePanel(p.fusionado_en_id, sp.get('categoria'), volver)}
+                    className="text-agua-500 underline"
+                  >
                     {p.fusionado_en_id}
                   </Link>
                 ) : null}
@@ -243,7 +232,7 @@ export default function PaginaDetalleReporte() {
                 </div>
               </Dato>
             </dl>
-            <FactoresSeveridad reporte={p} />
+            <FactoresSeveridad reporte={p} registro={registro} />
           </Bloque>
         </div>
 
@@ -265,6 +254,7 @@ export default function PaginaDetalleReporte() {
       {mostrarUnitario && (
         <ReporteUnitarioModal
           reporte={f}
+          registro={registro}
           onCerrar={() => setMostrarUnitario(false)}
           retorno={botonUnitario}
         />

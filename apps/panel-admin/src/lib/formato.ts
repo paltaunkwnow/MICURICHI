@@ -75,15 +75,16 @@ export function colorSeveridad(s: Severidad) {
 export function etiquetaEstado(e: EstadoReporte) {
   return ETIQUETAS.estado[e];
 }
-export function etiquetaProfundidad(p: Profundidad) {
+export function etiquetaProfundidad(p: Profundidad | null) {
+  if (p === null) return '—';
   const e = ETIQUETAS.profundidad[p];
   return `${e.corta} · ${e.rango}`;
 }
-export function etiquetaFrecuencia(f: Frecuencia) {
-  return ETIQUETAS.frecuencia[f];
+export function etiquetaFrecuencia(f: Frecuencia | null) {
+  return f === null ? '—' : ETIQUETAS.frecuencia[f];
 }
-export function etiquetaCausa(c: CausaPresunta) {
-  return ETIQUETAS.causa_presunta[c];
+export function etiquetaCausa(c: CausaPresunta | null) {
+  return c === null ? '—' : ETIQUETAS.causa_presunta[c];
 }
 export function etiquetaUbicacionTipo(u: UbicacionTipo) {
   return ETIQUETAS.ubicacion_tipo[u];

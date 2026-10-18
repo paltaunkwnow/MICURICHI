@@ -2,14 +2,13 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
-  BANDAS,
   CONFIG_DOMINIO,
-  calcularSeveridad,
+  type DefinicionCategoriaCualquiera,
   ETIQUETAS,
-  PROFUNDIDADES,
   type ResolverRespuesta,
-  SUMIDERO_CERCANO,
-  SUMIDERO_ESTADOS,
+  resolverCategoriaInicial,
+  type SlugCategoria,
+  textosDeCategoria,
 } from 'contracts';
 import {
   ArrowDown,
@@ -28,8 +27,8 @@ import {
 import type { Map as MapaGl } from 'maplibre-gl';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { type FieldErrors, useForm } from 'react-hook-form';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { type FieldErrors, type Resolver, useForm } from 'react-hook-form';
 import {
   crearReporte,
   ErrorApi,
@@ -45,7 +44,13 @@ import {
   leerBorrador,
   olvidarBorrador,
 } from '@/lib/borrador';
-import { estadoDelCupo, textoCupo } from '@/lib/cupo';
+import {
+  PARAMETRO_CATEGORIA,
+  resolverCategoriaDeUrl,
+  urlTrasElegirCategoria,
+} from '@/lib/categoria';
+import { useCategorias } from '@/lib/categorias-contexto';
+import { estadoDelCupo, restantesDeCategoria, textoCupo } from '@/lib/cupo';
 import {
   detallesDeError,
   esCuotaAgotada,
@@ -64,29 +69,25 @@ import {
 } from '@/lib/formato';
 import {
   armarEnvio,
-  campoFechaDesdeIso,
+  type ContextoFormulario,
   camposSinLugar,
   centroDelPaso1,
+  crearResolverFormulario,
   type EstadoParaAvanzar,
-  isoDesdeCampoFecha,
-  limitesFechaEvento,
   MENSAJE_FALTA_UBICACION,
   mosaicoDeFotos,
   PASOS_REPORTE as PASOS,
   pasoDelError,
-  problemaFechaEvento,
   puedeAvanzar,
-  resolverFormulario,
-  respuestasSumidero,
-  type Sumidero,
   type Ubicacion,
   ubicacionDelEnlace,
   type ValoresFormulario,
   valoresIniciales,
+  valoresTrasCambiarCategoria,
 } from '@/lib/formulario-reporte';
 import { MiniaturasLocales, motivoDeRechazoDeFoto } from '@/lib/foto';
 import { CLAVE_MIS_REPORTES } from '@/lib/misReportes';
-import { textoDemora } from '@/lib/publicacion';
+import { demoraDeCategoria, textoDemora } from '@/lib/publicacion';
 import {
   aceptarPunto,
   coordenadasEscritas,
@@ -110,6 +111,7 @@ import {
 } from '@/lib/ubicacion-dispositivo';
 import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { AccesoRequerido } from './AccesoRequerido';
+import { AnuncioCategoria } from './AnuncioCategoria';
 import { Aviso } from './Aviso';
 import { ErrorDeFoto, PieDeRevision } from './AvisosDelReporte';
 import { CamaraReporte } from './CamaraReporte';
@@ -117,30 +119,15 @@ import { ChipSeveridad } from './ChipSeveridad';
 import { CuentaRegresiva, TextoTrasEnviar } from './CuentaRegresiva';
 import { CupoAgotado } from './CupoAgotado';
 import { ErrorDeCarga } from './ErrorDeCarga';
+import { MensajeDeCampo, Pastilla } from './formulario-categorias/controles';
+import { adaptadorFormularioDe } from './formulario-categorias/registro';
+import { SelectorCategoriaFormulario } from './formulario-categorias/SelectorCategoriaFormulario';
 import { MapaDiferido } from './MapaDiferido';
 import { VistaPedirUbicacion } from './PedirUbicacion';
 import { useToast } from './Toast';
 
-const FRECUENCIAS = [
-  'primera_vez',
-  'ocasional',
-  'cada_lluvia_fuerte',
-  'permanente',
-  'agua_estancada',
-] as const;
-const CAUSAS = [
-  'desconocida',
-  'sumidero_tapado',
-  'falta_sumidero',
-  'hundimiento_pavimento',
-  'contrapendiente',
-  'colector_saturado',
-  'desborde_cauce',
-] as const;
 const UBICACION_TIPOS = ['via_publica', 'vivienda_o_predio', 'otro'] as const;
 
-/** Puntaje máximo de la fórmula vigente: el «N/12» del resumen no puede quedarse en otra versión. */
-const PUNTAJE_MAX = Math.max(...BANDAS.map((b) => b.max));
 /**
  * Quietud del mapa antes de preguntar en qué unidad vecinal cayó el punto. Sin esta pausa, cada
  * sacudida del pulgar sería una llamada a `POST /geo/v1/resolver`, que tiene límite por IP.
@@ -157,87 +144,6 @@ const BOTONES_MOVER: Array<{ direccion: Direccion; Icono: LucideIcon; texto: str
   { direccion: 'oeste', Icono: ArrowLeft, texto: 'al oeste' },
   { direccion: 'este', Icono: ArrowRight, texto: 'al este' },
 ];
-
-/** Opción en tarjeta con radio real escondido: el aspecto es del prototipo, el control es nativo. */
-function Opcion({
-  nombre,
-  valor,
-  texto,
-  detalle,
-  marcado,
-  onCambio,
-}: {
-  nombre: string;
-  valor: string;
-  texto: string;
-  detalle?: string;
-  marcado: boolean;
-  onCambio: () => void;
-}) {
-  return (
-    <label className="opc">
-      <input
-        type="radio"
-        className="control-invisible"
-        name={nombre}
-        value={valor}
-        checked={marcado}
-        onChange={onCambio}
-      />
-      <span className="r" aria-hidden="true" />
-      <span className={marcado ? 'font-semibold' : ''}>{texto}</span>
-      {detalle ? <span className="cm">{detalle}</span> : null}
-    </label>
-  );
-}
-
-/** Igual que `Opcion`, pero en pastilla: para respuestas cortas, como el tipo de lugar. */
-function Pastilla({
-  nombre,
-  valor,
-  texto,
-  marcado,
-  onCambio,
-}: {
-  nombre: string;
-  valor: string;
-  texto: string;
-  marcado: boolean;
-  onCambio: () => void;
-}) {
-  return (
-    <label className="chip">
-      <input
-        type="radio"
-        className="control-invisible"
-        name={nombre}
-        value={valor}
-        checked={marcado}
-        onChange={onCambio}
-      />
-      {texto}
-    </label>
-  );
-}
-
-/**
- * Mensaje de error de un campo, en su lugar de la pantalla. `role="alert"` para que se anuncie al
- * aparecer, y `data-campo-con-error` para que, tras un rechazo, la vista pueda ir hasta él.
- */
-function MensajeDeCampo({ campo, mensaje }: { campo: string; mensaje?: string | null }) {
-  if (!mensaje) return null;
-  return (
-    <p
-      id={`error-${campo}`}
-      className="error"
-      role="alert"
-      data-testid={`error-campo-${campo}`}
-      data-campo-con-error=""
-    >
-      {mensaje}
-    </p>
-  );
-}
 
 /**
  * «×» de una miniatura. El círculo se ve de 28 px, pero se toca en 48 × 48 (CLAUDE.md §14.4):
@@ -271,15 +177,57 @@ export function FormularioReporte() {
   const parametros = useSearchParams();
   const toast = useToast();
   const cliente = useQueryClient();
+  const { activas, registro } = useCategorias();
+  /**
+   * La categoría del reporte (M4, ADR 0009, 0021). Sale de `?categoria=` de la URL, con alias; sin
+   * un valor válido es la de por defecto (Inundaciones o la primera activa). A diferencia del mapa,
+   * el formulario NO lee ni guarda la preferencia del dispositivo (ADR 0014): resuelve solo desde la
+   * URL. Con dos o más activas, la persona puede cambiarla en el paso 1 (`categoriaElegida`).
+   */
+  const categoriaUrl = resolverCategoriaInicial({
+    url: parametros?.get(PARAMETRO_CATEGORIA) ?? null,
+    guardada: null,
+    activas,
+  }).slug;
+  const [categoriaElegida, setCategoriaElegida] = useState<SlugCategoria | null>(null);
+  const categoriaForm = categoriaElegida ?? categoriaUrl;
+  const definicion: DefinicionCategoriaCualquiera | undefined = categoriaForm
+    ? registro.obtener(categoriaForm)
+    : undefined;
+  const adaptador = useMemo(
+    () => (definicion ? adaptadorFormularioDe(definicion) : null),
+    [definicion],
+  );
+  /** Anuncio para `aria-live` si la URL traía una categoría inválida o inactiva (D1). */
+  const [anuncioCategoria, setAnuncioCategoria] = useState<string | null>(null);
+  // Corrección de la URL (D1) y anuncio, sin guardar la preferencia del mapa: en el cliente, al montar.
+  useEffect(() => {
+    const resuelto = resolverCategoriaDeUrl({
+      href: window.location.href,
+      activas,
+      guardada: null,
+      registro,
+    });
+    if (resuelto.urlNueva) {
+      try {
+        window.history.replaceState(window.history.state, '', resuelto.urlNueva);
+      } catch {
+        // Sin `history` o con restricciones: la URL queda como estaba, no es bloqueante.
+      }
+    }
+    setAnuncioCategoria(resuelto.anuncio);
+  }, [activas, registro]);
   const {
     usuario,
     cargando: comprobandoSesion,
     errorDeCarga: errorSesion,
     reintentando: reintentandoSesion,
     reintentar: reintentarSesion,
-    reportesRestantesHoy,
-    demoraProximoS,
   } = useSesion();
+  // El cupo y la demora son POR CATEGORÍA (M3b): `cupos[categoria]` de `/auth/yo`, con respaldo en
+  // los campos sueltos. Con inundación y una sola activa, los textos son idénticos a los de antes.
+  const reportesRestantesHoy = restantesDeCategoria(usuario, categoriaForm);
+  const demoraProximoS = demoraDeCategoria(usuario, categoriaForm);
   /**
    * Al tocar «Reportar un punto» se vuelve a preguntar a `/auth/yo`: el cupo en caché puede ser de
    * antes de los envíos de hoy (también desde otro teléfono). Hasta que contesta no se ofrece
@@ -375,11 +323,34 @@ export function FormularioReporte() {
   const enlaceRef = useRef(enlace);
   enlaceRef.current = enlace;
 
+  // El resolver despacha al adaptador vigente a través de un ref, así es estable (no se recrea el
+  // formulario) pero valida con el esquema de la categoría actual, incluso tras un cambio (ADR 0021).
+  const adaptadorRef = useRef(adaptador);
+  adaptadorRef.current = adaptador;
+  const cacheResolver = useRef<{
+    validacion: object;
+    fn: Resolver<ValoresFormulario, ContextoFormulario>;
+  } | null>(null);
+  const resolver = useMemo<Resolver<ValoresFormulario, ContextoFormulario>>(
+    () => (valores, contexto, opciones) => {
+      const a = adaptadorRef.current;
+      if (!a) return Promise.resolve({ values: {}, errors: {} });
+      if (cacheResolver.current?.validacion !== a)
+        cacheResolver.current = { validacion: a, fn: crearResolverFormulario(a) };
+      return cacheResolver.current.fn(valores, contexto, opciones);
+    },
+    [],
+  );
+
+  const tipoLugarElegido = useRef(false);
   const form = useForm<ValoresFormulario>({
-    resolver: resolverFormulario,
+    resolver,
     context: { ubicacion },
     mode: 'onSubmit',
-    defaultValues: valoresIniciales(),
+    defaultValues: {
+      ...valoresIniciales(definicion?.ubicacionTipoPorDefecto),
+      ...(adaptador?.valoresIniciales() ?? {}),
+    },
   });
   const valores = form.watch();
 
@@ -464,8 +435,10 @@ export function FormularioReporte() {
   useEffect(() => {
     if (restaurado.current) return;
     restaurado.current = true;
-    const b = leerBorrador();
+    // No se restaura un borrador de otra categoría (ADR 0021): sus respuestas del paso 2 no servirían.
+    const b = leerBorrador(categoriaForm ?? undefined);
     if (b && borradorTieneContenido(b)) {
+      tipoLugarElegido.current = b.valores.ubicacion_tipo !== undefined;
       claveEnvio.current = b.clave;
       form.reset({ ...form.getValues(), ...b.valores });
       setFotos(b.fotos);
@@ -494,8 +467,9 @@ export function FormularioReporte() {
   // no se puede es perder el último cambio por esperar a un momento mejor. La posición del
   // teléfono no va: solo el punto del reporte.
   useEffect(() => {
-    if (!restaurado.current || creado) return;
+    if (!restaurado.current || creado || !categoriaForm) return;
     guardarBorrador({
+      categoria: categoriaForm,
       paso: pasoPendiente ?? paso,
       ubicacion,
       resuelto,
@@ -504,13 +478,17 @@ export function FormularioReporte() {
       clave: claveEnvio.current as string,
       aproximado,
     });
-  }, [paso, pasoPendiente, ubicacion, resuelto, fotos, valores, creado, aproximado]);
+  }, [categoriaForm, paso, pasoPendiente, ubicacion, resuelto, fotos, valores, creado, aproximado]);
 
   const empezarDeCero = () => {
     olvidarBorrador();
     claveEnvio.current = nuevaClaveIdempotencia();
     congelado.current.soltar();
-    form.reset(valoresIniciales());
+    tipoLugarElegido.current = false;
+    form.reset({
+      ...valoresIniciales(definicion?.ubicacionTipoPorDefecto),
+      ...(adaptador?.valoresIniciales() ?? {}),
+    });
     setResolviendo(false);
     setFotos([]);
     // Una foto a medio subir es del formulario que se descarta: su miniatura se suelta con las
@@ -537,6 +515,36 @@ export function FormularioReporte() {
       fijarUbicacion(punto);
       setAvisoUbicacion(aviso);
       mapa.current?.jumpTo({ center: [punto.lon, punto.lat] });
+    }
+  };
+
+  /**
+   * Elegir otra categoría en el paso 1 (ADR 0021, solo con dos o más activas). No pierde la
+   * ubicación, las fotos ni la descripción; reinicia las respuestas del paso 2 (los campos propios de
+   * la categoría) y corrige la URL (D1). Como `armarEnvio`, la validación y la revisión preguntan al
+   * adaptador, nunca a una categoría concreta.
+   */
+  const cambiarCategoria = (slug: SlugCategoria) => {
+    if (slug === categoriaForm) return;
+    const def = registro.obtener(slug);
+    if (!def) return;
+    const nuevo = adaptadorFormularioDe(def);
+    setCategoriaElegida(slug);
+    form.reset(
+      valoresTrasCambiarCategoria(
+        form.getValues(),
+        { ...valoresIniciales(def.ubicacionTipoPorDefecto), ...nuevo.valoresIniciales() },
+        tipoLugarElegido.current,
+      ),
+    );
+    form.clearErrors();
+    const nuevaUrl = urlTrasElegirCategoria(window.location.href, slug, activas.length);
+    if (nuevaUrl) {
+      try {
+        window.history.replaceState(window.history.state, '', nuevaUrl);
+      } catch {
+        // Sin history: la categoría cambia igual, solo no se refleja en la barra de direcciones.
+      }
     }
   };
 
@@ -681,18 +689,9 @@ export function FormularioReporte() {
     setMiniaturas(({ [clave]: _quitada, ...resto }) => resto);
   }
 
-  /** Respuesta a «¿Hay sumidero cercano?», con las otras dos puestas en regla (contracts 0.6.0). */
-  function responderSumidero(cercano: Sumidero['sumidero_cercano']) {
-    const r = respuestasSumidero(cercano, form.getValues());
-    form.setValue('sumidero_cercano', r.sumidero_cercano);
-    form.setValue('sumidero_estado', r.sumidero_estado);
-    form.setValue('agua_brota_sumidero', r.agua_brota_sumidero);
-    form.clearErrors(['sumidero_cercano', 'sumidero_estado', 'agua_brota_sumidero']);
-  }
-
   /** Lleva a la persona al paso del primer campo rechazado, que es donde está su mensaje. */
   function llevarAlError(campos: string[]) {
-    const destino = pasoDelError(campos);
+    const destino = pasoDelError(campos, adaptador?.pasoDeCampo);
     if (destino === 1) setErrorUbicacion(MENSAJE_FALTA_UBICACION);
     setPaso(destino);
     setMostrarError(true);
@@ -818,13 +817,9 @@ export function FormularioReporte() {
   // ---------------------------------------------------------------- pasos
 
   const ahora = new Date();
-  const severidad =
-    valores.profundidad_estimada && valores.frecuencia
-      ? calcularSeveridad({
-          profundidad_estimada: valores.profundidad_estimada,
-          frecuencia: valores.frecuencia,
-        })
-      : null;
+  // La previsualización de severidad la calcula la DEFINICIÓN de la categoría (ADR 0009): el mismo
+  // puntaje y la misma banda que antes; para una categoría declarativa, solo la banda.
+  const severidadPrevia = adaptador?.previsualizarSeveridad(valores) ?? null;
 
   const estadoAvance: EstadoParaAvanzar = {
     ancla,
@@ -832,17 +827,19 @@ export function FormularioReporte() {
     ubicacion,
     resuelto,
     resolviendo,
-    profundidad_estimada: valores.profundidad_estimada,
-    frecuencia: valores.frecuencia,
-    evento_en: valores.evento_en,
     descripcion: valores.descripcion,
     subiendoFoto: subir.isPending,
     enviando: enviar.isPending || releyendo,
-    ahora,
   };
   const errores = form.formState.errors;
-  const limitesFecha = limitesFechaEvento(ahora);
-  const errorFecha = errores.evento_en?.message ?? problemaFechaEvento(valores.evento_en, ahora);
+  // Componentes de la categoría (paso 2 y bloque extra del paso 3); `undefined` sin adaptador.
+  const CuerpoPaso2 = adaptador?.CuerpoPaso2;
+  const ExtraPaso3 = adaptador?.ExtraPaso3;
+  // El avance del paso 2 lo decide la categoría (sus respuestas obligatorias); el resto, el núcleo.
+  const puedeSeguir = (p: number): boolean =>
+    p === 2
+      ? (adaptador?.puedeAvanzarPaso2(valores, ahora) ?? false)
+      : puedeAvanzar(p, estadoAvance);
 
   const irAdelante = () => {
     if (paso === 1 && mostrarCoordenadas && latTexto.trim() && lonTexto.trim()) {
@@ -891,6 +888,7 @@ export function FormularioReporte() {
         setPaso(1);
         return;
       }
+      if (!adaptador) return;
       setErrorEnvio(null);
       // Un reintento repite el `dispositivo` del primer intento. Si no hay, se relee la posición:
       // el teléfono pudo moverse desde el paso 1.
@@ -926,7 +924,7 @@ export function FormularioReporte() {
         }
         dispositivo = congelado.current.tomar(decision.lectura, Date.now());
       }
-      enviar.mutate(armarEnvio(datos, ubicacion, fotos, dispositivo, aproximado));
+      enviar.mutate(armarEnvio(datos, ubicacion, fotos, dispositivo, adaptador, aproximado));
     },
     (rechazados) => {
       // Cada error se muestra en su campo y se lleva a la persona al paso donde está. Antes todo
@@ -934,7 +932,7 @@ export function FormularioReporte() {
       // fecha del evento o el sumidero, un botón que no hacía nada (TRASPASO §3.8). Lo que no
       // tiene un control propio se dice en la revisión, con su propio texto.
       const campos = Object.keys(rechazados);
-      const sueltos = camposSinLugar(campos)
+      const sueltos = camposSinLugar(campos, adaptador?.pasoDeCampo)
         .map((c) => mensajeDe(rechazados, c))
         .filter((m) => m !== '');
       setErrorEnvio(sueltos.length ? sueltos.join(' ') : null);
@@ -949,7 +947,7 @@ export function FormularioReporte() {
       onKeyDown={(e) => {
         if (e.key === 'Enter' && paso < PASOS && (e.target as HTMLElement).tagName !== 'TEXTAREA') {
           e.preventDefault();
-          if (puedeAvanzar(paso, estadoAvance)) {
+          if (puedeSeguir(paso)) {
             irAdelante();
           }
         }
@@ -983,6 +981,7 @@ export function FormularioReporte() {
         <p className="sr-only" aria-live="polite">
           Paso {paso} de {PASOS}
         </p>
+        <AnuncioCategoria mensaje={anuncioCategoria} />
 
         {/* Cuántos le quedan hoy a la cuenta. Es aviso, no control: decide el servidor al enviar. */}
         {reportesRestantesHoy !== null ? (
@@ -1016,7 +1015,16 @@ export function FormularioReporte() {
         <>
           <div className="flex-none px-5 pb-3">
             <p className="pno">Paso 1 de {PASOS}</p>
-            <p className="preg">¿Dónde se junta el agua?</p>
+            <p className="preg">{definicion?.preguntaUbicacion}</p>
+            {/* Con dos o más categorías activas se puede cambiar acá (ADR 0021); con una, no aparece. */}
+            {activas.length >= 2 && categoriaForm ? (
+              <SelectorCategoriaFormulario
+                activas={activas}
+                categoria={categoriaForm}
+                registro={registro}
+                onElegir={cambiarCategoria}
+              />
+            ) : null}
           </div>
           {!ancla ? (
             // Sin la posición del teléfono no hay mapa: primero se comparte la ubicación, y solo
@@ -1248,7 +1256,7 @@ export function FormularioReporte() {
                   type="button"
                   data-testid="boton-siguiente"
                   className="btn btn-bloque"
-                  disabled={!puedeAvanzar(1, estadoAvance)}
+                  disabled={!puedeSeguir(1)}
                   onClick={irAdelante}
                 >
                   Continuar
@@ -1260,113 +1268,27 @@ export function FormularioReporte() {
       ) : null}
 
       {/* ---------------------------------------------------------------- paso 2 */}
-      {paso === 2 ? (
+      {paso === 2 && CuerpoPaso2 && definicion ? (
         <>
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
             <p className="pno">Paso 2 de {PASOS}</p>
-            <p className="preg">¿Hasta dónde llegó y cada cuánto pasa?</p>
-
-            <div className="mt-5">
-              <label htmlFor="evento" className="lbl">
-                Fecha del evento (opcional)
-              </label>
-              {/* Controlado: el paso 2 se desmonta al avanzar, y con un input sin `value` la
-                  fecha elegida desaparecía de la pantalla al volver aunque siguiera en el
-                  formulario. Lo mismo al retomar un borrador. Los límites y el valor van en la
-                  hora local de quien reporta, no en UTC. */}
-              <input
-                id="evento"
-                type="date"
-                className="campo"
-                min={limitesFecha.min}
-                max={limitesFecha.max}
-                value={campoFechaDesdeIso(valores.evento_en)}
-                aria-invalid={!!errorFecha}
-                aria-describedby={errorFecha ? 'ayuda-evento error-evento_en' : 'ayuda-evento'}
-                onChange={(e) => {
-                  form.clearErrors('evento_en');
-                  form.setValue(
-                    'evento_en',
-                    e.target.value ? isoDesdeCampoFecha(e.target.value, new Date()) : null,
-                  );
-                }}
-              />
-              <p id="ayuda-evento" className="ayuda mt-1.5">
-                Si la dejás vacía, tomamos la fecha de hoy.
-              </p>
-              <MensajeDeCampo campo="evento_en" mensaje={errorFecha} />
-            </div>
-
-            <fieldset className="mt-5">
-              <legend className="lbl">{ETIQUETAS.campos.profundidad_estimada}</legend>
-              <p className="ayuda mb-2.5">
-                ¿Hasta dónde llegaba el agua? Tomá tu cuerpo como referencia.
-              </p>
-              <div className="grid gap-2.5">
-                {PROFUNDIDADES.map((p) => (
-                  <Opcion
-                    key={p}
-                    nombre="profundidad_estimada"
-                    valor={p}
-                    texto={ETIQUETAS.profundidad[p].corta}
-                    detalle={ETIQUETAS.profundidad[p].rango}
-                    marcado={valores.profundidad_estimada === p}
-                    onCambio={() => {
-                      form.setValue('profundidad_estimada', p);
-                      form.clearErrors('profundidad_estimada');
-                    }}
-                  />
-                ))}
-              </div>
-              <MensajeDeCampo
-                campo="profundidad_estimada"
-                mensaje={errores.profundidad_estimada?.message}
-              />
-            </fieldset>
-
-            <fieldset className="mt-5">
-              <legend className="lbl">Frecuencia</legend>
-              <div className="grid gap-2.5">
-                {FRECUENCIAS.map((f) => (
-                  <Opcion
-                    key={f}
-                    nombre="frecuencia"
-                    valor={f}
-                    texto={ETIQUETAS.frecuencia[f]}
-                    marcado={valores.frecuencia === f}
-                    onCambio={() => {
-                      form.setValue('frecuencia', f);
-                      form.clearErrors('frecuencia');
-                    }}
-                  />
-                ))}
-              </div>
-              <MensajeDeCampo campo="frecuencia" mensaje={errores.frecuencia?.message} />
-            </fieldset>
-
-            {severidad ? (
-              <div className="tarjeta mt-4.5 px-[18px] py-4" aria-live="polite">
-                <p className="glbl mt-0">Severidad calculada</p>
-                <div className="mt-2.5 flex items-center gap-3">
-                  <ChipSeveridad severidad={severidad.banda} grande />
-                  <b className="titular ml-auto text-[22px] tabular-nums">
-                    {severidad.puntaje}
-                    <span className="text-[14px] text-tinta-600">/{PUNTAJE_MAX}</span>
-                  </b>
-                </div>
-                <p className="mt-2.5 text-[14px] leading-[1.45] text-tinta-600">
-                  La calcula el sistema con lo que declaraste. El técnico puede corregirla, siempre
-                  dejando el motivo escrito.
-                </p>
-              </div>
-            ) : null}
+            <p className="preg">{textosDeCategoria(definicion).tituloPaso2}</p>
+            {/* El cuerpo del paso 2 lo pone la categoría (ADR 0021): Inundaciones trae su componente
+                especial; las demás, el renderizador declarativo. */}
+            <CuerpoPaso2
+              form={form}
+              valores={valores}
+              errores={errores}
+              definicion={definicion}
+              ahora={ahora}
+            />
           </div>
           <div className="pie">
             <button
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedeAvanzar(2, estadoAvance)}
+              disabled={!puedeSeguir(2)}
               onClick={irAdelante}
             >
               Continuar
@@ -1463,118 +1385,24 @@ export function FormularioReporte() {
               <MensajeDeCampo campo="descripcion" mensaje={errores.descripcion?.message} />
             </div>
 
-            <details className="tarjeta mt-4 p-4">
-              <summary className="cursor-pointer font-semibold">
-                Causa presunta y sumidero <span className="mini ml-1">Opcional</span>
-              </summary>
-              <div className="mt-4 space-y-4">
-                <div>
-                  <label htmlFor="causa_presunta" className="lbl">
-                    ¿Por qué creés que pasa?
-                  </label>
-                  <select
-                    id="causa_presunta"
-                    className="campo"
-                    {...form.register('causa_presunta')}
-                  >
-                    {CAUSAS.map((c) => (
-                      <option key={c} value={c}>
-                        {ETIQUETAS.causa_presunta[c]}
-                      </option>
-                    ))}
-                  </select>
-                  <MensajeDeCampo
-                    campo="causa_presunta"
-                    mensaje={errores.causa_presunta?.message}
-                  />
-                </div>
-                {/* Radios y no <select>: «no contestó» tiene que ser `null`, nunca `''`. Con
-                    los desplegables anteriores, uno sin elegir mandaba la cadena vacía y la
-                    validación fallaba SIEMPRE que el vecino no los tocaba (TRASPASO §3.8). Aquí
-                    `setValue` solo escribe un valor del enum o `null`; si algún día vuelve a ser
-                    un control registrado, necesita `setValueAs` que convierta '' en null. */}
-                <fieldset>
-                  <legend className="lbl">{ETIQUETAS.campos.sumidero_cercano}</legend>
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {SUMIDERO_CERCANO.map((v) => (
-                      <Opcion
-                        key={v}
-                        nombre="sumidero_cercano"
-                        valor={v}
-                        texto={ETIQUETAS.sumidero_cercano[v]}
-                        marcado={valores.sumidero_cercano === v}
-                        onCambio={() => responderSumidero(v)}
-                      />
-                    ))}
-                  </div>
-                  {valores.sumidero_cercano ? (
-                    <button
-                      type="button"
-                      className="mt-1.5 inline-flex min-h-12 items-center px-0.5 text-[14px] font-bold text-agua-700"
-                      onClick={() => responderSumidero(null)}
-                    >
-                      Dejar sin responder
-                    </button>
-                  ) : null}
-                  <MensajeDeCampo
-                    campo="sumidero_cercano"
-                    mensaje={errores.sumidero_cercano?.message}
-                  />
-                </fieldset>
-                {valores.sumidero_cercano === 'si' ? (
-                  <fieldset>
-                    <legend className="lbl">{ETIQUETAS.campos.sumidero_estado}</legend>
-                    <div className="grid grid-cols-2 gap-2.5">
-                      {SUMIDERO_ESTADOS.map((v) => (
-                        <Opcion
-                          key={v}
-                          nombre="sumidero_estado"
-                          valor={v}
-                          texto={ETIQUETAS.sumidero_estado[v]}
-                          marcado={valores.sumidero_estado === v}
-                          onCambio={() => {
-                            form.setValue('sumidero_estado', v);
-                            form.clearErrors('sumidero_estado');
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </fieldset>
-                ) : null}
-                <MensajeDeCampo
-                  campo="sumidero_estado"
-                  mensaje={errores.sumidero_estado?.message}
-                />
-                {/* Controlada y con `null` como «sin contestar»: registrada, react-hook-form le
-                    escribía `false` al montarla y todo reporte decía que el agua no brotaba. Con
-                    «No» en el sumidero cercano no se pregunta: no hay de dónde brotar. */}
-                {valores.sumidero_cercano !== 'no' ? (
-                  <label className="opc">
-                    <input
-                      type="checkbox"
-                      name="agua_brota_sumidero"
-                      checked={valores.agua_brota_sumidero === true}
-                      onChange={(e) => {
-                        form.setValue('agua_brota_sumidero', e.target.checked ? true : null);
-                        form.clearErrors('agua_brota_sumidero');
-                      }}
-                    />
-                    <span>El agua brota del sumidero cuando llueve</span>
-                  </label>
-                ) : null}
-                <MensajeDeCampo
-                  campo="agua_brota_sumidero"
-                  mensaje={errores.agua_brota_sumidero?.message}
-                />
-              </div>
-            </details>
+            {/* Espacio extra de la categoría en el paso 3 (Inundaciones: causa presunta y sumidero,
+                con su lógica condicional). Una categoría sin componente especial no agrega nada. */}
+            {ExtraPaso3 && definicion ? (
+              <ExtraPaso3
+                form={form}
+                valores={valores}
+                errores={errores}
+                definicion={definicion}
+                ahora={ahora}
+              />
+            ) : null}
           </div>
           <div className="pie">
             <button
               type="button"
               data-testid="boton-siguiente"
               className="btn btn-bloque"
-              disabled={!puedeAvanzar(3, estadoAvance)}
+              disabled={!puedeSeguir(3)}
               onClick={irAdelante}
             >
               {subir.isPending ? 'Subiendo foto…' : 'Continuar'}
@@ -1603,12 +1431,14 @@ export function FormularioReporte() {
               </div>
             ) : null}
 
-            {severidad ? (
+            {severidadPrevia ? (
               <div className="mt-3.5 flex items-center gap-3">
-                <ChipSeveridad severidad={severidad.banda} grande />
-                <b className="titular ml-auto text-[19px] tabular-nums">
-                  {severidad.puntaje}/{PUNTAJE_MAX}
-                </b>
+                <ChipSeveridad severidad={severidadPrevia.banda} grande />
+                {severidadPrevia.puntaje !== undefined ? (
+                  <b className="titular ml-auto text-[19px] tabular-nums">
+                    {severidadPrevia.puntaje}/{severidadPrevia.max}
+                  </b>
+                ) : null}
               </div>
             ) : null}
 
@@ -1641,20 +1471,15 @@ export function FormularioReporte() {
                 }
                 alEditar={volverAlPaso1}
               />
-              <FilaRevision
-                etiqueta={ETIQUETAS.campos.profundidad}
-                valor={
-                  valores.profundidad_estimada
-                    ? `${ETIQUETAS.profundidad[valores.profundidad_estimada].corta} · ${ETIQUETAS.profundidad[valores.profundidad_estimada].rango}`
-                    : '—'
-                }
-                alEditar={() => setPaso(2)}
-              />
-              <FilaRevision
-                etiqueta="Frecuencia"
-                valor={valores.frecuencia ? ETIQUETAS.frecuencia[valores.frecuencia] : '—'}
-                alEditar={() => setPaso(2)}
-              />
+              {/* Las filas propias de la categoría (Inundaciones: Profundidad y Frecuencia). */}
+              {adaptador?.filasRevision(valores).map((f) => (
+                <FilaRevision
+                  key={f.etiqueta}
+                  etiqueta={f.etiqueta}
+                  valor={f.valor}
+                  alEditar={() => setPaso(f.paso)}
+                />
+              ))}
               <FilaRevision
                 etiqueta="Fotos"
                 valor={`${fotos.length} ${fotos.length === 1 ? 'foto' : 'fotos'}${subir.isPending ? ' · subiendo otra' : ''}`}
@@ -1684,6 +1509,7 @@ export function FormularioReporte() {
                     texto={ETIQUETAS.ubicacion_tipo[t]}
                     marcado={valores.ubicacion_tipo === t}
                     onCambio={() => {
+                      tipoLugarElegido.current = true;
                       form.setValue('ubicacion_tipo', t);
                       form.clearErrors('ubicacion_tipo');
                     }}
@@ -1712,7 +1538,7 @@ export function FormularioReporte() {
               aviso al final de ella quedaba debajo del pliegue (plan 2026-10-04, M-6.1). */}
           <PieDeRevision
             errorEnvio={errorEnvio}
-            deshabilitado={!puedeAvanzar(4, estadoAvance)}
+            deshabilitado={!puedeSeguir(4)}
             textoBoton={
               releyendo
                 ? 'Confirmando tu ubicación…'

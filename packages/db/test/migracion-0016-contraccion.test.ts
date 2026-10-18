@@ -57,11 +57,23 @@ const columnasDeUsuario = async (ex: Ejecutor) =>
     )
   ).map((f) => f.c);
 
-const columnaPublicarEn = (ex: Ejecutor) =>
+/** La tabla BASE de reportes: `reporte_inundacion` hasta 0019, `reporte` desde 0020 (el renombre). */
+const tablaBaseReportes = async (ex: Ejecutor) =>
+  (
+    await ex.consultar<{ relname: string }>(
+      `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname IN ('reporte', 'reporte_inundacion')`,
+    )
+  )[0]!.relname;
+
+// Lee publicar_en de la TABLA base (no de la vista, que reportaría la columna como NULL-able): así la
+// afirmación «publicar_en sigue NOT NULL sin DEFAULT» vale igual en 0019 (tabla reporte_inundacion) y
+// desde la 0020 (tabla reporte, con la vista de compatibilidad por encima).
+const columnaPublicarEn = async (ex: Ejecutor) =>
   ex.consultar<{ data_type: string; is_nullable: string; column_default: string | null }>(
     `SELECT data_type, is_nullable, column_default FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'reporte_inundacion'
-        AND column_name = 'publicar_en'`,
+      WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'publicar_en'`,
+    [await tablaBaseReportes(ex)],
   );
 
 const restriccionRango = (ex: Ejecutor) =>
@@ -134,7 +146,10 @@ describe('migración 0016 desde 0015, con filas anteriores', () => {
     reportesAntes = await leerReportes(ex);
     usuariosAntes = await leerUsuarios(ex);
 
-    resto = await aplicarMigraciones(ex);
+    // Hasta 0019: esta prueba inspecciona `reporte_inundacion.publicar_en` como columna de una TABLA
+    // (NOT NULL, su CHECK). La 0020 la convierte en VISTA, donde information_schema reporta la columna
+    // como NULL-able y `pg_constraint` por `::regclass` no ve el CHECK; eso lo cubre migracion-0020.
+    resto = await aplicarMigraciones(ex, { hasta: '0019' });
     columnasDesde0015 = await columnasDeUsuario(ex);
     publicarEnDesde0015 = await columnaPublicarEn(ex);
   }, 240_000);
@@ -191,7 +206,7 @@ describe('migración 0016 desde 0015, con filas anteriores', () => {
   });
 
   it('volver a migrar no aplica nada y ejecutar el archivo a mano no falla ni cambia nada', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0019' });
     expect(otra.aplicadas).toEqual([]);
     const antes = { reportes: await leerReportes(ex), usuarios: await leerUsuarios(ex) };
     await ex.transaccion((tx) =>
@@ -212,6 +227,9 @@ describe('migración 0016 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
+    // Hasta la última (incluida la 0020): los seeds de abajo pasan por `reporte` (via la vista) y por
+    // `rellenarGeometriaPublica`, que desde la 0020 escribe en `reporte`. `columnaPublicarEn` lee la
+    // tabla base, así que la comparación con la base migrada desde 0015 sigue valiendo.
     await aplicarMigraciones(ex);
   }, 240_000);
 

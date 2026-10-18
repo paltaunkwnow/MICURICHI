@@ -1,5 +1,7 @@
-import { PESOS, PUNTOS, type ReporteTecnico } from 'contracts';
+import { PESOS, PUNTOS, REGISTRO_CATEGORIAS, type RegistroCategorias } from 'contracts';
 import { colorSeveridad } from '@/lib/formato';
+import { presentarReporte } from '@/lib/presentacion-reporte';
+import type { PropiedadesReportePanel as ReporteTecnico } from '@/lib/reportes-panel';
 import { MAX_FRECUENCIA, MAX_PROFUNDIDAD, PUNTAJE_MAXIMO } from '@/lib/severidad';
 
 /**
@@ -7,7 +9,25 @@ import { MAX_FRECUENCIA, MAX_PROFUNDIDAD, PUNTAJE_MAXIMO } from '@/lib/severidad
  * necesita ver qué variable empujó la severidad, no solo el número final; y que la profundidad
  * pesa doble, que es lo que más sorprende cuando se mira por primera vez.
  */
-export function FactoresSeveridad({ reporte }: { reporte: ReporteTecnico }) {
+export function FactoresSeveridad({
+  reporte,
+  registro = REGISTRO_CATEGORIAS,
+}: {
+  reporte: ReporteTecnico;
+  registro?: RegistroCategorias;
+}) {
+  if (
+    (reporte.categoria ?? 'inundacion') !== 'inundacion' ||
+    reporte.profundidad_estimada === null ||
+    reporte.frecuencia === null ||
+    (reporte.detalle !== undefined && !presentarReporte(reporte, registro).inundacion)
+  )
+    return (
+      <p className="ayuda mt-3">
+        La severidad corresponde al modelo propio de la categoría del reporte.{' '}
+        {presentarReporte(reporte, registro).versiones}
+      </p>
+    );
   const filas = [
     {
       nombre: 'Profundidad',

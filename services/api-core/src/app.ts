@@ -7,13 +7,14 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
-import { CONFIG_DOMINIO } from 'contracts';
+import { CONFIG_DOMINIO, REGISTRO_CATEGORIAS, type RegistroCategorias } from 'contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { parse as parseYaml } from 'yaml';
 import type { Almacen } from './almacen.js';
 import { instalarAuth } from './auth.js';
 import { aplicarCachePorDefecto } from './cache.js';
+import { crearProveedorCategorias, type ProveedorCategorias } from './categorias.js';
 import type { ConfigApi } from './config.js';
 import { instalarMetricasDeDisco, revisarEspacio } from './guarda-disco.js';
 import {
@@ -60,6 +61,18 @@ export interface Dependencias {
   logger?: boolean | object;
   /** Registro de métricas; si no se pasa, se crea uno propio. */
   metricas?: Metricas;
+  /**
+   * Registro de categorías (ADR 0009). Por defecto `REGISTRO_CATEGORIAS` (hoy solo Inundaciones);
+   * las pruebas inyectan uno con una categoría sintética para ejercitar el camino multicategoría
+   * sin tocar `contracts`. De él salen la disponibilidad de categorías (`app.categorias`), los
+   * campos públicos del `detalle` y el radio de recurrencia que usa el recálculo de puntos críticos.
+   */
+  registro?: RegistroCategorias;
+}
+
+/** El registro efectivo de una app: el inyectado o, por defecto, `REGISTRO_CATEGORIAS`. */
+export function registroDe(dep: Dependencias): RegistroCategorias {
+  return dep.registro ?? REGISTRO_CATEGORIAS;
 }
 
 export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
@@ -103,6 +116,10 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
   app.decorateRequest('requestId', '');
   const metricas = dep.metricas ?? new Metricas();
   app.decorate('metricas', metricas);
+  // Disponibilidad de categorías (M3): única fuente de qué categorías están activas (catálogo +
+  // registro inyectado). La comparten las lecturas públicas (exigen una categoría activa), el
+  // detalle por id, las fotos y `/configuracion`.
+  app.decorate('categorias', crearProveedorCategorias(dep.pool, registroDe(dep), { log: app.log }));
   // Duración de consultas y estado del pool. Sin esto, «la API va lenta» no se puede separar en
   // «la base tarda» y «no quedan conexiones», que se arreglan de formas opuestas.
   instrumentarPool(dep.pool as unknown as Parameters<typeof instrumentarPool>[0], metricas);
@@ -305,5 +322,6 @@ export async function crearApp(dep: Dependencias): Promise<FastifyInstance> {
 declare module 'fastify' {
   interface FastifyInstance {
     metricas: Metricas;
+    categorias: ProveedorCategorias;
   }
 }

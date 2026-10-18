@@ -2,13 +2,11 @@
 
 import { Image as IconoImagen } from 'lucide-react';
 import type { ReporteFeature } from '@/lib/api';
-import {
-  etiquetaProfundidad,
-  subtituloReporte,
-  tituloReporte,
-  urlFotoRelativa,
-} from '@/lib/formato';
+import { categoriaDeReporte } from '@/lib/categoria';
+import { useCategoriasOpcional } from '@/lib/categorias-contexto';
+import { subtituloReporte, tituloReporte, urlFotoRelativa } from '@/lib/formato';
 import { ChipEstado, ChipSeveridad } from './ChipSeveridad';
+import { presentadorDe } from './categorias/registro';
 
 interface Props {
   reporte: ReporteFeature;
@@ -19,12 +17,16 @@ interface Props {
 
 /**
  * Tarjeta de la lista lateral (`.res` del prototipo): miniatura a la izquierda, severidad,
- * unidad vecinal y dos datos del agua. El vecino reconoce su barrio antes que un punto, así que
- * la lista manda sobre el mapa en escritorio.
+ * unidad vecinal y dos datos del punto. El vecino reconoce su barrio antes que un punto, así que
+ * la lista manda sobre el mapa en escritorio. El primer dato es de la categoría del reporte: lo dibuja
+ * su presentador (`categorias/`), no esta tarjeta.
  */
 export function TarjetaReporte({ reporte, distanciaM, seleccionado, onSeleccionar }: Props) {
   const p = reporte.properties;
   const foto = p.fotos[0];
+  const { definicionDe } = useCategoriasOpcional();
+  const slug = categoriaDeReporte(p);
+  const { PastillaTarjeta } = presentadorDe(slug);
   return (
     <button
       type="button"
@@ -60,9 +62,7 @@ export function TarjetaReporte({ reporte, distanciaM, seleccionado, onSelecciona
           {subtituloReporte(p, distanciaM)}
         </span>
         <span className="mt-2 flex flex-wrap gap-1.5">
-          <span className="mini">
-            {etiquetaProfundidad(p.profundidad_estimada).split(' · ')[0]}
-          </span>
+          <PastillaTarjeta reporte={reporte} definicion={definicionDe(slug)} />
           <span className="mini">
             {p.n_reportes_punto && p.n_reportes_punto > 1
               ? `${p.n_reportes_punto} reportes`

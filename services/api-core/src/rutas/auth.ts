@@ -17,9 +17,10 @@ import {
   verificarPassword,
 } from 'db';
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { Dependencias } from '../app.js';
+import { type Dependencias, registroDe } from '../app.js';
 import { COOKIE_SESION, crearSesion } from '../auth.js';
-import { cupoDelDia, momentoDelDia } from '../cuota.js';
+import { limiteReportesDe } from '../categorias.js';
+import { CLAVE_FOTOS, claveReportes, leerCupos, momentoDelDia } from '../cuota.js';
 import { hashIp } from '../privacidad.js';
 
 /**
@@ -282,15 +283,47 @@ export async function rutasAuth(app: FastifyInstance, dep: Dependencias) {
    */
   app.get('/api/v1/auth/yo', async (req, res) => {
     if (!req.usuario) return res.status(401).send({ codigo: 'SIN_SESION', mensaje: 'Sin sesión.' });
-    const cupo = await cupoDelDia(dep.pool, req.usuario.id, { zona: dep.cfg.zonaHoraria });
-    const restantes = Math.max(0, dep.cfg.reportesPorDia - cupo.reportesN);
+    const registro = registroDe(dep);
+    const activas = await app.categorias.activas();
+    // Se leen en una consulta el cupo de cada categoría activa, el de inundación (campos sueltos) y
+    // el de fotos (global). `inundacion` se incluye siempre aunque no estuviera activa, para que los
+    // campos sueltos del contrato no dependan del catálogo.
+    const clavesReportes = new Set(activas.map(claveReportes));
+    clavesReportes.add(claveReportes('inundacion'));
+    const estado = await leerCupos(dep.pool, req.usuario.id, [...clavesReportes, CLAVE_FOTOS], {
+      zona: dep.cfg.zonaHoraria,
+    });
+    // Cupo por categoría ACTIVA (0.20.0, ADR 0017): cuántos quedan, cuánto tardaría el próximo y
+    // desde cuándo vuelve a poder reportar. Es cortesía para avisar antes del 429, no el control.
+    const cupos: Record<
+      string,
+      { restantes: number; demora_proximo_s: number; puede_reportar_desde: string | null }
+    > = {};
+    for (const sl of activas) {
+      const def = registro.obtener(sl);
+      if (!def) continue; // activa ⇒ tiene definición; defensivo.
+      const limite = limiteReportesDe(def, dep.cfg.reportesPorDiaOverride);
+      const n = estado.conteos[claveReportes(sl)] ?? 0;
+      const restantes = Math.max(0, limite - n);
+      cupos[sl] = {
+        restantes,
+        demora_proximo_s: n === 0 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS,
+        puede_reportar_desde: restantes > 0 ? null : estado.espera.disponibleEn,
+      };
+    }
+    // Campos sueltos de hoy: SIEMPRE los de inundación (su límite efectivo es `cfg.reportesPorDia`).
+    const nInund = estado.conteos[claveReportes('inundacion')] ?? 0;
+    const restantesInund = Math.max(0, dep.cfg.reportesPorDia - nInund);
+    const fotosGastadas = estado.conteos[CLAVE_FOTOS] ?? 0;
     const esRolDelPanel = (ROLES_DEL_PANEL as readonly Rol[]).includes(req.usuario.rol);
     return SesionActualSchema.parse({
       ...req.usuario,
-      reportes_restantes_hoy: restantes,
-      puede_reportar_desde: restantes > 0 ? null : cupo.espera.disponibleEn,
+      reportes_restantes_hoy: restantesInund,
+      puede_reportar_desde: restantesInund > 0 ? null : estado.espera.disponibleEn,
       // Para avisar ANTES de enviar cuánto va a tardar en verse: la misma regla que el INSERT.
-      demora_proximo_s: cupo.reportesN === 0 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS,
+      demora_proximo_s: nInund === 0 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS,
+      cupos,
+      fotos_restantes_hoy: Math.max(0, dep.cfg.fotosPorDia - fotosGastadas),
       ...(esRolDelPanel ? { panel_url: dep.cfg.panelAdminUrl } : {}),
     });
   });

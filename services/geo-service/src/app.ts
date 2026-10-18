@@ -4,10 +4,14 @@ import rateLimit from '@fastify/rate-limit';
 import sensible from '@fastify/sensible';
 import {
   type AgregadoUv,
-  BboxSchema,
   CODIGO_CAPA_CAMBIO,
+  CODIGO_CATEGORIA_NO_DISPONIBLE,
+  GeoAgregadosQuerySchema,
+  GeoPuntosCriticosQuerySchema,
   HuellaCapaSchema,
   type PuntoCritico,
+  REGISTRO_CATEGORIAS,
+  type RegistroCategorias,
   ResolverEntradaSchema,
   rutaTeselasConHuella,
   TIPOS_CAPA,
@@ -16,8 +20,13 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import { CacheCorta } from './cache-corta.js';
+import { type CacheCorta, CachePorCategoria } from './cache-corta.js';
 import { CacheCapas, type CapaEnCache } from './capas.js';
+import {
+  categoriaPublica,
+  crearProveedorCategorias,
+  type ProveedorCategorias,
+} from './categorias.js';
 import { igualEnTiempoConstante } from './comparar.js';
 import type { ConfigGeo } from './config.js';
 import { instalarObservabilidad, instrumentarPool, MetricasGeo } from './observabilidad.js';
@@ -31,6 +40,12 @@ export interface DependenciasGeo {
   logger?: boolean | object;
   /** Registro de métricas; si no se pasa, se crea uno propio. */
   metricas?: MetricasGeo;
+  /**
+   * Registro de categorías (ADR 0009). Por defecto `REGISTRO_CATEGORIAS` (hoy solo Inundaciones);
+   * una prueba inyecta uno con una categoría sintética para ejercitar el camino multicategoría sin
+   * tocar `contracts`. De él sale la disponibilidad de categorías (`app.categorias`).
+   */
+  registro?: RegistroCategorias;
 }
 
 const CapaParam = z.object({ capa: z.enum(TIPOS_CAPA) });
@@ -174,14 +189,25 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   });
   const capas = new CacheCapas(dep.pool, dep.cfg, metricas);
   app.decorate('capas', capas);
+  // Disponibilidad de categorías (catálogo `categoria` ∩ registro inyectado). La usan las rutas
+  // de cifras públicas (agregados y puntos críticos), que exigen UNA categoría activa.
+  app.decorate(
+    'categorias',
+    crearProveedorCategorias(dep.pool, dep.registro ?? REGISTRO_CATEGORIAS, { log: app.log }),
+  );
   // Las cifras públicas (agregados por UV y puntos críticos) las consultan el panel y el mapa
   // público en cada carga. Con caché, la consulta corre como mucho una vez cada
   // GEO_CACHE_AGREGADOS_MS y nadie ve una cifra de más de GEO_CACHE_AGREGADOS_EDAD_MAX_MS: es un
-  // conteo para colorear un mapa, no un saldo bancario. El TTL nunca pasa de la edad máxima.
+  // conteo para colorear un mapa, no un saldo bancario. El TTL nunca pasa de la edad máxima. Desde
+  // M3.4 las cifras se filtran por categoría, así que hay una caché por categoría: la de inundación
+  // y la de otra categoría cuentan cosas distintas y no pueden compartir celda.
   const ttlCifras = Math.min(dep.cfg.cacheAgregadosMs, dep.cfg.cacheAgregadosEdadMaxMs);
-  const agregados = new CacheCorta<AgregadoUv[]>(ttlCifras, dep.cfg.cacheAgregadosEdadMaxMs);
+  const agregados = new CachePorCategoria<AgregadoUv[]>(ttlCifras, dep.cfg.cacheAgregadosEdadMaxMs);
   app.decorate('agregados', agregados);
-  const puntosCriticos = new CacheCorta<PuntoCritico[]>(ttlCifras, dep.cfg.cacheAgregadosEdadMaxMs);
+  const puntosCriticos = new CachePorCategoria<PuntoCritico[]>(
+    ttlCifras,
+    dep.cfg.cacheAgregadosEdadMaxMs,
+  );
   app.decorate('puntosCriticos', puntosCriticos);
 
   /** Sirve una cifra pública desde su caché, con `X-Cache` y las métricas de acierto y fallo. */
@@ -347,11 +373,24 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
   app.get(
     '/geo/v1/agregados/unidades-vecinales',
     limiteConsulta,
-    async (_req, res): Promise<AgregadoUv[]> =>
-      servirCifra(agregados, 'agregados', res, async () => {
-        const r = await dep.pool.query<AgregadoUv>(SQL_AGREGADOS_UV);
+    async (req, res): Promise<AgregadoUv[] | undefined> => {
+      const q = GeoAgregadosQuerySchema.safeParse(req.query);
+      if (!q.success) return res.badRequest(q.error.issues.map((i) => i.message).join('; '));
+      // Ruta pública: exige UNA categoría activa. Sin parámetro ya es `inundacion`; `todas` o una
+      // categoría desconocida o inactiva dan 400 CATEGORIA_NO_DISPONIBLE.
+      const cat = await categoriaPublica(app.categorias, q.data.categoria);
+      if (!cat.ok) {
+        res.status(400).send({
+          codigo: CODIGO_CATEGORIA_NO_DISPONIBLE,
+          mensaje: 'La categoría pedida no está disponible.',
+        });
+        return undefined;
+      }
+      return servirCifra(agregados.para(cat.slug), 'agregados', res, async () => {
+        const r = await dep.pool.query<AgregadoUv>(SQL_AGREGADOS_UV, [cat.slug]);
         return r.rows;
-      }),
+      });
+    },
   );
 
   /**
@@ -359,7 +398,7 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
    * el bbox se filtra aquí: el mapa pide por bbox y cada vista es distinta, así que una caché por
    * bbox casi nunca acertaría.
    */
-  async function cargarPuntosCriticos(): Promise<PuntoCritico[]> {
+  async function cargarPuntosCriticos(categoria: string): Promise<PuntoCritico[]> {
     type FilaPc = Omit<PuntoCritico, 'primer_reporte_en' | 'ultimo_reporte_en' | 'calculado_en'> & {
       primer_reporte_en: Date;
       ultimo_reporte_en: Date;
@@ -376,13 +415,16 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     // lo que se publica aquí es el centroide ya degradado. Publicar las dos cosas juntas da una
     // medida exacta sobre posiciones que se están ocultando a propósito. Ningún cliente las
     // usaba; quedan en la tabla para el análisis del técnico (§9.2).
+    // `categoria = $1` (M3.4): el DBSCAN particiona por categoría (`punto_critico.categoria` desde
+    // la migración 0020), así que dos categorías no comparten punto crítico ni cifra.
     const r = await dep.pool.query<FilaPc>(
       `SELECT id, ST_Y(geom_publico) AS lat, ST_X(geom_publico) AS lon, n_reportes,
               primer_reporte_en, ultimo_reporte_en, severidad_max, distrito_id, unidad_vecinal_id,
-              calculado_en
-       FROM punto_critico WHERE geom_publico IS NOT NULL
+              calculado_en, categoria
+       FROM punto_critico WHERE geom_publico IS NOT NULL AND categoria = $1
        ORDER BY n_reportes DESC, ultimo_reporte_en DESC, id
        LIMIT ${MAX_PUNTOS_CRITICOS_EN_MEMORIA}`,
+      [categoria],
     );
     return r.rows.map((f) => ({
       ...f,
@@ -396,9 +438,20 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
     '/geo/v1/puntos-criticos',
     limiteConsulta,
     async (req, res): Promise<PuntoCritico[] | undefined> => {
-      const q = z.object({ bbox: BboxSchema.optional() }).safeParse(req.query);
+      const q = GeoPuntosCriticosQuerySchema.safeParse(req.query);
       if (!q.success) return res.badRequest(q.error.issues.map((i) => i.message).join('; '));
-      const todos = await servirCifra(puntosCriticos, 'puntos_criticos', res, cargarPuntosCriticos);
+      // Ruta pública: exige UNA categoría activa, igual que los agregados.
+      const cat = await categoriaPublica(app.categorias, q.data.categoria);
+      if (!cat.ok) {
+        res.status(400).send({
+          codigo: CODIGO_CATEGORIA_NO_DISPONIBLE,
+          mensaje: 'La categoría pedida no está disponible.',
+        });
+        return undefined;
+      }
+      const todos = await servirCifra(puntosCriticos.para(cat.slug), 'puntos_criticos', res, () =>
+        cargarPuntosCriticos(cat.slug),
+      );
       const bbox = q.data.bbox;
       const elegidos = bbox
         ? todos.filter(
@@ -417,8 +470,9 @@ export async function crearApp(dep: DependenciasGeo): Promise<FastifyInstance> {
 declare module 'fastify' {
   interface FastifyInstance {
     capas: CacheCapas;
-    agregados: CacheCorta<AgregadoUv[]>;
-    puntosCriticos: CacheCorta<PuntoCritico[]>;
+    categorias: ProveedorCategorias;
+    agregados: CachePorCategoria<AgregadoUv[]>;
+    puntosCriticos: CachePorCategoria<PuntoCritico[]>;
     metricas: MetricasGeo;
   }
 }

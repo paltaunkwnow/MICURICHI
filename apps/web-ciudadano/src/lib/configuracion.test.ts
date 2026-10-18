@@ -1,6 +1,6 @@
 import { type Ciudad, CONFIG_DOMINIO } from 'contracts';
 import { describe, expect, it, vi } from 'vitest';
-import { crearLectorDeCiudad, REVALIDAR_MS } from './configuracion';
+import { crearLectorDeConfiguracion, REVALIDAR_MS } from './configuracion';
 
 /**
  * La ciudad llega de `GET /api/v1/configuracion` en tiempo de ejecución: la misma imagen sirve a
@@ -32,7 +32,7 @@ function preparar() {
   let base = 'http://api-core:3001';
   const registros: string[] = [];
   const pedir = vi.fn<typeof fetch>();
-  const leer = crearLectorDeCiudad({
+  const leerCfg = crearLectorDeConfiguracion({
     urlBase: () => base,
     pedir,
     ahora: () => reloj,
@@ -40,7 +40,10 @@ function preparar() {
     plazoMs: 30,
   });
   return {
-    leer,
+    // `leer` devuelve solo la ciudad: así las pruebas de la ciudad quedan como estaban (el lector
+    // ahora resuelve la configuración completa; `leerCfg` da ciudad + categorías activas).
+    leer: async (): Promise<Ciudad> => (await leerCfg()).ciudad,
+    leerCfg,
     pedir,
     registros,
     avanzar: (ms: number) => {
@@ -159,7 +162,7 @@ describe('lector de la ciudad (GET /api/v1/configuracion)', () => {
 
   it('una API_CORE_URL mal escrita no tumba la página: respaldo y registro', async () => {
     const registros: string[] = [];
-    const leer = crearLectorDeCiudad({
+    const leer = crearLectorDeConfiguracion({
       urlBase: () => {
         throw new Error('API_CORE_URL inválida: «api-core:3001».');
       },
@@ -167,7 +170,7 @@ describe('lector de la ciudad (GET /api/v1/configuracion)', () => {
       registrar: (mensaje) => registros.push(mensaje),
     });
 
-    expect(await leer()).toEqual(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
+    expect((await leer()).ciudad).toEqual(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
     expect(registros[0]).toContain('API_CORE_URL inválida');
   });
 
@@ -182,5 +185,37 @@ describe('lector de la ciudad (GET /api/v1/configuracion)', () => {
 
     expect(await leer()).toEqual(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
     expect(registros).toHaveLength(1);
+  });
+});
+
+describe('categorías activas (GET /api/v1/configuracion)', () => {
+  it('normaliza los slugs (alias incluidos) y los deja en orden canónico', async () => {
+    const { leerCfg, pedir } = preparar();
+    pedir.mockResolvedValue(
+      json({ ciudad: COCHABAMBA, categorias_activas: ['Baches', 'inundaciones', 'areas-verdes'] }),
+    );
+    expect((await leerCfg()).categoriasActivas).toEqual(['inundacion', 'bache', 'area_verde']);
+  });
+
+  it('sin el campo (api-core viejo) usa el respaldo ["inundacion"]', async () => {
+    const { leerCfg, pedir } = preparar();
+    pedir.mockResolvedValue(json({ ciudad: COCHABAMBA }));
+    expect((await leerCfg()).categoriasActivas).toEqual(['inundacion']);
+  });
+
+  it('descarta los slugs desconocidos (el registro los filtra aparte en el cliente)', async () => {
+    const { leerCfg, pedir } = preparar();
+    pedir.mockResolvedValue(
+      json({ ciudad: COCHABAMBA, categorias_activas: ['inundacion', 'xyz'] }),
+    );
+    expect((await leerCfg()).categoriasActivas).toEqual(['inundacion']);
+  });
+
+  it('si api-core no responde, el respaldo es ["inundacion"] con la ciudad por defecto', async () => {
+    const { leerCfg, pedir } = preparar();
+    pedir.mockRejectedValue(new TypeError('fetch failed'));
+    const cfg = await leerCfg();
+    expect(cfg.ciudad).toEqual(CONFIG_DOMINIO.CIUDAD_POR_DEFECTO);
+    expect(cfg.categoriasActivas).toEqual(['inundacion']);
   });
 });

@@ -1,6 +1,13 @@
 'use client';
 
-import { FRECUENCIAS, PESOS, PROFUNDIDADES, PUNTOS } from 'contracts';
+import {
+  FRECUENCIAS,
+  PESOS,
+  PROFUNDIDADES,
+  PUNTOS,
+  REGISTRO_CATEGORIAS,
+  type RegistroCategorias,
+} from 'contracts';
 import { definicionPestana, type PestanaEjecutiva, rangoPuntajePestana } from '@/lib/ejecutivo';
 import { etiquetaFrecuencia, etiquetaProfundidad, etiquetaSeveridad } from '@/lib/formato';
 import { formulaPuntaje, profundidadesSiempreCriticas, textoRango } from '@/lib/severidad';
@@ -79,10 +86,51 @@ function ListaDePuntos({
 export function CriteriosSeveridad({
   pestana,
   onCambiarPestana,
+  categoria = 'inundacion',
+  registro = REGISTRO_CATEGORIAS,
 }: {
   pestana: PestanaEjecutiva;
   onCambiarPestana: (p: PestanaEjecutiva) => void;
+  categoria?: string;
+  registro?: RegistroCategorias;
 }) {
+  if (categoria !== 'inundacion') {
+    const def = registro.obtener(categoria);
+    return (
+      <section
+        className="tarjeta p-5 space-y-4"
+        aria-label="Significado de los niveles de severidad"
+      >
+        <h2 className="titular text-xl">Significado de los niveles de severidad</h2>
+        <p>
+          Bandas comunes del servidor. Crítica agrupa las bandas alta y crítica. Los puntajes de
+          categorías distintas no se comparan.
+        </p>
+        {def ? (
+          <p>
+            Modelo de la definición disponible: versión {def.severidad.version}. La API no informa
+            la versión histórica usada por cada reporte.
+          </p>
+        ) : (
+          <p>Cada categoría usa su propio modelo de severidad. No hay una fórmula conjunta.</p>
+        )}
+        {def && <p>{def.notaMetodologica}</p>}
+        <div className="flex flex-wrap gap-3">
+          {TARJETAS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="btn btn-secundario"
+              aria-pressed={pestana === t.id}
+              onClick={() => onCambiarPestana(t.id)}
+            >
+              {t.etiqueta}
+            </button>
+          ))}
+        </div>
+      </section>
+    );
+  }
   const siempreCriticas = profundidadesSiempreCriticas();
 
   return (

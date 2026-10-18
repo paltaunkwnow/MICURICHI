@@ -1,11 +1,12 @@
 'use client';
 
-import type { AgregadoUv, CapaInfo, ResumenEjecutivo } from 'contracts';
+import type { CapaInfo, RegistroCategorias, ResumenEjecutivo } from 'contracts';
 import { Filter, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Aviso } from '@/componentes/Aviso';
 import { type FeaturePuntoReporte, Mapa } from '@/componentes/Mapa';
 import { useFormato } from '@/lib/ciudad-contexto';
+import type { ConteoUv } from '@/lib/consultas-compuestas';
 import {
   barrasInundaciones,
   barrasTrabajo,
@@ -62,11 +63,17 @@ export interface PropsPanelEjecutivo {
   /** Error de la última consulta. Con `resumen` presente, los datos son los de la anterior. */
   error: string | null;
   onReintentar: () => void;
+  puedeReintentar?: boolean;
   pestana: PestanaEjecutiva;
   onCambiarPestana: (p: PestanaEjecutiva) => void;
   capas?: CapaInfo[];
   reportes?: FeaturePuntoReporte[];
-  agregadosUv?: AgregadoUv[];
+  agregadosUv?: ConteoUv[];
+  categoria?: string;
+  nombreCategoria?: string;
+  registro?: RegistroCategorias;
+  avisoMapa?: string | null;
+  avisoUvs?: string | null;
   uvSeleccionada?: { id: string; codigo: string; nombre: string } | null;
   onSeleccionarUv?: (uv: { id: string; codigo: string; nombre: string } | null) => void;
 }
@@ -96,7 +103,11 @@ export function PanelEjecutivo(props: PropsPanelEjecutivo) {
         quedan a la vista los datos anteriores.
       */}
       <p className="sr-only" role="status" data-testid="ejecutivo-anuncio">
-        {resumen ? textoAnuncio(resumen, formato) : ''}
+        {resumen
+          ? props.categoria === undefined || props.categoria === 'inundacion'
+            ? textoAnuncio(resumen, formato)
+            : `${formato.numero(resumen.activas.total)} reportes activos · ${props.nombreCategoria ?? 'Todas las categorías'}: ${formato.numero(resumen.activas.verificadas)} verificados y ${formato.numero(resumen.activas.en_revision)} en revisión.`
+          : ''}
       </p>
       <Aviso tipo="alerta" testId="ejecutivo-sin-actualizar">
         {resumen && props.error
@@ -125,6 +136,7 @@ export function PanelEjecutivo(props: PropsPanelEjecutivo) {
             type="button"
             className="btn btn-secundario btn-sm mt-2"
             onClick={props.onReintentar}
+            disabled={props.puedeReintentar === false}
           >
             Reintentar
           </button>
@@ -132,8 +144,9 @@ export function PanelEjecutivo(props: PropsPanelEjecutivo) {
       )}
 
       <p className="text-[13.5px] text-tinta-600" data-testid="ejecutivo-nota">
-        Son reportes ciudadanos, no mediciones: donde no hay reportes igual puede inundarse, y toda
-        obra requiere un estudio técnico.
+        {props.categoria === undefined || props.categoria === 'inundacion'
+          ? 'Son reportes ciudadanos, no mediciones: donde no hay reportes igual puede inundarse, y toda obra requiere un estudio técnico.'
+          : 'Son reportes ciudadanos, no mediciones: la ausencia de reportes no implica ausencia del problema. Toda intervención requiere un estudio técnico.'}
       </p>
     </div>
   );
@@ -183,7 +196,11 @@ function Contenido(
           <p className="numero-ejecutivo tabular-nums" data-testid="ejecutivo-total">
             {formato.numero(resumen.activas.total)}
           </p>
-          <p className="text-lg font-semibold">inundaciones activas</p>
+          <p className="text-lg font-semibold">
+            {props.categoria === undefined || props.categoria === 'inundacion'
+              ? 'inundaciones activas'
+              : `reportes activos · ${props.nombreCategoria ?? 'Todas las categorías'}`}
+          </p>
           <p className="text-[15px] text-tinta-600" data-testid="ejecutivo-verificadas">
             {textoVerificadas(resumen.activas, formato)}
           </p>
@@ -197,19 +214,31 @@ function Contenido(
       </section>
 
       {/* Qué significa cada nivel: la fórmula y los rangos de puntaje, de contracts */}
-      <CriteriosSeveridad pestana={pestana} onCambiarPestana={props.onCambiarPestana} />
+      <CriteriosSeveridad
+        pestana={pestana}
+        onCambiarPestana={props.onCambiarPestana}
+        categoria={props.categoria}
+        registro={props.registro}
+      />
 
       <div className="grid gap-6 xl:grid-cols-2">
         {/* Lo único que cambia con la pestaña es esta gráfica. */}
         <div id={ID_PANEL} role="tabpanel" aria-labelledby={`pestana-ej-${pestana}`}>
           <section className="tarjeta h-full p-5" aria-labelledby="ej-titulo-inundaciones">
             <h2 id="ej-titulo-inundaciones" className="titular mb-2 text-xl">
-              Inundaciones activas por distrito
+              {props.categoria === undefined || props.categoria === 'inundacion'
+                ? 'Inundaciones activas por distrito'
+                : 'Reportes activos por distrito'}
             </h2>
             <GraficaInundaciones
               barras={inundaciones}
               color={colorPrincipal(pestana)}
               rotuloSeveridad={rotulo(pestana)}
+              nombre={
+                props.categoria === undefined || props.categoria === 'inundacion'
+                  ? 'Inundaciones activas'
+                  : 'Reportes activos'
+              }
             />
           </section>
         </div>
@@ -224,6 +253,8 @@ function Contenido(
 
       {/* Mapa interactivo con distritos y unidades vecinales (UV) */}
       <section className="tarjeta p-5 space-y-4" aria-labelledby="ej-titulo-mapa">
+        {props.avisoMapa && <p className="aviso aviso-alerta">{props.avisoMapa}</p>}
+        {props.avisoUvs && <p className="aviso aviso-alerta">{props.avisoUvs}</p>}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 id="ej-titulo-mapa" className="titular text-xl">
@@ -290,8 +321,11 @@ function Contenido(
         <div className="h-[460px] w-full overflow-hidden rounded-lg border border-slate-200">
           <Mapa
             reportes={reportesVisibles}
+            ambito={props.categoria}
+            registro={props.registro}
             capas={props.capas ?? []}
             ajustarAPuntos={Boolean(uvSeleccionada)}
+            claveEncuadre={uvSeleccionada?.id ?? null}
             onSeleccionarUv={(uv) => setUvSeleccionada(uv)}
             className="h-full w-full"
             ariaLabel="Mapa de distritos y unidades vecinales con reportes"

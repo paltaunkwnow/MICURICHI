@@ -249,7 +249,21 @@ test.describe('contratos de la API (sin navegador)', () => {
       // Es la misma para cualquiera: una caché compartida puede guardarla.
       expect(r.headers()['cache-control'] ?? '').toMatch(/^public\b.*max-age=\d+/);
       const cuerpo = await r.json();
-      expect(Object.keys(cuerpo)).toEqual(['ciudad']);
+      // M3a (ADR 0012): `categorias_activas` es aditiva; estricta para que nada más sobre.
+      expect(Object.keys(cuerpo).sort()).toEqual(['categorias_activas', 'ciudad']);
+      const activas: unknown = cuerpo.categorias_activas;
+      expect(Array.isArray(activas)).toBe(true);
+      const slugs = activas as unknown[];
+      for (const slug of slugs) {
+        expect(typeof slug).toBe('string');
+        expect((slug as string).length).toBeGreaterThan(0);
+      }
+      expect(slugs).toContain('inundacion');
+      // Copia literal de SLUGS_CATEGORIA (packages/contracts/src/categorias/slugs.ts): la E2E no
+      // depende del paquete `contracts`.
+      const SLUGS_CATEGORIA = ['inundacion', 'bache', 'area_verde', 'basura'];
+      for (const slug of slugs) expect(SLUGS_CATEGORIA).toContain(slug);
+      expect(new Set(slugs).size).toBe(slugs.length);
       const c = cuerpo.ciudad;
       expect(Object.keys(c).sort()).toEqual(
         ['centro', 'locale', 'nombre', 'pais', 'zona_horaria', 'zoom_inicial'].sort(),

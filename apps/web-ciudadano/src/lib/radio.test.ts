@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { CONFIG_DOMINIO, dentroDelRadio, distanciaMetros } from 'contracts';
 import { describe, expect, it } from 'vitest';
+import { ADAPTADOR_INUNDACION } from '@/componentes/formulario-categorias/inundacion';
 import { ErrorApi } from './api';
 import { esUbicacionRechazada } from './errores';
 import { armarEnvio, type ValoresFormulario, valoresIniciales } from './formulario-reporte';
@@ -293,6 +294,7 @@ describe('al salir del paso 1 el punto deja de ser precargado (hallazgo de T2)',
         r.punto,
         [],
         { lat: nuevaAncla.lat, lon: nuevaAncla.lon, precision_m: 8, antiguedad_s: 1 },
+        ADAPTADOR_INUNDACION,
       );
       expect(cuerpo.lat).toBe(ANCLA.lat);
       expect(cuerpo.lon).toBe(ANCLA.lon);
