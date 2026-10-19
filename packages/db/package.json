@@ -36,18 +36,18 @@
   },
   "dependencies": {
     "contracts": "workspace:*",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "0.45.4",
     "hash-wasm": "4.12.0",
-    "pg": "8.23.0"
+    "pg": "8.23.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
-    "@electric-sql/pglite-postgis": "0.2.8",
-    "@electric-sql/pglite-socket": "0.2.11",
+    "@electric-sql/pglite": "0.5.9",
+    "@electric-sql/pglite-postgis": "0.2.9",
+    "@electric-sql/pglite-socket": "0.2.12",
     "@types/geojson": "7946.0.16",
     "@types/node": "24.13.4",
     "@types/pg": "8.23.1",
-    "tsx": "4.23.13",
+    "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "4.1.11"
   }
