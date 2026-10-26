@@ -9,7 +9,7 @@
 # no desincronizarlos nunca es usar la imagen del propio servidor, que ya está descargada. Fijada
 # por digest y escrita literal (Dependabot solo actualiza FROM literales): una reconstrucción trae
 # siempre los mismos binarios. A mano: `docker pull postgis/postgis:18-3.6` y copiar el digest.
-FROM postgis/postgis:18-3.6@sha256:60f6ad1d21ea86a67d47780b9a0d1e1d200500f62b19293fa834d0dea80b8677
+FROM postgis/postgis:18-3.6@sha256:e84455a058f60f06dd8c40e66a2c628b8fc113d9fca0896e1f308b25b897207f
 
 # rclone habla con cualquier S3 (AWS, R2, B2, Spaces, MinIO…) con la configuración por variables
 # de entorno, reintenta, verifica el hash de lo subido y sabe borrar por antigüedad. El de Debian
