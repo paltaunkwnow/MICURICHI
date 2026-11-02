@@ -20,7 +20,7 @@ ARG NODE_MAYOR=24
 
 # --- 1) Dependencias ------------------------------------------------------------------------------
 # No depende de APP: las dos imágenes comparten esta capa, que es la cara (next, react, maplibre).
-FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS deps
+FROM node:24.22.2-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS deps
 ENV PNPM_HOME=/pnpm CI=1 HUSKY=0 NEXT_TELEMETRY_DISABLED=1
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -71,7 +71,7 @@ RUN set -e; \
     fi
 
 # --- 3) Imagen final ------------------------------------------------------------------------------
-FROM node:24.21.0-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS runtime
+FROM node:24.22.2-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS runtime
 ARG NODE_MAYOR
 ARG APP
 ARG PUERTO=3000
