@@ -1,5 +1,16 @@
 # Lista de comprobación para producción
 
+> **Estado del29/10/2026.** El usuario pide dejar la versión preparada para subir después,
+> **sin despliegue ahora**. Dominio previsto de la web: `micurichi.lat`; propiedad/DNS/TLS
+> no comprobados, VPS y dominio del panel sin elegir. Las cuatro categorías tienen entrega
+> funcional local verificada el25/10; M10.5 cerró con375/375 y confirmación independiente.
+> [Cierre final M10](../sdd/2026-10-29-cierre-m10/plan.md) aprobado y en implementación
+> aislada, conservando API y con reversa coordinada. No se ha actualizado la demo a0022.
+> Las pruebas contra PostgreSQL/S3 reales, CI remoto y audit de dependencias actual no se
+> dan por aprobados por esa evidencia local. Las pruebas potencialmente destructivas se
+> harán en bancos/copias aislados expresamente autorizados, nunca sobre la base pública.
+> Preparar código no sustituye las decisiones de licencia, privacidad y operación siguientes.
+
 Lo que hay que tener resuelto **antes** de abrir el sistema al público. Lo marcado como
 `PENDIENTE` depende de infraestructura que todavía no existe; no se ha inventado configuración
 para ello.

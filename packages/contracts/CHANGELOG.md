@@ -1,5 +1,61 @@
 # Changelog — contracts
 
+## 0.24.0 — 2026-10-22
+
+**Basura y Áreas verdes reales (M7/M8, plan local aprobado del 2026-10-22).** El registro
+ofrece las cuatro definiciones iniciales en orden canónico. Esto no activa categorías en
+ninguna base; la actividad sigue dependiendo del catálogo de cada instalación.
+
+- Cinco subtipos obligatorios en el núcleo por cada categoría nueva, con esquemas de subtipo
+  exportados; detalle v1 estricto con solo `gravedad_declarada` y `tamano`, ambos obligatorios.
+  Preguntas declarativas, campos públicos y exportables coinciden con esos dos enums.
+- Severidad v1 por categoría: índice auxiliar g+t+2 (2–8), bandas combinadas desde 4/5/7,
+  con piso en la gravedad declarada; 16 combinaciones explícitas por modelo. No se comparan
+  los índices entre categorías. Radio provisional de recurrencia 10 m; cupo desde CONFIG_DOMINIO.
+- Se conservan Point, iconos/paleta ADR 0022, percepción ciudadana y limitaciones. Las claves
+  `basura/paso2` y `area_verde/paso2` permiten a P1 envolver el formulario declarativo con avisos.
+  Contracts no importa React ni implementa esos wrappers.
+- Persona en situación de calle conserva gravedad/tamaño y la fórmula común de su categoría.
+  La nota distingue el destino previsto Desarrollo Social (los demás, Parques y jardines),
+  pide evitar caras y documenta el comportamiento local de fotos sin prometer ocultación
+  ni derivación municipal automática. Quema no sustituye atención de emergencias.
+- Inundaciones v2, Baches v1, núcleo HTTP, respuestas históricas y generador OpenAPI intactos.
+  Se regenera OpenAPI con el comando existente; los contratos HTTP genéricos no cambian.
+- Pruebas nuevas de matrices/índice/piso/pureza/monotonicidad, rechazos, subtipos, preguntas,
+  exports, contraste y límites locales. Solo se actualizan las expectativas del registro de
+  dos a cuatro definiciones en contrato-0-19 y en el caso de registro de Baches.
+
+Parámetros aprobados para esta entrega local; validación municipal y decisiones de privacidad
+antes de producción pendientes. No incluye integración municipal efectiva.
+
+## 0.23.0 — 2026-10-18
+
+**Baches reales y respuestas multitemáticas compatibles (M6.1, ADR 0024).** El registro suma
+`DEFINICION_BACHE`: cinco subtipos; detalle v1 estricto (`gravedad_declarada`, `tamano`),
+severidad v1 con índice auxiliar 2–8 y piso en la gravedad declarada; radio de recurrencia 10 m.
+Textos, referencias visuales sin intervalos inventados, TrafficCone, acentos del ADR 0022 y
+cupo configurable por cuenta/categoría/día. Son parámetros de piloto, pendientes de validación municipal.
+Registrar la definición no activa el catálogo de ninguna instalación.
+
+- Público, técnico y propio conservan `ZodObject`, `.shape`, `.strict()` y descarte de extras.
+  Admiten los tres enums planos nulos solo con categoría explícita, no vacía y distinta del
+  literal `inundacion`. Los payloads anteriormente válidos, incluidos otras categorías con
+  enums no nulos, se conservan. No se vuelven obligatorios categoría/subtipo/detalle ni se
+  normalizan slugs o consultan registros al validar respuestas históricas.
+- Un mismo fragmento Zod decide la condición en runtime y produce sus metadatos JSON Schema
+  `allOf`/`anyOf`, en modo input e inline. Las bases se derivan antes de aplicar checks y
+  metadatos a cada final. Los errores comunes conservan sus rutas por campo; Inundación y
+  legado continúan rechazando nulos en profundidad/frecuencia/causa.
+- Exportación reutiliza el feature técnico canónico, sin otra representación nullable en admin.
+  Los metadatos, geometría, estados, campos técnicos y requisitos anteriores se conservan.
+- `ReporteCrearSchema`, sus defaults/strip/refinamientos y el normalizador de entrada quedan
+  intactos. API valida el detalle por definición y debe comprobar el subtipo antes del cupo (M6.2).
+- OpenAPI incorpora `DetalleBache` y `SubtipoBache`, junto con la condición de las respuestas.
+  Se conserva la versión de rutas v1 y `info.version` del API, independientes de este paquete.
+- Pruebas: matriz explícita de 16 combinaciones, puntaje/piso/monotonicidad/invalidación,
+  definición real y compatibilidad de vistas/colecciones/exportación, serialización directa
+  sin referencias colgantes y checks en derivados strict/safeExtend.
+
 ## 0.22.0 — 2026-10-15
 
 **Ampliación compatible de la exportación GeoJSON (M5.0).** `ExportacionGeoJsonSchema.features`

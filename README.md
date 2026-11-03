@@ -1,13 +1,40 @@
 # Mi Curichi
 
-Plataforma municipal de **reportes ciudadanos georreferenciados**. Inundaciones es la categoría
-implementada; la ampliación a Baches, Áreas verdes y Basura comparte el mismo núcleo.
+Plataforma municipal de **reportes ciudadanos georreferenciados** para Inundaciones, Baches,
+Áreas verdes y Basura. Las cuatro categorías comparten mapa, cuentas, reportes y panel técnico.
 
-> **Continuidad, 2026-10-15:** estado verificado, pruebas actuales y próximos pasos en
-> [VentanaContexto.md](VentanaContexto.md). M0–M4 tienen cierre local documentado; ver el
-> [informe M4](docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md).
-> Las otras categorías aún no están habilitadas por
-> el registro de la aplicación.
+> **Continuidad, 2026-10-25:** estado verificado y pendientes en
+> [VentanaContexto.md](VentanaContexto.md). M0–M5 tienen cierre local documentado.
+> Contracts 0.24.0 incorpora las cuatro definiciones reales y pasó 512 pruebas; su registro
+> no activa categorías en una base de datos. La integración y la instalación local separada
+> `curichi_multitematica` están en curso según el [plan aprobado](docs/sdd/2026-10-22-cuatro-categorias/plan.md).
+> Falta la verificación con navegador, incluido el fallo de mapa pendiente de M6.
+
+La instalación separada `curichi_multitematica` ya está preparada con las cuatro categorías
+activas, capas municipales y cuentas de prueba. La web y el panel respondieron HTTP200 el24/10.
+La comprobación visual del mapa y la E2E integral siguen pendientes; esto no declara cierre
+global ni despliegue de producción.
+
+**Reanudación del 25/10:** después del reinicio de Windows, API y geo compilaron con
+exit 0 y la demo volvió a arrancar. Web, panel y ambos servicios respondieron HTTP 200;
+las seis tablas de control conservaron sus recuentos y huellas anteriores al reinicio.
+Las cuatro categorías están activas y pasaron **14/14 pruebas con navegador**, siete en
+escritorio y siete en móvil, sin omisiones o reintentos. El mapa pendiente de M6 también
+pasó su comprobación exacta. Ver [informe de entrega local](docs/sdd/2026-10-22-cuatro-categorias/informe.md)
+para evidencias y límites; M9/M10 y producción conservan sus pasos propios.
+
+Para abrir la demo desde la raíz, con PostgreSQL disponible y memoria libre suficiente:
+
+```powershell
+node scripts/multitematica-local.mjs iniciar
+```
+
+Web: <http://127.0.0.2:4000>. Panel: <http://127.0.0.2:4100>. El proceso queda en primer plano;
+`Ctrl+C` cierra sus servicios y conserva los datos. No ejecutar de nuevo `preparar` para
+restablecer cuentas o ejemplos. Instrucciones completas y requisitos en
+[la operación local](docs/operaciones/multitematica-local.md).
+Los comandos de arranque habitual de abajo se conservan como referencia y no deben usarse
+para migrar las bases protegidas `curichi`/`curichi_revision`.
 
 En Santa Cruz de la Sierra hay calles que se anegan cada vez que llueve fuerte. Los vecinos saben
 exactamente cuáles, pero el municipio no tiene un inventario de eso: ni dónde, ni con qué

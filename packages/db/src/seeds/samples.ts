@@ -187,7 +187,7 @@ export async function sembrarSamples(
   // Reportes sintéticos ubicados dentro de las UV VIGENTES de la base (reales del municipio si están
   // cargadas, sintéticas si no). ST_GeneratePoints garantiza que el punto cae dentro del polígono.
   await ex.consultar(
-    `DELETE FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%'`,
+    `DELETE FROM reporte WHERE categoria = 'inundacion' AND descripcion LIKE '%[muestra sintética]%'`,
   );
   const al = rng(20260913);
   const elegir = <T>(arr: readonly T[]): T => arr[Math.floor(al() * arr.length)]!;
@@ -228,10 +228,11 @@ export async function sembrarSamples(
     const diasAtras = Math.floor(al() * 120);
     const desc = `${elegir(DESCRIPCIONES)} [muestra sintética]`;
     await ex.consultar(
-      `INSERT INTO reporte_inundacion (geom, creado_en, publicar_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
-         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
-         sumidero_cercano, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, validado_por, validado_en)
-       SELECT ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval,
+      // Mismos valores/orden de sorteos; la representación JSON conserva la forma0020.
+      `INSERT INTO reporte (categoria, geom, creado_en, publicar_en, evento_en, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+         ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, detalle, detalle_version,
+         severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, validado_por, validado_en)
+       SELECT 'inundacion', ST_SetSRID(ST_MakePoint($1, $2), 4326), now() - ($3 || ' days')::interval,
          -- Publicado desde que se creó (migración 0015): con el DEFAULT now(), el CHECK de
          -- publicar_en (como mucho 1 hora después de creado_en) rechazaría toda fecha pasada.
          now() - ($3 || ' days')::interval,
@@ -243,8 +244,10 @@ export async function sembrarSamples(
          -- hay que guardar, o el dato de trazabilidad miente.
          COALESCE((SELECT version_capa FROM geo.unidad_vecinal_vigente u WHERE ST_Contains(u.geom, ST_SetSRID(ST_MakePoint($1, $2), 4326)) LIMIT 1), $4),
          '{"seed": true}'::jsonb,
-         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8, $9::profundidad_estimada, $10::frecuencia, $11::causa_presunta,
-         $12::sumidero_cercano, $13::severidad, $14, $15, $16::estado_reporte, $17,
+         $5::ubicacion_metodo, $6, $7::ubicacion_tipo, $8,
+         jsonb_strip_nulls(jsonb_build_object('profundidad_estimada',$9::text,'frecuencia',$10::text,
+           'causa_presunta',$11::text,'sumidero_cercano',$12::text)),1,
+         $13::severidad, $14, $15, $16::estado_reporte, $17,
          CASE WHEN $16 IN ('validado', 'resuelto') THEN $18::uuid END,
          CASE WHEN $16 IN ('validado', 'resuelto') THEN now() - ($3 || ' days')::interval + interval '1 day' END`,
       [
@@ -276,10 +279,10 @@ export async function sembrarSamples(
   }
   // Reportes que cayeron fuera de las UV sintéticas (por el ruido) se eliminan para no ensuciar la muestra.
   await ex.consultar(
-    `DELETE FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%' AND unidad_vecinal_id = 'sin_uv'`,
+    `DELETE FROM reporte WHERE categoria = 'inundacion' AND descripcion LIKE '%[muestra sintética]%' AND unidad_vecinal_id = 'sin_uv'`,
   );
   const [n] = await ex.consultar<{ n: string }>(
-    `SELECT count(*)::text AS n FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%'`,
+    `SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion' AND descripcion LIKE '%[muestra sintética]%'`,
   );
   // Antes de agrupar: el centroide publicable de un punto crítico se calcula con los puntos ya
   // degradados de sus miembros, así que estos tienen que existir primero (§13, migración 0005).

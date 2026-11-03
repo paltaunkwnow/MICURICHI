@@ -62,8 +62,18 @@ contador al crear. El mantenimiento borra las ventanas de días anteriores. La c
 se guarda con el prefijo de la cuenta (`<usuario_id>:<clave>`): la misma clave en dos cuentas crea
 dos reportes. `usuario.ultimo_reporte_en` ya no se lee ni se escribe (se quita en la 0016).
 
-`cuota_reporte_diaria` (migración 0014) quedó **sin uso** desde M3b: nada la lee ni la escribe, pero
-no se borra hasta M10 (el mantenimiento sigue limpiando sus días viejos).
+`cuota_reporte_diaria` (migración 0014) **ya no reserva cupos** desde M3b: esa función corresponde
+a `cupo_contador`. La 0022 conserva la cuota histórica en
+`resguardo_m10.cuota_reporte_diaria`, accesible solo para el dueño, sin limpieza automática.
+La API no accede al archivo; `cuotasDiariasBorradas` queda como resumen obsoleto con valor 0.
+
+**Arranque coordinado (0022).** Este release exige el esquema 22 íntegro. Antes de escuchar
+o iniciar mantenimiento consulta `SELECT version, integro FROM public.estado_esquema_m10()`:
+admite exactamente una fila con integer 22 y boolean true. Un error, forma inválida,
+versión anterior/futura o integridad falsa impide el arranque. No lee `_migraciones`
+ni migra por su cuenta: código y esquema deben actualizarse y recuperarse juntos.
+Importar `src/servidor.ts` no carga configuración ni crea recursos o señales; solo la
+invocación del archivo como punto de entrada inicia el servicio (Node 24, también Windows).
 
 **Reglas de cupo al arrancar (falla cerrado).** `src/servidor.ts` llama a
 `verificarReglasDeCupoActivas` después de comprobar los privilegios de la base y antes de escuchar.
@@ -153,6 +163,11 @@ administración; cada una crea y borra su propia base temporal). Ejercitan el *u
 `cupo_contador`: envíos simultáneos que dejan exactamente el cupo, dos cuentas que no se estorban y,
 en la de reportes, dos categorías a la vez (una categoría sintética activa) con su cupo cada una.
 
+En la verificación M6 se retiran del entorno hijo `PG*`, `*DATABASE*`, `*POSTGRES*` y `S3*`:
+las suites usan PGlite efímero y almacén en memoria. Los diez casos PG real y dos S3 siguen
+omitidos y no cuentan como aprobados. Los arneses PG históricos crean bases `curichi_cuota_*`
+y acceden a una base de administración; no están autorizados en el piloto aislado M6.
+
 Fotos en local: `infra/.storage/fotos/` (adaptador `AlmacenDisco`). En Fase 2, adaptador S3/MinIO con la misma interfaz.
 
 ## Categorías (plataforma multitemática)
@@ -165,8 +180,9 @@ núcleo es común a todas las categorías ([ADR 0009](../../docs/decisiones/0009
 no hay `/api/v2` y sin el parámetro todo se comporta como antes
 ([ADR 0012](../../docs/decisiones/0012-compatibilidad-de-api.md)), y los datos se piden por categoría
 ([ADR 0013](../../docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md)). El registro de
-`contracts` define hoy solo Inundaciones (`REGISTRO_CATEGORIAS`), así que es la única categoría que
-puede estar activa.
+`contracts` 0.23.0 registra Inundaciones y Baches reales (`REGISTRO_CATEGORIAS`). Registrar la
+definición no activa el catálogo ni una instalación habitual: M6 solo autoriza la activación
+temporal del piloto aislado, con restauración del catálogo y sin migración ni seed.
 
 ### El parámetro `categoria`
 
@@ -198,13 +214,23 @@ La categoría se suma a los filtros que cada ruta ya tenía. En `GET /indicadore
 del resumen ejecutivo distingue la categoría pedida.
 
 **Respuestas.** Las tres vistas (pública, técnica y del autor) traen `categoria`, `subtipo` y `detalle`
-además de los campos planos de inundación, que siguen hasta la contracción (M10). La vista **pública**
+además de los alias planos de inundación, conservados tras la contracción física (M10). La vista **pública**
 recorta el `detalle` a los `camposPublicos` de la definición de la categoría (`detallePublico` en
 `src/vistas.ts`; para inundación, `profundidad_estimada`, `frecuencia` y `causa_presunta`), y sin
 definición en el registro va vacío. La técnica y la del autor llevan el `detalle` completo. La
 exportación suma `categoria`, `subtipo` y `detalle` (JSON) al final de las columnas del CSV y a las
 propiedades del GeoJSON; en una categoría que no es inundación las columnas de dominio de inundación
 quedan vacías.
+
+**Notas de exportación.** `src/nota-metodologica.ts` conserva la nota exacta de Inundaciones
+para la selección por defecto o explícita, aun vacía. Baches combina las limitaciones comunes
+con `notaMetodologica` de su definición. `todas` incluye una base neutral y las notas identificadas
+de las categorías presentes en el archivo, sin duplicados; una exportación vacía no inventa
+categorías. En un archivo truncado esas notas describen solo las filas incluidas, y se conservan
+`total`, `exportados`, `truncado` y el aviso `INCOMPLETO`. Historial sin definición declara esa
+limitación. CSV y GeoJSON llevan la misma nota; cada línea de metadatos CSV sigue siendo comentario.
+Los encabezados y el formato CSV existentes se conservan: subtipo y respuestas viajan en
+`subtipo` y `detalle` JSON, sin columnas nuevas ni valores de agua ficticios.
 
 **Métricas y mantenimiento.** `curichi_reportes_sin_verificar_antiguedad_segundos` mira los `nuevo`
 publicados de **todas** las categorías (la alerta `BandejaSinVerificarAtrasada` vale para todas), y el
@@ -241,12 +267,36 @@ la caché de 30 s lo vea ya. El ejemplo es `test/no-contaminacion-categoria.test
 cuatro categorías en las mismas coordenadas, sin parámetro solo sale inundación y con la categoría
 sintética activa salen solo los suyos.
 
+### Pruebas de cuatro definiciones reales (M7/M8, contracts 0.24.0)
+
+`test/m7-m8-categorias-reales.test.ts` usa el registro real, PGlite con PostGIS en memoria y
+un socket propio de loopback en puerto efímero, junto con las ayudas existentes. Cubre los
+cinco subtipos de Basura y de Áreas verdes, detalle estricto antes de PIP/cupo/idempotencia,
+persistencia y severidad v1, cuatro cupos independientes, doce fotos globales, demoras
+60/240/240, replay, privacidad, roles y fusión. Comprueba lecturas por categoría y exportaciones
+CSV/GeoJSON con las notas de las cuatro definiciones y los campos de agua vacíos/nulos donde
+corresponde. Persona y las fotos usan exclusivamente escenarios sintéticos.
+
+Se conserva la cobertura sintética de `test/no-contaminacion-categoria.test.ts`; sus negativos
+de Basura/Áreas verdes usan un registro incompleto inyectado, aunque el catálogo esté activo.
+M6 conserva sus casos de Baches; solo se actualiza la expectativa histórica del registro a
+las definiciones reales de Basura y Áreas verdes. Estas pruebas no activan instalaciones reales.
+
+Ejecutar en el turno pesado exclusivo: suite completa de `api-core` con Vitest
+`--maxWorkers=1 --no-file-parallelism`, después tipos y Biome de los archivos tocados.
+El hijo debe usar entorno privado sin `.env`, URLs heredadas, `DATABASE_URL_PG_REAL` ni
+`S3_SECRET_KEY`, y `TEMP`/`TMP` propios. Un bloqueo de conexión a los sockets efímeros se
+registra como fallo de entorno; los casos impedidos no cuentan como aprobados. Los doce
+casos históricos omitidos de PG/S3 reales siguen siendo no verificados cuando sus servicios
+no se ejecutan. La implementación de estos tests no sustituye la salida de verificación ni
+la revisión SDD independiente.
+
 ### Escrituras por categoría (corrida M3b)
 
 Desde la corrida M3b ([plan](../../docs/sdd/2026-10-09-cupo-por-categoria/plan.md)) crear y moderar
 escriben en la tabla `reporte` con la categoría del reporte; ya no pasan por la vista de
-compatibilidad `reporte_inundacion`. Como el registro solo trae Inundaciones, las otras categorías
-existen todavía solo en las pruebas (registro inyectado y filas insertadas por SQL).
+compatibilidad `reporte_inundacion`. M6.2 prueba además Baches con la definición real, creando y
+moderando por API en PGlite propio; se conservan las pruebas de abstracción con registro sintético.
 
 **Dos formas de cuerpo en `POST /api/v1/reportes`.** Es la nueva si trae `categoria` o `detalle`; si
 no, es la plana de hoy, que crea una inundación idéntica a la de siempre
@@ -269,10 +319,22 @@ no, es la plana de hoy, que crea una inundación idéntica a la de siempre
 
 El orden de las comprobaciones, antes de tocar el cupo: núcleo (400 `PAYLOAD_INVALIDO`), categoría
 (422 `CATEGORIA_NO_DISPONIBLE` si es desconocida o está inactiva en el catálogo, sin gastar cupo),
-`detalle` (400 `PAYLOAD_INVALIDO`), posición del teléfono (422, ver arriba) y UV (422
+subtipo si la definición ofrece opciones (400 `PAYLOAD_INVALIDO`, campo `subtipo`), `detalle`
+(400 `PAYLOAD_INVALIDO`), posición del teléfono (422, ver arriba) y UV (422
 `FUERA_DE_COBERTURA`). Después, dentro de la transacción: idempotencia, turno de cupo y `INSERT`. La
 huella de idempotencia incluye `categoria`, `subtipo` y `detalle` (y no `dispositivo`), así que dos
 envíos de categorías o detalles distintos no se confunden con un replay.
+
+**Baches v1 (ADR 0024, parámetros de piloto).** El subtipo externo al detalle es obligatorio:
+`bache`, `hundimiento_calzada`, `tapa_alcantarilla_faltante`, `asfalto_levantado` o
+`calle_tierra_intransitable`. La API comprueba su pertenencia a `def.subtipos` antes del PIP/cupo;
+Inundaciones, sin subtipos, conserva su comportamiento. El detalle estricto contiene solo
+`gravedad_declarada` (`se_puede_pasar`, `hay_que_esquivar`, `peligroso`, `causo_accidente`) y
+`tamano` (`plato`, `rueda`, `medio_carril`, `todo_el_carril`). Detalle y severidad son versión 1;
+puntaje auxiliar 2–8 y banda con piso de gravedad declarada, sin compararlo con Inundaciones.
+Las seis columnas de agua se guardan NULL; público/propio exponen los tres planos comunes nulos,
+y técnico/exportación los seis. Los enums de Inundaciones y la auditoría E1 siguen intactos.
+El tamaño, la gravedad y un accidente declarado no constituyen medición ni comprobación técnica.
 
 **El `detalle` es estricto.** Se valida con el Zod de la definición de la categoría
 (`esquemaDetalle`; en Inundaciones, `DetalleInundacionSchema`, un objeto estricto): una clave de más
@@ -281,12 +343,12 @@ o un valor fuera de rango da 400 `PAYLOAD_INVALIDO` con `detalles[].campo` como 
 mismo tope que el CHECK `detalle_tope` de la base, que queda de respaldo junto al CHECK de objeto. En
 la forma plana los seis campos pasan por `ReporteCrearSchema` y se mueven a `detalle`.
 
-**Qué se guarda.** `categoria`, `subtipo`, `detalle` (el validado) y `detalle_version` (de la
-definición). En una **inundación** las seis columnas planas de dominio (`profundidad_estimada`,
-`frecuencia`, `causa_presunta`, `sumidero_cercano`, `sumidero_estado`, `agua_brota_sumidero`) salen
-del `detalle`, porque el disparador de la 0020 rearma `detalle` desde ellas en cada escritura de
-inundación. En **otra categoría** esas seis van en `NULL`, y `causa_presunta` explícitamente, porque
-su `DEFAULT` es `'desconocida'` y violaría el CHECK `no_inundacion_sin_campos`.
+**Qué se guarda (0022).** `categoria`, `subtipo`, `detalle` y `detalle_version` (de la
+definición), sin las seis columnas de inundación ni su trigger antiguo. El INSERT usa 25
+argumentos. El JSON persistido de **Inundaciones** conserva la representación de 0020:
+`profundidad_estimada`, `frecuencia` y `causa_presunta` obligatorios, opcionales NULL omitidos
+y boolean false conservado. Se prepara aparte del detalle validado, que sigue alimentando
+huella/RF-01 y severidad. Las **otras categorías** conservan íntegro su detalle validado.
 
 **Severidad.** La calcula la definición de la categoría (`severidad.calcular(detalle)`) y se guardan
 la banda (`severidad_calculada`), el `severidad_puntaje` y `severidad_version`, que es la de su
@@ -305,3 +367,47 @@ otra categoría da 409 `FUSION_ENTRE_CATEGORIAS`: se comprueba con las dos filas
 exigir que el canónico esté `validado`, y no cambia nada. Los reportes de categorías distintas nunca
 se agrupan en un punto crítico: al moderar, el recálculo del entorno usa el radio de recurrencia de
 la categoría del reporte.
+
+### M10.1: lectura compatible y medición de las formas de POST
+
+Los seis alias de inundación de las respuestas y del CSV se leen de `reporte.detalle` en
+`SELECT_REPORTE`. Conservan sus nombres y tipos: `false` sigue siendo booleano; NULL y ausencia
+del JSON producen NULL en los alias, y los campos de agua son NULL para las otras categorías.
+La vista pública mantiene su recorte de `detalle`, el jitter y la exclusión de identidad; las
+vistas técnica y propia conservan sus campos anteriores. Tras la 0022 el INSERT escribe solo JSON
+y su versión; las proyecciones HTTP y CSV mantienen los seis alias. Ambas formas de POST,
+idempotencia, auditoría, cupos y demoras conservan sus reglas; el POST plano sin `categoria`
+continúa creando inundación, y la forma con `detalle` sigue exigiendo `categoria`.
+
+RF-01 calcula la huella con el detalle ya validado. En Inundaciones, omitir
+`causa_presunta` equivale a enviar `desconocida`, también al reintentar entre ambas formas.
+Solo ante conflicto con esa causa se comprueba la huella histórica que omitía dicha clave,
+dentro de la misma transacción y con el bloqueo vigente. El replay conserva la fila y su
+antigüedad; no renueva las 24 horas ni consume otro cupo o auditoría. Cambiar una causa real,
+descripción, coordenada o categoría mantiene el 409. El dispositivo sigue fuera de la huella;
+las claves por cuenta, las caducadas, las huérfanas y los envíos en curso conservan sus reglas.
+Esta compatibilidad histórica se limita al default de causa de Inundaciones.
+
+Cada creación respondida y cada replay emiten el contador `curichi_reportes_forma_total` y un
+log con `evento=compatibilidad_reporte`. Solo agregan etiquetas finitas: `forma=plana|categoria`,
+`resultado=aceptado|replay`, `origen=entorno_prueba|no_clasificado`. No incluyen cuerpo, ubicación,
+dispositivo, autor, correo, IP, ID de reporte, claves ni texto del usuario. El logger conserva su
+`reqId` técnico habitual; no se usa como etiqueta de métrica ni como identidad de dominio.
+Los rechazos y conflictos no cuentan como aceptados ni replays.
+
+El origen se fija al registrar las rutas: solo `NODE_ENV=test`, controlado por el runner,
+se etiqueta `entorno_prueba`. Describe el entorno de ejecución, sin certificar el contenido de
+los datos. Development, producción y la demo quedan `no_clasificado`; ninguna cabecera del cliente
+puede declarar tráfico sintético. No se agrega configuración ni variable persistente.
+Para medir convivencia, separar la instalación controlada y el tráfico representativo mediante
+el contexto operativo del despliegue y observar las series por forma y resultado. Los contadores
+son por proceso y se reinician con él; los replays se cuentan aparte de las creaciones.
+Cero POST planos sin tráfico representativo no prueba adopción ni muestra qué propiedades leen
+los clientes de GET o sus PWA. La ventana de convivencia y el retiro HTTP/físico siguen pendientes.
+
+Comprobaciones aisladas: `pnpm --filter api-core test`, el grafo
+`pnpm exec turbo run typecheck --filter=...contracts --concurrency=1`,
+`pnpm --filter api-core build` y `pnpm exec biome check services/api-core`.
+El arnés M10.1 usa PGlite y fixtures sintéticos; los casos PostgreSQL real y S3 requieren su
+entorno específico y quedan omitidos sin él. Compilar `dist` no actualiza la demo ya cargada:
+continúa con el build anterior hasta una actualización posterior planificada.

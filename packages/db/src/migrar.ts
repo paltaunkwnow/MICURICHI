@@ -33,6 +33,8 @@ export interface OpcionesMigracion {
    * transacción. En el CLI, `--publicar-nuevos-existentes`.
    */
   publicarNuevosExistentes?: boolean;
+  /** Consentimiento expreso de0022, sin permiso por entorno ni herencia de sesión. */
+  autorizarContraccionCompatible?: boolean;
 }
 
 export function listarMigraciones(directorio = DIRECTORIO_MIGRACIONES): string[] {
@@ -116,6 +118,24 @@ export async function aplicarMigraciones(
   // contenedor en CrashLoopBackOff sin ninguna causa real detrás.
   await ex.transaccion(async (tx) => {
     await tomarLockDeMigraciones(tx, lockTimeoutMs);
+    if (
+      archivos.includes('0022_contraccion_compatible.sql') &&
+      o.autorizarContraccionCompatible !== true
+    ) {
+      const [control] = await tx.consultar<{ existe: boolean }>(
+        "SELECT to_regclass('public._migraciones') IS NOT NULL AS existe",
+      );
+      const aplicada = control?.existe
+        ? await tx.consultar<{ nombre: string }>(
+            'SELECT nombre FROM _migraciones WHERE nombre = $1',
+            ['0022_contraccion_compatible.sql'],
+          )
+        : [];
+      if (!aplicada.length)
+        throw new Error(
+          '0022 pendiente: se requiere --autorizar-contraccion-compatible antes de modificar la base.',
+        );
+    }
     await tx.ejecutar(`CREATE TABLE IF NOT EXISTS _migraciones (
       nombre text PRIMARY KEY,
       aplicada_en timestamptz NOT NULL DEFAULT now()
@@ -150,6 +170,14 @@ export async function aplicarMigraciones(
         [archivo],
       );
       if (yaEsta.length) return 'omitida' as const;
+      if (archivo === '0022_contraccion_compatible.sql') {
+        if (o.autorizarContraccionCompatible !== true)
+          throw new Error('0022 pendiente: se requiere --autorizar-contraccion-compatible.');
+        await tx.ejecutar("SET LOCAL curichi.autorizar_contraccion_compatible = 'si'");
+        await tx.consultar(
+          "SELECT set_config('curichi.autorizar_contraccion_compatible_tx',txid_current()::text,true)",
+        );
+      }
       if (o.publicarNuevosExistentes)
         await tx.ejecutar(`SET LOCAL curichi.publicar_nuevos_existentes = 'si'`);
       const sql = readFileSync(join(directorio, archivo), 'utf8');

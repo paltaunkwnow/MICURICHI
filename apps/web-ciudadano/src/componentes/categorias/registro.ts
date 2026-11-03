@@ -1,3 +1,4 @@
+import { PRESENTADOR_AREA_VERDE } from './area-verde';
 import { PRESENTADOR_GENERICO } from './generico';
 import { PRESENTADOR_INUNDACION } from './inundacion';
 import type { PresentadorCategoria } from './tipos';
@@ -9,6 +10,7 @@ import type { PresentadorCategoria } from './tipos';
  */
 export const PRESENTADORES: Readonly<Record<string, PresentadorCategoria>> = {
   inundacion: PRESENTADOR_INUNDACION,
+  area_verde: PRESENTADOR_AREA_VERDE,
 };
 
 /** El presentador de una categoría: el registrado o, si no hay, el genérico. */

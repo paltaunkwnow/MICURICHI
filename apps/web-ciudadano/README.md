@@ -3,8 +3,9 @@
 App pública: mapa de puntos reportados por los vecinos, panel de detalle y formulario de reporte.
 Especificación en `CLAUDE.md` §4.3. Implementada (tarea 7 de la Fase 1); el estado y los pendientes
 están en [`docs/TRASPASO.md`](../../docs/TRASPASO.md). Desde M4 trabaja **por categoría** sobre el
-registro de `contracts` (ver [Categorías](#categorías)); hoy la única activa es Inundaciones, y con
-una sola categoría activa no cambia nada visible.
+registro de `contracts` (ver [Categorías](#categorías)), con las cuatro definiciones reales de
+la versión 0.24.0: Inundaciones, Baches, Áreas verdes y Basura. El catálogo de cada instalación
+decide cuáles están activas; con una sola categoría activa no cambia nada visible.
 
 ```bash
 pnpm --filter web-ciudadano dev        # 3000; necesita api-core (3001) y geo-service (3002)
@@ -25,6 +26,12 @@ petición, y cambiarlas no exige volver a construir. Ver `.env.example`.
 | `PROXY_DE_CONFIANZA` | En cada petición (`src/proxy.ts`) | `1` solo con un proxy propio delante que reescriba `X-Forwarded-For` |
 | `HSTS` | En cada petición (`src/proxy.ts`) | `1` añade `Strict-Transport-Security`. Solo detrás de HTTPS |
 | `NODE_ENV` | En cada petición (`src/proxy.ts`) y al compilar | Distingue `next dev` de la imagen: `'unsafe-eval'` en la CSP y el registro del service worker. No cambia entre despliegues |
+| `CURICHI_INSTALACION_LOCAL` | Al compilar y arrancar Next | Solo `1` usa `.next-multitematica`, para la instalación local separada. Sin ese valor se conserva `.next` |
+
+El modo local se pasa únicamente al proceso de Next que se construye o arranca. No exige editar
+`.env` ni variables persistentes. Su salida standalone queda en
+`.next-multitematica/standalone/apps/web-ciudadano/server.js`; las instrucciones de la imagen
+habitual de abajo usan `.next`. Este cambio de salida no activa categorías ni prepara la base.
 
 Lo que **ya no** se configura en esta app:
 
@@ -156,7 +163,7 @@ Desde M4 la web trabaja **por categoría** (ADR [0009](../../docs/decisiones/000
 [0016](../../docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md),
 [0021](../../docs/decisiones/0021-formularios-por-categoria.md) y
 [0022](../../docs/decisiones/0022-paleta-e-iconografia-de-categorias.md)) sobre el registro de
-`contracts` (0.21.0). Una `DefinicionCategoria` trae los textos de pantalla, el icono (su nombre),
+`contracts` (0.23.0 desde M6.1). Una `DefinicionCategoria` trae los textos de pantalla, el icono (su nombre),
 los colores, las `preguntas` del paso 2, el esquema del `detalle`, la severidad, los filtros con
 alcance y los `camposPublicos`; el código común lee eso y no pregunta por una categoría concreta
 (ADR 0009 §6.3). Con una sola categoría activa no aparece selector y se conservan pasos,
@@ -174,6 +181,12 @@ cerrado, igual que en el servidor). `useCategoriasOpcional()`, sin proveedor, de
 el respaldo `['inundacion']`: es para las piezas de presentación que también se pintan sueltas
 (`HojaDetalle`, `TarjetaReporte`); las pantallas que deciden qué categoría se muestra usan
 `useCategorias()`, que exige el proveedor.
+
+El registro real contiene **Inundaciones y Baches**. Registrar Baches no la activa: para
+ofrecerla hacen falta también `categorias_activas` de la instalación. M6 solo autoriza su
+activación temporal en el piloto aislado y la restauración del catálogo; esta app no cambia
+ese catálogo. Áreas verdes y Basura siguen sin definición. No se afirma actividad ni
+despliegue de las instalaciones habituales.
 
 ### Cuál se muestra al abrir el mapa
 
@@ -270,11 +283,18 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
 - **Detalle y tarjeta.** `presentadorDe(slug)` (`src/componentes/categorias/registro.ts`) da el
   `PresentadorCategoria`, con `CamposDetalle` (las filas del `<dl>` del detalle) y `PastillaTarjeta`
   (el dato de la tarjeta). Inundaciones registra el suyo (`inundacion.tsx`: profundidad por
-  referencia corporal, frecuencia y causa presunta, leídas del `detalle` y, si la respuesta no lo
-  trae, de los campos planos de siempre). Las demás usan el genérico (`generico.tsx`, `filas.ts`):
+  referencia corporal, frecuencia y causa presunta). Cada dato toma primero un valor válido del
+  `detalle`, después un plano válido y, si faltan ambos, dice «Sin datos». Los planos nulos de
+  otra categoría o una respuesta malformada no se convierten en estimaciones de agua.
+  Áreas verdes envuelve ese presentador (`area-verde.tsx`) para mostrar el aviso de Persona y
+  su destino previsto, conservando datos, fotos y severidad recibidos. Las demás usan el genérico
+  (`generico.tsx`, `filas.ts`):
   una fila por cada campo de `camposPublicos`, con la etiqueta de su pregunta y la de la opción
   elegida (sin pregunta, la clave; un valor desconocido se muestra tal cual; lo vacío no produce
-  fila); la tarjeta muestra, a lo sumo, la primera.
+  fila). Si el subtipo corresponde a una opción de la definición, el detalle lo muestra como
+  «Tipo de problema» y la tarjeta lleva esa etiqueta. Sin tipo reconocido, la tarjeta conserva
+  el primer dato público; sin definición no inventa filas. No se aplica a un reporte histórico
+  un subtipo actual que no se conoce.
 - **Leyenda.** `LeyendaMapa` suma el icono y el nombre de la categoría solo con dos o más activas.
 - **Iconos.** La definición guarda solo el nombre; `iconoDeCategoria` (`categorias/iconos.ts`) lo
   resuelve a su componente de `lucide-react`, y un nombre desconocido cae al pin de mapa.
@@ -304,11 +324,24 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
     cambios —fecha del evento, profundidad, frecuencia y severidad con su puntaje—, y el bloque de
     causa y sumidero del paso 3, con la lógica condicional del sumidero que una `Pregunta` no
     expresa. Valida con el contrato plano.
+  - **Áreas verdes y Basura** (`area-verde.tsx`, `basura.tsx`): envolturas pequeñas del
+    declarativo, con las mismas preguntas, validación, detalle y previsualización. Persona
+    muestra el aviso literal aprobado en el paso 2, las fotos, la revisión y el detalle:
+    «Esto no es una denuncia. Se deriva a Desarrollo Social para ofrecer ayuda, no a seguridad.
+    No subas fotos donde se vea la cara de la persona.» Su destino previsto es Desarrollo Social;
+    los demás subtipos de Áreas verdes indican Parques y jardines. Se aclara que no hay derivación
+    municipal automática. No se promete ocultación ni difuminado de fotos; el comportamiento
+    local y la puerta de privacidad previa a producción siguen los límites de ADR 0018 y del
+    [plan aprobado](../../docs/sdd/2026-10-22-cuatro-categorias/plan.md).
+    Quema de basura muestra «Reportar quema de basura no sustituye la atención de emergencias.»
+    en el paso 2 y la revisión, sin número nuevo ni escalamiento por subtipo.
+    Los avisos dependen de la selección actual y desaparecen al cambiar o reiniciar el subtipo.
   - **Declarativo** (`generico.tsx`, `crearAdaptadorGenerico`): dibuja las `preguntas` de la
     definición (`opcion_unica`, `opcion_multiple`, `booleana`) bajo `detalle.<id>`, exige las
     `obligatoria`, valida el núcleo más `def.esquemaDetalle`, arma la revisión desde las respuestas
     y previsualiza la banda con `def.severidad.calcular` (sin puntaje). Si la definición ofrece
-    `subtipos`, pide elegir una opción y la conserva en revisión, borrador y envío. Aplica
+    `subtipos`, pide elegir una opción con el rótulo público «Tipo de problema» y la conserva
+    con su etiqueta en revisión y con su valor en borrador/envío (`subtipo`, fuera de `detalle`). Aplica
     `ubicacionTipoPorDefecto`; al cambiar categoría conserva el tipo de lugar ya elegido por la
     persona, y si no lo eligió adopta el defecto nuevo. Un borrador restaurado conserva su lugar.
 - **El cuerpo** (D2 del plan M4). `armarEnvio` manda **la forma por categoría para todas, también
@@ -329,6 +362,29 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
   antes de pedir la ubicación. Un `CATEGORIA_NO_DISPONIBLE` del servidor tiene su texto en
   `src/lib/errores.ts`.
 
+### Baches reales (M6.4)
+
+Baches reutiliza el adaptador y el presentador genéricos. Sus cinco tipos son Bache,
+Hundimiento de calzada, Tapa de alcantarilla faltante, Asfalto levantado y Calle de tierra
+intransitable. El paso 2 exige tipo, gravedad declarada y tamaño por referencia visual;
+`detalle` solo contiene `gravedad_declarada` y `tamano`, sin claves de agua. Se mantienen
+los cuatro pasos comunes, la ubicación, la cámara opcional, la revisión y el envío.
+
+La previsualización usa la banda de la definición real (16 combinaciones); no presenta su
+índice auxiliar como una medición ni lo compara con Inundaciones. El tamaño y la gravedad
+son percepción ciudadana; «Ya causó un accidente» es una declaración sin comprobar.
+Detalle y modelo disponibles en la **definición** son versión 1. La API actual no devuelve
+sus versiones históricas por reporte, por lo que la interfaz no se las atribuye a datos
+anteriores. Los parámetros del piloto requieren validación municipal antes de producción.
+
+La compatibilidad de contratos 0.23.0 permite planos públicos/propios nulos para Baches.
+Inundaciones explícita y el legado sin categoría siguen exigiendo sus tres planos de agua
+en el contrato; el respaldo visual «Sin datos» solo evita inventarlos ante una respuesta
+incompleta. El mapa conserva su encuadre y zona al cambiar de categoría, limpia la selección
+y los filtros propios, y mantiene la prioridad URL → preferencia → defecto. El borrador 3
+no se restaura en otra categoría; cupo/demora siguen viniendo de la sesión por categoría,
+con fotos globales. No se cambian rutas ni se agrega un formulario especial para Baches.
+
 ### Sumar una categoría (M6 en adelante)
 
 1. **En `contracts`** (Parte 3, con anuncio): la definición en `src/categorias/<slug>/` y su línea
@@ -338,8 +394,9 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
    `preguntas`, `esquemaDetalle`, `severidad`, `filtros` con su `alcance` y `camposPublicos`. La
    categoría tiene que estar además activa en el catálogo de la base, que es lo que llega en
    `categorias_activas`.
-2. **En esta app, normalmente una línea**: el nombre de su icono en `ICONOS`
-   (`componentes/categorias/iconos.ts`; si falta, se usa el pin de mapa). Con eso ya funcionan el
+2. **En esta app**, comprobar el nombre de su icono en `ICONOS`
+   (`componentes/categorias/iconos.ts`; si falta, se usa el pin de mapa). `TrafficCone` para Baches
+   ya está resuelto con Lucide; no necesita otra dependencia ni rediseño. Con eso funcionan el
    selector, las lecturas, los textos, el detalle y la tarjeta genéricos, el paso 2 declarativo, el
    borrador, el cupo y los enlaces.
 3. **Cuándo hace falta algo especial** (el código común no cambia):
@@ -352,8 +409,10 @@ anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categor�
      `definicion.componenteEspecialPaso2`, con error explícito si falta ese identificador en el registro.
 4. **Pruebas**: Vitest con una segunda categoría sintética (`src/lib/categoria-de-prueba.ts`,
    `REGISTRO_DOS_CATEGORIAS`), que solo importan los `*.test.ts`: no hay una categoría de prueba
-   en el bundle. El E2E del cambio de categoría pasa a M6 (D3 del plan M4), cuando exista una
-   segunda real.
+   en el bundle. M6.4 añade `src/lib/m6-bache-real.test.ts` con la definición real, sin sustituir
+   los sintéticos; los negativos de registro ausente lo inyectan explícitamente. El E2E del
+   cambio de categoría, cámara/envío y encuadre en navegador corresponde al piloto M6.6;
+   las pruebas de helpers y render estático no lo certifican.
 5. **Cupo efectivo:** la UI consume restantes y demora del servidor, porque el límite de la
    definición puede ser sustituido por la configuración de la instalación. `/cuenta` muestra
    aún los campos sueltos de Inundaciones; el selector de cupos de cuenta queda para una fase
@@ -374,9 +433,13 @@ Vitest, sin navegador (`pnpm --filter web-ciudadano test`):
 | `src/lib/conteos-mapa.test.ts` | La limpieza de los conteos al cambiar de categoría |
 | `src/lib/teclado-pestanas.test.ts`, `src/componentes/SelectorCategoria.test.ts` | Teclado y estado del tablist; oculto con una sola activa |
 | `src/componentes/VistaMapa.test.ts` | El mapa con una y con dos categorías, y que lee por categoría |
-| `src/componentes/categorias/presentadores.test.ts` | Presentador de Inundaciones y genérico |
+| `src/componentes/categorias/presentadores.test.ts` | Presentadores de Inundaciones, Áreas verdes y genérico; Persona conserva foto y severidad recibida |
+| `src/lib/formato.test.ts` | Etiquetas válidas, nulos y respuestas malformadas sin datos de agua inventados |
 | `src/componentes/formulario-categorias/adaptadores.test.ts`, `SelectorCategoriaFormulario.test.ts` | Adaptadores del paso 2 y «Categoría: X · Cambiar» |
+| `src/componentes/formulario-categorias/area-verde.test.ts`, `basura.test.ts` | Avisos condicionales, revisión, validación y previsualización heredadas del declarativo |
+| `src/lib/cuatro-categorias-reales.test.ts` | Subtipos y envío real de las nuevas categorías, cambio sin contaminación, URL/catálogo de cuatro y salida Next optativa |
 | `src/lib/formulario-reporte.test.ts`, `src/lib/borrador.test.ts`, `src/lib/cupo-categoria.test.ts` | Cuerpo y su equivalencia con la forma plana, cambio de categoría, borrador 3, `cupos[categoria]` |
+| `src/lib/m6-bache-real.test.ts` | Adaptador/render real, cinco tipos legibles, detalle estricto, 16 bandas, respuestas públicas/propias nulas y estados del autor; URL/preferencia, disponibilidad, borrador y cupo con el registro productivo |
 
 `src/lib/categoria-de-prueba.ts` es la segunda categoría sintética que usan.
 

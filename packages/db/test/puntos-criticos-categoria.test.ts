@@ -19,6 +19,7 @@ let ex: Ejecutor;
 /** Registro sintético: inundación con su radio real (25 m) y un «bache» con radio 30 m. */
 const DEF_BACHE = { ...DEFINICION_INUNDACION, slug: 'bache', recurrenciaRadioM: 30 };
 const REGISTRO_SINTETICO = crearRegistroCategorias([DEFINICION_INUNDACION, DEF_BACHE]);
+const REGISTRO_SOLO_INUNDACION = crearRegistroCategorias([DEFINICION_INUNDACION]);
 
 /** Punto base dentro de la UV A de las capas de prueba, y su CRS métrico (UTM 20S). */
 const BASE = { lon: -63.195, lat: -17.79 };
@@ -54,16 +55,16 @@ async function crear(
     categoria === 'inundacion'
       ? `WITH p AS (SELECT ${geom} AS g)
          INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-           descripcion, profundidad_estimada, frecuencia, causa_presunta, severidad_calculada, severidad_puntaje,
+           descripcion, detalle, detalle_version, severidad_calculada, severidad_puntaje,
            severidad_version, estado, publicar_en)
          SELECT g, ${publico}, 'distrito_municipal:01','unidad_vecinal:A','manual','via_publica',
-           'Sintético inundación','rodilla','ocasional','desconocida','media',6,2,$5::estado_reporte, now()
+           'Sintético inundación','{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1,'media',6,2,$5::estado_reporte, now()
          FROM p RETURNING id::text`
       : `WITH p AS (SELECT ${geom} AS g)
-         INSERT INTO reporte (geom, geom_publico, categoria, detalle, detalle_version, causa_presunta, distrito_id,
+         INSERT INTO reporte (geom, geom_publico, categoria, detalle, detalle_version, distrito_id,
            unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion, severidad_calculada, severidad_puntaje,
            severidad_version, estado, publicar_en)
-         SELECT g, ${publico}, 'bache', '{"sintetico": true}'::jsonb, 1, NULL, 'distrito_municipal:01',
+         SELECT g, ${publico}, 'bache', '{"sintetico": true}'::jsonb, 1, 'distrito_municipal:01',
            'unidad_vecinal:A','manual','via_publica','Sintético bache','media',6,1,$5::estado_reporte, now()
          FROM p RETURNING id::text`;
   const r = await pool.query<{ id: string }>(sql, [BASE.lon, BASE.lat, dx, dy, estado]);
@@ -131,7 +132,7 @@ describe('el agrupamiento no cruza categorías (recálculo completo)', () => {
     const a = await crear('inundacion', 0, 0);
     const b = await crear('inundacion', 0, 11);
     const c = await crear('inundacion', 210, 0);
-    await recalcularPuntosCriticos(ex); // registro real: solo inundación, radio 25
+    await recalcularPuntosCriticos(ex); // registro real: inundación conserva su radio de 25 m
     expect(await particionDe('inundacion')).toEqual(
       [[a, b].sort(), [c]].sort((x, y) => x[0]!.localeCompare(y[0]!)),
     );
@@ -178,10 +179,10 @@ describe('el recálculo incremental no cruza categorías', () => {
 
 describe('una categoría sin definición en el registro no se agrupa (fail-closed, §9.2)', () => {
   it('el recálculo completo agrupa la inundación y deja el bache sin punto crítico', async () => {
-    // Registro REAL (REGISTRO_CATEGORIAS): solo inundación tiene definición; «bache» no.
+    // Ausencia explícita: el registro real de M6 ya contiene la definición de Bache.
     const bache = await crear('bache', 0, 0);
     const inund = await crear('inundacion', 10, 0);
-    const r = await recalcularPuntosCriticos(ex);
+    const r = await recalcularPuntosCriticos(ex, undefined, undefined, REGISTRO_SOLO_INUNDACION);
 
     expect(r.categoriasSinDefinicion).toEqual(['bache']);
     expect(await particionDe('inundacion')).toEqual([[inund]]);
@@ -196,7 +197,13 @@ describe('una categoría sin definición en el registro no se agrupa (fail-close
 
   it('el recálculo incremental de un bache sin definición no lo agrupa', async () => {
     const bache = await crear('bache', 0, 0);
-    const r = await recalcularEntornoDeReporte(ex, bache); // registro real: bache sin definición
+    const r = await recalcularEntornoDeReporte(
+      ex,
+      bache,
+      undefined,
+      undefined,
+      REGISTRO_SOLO_INUNDACION,
+    );
     expect(r.puntos).toBe(0);
     expect(await puntos()).toEqual([]);
     const b = await pool.query<{ pc: string | null }>(

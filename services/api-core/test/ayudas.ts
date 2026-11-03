@@ -46,7 +46,10 @@ export function configDePrueba(env: NodeJS.ProcessEnv = {}): ConfigApi {
 
 /** Termina la espera de un reporte: lo publica ya (el CHECK exige `publicar_en >= creado_en`). */
 export async function publicarYa(ex: Ejecutor, id: string) {
-  await ex.consultar('UPDATE reporte_inundacion SET publicar_en = creado_en WHERE id = $1', [id]);
+  await ex.consultar(
+    "UPDATE reporte SET publicar_en = creado_en WHERE categoria = 'inundacion' AND id = $1",
+    [id],
+  );
 }
 
 /**
@@ -55,8 +58,8 @@ export async function publicarYa(ex: Ejecutor, id: string) {
  */
 export async function enEspera(ex: Ejecutor, id: string) {
   const filas = await ex.consultar(
-    `UPDATE reporte_inundacion SET publicar_en = GREATEST(creado_en, now()) + interval '30 minutes'
-      WHERE id = $1 AND creado_en > now() - interval '25 minutes' RETURNING id`,
+    `UPDATE reporte SET publicar_en = GREATEST(creado_en, now()) + interval '30 minutes'
+      WHERE categoria = 'inundacion' AND id = $1 AND creado_en > now() - interval '25 minutes' RETURNING id`,
     [id],
   );
   if (filas.length !== 1) throw new Error(`enEspera: el reporte ${id} no existe o es viejo`);

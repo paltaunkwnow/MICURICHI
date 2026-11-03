@@ -84,6 +84,7 @@ export async function ejecutarComandoMigrar(
   // 1) Uso y configuración: todo lo que puede estar mal escrito, antes de conectarse.
   let hasta: string | undefined;
   let publicarNuevosExistentes: boolean;
+  let autorizarContraccionCompatible: boolean;
   let lockTimeoutMs: number;
   let url: string;
   try {
@@ -94,12 +95,14 @@ export async function ejecutarComandoMigrar(
       options: {
         hasta: { type: 'string' },
         'publicar-nuevos-existentes': { type: 'boolean' },
+        'autorizar-contraccion-compatible': { type: 'boolean' },
       },
       strict: true,
       allowPositionals: false,
     });
     hasta = values.hasta === undefined ? undefined : resolverHasta(values.hasta);
     publicarNuevosExistentes = values['publicar-nuevos-existentes'] === true;
+    autorizarContraccionCompatible = values['autorizar-contraccion-compatible'] === true;
     lockTimeoutMs = lockTimeoutMigracionMs(entorno.MIGRAR_LOCK_TIMEOUT_MS);
     const deEntorno = entorno.DATABASE_URL?.trim();
     // En producción no hay «base por defecto»: caer a la local sería migrar otra base, o ninguna,
@@ -128,6 +131,7 @@ export async function ejecutarComandoMigrar(
       ...(hasta !== undefined ? { hasta } : {}),
       lockTimeoutMs,
       publicarNuevosExistentes,
+      autorizarContraccionCompatible,
     });
     // El texto «migraciones aplicadas: ninguna» lo busca el CI para afirmar la idempotencia.
     registrar(
@@ -139,6 +143,7 @@ export async function ejecutarComandoMigrar(
         pendientes: r.pendientes,
         hasta: hasta ?? null,
         publicarNuevosExistentes,
+        autorizarContraccionCompatible,
         duracionMs: Date.now() - inicio,
       },
     );

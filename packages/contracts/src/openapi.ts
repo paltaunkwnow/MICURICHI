@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DetalleBacheSchema, SubtipoBacheSchema } from './categorias/bache/esquema.js';
 import { CONFIG_DOMINIO } from './dominio/config.js';
 import { ETIQUETAS, TIPOS_CAPA } from './dominio/enums.js';
 import { SEVERIDAD_VERSION } from './dominio/severidad.js';
@@ -44,6 +45,8 @@ import {
 
 /** Esquemas publicados como componentes OpenAPI. Se generan desde Zod: no editar openapi.yaml a mano. */
 export const COMPONENTES = {
+  DetalleBache: DetalleBacheSchema,
+  SubtipoBache: SubtipoBacheSchema,
   ErrorApi: ErrorApiSchema,
   ReporteCrear: ReporteCrearSchema,
   ReporteCrearCategoria: ReporteCrearCategoriaSchema,

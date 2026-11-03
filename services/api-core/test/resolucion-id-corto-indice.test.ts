@@ -54,7 +54,7 @@ describe('M-2.2: EXPLAIN de la consulta de resolución', () => {
       planRango = await planDe(cliente, sqlResolverIdCorto(condicionPublicado('')), [desde, hasta]);
       planLike = await planDe(
         cliente,
-        `SELECT id::text FROM reporte_inundacion WHERE id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
+        `SELECT id::text FROM reporte WHERE categoria = 'inundacion' AND id::text LIKE $1 || '%' AND ${condicionPublicado('')} LIMIT 2`,
         ['abababab'],
       );
       await cliente.query('ROLLBACK');

@@ -238,7 +238,7 @@ describe('alineación con contracts 0.9.0', () => {
   });
 
   it('el esquema Drizzle declara distancia_dispositivo_m como smallint que admite NULL', () => {
-    const c = getTableColumns(esquema.reporteInundacion) as Record<
+    const c = getTableColumns(esquema.reporte) as Record<
       string,
       { name: string; notNull: boolean; getSQLType(): string }
     >;

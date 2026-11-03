@@ -1,0 +1,24 @@
+M10.1 — F0 del 2026-10-27
+Parte3 / services/api-core; ocho archivos del plan aprobado el26/10.
+Banderas: base, api, privacidad, seguridad. Contrato HTTP/CSV sin cambios.
+Rama: codex/cuatro-categorias
+HEAD: 59b80781030707b8c3334bfbfd40f80000c60a57
+No se creó commit, rama ni ref nueva. Foto de contenido mediante manifiesto/copias.
+
+Evidencia: .turbo/m10-2026-10-26/f0/
+manifest.json: 952 archivos rastreados/no ignorados, SHA256 y fecha de captura.
+status.txt: estadoGit completo al comenzar.
+tracked.diff: diff binario de cambios rastreados frente aHEAD.
+antes/services/api-core/: 74 archivos API previos, incluidos cambios locales ajenos.
+
+Todos los cambios M6–M9 anteriores son ajenos a M10.1 y se conservan.
+El diff de M10.1 debe compararse con esas copias, no conHEAD.
+No usar stash/reset/clean/checkout para aislarlo.
+RAM Node al preflight principal:4170MiB; implementador debe medir antes de cada control pesado.
+Pruebas solo PGlite/fixtures; no cargar.env ni conectar PG/S3/HTTP/Docker.
+Demo viva con sus builds previos; no migrar/preparar/seed/cargar.
+
+Nota de continuidad: tras capturarF0 el principal completó el encabezado de cierre de
+docs/sdd/2026-10-25-medicion-cuatro-categorias/verificacion.md, dentro de la autorizaciónM9.
+Es documentación de la corrida anterior, no producto ni cambio de comportamientoM10.1.
+El contenido anterior se conserva en el diff/huellaF0 y el historial inferior del documento.

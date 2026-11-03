@@ -13,8 +13,9 @@ pnpm --filter panel-admin build      # imagen de producción: .next/standalone (
 ## Panel por categoría (M5)
 
 La disponibilidad es la intersección ordenada de `categorias_activas` de la configuración y el
-registro de `contracts`. Inundaciones sigue siendo la única definición real registrada; las
-definiciones sintéticas se inyectan únicamente en pruebas y no activan categorías.
+registro de `contracts`. Desde 0.24.0 están registradas Inundaciones, Baches, Áreas verdes y
+Basura; registrar una definición no activa el catálogo de una instalación. Las definiciones sintéticas se inyectan
+únicamente en pruebas y no activan categorías.
 
 - Con una categoría se oculta el selector. Con varias ofrece «Todas» y las disponibles; empieza
   en Inundaciones salvo una selección válida en la URL. El panel no usa la preferencia del mapa
@@ -57,6 +58,97 @@ con el historial inactivo se explican en pantalla. Un mapa parcial identifica ca
 las UV se suman solo con respuestas completas e identidad territorial compatible, se ordenan por
 total combinado y no reciben una severidad conjunta inventada. No se usan endpoints técnicos
 para obtener esos datos del ejecutivo.
+
+## Baches reales (M6.5)
+
+Los alias locales del panel consumen `ReporteTecnico`, `ReporteTecnicoFeature` y
+`ReporteTecnicoFeatureCollection` de contracts 0.23.0. Se conserva el núcleo de M5: Baches usa
+su tipo, gravedad declarada y tamaño visual desde la definición real; los seis campos de agua
+permanecen nulos. El panel presenta la severidad recibida y su reclasificación con motivo.
+Inundaciones y los reportes antiguos sin categoría conservan su presentación y nota.
+
+Detalle, ficha imprimible, TXT y GeoJSON usan las etiquetas y limitaciones de Baches: percepción
+ciudadana, accidente declarado sin comprobar, índice auxiliar no comparable entre categorías
+y parámetros pendientes de validación municipal. Las versiones mostradas corresponden a la
+definición disponible; no se atribuyen versiones históricas que la API no devuelve. «Todas»
+conserva la categoría de origen y el historial; fusión y permisos mantienen las reglas existentes.
+
+`src/lib/m6-bache-real.test.ts` añade casos con el registro real y reportes sintéticos de prueba,
+sin sustituir las pruebas de abstracción con definiciones inyectadas. Cubre tipos, nulos,
+presentación, ficha/nota/versiones, Baches/Inundaciones/Todas, edición, roles y fusión.
+En exportación comprueba URL/filtros del CSV y validación/preservación del GeoJSON recibido;
+la generación del CSV y la composición de notas del servidor corresponden a las pruebas API.
+
+Preflight anterior a estos cambios: **551 PASS / 52 archivos y tipos exit 0**. POST del paquete:
+**586 PASS / 53 archivos** (551 anteriores y 35 nuevos), sin omisiones; focal final **35/35**,
+tipos, Biome de las dos fuentes TypeScript y build de producción del panel con **exit 0**.
+La suite completa precede al formato del test nuevo, cuyo AST quedó idéntico; focal y tipos se
+repitieron sobre el archivo formateado. Biome no procesa Markdown. Evidencia de M6.5 en
+`.turbo/m6-2026-10-18/m6-5/`. F4 independiente, navegación real y despliegue quedan fuera de
+esta verificación. La activación de Baches se limita al piloto aislado autorizado; este cambio
+no activa una instalación habitual.
+
+## Cuatro categorías reales — entrega local (2026-10-22)
+
+Basura y Áreas verdes usan los subtipos y las dos preguntas (gravedad declarada y tamaño) de
+sus definiciones reales en contracts 0.24.0. El panel valida el detalle y muestra las respuestas
+recibidas; conserva la severidad del servidor, la reclasificación con motivo, los seis campos
+de agua cuando llegan nulos y la advertencia sobre versiones históricas no informadas por la API.
+
+Persona en situación de calle conserva este aviso literal en detalle, ficha imprimible y TXT;
+también se incluye como aviso en el GeoJSON unitario:
+
+> Esto no es una denuncia. Se deriva a Desarrollo Social para ofrecer ayuda, no a seguridad.
+> No subas fotos donde se vea la cara de la persona.
+
+El campo «Destino previsto» muestra Desarrollo Social para Persona y Parques y jardines para
+los otros subtipos de Áreas verdes, siempre con «No hay derivación municipal automática».
+Son textos de presentación: no se envían mensajes a terceros ni se acredita una integración
+municipal. No se promete ocultación o difuminado de fotos. Para Quema de basura se muestra
+«Reportar quema de basura no sustituye la atención de emergencias», sin teléfono nuevo ni
+escalamiento automático. Los avisos dependen del subtipo actual y no pasan a otra selección.
+Un detalle o subtipo incompatible conserva los datos comunes y su aviso de incompatibilidad,
+sin atribuir destino ni rescatar datos de otra categoría.
+
+CSV y GeoJSON mantienen las rutas, filtros, permisos, notas y respuestas técnicas existentes.
+El CSV lo genera la API; el panel conserva los bytes del GeoJSON recibido después de validarlo.
+Los avisos y destinos del detalle y de la ficha usan los mismos `campos` y `aviso` del presentador.
+El GeoJSON unitario conserva las propiedades recibidas, la nota de la categoría y el aviso,
+sin inventar versiones históricas ni modificar los datos del reporte.
+
+`src/lib/avisos-categoria.test.ts` y `src/lib/cuatro-categorias-reales.test.ts` cubren avisos,
+destinos, las 32 combinaciones de respuestas nuevas conservando la severidad recibida,
+presentación/ficha/TXT/GeoJSON, las cuatro categorías y Todas, filtros, roles y fusión.
+Los reportes y las personas de estas pruebas son sintéticos. Línea base de esta corrida,
+antes de editar: **586 PASS / 53 archivos y tipos exit 0**. El primer intento dentro del
+sandbox terminó por `EPERM` de la caché temporal de Vite sin ejecutar casos; se conserva
+por separado. Post completo: **709 PASS / 55 archivos**, incluidos los 586 casos anteriores
+y 123 nuevos; tipos, Biome (incluido `tsconfig.json`) y build aislado aprobados. Evidencia,
+comparación por caso, hashes y cesión en `.turbo/cuatro-categorias-2026-10-22/panel/`.
+La comprobación estática no acredita navegación, integración municipal ni cierre conjunto de
+M6/M7/M8; la revisión independiente corresponde al cierre coordinado.
+
+El primer post conservado tuvo tres fallos nuevos, sin modificar los casos anteriores. Se
+corrigieron expectativas de la tabla habitual de Inundaciones y de la URL pública
+`area-verde` (ADR 0015). El negativo de exportación ahora usa el tipo inválido `123` y
+comprueba el rechazo por el esquema vigente. La lectura del contrato y el post muestran que
+`rodilla` sí se admite en una respuesta general no inundación por compatibilidad: aquel
+negativo infería una garantía que el esquema de lectura no ofrece. No se endurecen lecturas
+ni se modifican API/contracts. Los casos de nulos y conservación de bytes recibidos siguen
+aprobados; garantizar los nulos producidos por el servidor corresponde a API/E2E.
+
+### Salida local independiente de Next
+
+Solo `CURICHI_INSTALACION_LOCAL=1` selecciona `.next-multitematica` en `next.config.ts` para
+desarrollo, build y arranque. Sin el flag, o con cualquier otro valor, se conserva la salida
+habitual `.next`. El flag se pasa únicamente al proceso local; no se modifica `.env` ni el
+entorno global. La imagen habitual conserva su configuración, cabeceras y proxy dinámico.
+La preparación de la base separada y el arranque de la instalación corresponden a Parte 5.
+El build añadió las referencias `.next-multitematica` de `tsconfig.json` y `next-env.d.ts`;
+se cotejaron con la copia anterior. `tsconfig.json` conserva además sus includes habituales.
+Build mediante `exec node node_modules/next/dist/bin/next build`, con CPU 1; `.next` habitual
+sin cambios. Biome omite README por formato no soportado y `next-env.d.ts` por la exclusión
+explícita del repositorio para ese archivo generado.
 
 ## Una imagen, cualquier ciudad: variables de tiempo de ejecución
 

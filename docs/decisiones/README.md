@@ -27,3 +27,7 @@ Formato: `NNNN-titulo-en-kebab.md` con Estado, Fecha, Contexto, Decisión, Conse
 | 0021 | [Formularios por categoría](0021-formularios-por-categoria.md) | aceptada |
 | 0022 | [Paleta e iconografía de categorías](0022-paleta-e-iconografia-de-categorias.md) | aceptada |
 | 0023 | [Severidad de inundación: «v2 extendida» (D3)](0023-severidad-de-inundacion-v2-extendida.md) | aceptada |
+| 0024 | [Baches v1 y piloto local](0024-baches-v1-y-piloto-local.md) | aceptada para M6 local; producción pendiente |
+| 0025 | [Cuatro categorías y entrega local separada](0025-cuatro-categorias-y-entrega-local.md) | aceptada para entrega local2026-10-22; producción pendiente |
+| 0026 | [Contracción física con API compatible](0026-contraccion-fisica-con-api-compatible.md) | aceptada2026-10-29; código/pruebas aisladas aprobados, operaciones reales pendientes |
+| 0026 | [Contracción física con API compatible](0026-contraccion-fisica-con-api-compatible.md) | aceptada2026-10-29; código/pruebas aisladas aprobados, operaciones reales pendientes |

@@ -32,9 +32,8 @@ export const ESPERADO = {
     'public.sesion': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
     'public.intento_login': ['SELECT', 'INSERT', 'DELETE'],
     'public.idempotencia': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-    // Cupo diario (0014): cuenta y reserva (INSERT/UPDATE), libera el turno de una foto que no se
-    // pudo procesar (UPDATE) y el mantenimiento borra los días anteriores (DELETE).
-    'public.cuota_reporte_diaria': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+    // Archivo0022: ninguna operación de aplicación, tampoco limpieza o FK que elimine la copia.
+    'resguardo_m10.cuota_reporte_diaria': [],
     'public.punto_critico': ['SELECT', 'INSERT', 'DELETE'],
     'public.spatial_ref_sys': ['SELECT'],
     'public._migraciones': [],
@@ -55,7 +54,7 @@ export const ESPERADO = {
     'public.sesion': [],
     'public.intento_login': [],
     'public.idempotencia': [],
-    'public.cuota_reporte_diaria': [],
+    'resguardo_m10.cuota_reporte_diaria': [],
     'public._migraciones': [],
     'geo.distrito_municipal': ['SELECT'],
     'geo.unidad_vecinal': ['SELECT'],

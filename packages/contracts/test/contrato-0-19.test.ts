@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   crearRegistroCategorias,
+  DEFINICION_AREA_VERDE,
+  DEFINICION_BACHE,
+  DEFINICION_BASURA,
   DEFINICION_INUNDACION,
   type DefinicionCategoriaCualquiera,
   DetalleInundacionSchema,
@@ -307,12 +310,14 @@ describe('0.19.0 · CA6 · invariantes', () => {
 describe('0.19.0 · CA5 · registro y fábrica', () => {
   const def = DEFINICION_INUNDACION;
 
-  it('REGISTRO_CATEGORIAS tiene solo inundación y la encuentra por slug', () => {
-    expect([...REGISTRO_CATEGORIAS.slugs]).toEqual(['inundacion']);
+  it('REGISTRO_CATEGORIAS encuentra las cuatro definiciones iniciales', () => {
+    expect([...REGISTRO_CATEGORIAS.slugs]).toEqual(['inundacion', 'bache', 'area_verde', 'basura']);
     expect(REGISTRO_CATEGORIAS.obtener('inundacion')).toBe(def);
     expect(REGISTRO_CATEGORIAS.tiene('inundacion')).toBe(true);
-    expect(REGISTRO_CATEGORIAS.tiene('bache')).toBe(false);
-    expect(REGISTRO_CATEGORIAS.obtener('bache')).toBeUndefined();
+    expect(REGISTRO_CATEGORIAS.tiene('bache')).toBe(true);
+    expect(REGISTRO_CATEGORIAS.obtener('bache')).toBe(DEFINICION_BACHE);
+    expect(REGISTRO_CATEGORIAS.obtener('area_verde')).toBe(DEFINICION_AREA_VERDE);
+    expect(REGISTRO_CATEGORIAS.obtener('basura')).toBe(DEFINICION_BASURA);
   });
 
   it('la fábrica rechaza slugs duplicados', () => {

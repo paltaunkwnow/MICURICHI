@@ -1,5 +1,21 @@
 # Traspaso — estado exacto al 2026-09-27
 
+> **Continuidad del03/11/2026:** el contenido que sigue es histórico. El estado vigente
+> está en [`VentanaContexto.md`](../VentanaContexto.md). Las cuatro categorías tienen
+> entrega local verificada; M10.5 cerró con375/375 y confirmación independiente. Está
+> aprobada y en implementación aislada la [contracción compatible final M10](sdd/2026-10-29-cierre-m10/plan.md)
+> (ADR0026), con inventario y ampliación de guardas aprobados. No se ha aplicado0022 a
+> la demo ni a bases protegidas. [`ARRANCAR.md`](../ARRANCAR.md) explica demo y arranque
+> habitual, evitando la migración automática de `curichi`. El usuario pide preparar para
+> subir después a `micurichi.lat`, sin desplegar ahora; Fase1/producción siguen abiertas.
+> Commit/push/PR autorizados al terminar y verificar; sin merge. Las suites independientes
+> afectadas aprobaron1477casos con12SKIP históricos y conservan1306casos anteriores.
+> Tipos/builds necesarios, sintaxis/YAML y Biome del delta aprobaron; formatoSQL98casos
+> posteriores,47bytesexactos ydiff-check0. La [ampliación del escáner](sdd/2026-10-29-cierre-m10/ampliacion-escaneo.md)
+> está aprobada:157casos propios tras SCAN01, pendiente de confirmación independiente
+> final. Ver [verificación](sdd/2026-10-29-cierre-m10/verificacion.md). El ensayo nuevo y la
+> actualización de demo requieren aún su protocolo concreto revisado y autorización.
+
 Este documento dice **dónde quedó el trabajo**, **qué funciona verificado**, **qué falta** y **cómo retomarlo**. Léelo junto con `CLAUDE.md`, que es el manual operativo y no cambia con el traspaso.
 
 > **Lo más nuevo está en §0** (plan de producción en una VPS, aprobado el 2026-09-26): la tabla de

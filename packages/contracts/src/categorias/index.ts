@@ -1,13 +1,52 @@
 /**
- * Registro de categorías (ADR 0009). Hoy una sola definición (Inundaciones); las demás se activan
- * por el roadmap M6–M8. La fábrica `crearRegistroCategorias` arma un registro a partir de una lista
+ * Registro de las cuatro categorías iniciales (ADR 0009); registrar no activa el catálogo.
+ * La fábrica `crearRegistroCategorias` arma un registro a partir de una lista
  * de definiciones, para que una categoría nueva se sume con solo su archivo y una línea de registro,
  * sin tocar el núcleo (lo prueba la categoría sintética de contrato-0-19).
  */
 
+import { DEFINICION_AREA_VERDE } from './area_verde/definicion.js';
+import { DEFINICION_BACHE } from './bache/definicion.js';
+import { DEFINICION_BASURA } from './basura/definicion.js';
 import { DEFINICION_INUNDACION } from './inundacion/definicion.js';
 import type { DefinicionCategoria } from './tipos.js';
 
+export { DEFINICION_AREA_VERDE } from './area_verde/definicion.js';
+export {
+  type DetalleAreaVerde,
+  DetalleAreaVerdeSchema,
+  GRAVEDADES_AREA_VERDE,
+  SUBTIPOS_AREA_VERDE,
+  type SubtipoAreaVerde,
+  SubtipoAreaVerdeSchema,
+  TAMANOS_AREA_VERDE,
+} from './area_verde/esquema.js';
+export {
+  calcularSeveridadAreaVerde,
+  SEVERIDAD_AREA_VERDE_VERSION,
+} from './area_verde/severidad.js';
+export { DEFINICION_BACHE } from './bache/definicion.js';
+export {
+  type DetalleBache,
+  DetalleBacheSchema,
+  GRAVEDADES_BACHE,
+  SUBTIPOS_BACHE,
+  type SubtipoBache,
+  SubtipoBacheSchema,
+  TAMANOS_BACHE,
+} from './bache/esquema.js';
+export { calcularSeveridadBache, SEVERIDAD_BACHE_VERSION } from './bache/severidad.js';
+export { DEFINICION_BASURA } from './basura/definicion.js';
+export {
+  type DetalleBasura,
+  DetalleBasuraSchema,
+  GRAVEDADES_BASURA,
+  SUBTIPOS_BASURA,
+  type SubtipoBasura,
+  SubtipoBasuraSchema,
+  TAMANOS_BASURA,
+} from './basura/esquema.js';
+export { calcularSeveridadBasura, SEVERIDAD_BASURA_VERSION } from './basura/severidad.js';
 export { DEFINICION_INUNDACION } from './inundacion/definicion.js';
 export { type DetalleInundacion, DetalleInundacionSchema } from './inundacion/esquema.js';
 export {
@@ -76,8 +115,13 @@ export function crearRegistroCategorias(
   };
 }
 
-/** Registro de la instalación: hoy solo Inundaciones (ADR 0009). */
-export const REGISTRO_CATEGORIAS = crearRegistroCategorias([DEFINICION_INUNDACION]);
+/** Definiciones disponibles; la actividad pública depende además del catálogo de la instalación. */
+export const REGISTRO_CATEGORIAS = crearRegistroCategorias([
+  DEFINICION_INUNDACION,
+  DEFINICION_BACHE,
+  DEFINICION_AREA_VERDE,
+  DEFINICION_BASURA,
+]);
 
 /**
  * Código de error de una categoría que no está disponible para la operación (0.20.0, ADR 0012): no

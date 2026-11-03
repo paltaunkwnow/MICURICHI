@@ -1,0 +1,135 @@
+2026-10-29T10:57:46.684Z
+Rama codex/cuatro-categorias
+HEAD 59b80781030707b8c3334bfbfd40f80000c60a57
+
+ M .github/workflows/ci.yml
+ M .gitignore
+ M AGENTS.md
+ M CLAUDE.md
+ M README.md
+ M VentanaContexto.md
+ M apps/panel-admin/README.md
+ M apps/panel-admin/next-env.d.ts
+ M apps/panel-admin/next.config.ts
+ M apps/panel-admin/src/lib/presentacion-reporte.ts
+ M apps/panel-admin/src/lib/reportes-panel.ts
+ M apps/panel-admin/tsconfig.json
+ M apps/web-ciudadano/README.md
+ M apps/web-ciudadano/next-env.d.ts
+ M apps/web-ciudadano/next.config.ts
+ M apps/web-ciudadano/src/componentes/categorias/generico.tsx
+ M apps/web-ciudadano/src/componentes/categorias/inundacion.tsx
+ M apps/web-ciudadano/src/componentes/categorias/presentadores.test.ts
+ M apps/web-ciudadano/src/componentes/categorias/registro.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/adaptadores.test.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/generico.test.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/generico.tsx
+ M apps/web-ciudadano/src/componentes/formulario-categorias/registro.ts
+ M apps/web-ciudadano/src/lib/categoria.test.ts
+ M apps/web-ciudadano/src/lib/formato.test.ts
+ M apps/web-ciudadano/src/lib/formato.ts
+ M apps/web-ciudadano/tsconfig.json
+ M docs/README.md
+ M docs/arquitectura/14-decisiones-m0-y-plan-m1.md
+ M docs/decisiones/README.md
+ M docs/operaciones/respaldo-y-restauracion.md
+ M docs/sdd/README.md
+ M e2e/README.md
+ M infra/respaldo/respaldo.sh
+ M packages/contracts/CHANGELOG.md
+ M packages/contracts/README.md
+ M packages/contracts/openapi/openapi.yaml
+ M packages/contracts/package.json
+ M packages/contracts/src/categorias/index.ts
+ M packages/contracts/src/esquemas/admin.ts
+ M packages/contracts/src/esquemas/reporte.ts
+ M packages/contracts/src/openapi.ts
+ M packages/contracts/test/contrato-0-19.test.ts
+ M packages/contracts/test/contrato-0-22.test.ts
+ M packages/db/README.md
+ M packages/db/banco-puntos-criticos.ts
+ M packages/db/src/esquema/index.ts
+ M packages/db/src/puntos-criticos.ts
+ M packages/db/src/seeds/samples.ts
+ M packages/db/src/test-utils.ts
+ M packages/db/test/db.test.ts
+ M packages/db/test/esquema-drizzle.test.ts
+ M packages/db/test/migracion-0010-quitar-campos.test.ts
+ M packages/db/test/migracion-0013-distancia-dispositivo.test.ts
+ M packages/db/test/migracion-0014-cuota-diaria.test.ts
+ M packages/db/test/migracion-0015-publicacion.test.ts
+ M packages/db/test/puntos-criticos-categoria.test.ts
+ M packages/db/test/servidor-local.test.ts
+ M scripts/banco-consultas.mjs
+ M scripts/banco-datos.mjs
+ M scripts/respaldo.mjs
+ M scripts/sembrar-30-puntos.sql
+ M services/api-core/README.md
+ M services/api-core/src/rutas/admin.ts
+ M services/api-core/src/rutas/reportes.ts
+ M services/api-core/src/vistas.ts
+ M services/api-core/test/cupo-diario.test.ts
+ M services/api-core/test/exportacion.test.ts
+ M services/api-core/test/no-contaminacion-categoria.test.ts
+ M services/api-core/test/reportes.test.ts
+ M services/api-core/test/vista-publica-vs-tecnica.test.ts
+ M services/geo-service/README.md
+ M services/geo-service/test/no-contaminacion-categoria.test.ts
+ M turbo.json
+?? apps/panel-admin/src/lib/avisos-categoria.test.ts
+?? apps/panel-admin/src/lib/avisos-categoria.ts
+?? apps/panel-admin/src/lib/cuatro-categorias-reales.test.ts
+?? apps/panel-admin/src/lib/m6-bache-real.test.ts
+?? apps/web-ciudadano/src/componentes/categorias/area-verde.tsx
+?? apps/web-ciudadano/src/componentes/formulario-categorias/area-verde.test.ts
+?? apps/web-ciudadano/src/componentes/formulario-categorias/area-verde.tsx
+?? apps/web-ciudadano/src/componentes/formulario-categorias/basura.test.ts
+?? apps/web-ciudadano/src/componentes/formulario-categorias/basura.tsx
+?? apps/web-ciudadano/src/lib/cuatro-categorias-reales.test.ts
+?? apps/web-ciudadano/src/lib/m6-bache-real.test.ts
+?? docs/decisiones/0024-baches-v1-y-piloto-local.md
+?? docs/decisiones/0025-cuatro-categorias-y-entrega-local.md
+?? docs/dominio/areas-verdes.md
+?? docs/dominio/baches.md
+?? docs/dominio/basura.md
+?? docs/operaciones/multitematica-local.md
+?? docs/sdd/2026-10-18-baches-piloto/
+?? docs/sdd/2026-10-22-cuatro-categorias/
+?? docs/sdd/2026-10-25-medicion-cuatro-categorias/
+?? docs/sdd/2026-10-26-contraccion-compatible/
+?? docs/sdd/2026-10-27-respaldos-multitematicos/
+?? docs/sdd/2026-10-27-restauracion-real-segura/
+?? docs/sdd/2026-10-28-consumidores-internos/
+?? e2e/playwright.cuatro-categorias.config.ts
+?? e2e/playwright.piloto-m6.config.ts
+?? e2e/scripts/piloto-m6.mjs
+?? e2e/scripts/piloto-m6.test.mjs
+?? e2e/tests/cuatro-categorias.local.ts
+?? e2e/tests/piloto-m6.piloto.ts
+?? infra/respaldo/respaldo.test.sh
+?? packages/contracts/src/categorias/area_verde/
+?? packages/contracts/src/categorias/bache/
+?? packages/contracts/src/categorias/basura/
+?? packages/contracts/test/area-verde-severidad.test.ts
+?? packages/contracts/test/bache-severidad.test.ts
+?? packages/contracts/test/basura-severidad.test.ts
+?? packages/contracts/test/contrato-0-23.test.ts
+?? packages/contracts/test/contrato-0-24.test.ts
+?? packages/db/test/m10-consumidores-internos.test.ts
+?? packages/db/test/puntos-criticos-bache.test.ts
+?? packages/db/test/puntos-criticos-cuatro-categorias.test.ts
+?? scripts/bancos-internos.test.mjs
+?? scripts/ensayar-respaldo-multitematico.mjs
+?? scripts/ensayar-respaldo-multitematico.test.mjs
+?? scripts/medir-cuatro-categorias.mjs
+?? scripts/medir-cuatro-categorias.test.mjs
+?? scripts/multitematica-local.mjs
+?? scripts/multitematica-local.test.mjs
+?? scripts/respaldo.test.mjs
+?? services/api-core/src/nota-metodologica.ts
+?? services/api-core/test/m10-compatibilidad.test.ts
+?? services/api-core/test/m6-bache-real.test.ts
+?? services/api-core/test/m7-m8-categorias-reales.test.ts
+
+
+F0 propio SHA/copias en .turbo/m10-5-2026-10-29/f0/manifest.json. Los cambios previos de M6–M10.4 son ajenos y se conservan. No stash/ref/commit.

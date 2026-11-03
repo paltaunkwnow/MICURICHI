@@ -1,0 +1,60 @@
+F0: plan aprobado2026-10-22; rama codex/cuatro-categorias; HEAD59b80781030707b8c3334bfbfd40f80000c60a57.
+Los cambios M6 siguientes son punto de partida propio, no archivos para revertir. Sin commit/push/stash/reset/clean.
+Hashes completos: .turbo/cuatro-categorias-2026-10-22/f0-hashes.json.
+Estado Git al iniciar:
+ M AGENTS.md
+ M CLAUDE.md
+ M VentanaContexto.md
+ M apps/panel-admin/README.md
+ M apps/panel-admin/src/lib/reportes-panel.ts
+ M apps/web-ciudadano/README.md
+ M apps/web-ciudadano/src/componentes/categorias/generico.tsx
+ M apps/web-ciudadano/src/componentes/categorias/inundacion.tsx
+ M apps/web-ciudadano/src/componentes/categorias/presentadores.test.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/generico.test.ts
+ M apps/web-ciudadano/src/componentes/formulario-categorias/generico.tsx
+ M apps/web-ciudadano/src/lib/categoria.test.ts
+ M apps/web-ciudadano/src/lib/formato.test.ts
+ M apps/web-ciudadano/src/lib/formato.ts
+ M docs/README.md
+ M docs/arquitectura/14-decisiones-m0-y-plan-m1.md
+ M docs/decisiones/README.md
+ M docs/sdd/README.md
+ M e2e/README.md
+ M packages/contracts/CHANGELOG.md
+ M packages/contracts/README.md
+ M packages/contracts/openapi/openapi.yaml
+ M packages/contracts/package.json
+ M packages/contracts/src/categorias/index.ts
+ M packages/contracts/src/esquemas/admin.ts
+ M packages/contracts/src/esquemas/reporte.ts
+ M packages/contracts/src/openapi.ts
+ M packages/contracts/test/contrato-0-19.test.ts
+ M packages/contracts/test/contrato-0-22.test.ts
+ M packages/db/README.md
+ M packages/db/src/puntos-criticos.ts
+ M packages/db/test/puntos-criticos-categoria.test.ts
+ M services/api-core/README.md
+ M services/api-core/src/rutas/admin.ts
+ M services/api-core/src/rutas/reportes.ts
+ M services/api-core/src/vistas.ts
+ M services/api-core/test/cupo-diario.test.ts
+ M services/api-core/test/exportacion.test.ts
+ M services/geo-service/README.md
+ M services/geo-service/test/no-contaminacion-categoria.test.ts
+?? apps/panel-admin/src/lib/m6-bache-real.test.ts
+?? apps/web-ciudadano/src/lib/m6-bache-real.test.ts
+?? docs/decisiones/0024-baches-v1-y-piloto-local.md
+?? docs/dominio/baches.md
+?? docs/sdd/2026-10-18-baches-piloto/
+?? docs/sdd/2026-10-22-cuatro-categorias/
+?? e2e/playwright.piloto-m6.config.ts
+?? e2e/scripts/piloto-m6.mjs
+?? e2e/scripts/piloto-m6.test.mjs
+?? e2e/tests/piloto-m6.piloto.ts
+?? packages/contracts/src/categorias/bache/
+?? packages/contracts/test/bache-severidad.test.ts
+?? packages/contracts/test/contrato-0-23.test.ts
+?? packages/db/test/puntos-criticos-bache.test.ts
+?? services/api-core/src/nota-metodologica.ts
+?? services/api-core/test/m6-bache-real.test.ts

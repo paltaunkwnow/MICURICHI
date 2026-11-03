@@ -10,7 +10,8 @@
  *  - con datos sintéticos de varias categorías, el EXPLAIN del listado por categoría ordenado por
  *    `creado_en DESC` puede usar el índice (con `enable_seqscan = off`, como resolucion-id-corto).
  */
-import { readFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type Ejecutor, ejecutorPglite } from '../src/ejecutor.js';
@@ -18,6 +19,35 @@ import { aplicarMigraciones, DIRECTORIO_MIGRACIONES, listarMigraciones } from '.
 
 const ARCHIVO_0021 = '0021_indice_categoria_creado.sql';
 const numero = (f: string) => f.slice(0, 4);
+
+// Copias byteexactas de las migraciones reales más una posterior EXCLUSIVA de la fixture.
+// La centinela permite detectar un migrador sin límite aunque el producto hoy termine en 0021.
+// No se crea una migración de producto ni se opera una instalación; el arnés conserva el temporal.
+const directorioPruebas = mkdtempSync(join(tmpdir(), 'm10-5-0021-'));
+for (const archivo of listarMigraciones())
+  copyFileSync(join(DIRECTORIO_MIGRACIONES, archivo), join(directorioPruebas, archivo));
+writeFileSync(
+  join(directorioPruebas, '9999_solo_fixture_m10_5.sql'),
+  `CREATE TABLE m10_5_posterior (dato text NOT NULL);
+   INSERT INTO m10_5_posterior VALUES ('Esta fila no pertenece al esquema histórico 0021');`,
+);
+
+async function comprobarHistoria0021(ex: Ejecutor) {
+  const [indice] = await ex.consultar<{ nombre: string }>(
+    `SELECT to_regclass('public.reporte_categoria_creado')::text AS nombre`,
+  );
+  expect(indice?.nombre).toBe('reporte_categoria_creado');
+  const registradas = await ex.consultar<{ nombre: string }>(
+    'SELECT nombre FROM _migraciones ORDER BY nombre',
+  );
+  expect(registradas.map((r) => r.nombre)).toEqual(
+    listarMigraciones().filter((f) => numero(f) <= '0021'),
+  );
+  const [posterior] = await ex.consultar<{ relacion: string | null }>(
+    `SELECT to_regclass('public.m10_5_posterior')::text AS relacion`,
+  );
+  expect(posterior?.relacion).toBeNull();
+}
 
 async function crearPglite() {
   const { PGlite } = await import('@electric-sql/pglite');
@@ -69,7 +99,7 @@ describe('migración 0021 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { directorio: directorioPruebas, hasta: '0021' });
   }, 240_000);
 
   afterAll(async () => {
@@ -100,9 +130,19 @@ describe('migración 0021 desde cero', () => {
       `SELECT count(*)::int AS n FROM pg_indexes WHERE schemaname='public' AND indexname='reporte_categoria_creado'`,
     );
     expect(idx!.n).toBe(1);
-    const reaplicar = await aplicarMigraciones(ex);
+    const reaplicar = await aplicarMigraciones(ex, {
+      directorio: directorioPruebas,
+      hasta: '0021',
+    });
     expect(reaplicar.aplicadas).not.toContain(ARCHIVO_0021);
     expect(reaplicar.omitidas).toContain(ARCHIVO_0021);
+  });
+
+  it('M10.5: desde cero e idempotencia excluyen una migración posterior con DDL real de fixture', async () => {
+    await sembrarVariasCategorias(ex, 1);
+    const [filas] = await ex.consultar<{ n: number }>('SELECT count(*)::int AS n FROM reporte');
+    expect(filas?.n).toBe(4);
+    await comprobarHistoria0021(ex);
   });
 });
 
@@ -113,7 +153,7 @@ describe('migración 0021: el EXPLAIN del listado por categoría puede usar el �
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { directorio: directorioPruebas, hasta: '0021' });
     await sembrarVariasCategorias(ex);
     await ex.ejecutar('ANALYZE reporte');
   }, 240_000);
@@ -139,5 +179,13 @@ describe('migración 0021: el EXPLAIN del listado por categoría puede usar el �
     );
     await ex.ejecutar('RESET enable_seqscan');
     expect(plan, plan).toContain('reporte_categoria_creado');
+  });
+
+  it('M10.5: EXPLAIN histórico mantiene las 100 filas sintéticas y el catálogo 0021', async () => {
+    const filas = await ex.consultar<{ categoria: string; n: number }>(
+      'SELECT categoria, count(*)::int AS n FROM reporte GROUP BY categoria ORDER BY categoria',
+    );
+    expect(filas).toEqual([...CATEGORIAS].sort().map((categoria) => ({ categoria, n: 25 })));
+    await comprobarHistoria0021(ex);
   });
 });

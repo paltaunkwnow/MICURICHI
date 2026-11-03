@@ -349,7 +349,9 @@ export async function construirPuntosCriticos(
         severidadMax,
         radioGrupo,
         Math.round(diametro * 10) / 10,
-        diametro > CONFIG_DOMINIO.RECURRENCIA_DIAMETRO_ADVERTENCIA_M,
+        diametro >
+          (CONFIG_DOMINIO.RECURRENCIA_DIAMETRO_ADVERTENCIA_M / CONFIG_DOMINIO.RECURRENCIA_RADIO_M) *
+            radioGrupo,
         publicables?.lon ?? null,
         publicables?.lat ?? null,
         categoria,

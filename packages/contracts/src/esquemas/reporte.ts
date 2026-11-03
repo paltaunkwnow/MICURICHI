@@ -287,8 +287,44 @@ export const ReporteFiltrosSchema = PaginacionSchema.extend({
 });
 export type ReporteFiltros = z.infer<typeof ReporteFiltrosSchema>;
 
-/** Propiedades de un reporte tal como las ve el público (sin autor, con precisión degradada si aplica). */
-export const ReportePublicoSchema = z.object({
+/** Una sola condición para runtime y JSON Schema, sin registro ni normalización de respuestas. */
+const PlanasLegadoSchema = z.object({
+  categoria: z.string().optional(),
+  profundidad_estimada: z.enum(PROFUNDIDADES),
+  frecuencia: z.enum(FRECUENCIAS),
+  causa_presunta: z.enum(CAUSAS_PRESUNTAS),
+});
+const PlanasOtraCategoriaSchema = PlanasLegadoSchema.extend({
+  categoria: z
+    .string()
+    .min(1)
+    .regex(/^(?!inundacion$)/),
+  profundidad_estimada: PlanasLegadoSchema.shape.profundidad_estimada.nullable(),
+  frecuencia: PlanasLegadoSchema.shape.frecuencia.nullable(),
+  causa_presunta: PlanasLegadoSchema.shape.causa_presunta.nullable(),
+});
+const PlanasCompatiblesSchema = z.union([PlanasLegadoSchema, PlanasOtraCategoriaSchema]);
+// input/inline: el fragmento no prohíbe campos comunes ni referencia $defs de otro documento.
+const { $schema: _dialecto, ...condicionPlanasJson } = z.toJSONSchema(PlanasCompatiblesSchema, {
+  io: 'input',
+  reused: 'inline',
+});
+
+function conCompatibilidadDeCategoria<S extends z.ZodRawShape>(base: z.ZodObject<S>) {
+  return base
+    .superRefine((datos, ctx) => {
+      const resultado = PlanasCompatiblesSchema.safeParse(datos);
+      if (resultado.success) return;
+      // La unión decidió el rechazo. Conservar el diagnóstico por campo de la rama anterior,
+      // en vez de sustituir errores útiles por un invalid_union en la raíz.
+      const legado = PlanasCompatiblesSchema.options[0].safeParse(datos);
+      if (!legado.success) for (const error of legado.error.issues) ctx.addIssue({ ...error });
+    })
+    .meta({ allOf: [structuredClone(condicionPlanasJson)] });
+}
+
+/** Bases objeto: derivar estados antes del check; los finales conservan shape/strict y strip. */
+const ReportePublicoBaseSchema = z.object({
   id: z.uuid(),
   creado_en: z.iso.datetime({ offset: true }),
   evento_en: z.iso.datetime({ offset: true }).nullable(),
@@ -296,9 +332,9 @@ export const ReportePublicoSchema = z.object({
   unidad_vecinal: UnidadAdministrativaSchema.nullable(),
   descripcion: z.string(),
   fotos: z.array(z.string()).meta({ description: 'URLs servidas por api-core, ya sin EXIF' }),
-  profundidad_estimada: z.enum(PROFUNDIDADES),
-  frecuencia: z.enum(FRECUENCIAS),
-  causa_presunta: z.enum(CAUSAS_PRESUNTAS),
+  profundidad_estimada: PlanasOtraCategoriaSchema.shape.profundidad_estimada,
+  frecuencia: PlanasOtraCategoriaSchema.shape.frecuencia,
+  causa_presunta: PlanasOtraCategoriaSchema.shape.causa_presunta,
   severidad: z
     .enum(SEVERIDADES)
     .meta({ description: 'Severidad efectiva = manual si existe, si no la calculada' }),
@@ -339,10 +375,11 @@ export const ReportePublicoSchema = z.object({
         'definición; completo en la vista técnica. Obligatorio desde M4/M5.',
     }),
 });
+export const ReportePublicoSchema = conCompatibilidadDeCategoria(ReportePublicoBaseSchema);
 export type ReportePublico = z.infer<typeof ReportePublicoSchema>;
 
 /** Vista del técnico: todo lo público más campos de moderación y coordenada exacta. */
-export const ReporteTecnicoSchema = ReportePublicoSchema.extend({
+const ReporteTecnicoBaseSchema = ReportePublicoBaseSchema.extend({
   estado: z.enum(ESTADOS_REPORTE),
   ubicacion_metodo: z.enum(UBICACION_METODOS).meta({
     description:
@@ -371,6 +408,7 @@ export const ReporteTecnicoSchema = ReportePublicoSchema.extend({
   resolucion_flags: z.record(z.string(), z.unknown()),
   autor_id: z.uuid().nullable(),
 });
+export const ReporteTecnicoSchema = conCompatibilidadDeCategoria(ReporteTecnicoBaseSchema);
 export type ReporteTecnico = z.infer<typeof ReporteTecnicoSchema>;
 
 export const PuntoGeoJsonSchema = z.object({
@@ -420,7 +458,7 @@ export type ReporteTecnicoFeatureCollection = z.infer<typeof ReporteTecnicoFeatu
  * envió, en cualquier estado: también mientras espera su `publicar_en` y si lo rechazaron o
  * fusionaron. Nunca lleva el autor ni campos de moderación, y solo sale con `private, no-store`.
  */
-export const MiReporteSchema = ReportePublicoSchema.extend({
+const MiReporteBaseSchema = ReportePublicoBaseSchema.extend({
   estado: z.enum(ESTADOS_REPORTE),
   verificado: z.boolean().meta({ description: 'true si está validado o resuelto' }),
   publicar_en: z.iso.datetime({ offset: true }).meta({
@@ -434,6 +472,7 @@ export const MiReporteSchema = ReportePublicoSchema.extend({
     description: 'true si lo rechazaron o lo fusionaron con otro: ya no está en el mapa público',
   }),
 });
+export const MiReporteSchema = conCompatibilidadDeCategoria(MiReporteBaseSchema);
 export type MiReporte = z.infer<typeof MiReporteSchema>;
 
 export const MiReporteFeatureSchema = ReporteFeatureSchema.extend({

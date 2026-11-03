@@ -436,3 +436,51 @@ describe('una caché compartida delante del servicio no puede mezclar representa
     }
   });
 });
+
+describe('M10.1: detalle canónico sin ampliar la vista pública', () => {
+  it('las vistas pública, técnica y propia mantienen campos y privacidad con false', async () => {
+    await liberarCuota(ex);
+    const creado = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reportes',
+      cookies: sesion(cookieVecina),
+      payload: reporteEn(LAT, LON, {
+        ubicacion_tipo: 'vivienda_o_predio',
+        sumidero_cercano: 'si',
+        sumidero_estado: 'tapado',
+        agua_brota_sumidero: false,
+      }),
+    });
+    expect(creado.statusCode).toBe(201);
+    const id = creado.json().id;
+    const pub = await app.inject(`/api/v1/reportes/${id}`);
+    const tec = await app.inject({
+      url: `/api/v1/tecnico/reportes/${id}`,
+      cookies: sesion(cookieTecnico),
+    });
+    const propios = await app.inject({
+      url: '/api/v1/mis-reportes',
+      cookies: sesion(cookieVecina),
+    });
+    expect(pub.statusCode).toBe(200);
+    expect(tec.statusCode).toBe(200);
+    expect(propios.statusCode).toBe(200);
+    const propia = propios.json().features.find((f: { id: string }) => f.id === id);
+    expect(propia.properties.detalle).toEqual(creado.json().properties.detalle);
+    expect(tec.json().properties.detalle.agua_brota_sumidero).toBe(false);
+    expect(tec.json().properties.agua_brota_sumidero).toBe(false);
+    expect(pub.json().properties.detalle).toEqual({
+      profundidad_estimada: 'rodilla',
+      frecuencia: 'cada_lluvia_fuerte',
+      causa_presunta: 'sumidero_tapado',
+    });
+    for (const p of [pub.json().properties, propia.properties]) {
+      expect(p).not.toHaveProperty('autor_id');
+      expect(p).not.toHaveProperty('agua_brota_sumidero');
+      expect(p).not.toHaveProperty('precision_gps_m');
+    }
+    expect(coordenadas(pub.json())).not.toEqual([LON, LAT]);
+    expect(coordenadas(tec.json())).toEqual([LON, LAT]);
+    expect(coordenadas(propia)).toEqual([LON, LAT]);
+  });
+});

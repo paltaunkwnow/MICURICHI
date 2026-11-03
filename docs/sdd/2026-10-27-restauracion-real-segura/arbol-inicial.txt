@@ -1,0 +1,30 @@
+M10.3 — estado antes de implementar
+Fecha F0: 2026-10-28T00:51:03.932Z (2026-10-27, America/La_Paz).
+Aprobación explícita: «Aprobar M10.3 completo (Recomendado)».
+Plan aprobado: docs/sdd/2026-10-27-restauracion-real-segura/plan.md.
+Parte 5; ocho archivos de producto/documentación operativa y documentación de continuidad.
+
+Rama: codex/cuatro-categorias
+HEAD: 59b80781030707b8c3334bfbfd40f80000c60a57
+Sin refs nuevos, stash, commits ni publicaciones.
+
+Captura completa de cambios locales y huellas:
+.turbo/m10-3-2026-10-27/f0/manifest.json
+Copias de seis archivos existentes: f0/antes/<ruta>.
+Estas seis fuentes corresponden al cierre verificado M10.2; no comparar su delta contra HEAD.
+
+e302dc061bc5279cd47d46e4f3099b46a69dd18c931a4227b3486ca88efb7c0d  scripts/respaldo.mjs
+e5219c753edc5897d0999d658ad477fd8b7361474ff89ce4dc9c8c013a39d325  scripts/respaldo.test.mjs
+64223b6da233de4d06b154b341b50803776a88c7ddef0a1277b794aac95f2dde  infra/respaldo/respaldo.sh
+608fa28ce9445efccbf4293fa2140b50d317798a695e04b4484b9ffb70b68708  infra/respaldo/respaldo.test.sh
+c8c9381e0f8c2735e4a25ad8a756580df8b6af93473eb42eb1d37f1d3f538755  .github/workflows/ci.yml
+9a978a5d5b8859d47c014ee111f41c54802d05545744d1371d40304fb7f0e392  docs/operaciones/respaldo-y-restauracion.md
+
+Ausentes antes de editar, confirmados por F0:
+scripts/ensayar-respaldo-multitematico.mjs
+scripts/ensayar-respaldo-multitematico.test.mjs
+
+Fuera de este inventario hay trabajo de otros hitos, conservado y declarado ajeno.
+Producto por Turing, trabajador raíz, agente01a17ffd-f92a-7162-80da-3ec41f7ccfb6.
+Principal solo documentación/coordinación e integración de resultados.
+Antes de operadores reales: pruebas aisladas, revisión independiente y freeze de guardas.

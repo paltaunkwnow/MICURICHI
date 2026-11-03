@@ -56,7 +56,7 @@ describe('formulario declarativo de extremo a extremo, con definición sintétic
     expect(ReporteCrearCategoriaSchema.safeParse(cuerpo).success).toBe(true);
     expect(def.esquemaDetalle.safeParse(cuerpo.detalle).success).toBe(true);
     expect(adaptador.filasRevision(valores)).toContainEqual({
-      etiqueta: 'Subtipo',
+      etiqueta: 'Tipo de problema',
       valor: 'Subtipo sintético',
       paso: 2,
     });

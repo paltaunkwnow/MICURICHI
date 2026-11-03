@@ -10,7 +10,7 @@
  * espejo con una base migrada desde cero, para que la próxima migración que se olvide del espejo
  * falle aquí y no en un servicio.
  */
-import { is, SQL } from 'drizzle-orm';
+import { getTableName, is, SQL } from 'drizzle-orm';
 import { getTableConfig, isPgEnum, type PgColumn, PgDialect, PgTable } from 'drizzle-orm/pg-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type Ejecutor, ejecutorPglite } from '../src/ejecutor.js';
@@ -49,7 +49,7 @@ let ex: Ejecutor;
 beforeAll(async () => {
   db = await crearPglite();
   ex = ejecutorPglite(db);
-  await aplicarMigraciones(ex);
+  await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
 }, 240_000);
 
 afterAll(async () => {
@@ -98,6 +98,25 @@ const relkindDe = async (ex: Ejecutor, esquemaSql: string, nombre: string) =>
   )[0]?.relkind;
 
 describe('esquema Drizzle ↔ base migrada desde cero', () => {
+  it('la FK de foto coincide con la tabla física reporte y su ON DELETE CASCADE en el catálogo', async () => {
+    const fk = getTableConfig(esquema.reporteFoto).foreignKeys.find(
+      (f) => f.reference().columns[0]?.name === 'reporte_id',
+    );
+    expect(fk).toBeDefined();
+    expect(getTableName(fk!.reference().foreignTable)).toBe('reporte');
+    expect(fk!.reference().foreignColumns.map((c) => c.name)).toEqual(['id']);
+    expect(fk!.onDelete).toBe('cascade');
+    expect(await relkindDe(ex, 'public', 'reporte')).toBe('r');
+    expect(await relkindDe(ex, 'public', 'reporte_inundacion')).toBeUndefined();
+    const catalogo = await ex.consultar<{ destino: string; borrado: string }>(
+      `SELECT confrelid::regclass::text AS destino, confdeltype::text AS borrado
+         FROM pg_constraint WHERE conrelid = 'reporte_foto'::regclass AND contype = 'f'
+          AND conkey = ARRAY[(SELECT attnum FROM pg_attribute
+            WHERE attrelid = 'reporte_foto'::regclass AND attname = 'reporte_id')]`,
+    );
+    expect(catalogo).toEqual([{ destino: 'reporte', borrado: 'c' }]);
+  });
+
   it('cada tabla del espejo tiene exactamente las columnas de la base, con su tipo, nulabilidad y DEFAULT', async () => {
     const diferencias: string[] = [];
     for (const tabla of tablasDrizzle()) {
@@ -118,13 +137,12 @@ describe('esquema Drizzle ↔ base migrada desde cero', () => {
       // propiedades) y exponen columnas de más (la vista es `SELECT *` de `reporte`). Se comprueba
       // solo que cada columna del espejo exista en la vista con el mismo tipo; la nulabilidad, el
       // DEFAULT y la forma exacta se verifican sobre la tabla base `reporte` y en migracion-0020.
-      const esVista = (await relkindDe(ex, esquemaSql, cfg.name)) === 'v';
+      expect(await relkindDe(ex, esquemaSql, cfg.name)).toBe('r');
       const enBase = new Map(filas.map((f) => [f.column_name, f]));
       const enEspejo = new Map(cfg.columns.map((c) => [c.name, c]));
-      if (!esVista)
-        for (const nombreColumna of enBase.keys())
-          if (!enEspejo.has(nombreColumna))
-            diferencias.push(`${nombre}.${nombreColumna}: está en la base y falta en Drizzle`);
+      for (const nombreColumna of enBase.keys())
+        if (!enEspejo.has(nombreColumna))
+          diferencias.push(`${nombre}.${nombreColumna}: está en la base y falta en Drizzle`);
       for (const [nombreColumna, columna] of enEspejo) {
         const b = enBase.get(nombreColumna);
         if (!b) {
@@ -135,7 +153,6 @@ describe('esquema Drizzle ↔ base migrada desde cero', () => {
           diferencias.push(
             `${nombre}.${nombreColumna}: tipo ${tipoBase(b)} en la base, ${columna.getSQLType()} en Drizzle`,
           );
-        if (esVista) continue; // la vista no tiene nulabilidad ni DEFAULT propios
         if ((b.is_nullable === 'NO') !== columna.notNull)
           diferencias.push(
             `${nombre}.${nombreColumna}: ${b.is_nullable === 'NO' ? 'NOT NULL' : 'admite NULL'} en la base, al revés en Drizzle`,
@@ -154,7 +171,7 @@ describe('esquema Drizzle ↔ base migrada desde cero', () => {
   it('toda tabla de la base tiene espejo o está en la lista de tablas sin espejo', async () => {
     const tablas = await ex.consultar<{ t: string }>(
       `SELECT table_schema || '.' || table_name AS t FROM information_schema.tables
-        WHERE table_schema IN ('public', 'geo') AND table_type = 'BASE TABLE' ORDER BY 1`,
+        WHERE table_schema IN ('public', 'geo', 'resguardo_m10') AND table_type = 'BASE TABLE' ORDER BY 1`,
     );
     const conEspejo = new Set(tablasDrizzle().map(nombreCompleto));
     const huerfanas = tablas

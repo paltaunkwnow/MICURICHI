@@ -132,7 +132,7 @@ async function fila(id: string) {
     fusionado_en_id: string | null;
     punto_critico_id: string | null;
   }>(
-    'SELECT estado::text, fusionado_en_id::text, punto_critico_id::text FROM reporte_inundacion WHERE id = $1',
+    "SELECT estado::text, fusionado_en_id::text, punto_critico_id::text FROM reporte WHERE categoria = 'inundacion' AND id = $1",
     [id],
   );
   return f!;
@@ -322,7 +322,7 @@ describe('si el recálculo de puntos críticos falla, la moderación no', () => 
   async function pendienteParaMantenimiento(id: string) {
     const [f] = await ex.consultar<{ pendiente: boolean }>(
       `SELECT (estado IN ('validado','resuelto') AND punto_critico_id IS NULL) AS pendiente
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [id],
     );
     return f!.pendiente;
@@ -364,8 +364,8 @@ describe('si el recálculo de puntos críticos falla, la moderación no', () => 
     control.fallar = false;
     await recalcularPuntosCriticos(ejecutorPg(pool));
     const [despues] = await ex.consultar<{ n_reportes: number }>(
-      `SELECT pc.n_reportes FROM reporte_inundacion r JOIN punto_critico pc ON pc.id = r.punto_critico_id
-        WHERE r.id = $1`,
+      `SELECT pc.n_reportes FROM reporte r JOIN punto_critico pc ON pc.id = r.punto_critico_id
+        WHERE r.categoria = 'inundacion' AND r.id = $1`,
       [p],
     );
     expect(despues?.n_reportes).toBe(1);

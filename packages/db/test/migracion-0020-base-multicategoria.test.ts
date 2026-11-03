@@ -1,7 +1,8 @@
 /**
  * Migración 0020: expandir la base al modelo multicategoría (ADR 0008–0011, 0017), SIN cambiar el
  * comportamiento de hoy. La red de seguridad es doble: esta prueba y las suites de api-core y
- * geo-service, que migran PGlite hasta la última y corren contra la 0020 y la vista de compatibilidad.
+ * geo-service, que migran PGlite hasta la última. Este archivo fija la transición en 0020;
+ * sólo la reversa parte de 0021 y la reaplica hasta 0021, sin incorporar cambios posteriores.
  *
  * Qué se comprueba (plan M2, CA1 y CA2):
  *  - sobre una base migrada hasta 0019 con filas de todas las combinaciones de enums, fotos, auditoría,
@@ -41,6 +42,40 @@ const REVERSA_0021 = join(
   '0021_indice_categoria_creado_reversa.sql',
 );
 const numero = (f: string) => f.slice(0, 4);
+
+async function comprobarHistoria0020(ex: Ejecutor) {
+  const [fila] = await ex.consultar<{ id: string; categoria: string; detalle: unknown }>(
+    `INSERT INTO reporte (geom, publicar_en, distrito_id, unidad_vecinal_id, ubicacion_metodo,
+       ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
+       severidad_calculada, severidad_puntaje)
+     VALUES (ST_SetSRID(ST_MakePoint(-63.18,-17.78),4326),now(),'d','u','gps','via_publica',
+       'Fila histórica M10.5 de 0020','rodilla','ocasional','desconocida','media',6)
+     RETURNING id::text, categoria, detalle`,
+  );
+  expect(fila?.id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(fila?.categoria).toBe('inundacion');
+  expect(fila?.detalle).toEqual({
+    profundidad_estimada: 'rodilla',
+    frecuencia: 'ocasional',
+    causa_presunta: 'desconocida',
+  });
+  const [catalogo] = await ex.consultar<{
+    tabla: string;
+    vista: string;
+    indicePosterior: string | null;
+  }>(
+    `SELECT (SELECT relkind::text FROM pg_class WHERE oid='reporte'::regclass) AS tabla,
+       (SELECT relkind::text FROM pg_class WHERE oid='reporte_inundacion'::regclass) AS vista,
+       to_regclass('public.reporte_categoria_creado')::text AS "indicePosterior"`,
+  );
+  expect(catalogo).toEqual({ tabla: 'r', vista: 'v', indicePosterior: null });
+  const registradas = await ex.consultar<{ nombre: string }>(
+    'SELECT nombre FROM _migraciones ORDER BY nombre',
+  );
+  expect(registradas.map((r) => r.nombre)).toEqual(
+    listarMigraciones().filter((f) => numero(f) <= '0020'),
+  );
+}
 
 const PROFUNDIDADES = ['tobillo', 'rodilla', 'muslo', 'mas_70'] as const;
 const FRECUENCIAS = [
@@ -192,7 +227,7 @@ describe('migración 0020 sobre una base en uso (desde 0019, con filas)', () => 
     const r = await sembrarAntesDe0020(ex);
     autorId = r.autor;
     antes = await conteos(ex);
-    await aplicarMigraciones(ex); // aplica la 0020
+    await aplicarMigraciones(ex, { hasta: '0020' }); // aplica sólo la 0020
     despues = await conteos(ex);
   }, 240_000);
 
@@ -390,7 +425,7 @@ describe('migración 0020 sobre una base en uso (desde 0019, con filas)', () => 
   });
 
   it('volver a migrar no aplica nada y ejecutar el archivo a mano no falla ni cambia el detalle', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0020' });
     expect(otra.aplicadas).toEqual([]);
     const leer = () =>
       ex.consultar(
@@ -402,6 +437,10 @@ describe('migración 0020 sobre una base en uso (desde 0019, con filas)', () => 
     );
     expect(await leer()).toStrictEqual(antesReexec);
   });
+
+  it('M10.5: transición e idempotencia permanecen en 0020 con datos y catálogo propios', async () => {
+    await comprobarHistoria0020(ex);
+  });
 });
 
 describe('migración 0020 desde cero', () => {
@@ -411,7 +450,7 @@ describe('migración 0020 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0020' });
   }, 240_000);
 
   afterAll(async () => {
@@ -437,6 +476,10 @@ describe('migración 0020 desde cero', () => {
       [r!.id],
     );
     expect(JSON.parse(d!.detalle)).toMatchObject({ profundidad_estimada: 'mas_70' });
+  });
+
+  it('M10.5: desde cero verifica 0020 sin incorporar el índice de 0021', async () => {
+    await comprobarHistoria0020(ex);
   });
 });
 
@@ -487,21 +530,30 @@ describe('migración 0020: la reversa deja el esquema de la 0019', () => {
   let cat0019: Awaited<ReturnType<typeof catalogo>>;
   let migracionesTrasReversa: string[];
   let reaplicar: Awaited<ReturnType<typeof aplicarMigraciones>>;
+  let registradasAntes: string[];
+  let registradasReaplicadas: string[];
+  let datosAntes: Awaited<ReturnType<typeof conteos>>;
+  let datosReaplicados: Awaited<ReturnType<typeof conteos>>;
 
   beforeAll(async () => {
-    // Base A: roles, todas las migraciones (→0020), la reversa, y después una nueva corrida del
-    // migrador (que debe reaplicar la 0020, porque la reversa borró su fila de `_migraciones`).
+    // Base A: roles, migraciones hasta 0021, ambas reversas y reaplicación hasta 0021.
+    // La fixture incluye filas para comprobar que la vuelta conserva datos además de catálogo.
     dbA = await crearPglite();
     const exA = ejecutorPglite(dbA);
     await crearRoles(exA);
-    await aplicarMigraciones(exA);
+    await aplicarMigraciones(exA, { hasta: '0021' });
+    registradasAntes = await migracionesRegistradas(exA);
+    await sembrarAntesDe0020(exA);
+    datosAntes = await conteos(exA);
     cat0020Antes = await catalogo(exA);
     // Se revierte la cadena en orden inverso: primero la 0021, después la 0020.
     await exA.ejecutar(readFileSync(REVERSA_0021, 'utf8'));
     await exA.ejecutar(readFileSync(REVERSA_0020, 'utf8'));
     catApostReversa = await catalogo(exA);
     migracionesTrasReversa = await migracionesRegistradas(exA);
-    reaplicar = await aplicarMigraciones(exA);
+    reaplicar = await aplicarMigraciones(exA, { hasta: '0021' });
+    registradasReaplicadas = await migracionesRegistradas(exA);
+    datosReaplicados = await conteos(exA);
     cat0020Reaplicado = await catalogo(exA);
     // Base B: roles y migraciones hasta la 0019.
     dbB = await crearPglite();
@@ -544,7 +596,7 @@ describe('migración 0020: la reversa deja el esquema de la 0019', () => {
   it('la reversa aborta si hay un reporte de otra categoría', async () => {
     const db = await crearPglite();
     const ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0021' });
     await ex.consultar(
       `INSERT INTO reporte (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
          severidad_calculada, severidad_puntaje, publicar_en, categoria, causa_presunta)
@@ -556,6 +608,15 @@ describe('migración 0020: la reversa deja el esquema de la 0019', () => {
     );
     await db.close();
   }, 120_000);
+
+  it('M10.5: excepción 0021→0019→0021 conserva las filas y el historial exactos', () => {
+    const hasta0021 = listarMigraciones().filter((f) => numero(f) <= '0021');
+    expect(registradasAntes).toEqual(hasta0021);
+    expect(registradasReaplicadas).toEqual(hasta0021);
+    expect(datosAntes.porEstado.reduce((n, f) => n + Number(f.n), 0)).toBeGreaterThan(20);
+    expect(Number(datosAntes.fotos)).toBeGreaterThan(0);
+    expect(datosReaplicados).toStrictEqual(datosAntes);
+  });
 });
 
 describe('migración 0020: las funciones del detalle no quedan ejecutables por PUBLIC', () => {
@@ -575,7 +636,7 @@ describe('migración 0020: las funciones del detalle no quedan ejecutables por P
     ex = ejecutorPglite(db);
     // Roles ANTES de migrar, para que los GRANT por rol de la 0020 se apliquen.
     await crearRoles(ex);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0020' });
     privs = await ex.consultar(
       `SELECT p.proname,
               has_function_privilege('curichi_api', p.oid, 'EXECUTE') AS api,
@@ -630,5 +691,9 @@ describe('migración 0020: las funciones del detalle no quedan ejecutables por P
       frecuencia: 'ocasional',
       causa_presunta: 'sumidero_tapado',
     });
+  });
+
+  it('M10.5: los positivos y negativos de funciones se verifican sobre 0020 exacta', async () => {
+    await comprobarHistoria0020(ex);
   });
 });

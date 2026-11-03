@@ -400,7 +400,7 @@ describe('seeds sintéticos con la 0015', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
   }, 240_000);
 
   afterAll(async () => {
@@ -418,7 +418,7 @@ describe('seeds sintéticos con la 0015', () => {
     const filas = await ex.consultar<{ estado: string; n: number; distintos: number }>(
       `SELECT estado::text, count(*)::int AS n,
               count(*) FILTER (WHERE publicar_en <> creado_en)::int AS distintos
-         FROM reporte_inundacion WHERE descripcion LIKE '%[muestra sintética]%'
+         FROM reporte WHERE categoria = 'inundacion' AND descripcion LIKE '%[muestra sintética]%'
         GROUP BY estado ORDER BY estado`,
     );
     expect(filas.map((f) => f.estado)).toContain('nuevo');
@@ -428,7 +428,7 @@ describe('seeds sintéticos con la 0015', () => {
 
 describe('esquema Drizzle de publicar_en', () => {
   it('declara publicar_en como timestamptz NOT NULL y, desde la 0016, sin DEFAULT', () => {
-    const c = getTableColumns(esquema.reporteInundacion) as Record<
+    const c = getTableColumns(esquema.reporte) as Record<
       string,
       { name: string; notNull: boolean; hasDefault: boolean; getSQLType(): string }
     >;

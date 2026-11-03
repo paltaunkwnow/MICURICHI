@@ -353,7 +353,7 @@ describe('cifras públicas con 120 s como máximo (S30)', () => {
       ] as const) {
         const id = await insertarReporte(ex, lon, lat, 'validado', 'alta');
         await pool.query(
-          "UPDATE reporte_inundacion SET unidad_vecinal_id = 'unidad_vecinal:B' WHERE id = $1",
+          "UPDATE reporte SET unidad_vecinal_id = 'unidad_vecinal:B' WHERE id = $1 AND categoria = 'inundacion'",
           [id],
         );
       }

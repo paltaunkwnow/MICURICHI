@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 /**
  * Comprueba contra una base REAL que los roles de aplicación tienen exactamente los privilegios
  * de las migraciones 0008, 0009, 0014, 0016 y 0020: ni uno más, ni uno menos.
@@ -15,21 +17,14 @@ import pg from 'pg';
 // La matriz esperada vive aparte para que las pruebas comprueben que nombra todas las tablas.
 import { COLUMNAS_ESPERADAS, ESPERADO } from './matriz-privilegios.mjs';
 
-const URL_BASE = process.env.DATABASE_URL;
-if (!URL_BASE) {
-  console.error('Definí DATABASE_URL (rol dueño) para poder leer el catálogo de privilegios.');
-  process.exit(1);
-}
-
 const OPERACIONES = ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'];
 /** Atributos de rol que ningún servicio debe tener. */
 const ATRIBUTOS_PROHIBIDOS = ['rolsuper', 'rolcreaterole', 'rolcreatedb', 'rolbypassrls'];
 
-const pool = new pg.Pool({ connectionString: URL_BASE, max: 2 });
-const fallos = [];
-const avisos = [];
-
-try {
+/** Pool inyectado: importar este módulo no lee configuración, conecta ni termina el proceso. */
+export async function verificarMatrizPrivilegios(pool) {
+  const fallos = [];
+  const avisos = [];
   for (const rol of Object.keys(ESPERADO)) {
     const existe = await pool.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [rol]);
     if (!existe.rowCount) {
@@ -46,14 +41,14 @@ try {
 
     const dueño = await pool.query(
       `SELECT count(*)::int AS n FROM pg_tables
-        WHERE schemaname IN ('public','geo') AND tablename <> 'spatial_ref_sys' AND tableowner = $1`,
+        WHERE schemaname IN ('public','geo','resguardo_m10') AND tablename <> 'spatial_ref_sys' AND tableowner = $1`,
       [rol],
     );
     if (dueño.rows[0].n) fallos.push(`${rol} es dueño de ${dueño.rows[0].n} tabla(s)`);
 
     // Privilegios reales, tabla por tabla y operación por operación.
     const tablas = await pool.query(
-      `SELECT schemaname || '.' || tablename AS t FROM pg_tables WHERE schemaname IN ('public','geo')`,
+      `SELECT schemaname || '.' || tablename AS t FROM pg_tables WHERE schemaname IN ('public','geo','resguardo_m10')`,
     );
     for (const { t } of tablas.rows) {
       const esperadas = ESPERADO[rol][t];
@@ -103,25 +98,70 @@ try {
     }
 
     // Poder crear objetos en un esquema equivale a poder instalarse una puerta propia.
-    for (const esquema of ['public', 'geo']) {
+    for (const esquema of ['public', 'geo', 'resguardo_m10']) {
       const r = await pool.query('SELECT has_schema_privilege($1, $2, $3) AS p', [
         rol,
         esquema,
         'CREATE',
       ]);
       if (r.rows[0].p) fallos.push(`${rol} puede CREATE en el esquema ${esquema}`);
+      if (esquema === 'resguardo_m10') {
+        const uso = await pool.query('SELECT has_schema_privilege($1, $2, $3) AS p', [
+          rol,
+          esquema,
+          'USAGE',
+        ]);
+        if (uso.rows[0].p) fallos.push(`${rol} puede USAGE en el esquema ${esquema}`);
+      }
     }
   }
-} finally {
-  await pool.end();
+  const archivo = await pool.query(`SELECT c.relowner=n.nspowner AS mismo_dueno,
+    NOT EXISTS (SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee<>c.relowner) AS tabla_exclusiva,
+    NOT EXISTS (SELECT 1 FROM pg_attribute columna CROSS JOIN LATERAL aclexplode(columna.attacl) permiso
+      WHERE columna.attrelid=c.oid AND columna.attnum>0 AND NOT columna.attisdropped AND permiso.grantee<>c.relowner) AS columnas_exclusivas,
+    NOT EXISTS (SELECT 1 FROM aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) a WHERE a.grantee<>n.nspowner) AS esquema_exclusivo
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+    WHERE n.nspname='resguardo_m10' AND c.relname='cuota_reporte_diaria' AND c.relkind='r'`);
+  if (archivo.rows.length !== 1)
+    fallos.push('falta el archivo físico resguardo_m10.cuota_reporte_diaria');
+  else {
+    if (!archivo.rows[0].mismo_dueno)
+      fallos.push('archivo y esquema resguardo_m10 tienen distinto dueño');
+    if (!archivo.rows[0].tabla_exclusiva)
+      fallos.push('archivo con ACL de tabla ajena al dueño (incluido PUBLIC)');
+    if (!archivo.rows[0].columnas_exclusivas)
+      fallos.push('archivo con ACL de columna ajena al dueño (incluido PUBLIC)');
+    if (!archivo.rows[0].esquema_exclusivo)
+      fallos.push('resguardo_m10 con ACL de esquema ajena al dueño (incluido PUBLIC)');
+  }
+  return { fallos, avisos };
 }
 
-for (const a of avisos) console.log(`aviso: ${a}`);
-if (fallos.length) {
-  console.error('\nPrivilegios incorrectos:');
-  for (const f of fallos) console.error(` - ${f}`);
-  process.exit(1);
+async function ejecutarCli() {
+  const url = process.env.DATABASE_URL;
+  if (!url) {
+    console.error('Definí DATABASE_URL (rol dueño) para poder leer el catálogo de privilegios.');
+    process.exitCode = 1;
+    return;
+  }
+  const pool = new pg.Pool({ connectionString: url, max: 2 });
+  let resultado;
+  try {
+    resultado = await verificarMatrizPrivilegios(pool);
+  } finally {
+    await pool.end();
+  }
+  const { fallos, avisos } = resultado;
+  for (const a of avisos) console.log(`aviso: ${a}`);
+  if (fallos.length) {
+    console.error('\nPrivilegios incorrectos:');
+    for (const f of fallos) console.error(` - ${f}`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(
+    `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado hasta la migración0022; archivo exclusivo del dueño`,
+  );
 }
-console.log(
-  `privilegios correctos: ${Object.keys(ESPERADO).join(' y ')} tienen exactamente lo documentado en las migraciones 0008, 0009, 0014, 0016 y 0020`,
-);
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
+  await ejecutarCli();

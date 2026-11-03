@@ -4,16 +4,16 @@ import {
   type Indicadores,
   type IndicadoresFiltros,
   IndicadoresFiltrosSchema,
-  NOTA_METODOLOGICA,
   SEVERIDADES,
 } from 'contracts';
 import type { FastifyInstance } from 'fastify';
 import type pg from 'pg';
 import { z } from 'zod';
-import type { Dependencias } from '../app.js';
+import { type Dependencias, registroDe } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { categoriaPanel } from '../categorias.js';
 import { seleccionarParaExportar } from '../consultas.js';
+import { notaMetodologicaParaExportar } from '../nota-metodologica.js';
 import { condicionPublicado } from '../visibilidad.js';
 import { aFeature, vistaTecnica } from '../vistas.js';
 import { invalidarResumenEjecutivo } from './ejecutivo.js';
@@ -244,6 +244,11 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       zonaHoraria: dep.cfg.zonaHoraria,
     });
     const vistas = filas.map((f) => vistaTecnica(f, dep.cfg.urlPublica));
+    const nota = notaMetodologicaParaExportar(
+      q.data.categoria ?? 'inundacion',
+      filas.map((fila) => fila.categoria),
+      registroDe(dep),
+    );
     // Nunca un recorte en silencio: el archivo dice cuántos trae de cuántos, y la cabecera lo
     // avisa a quien descarga por programa sin abrirlo.
     const exportados = vistas.length;
@@ -260,7 +265,7 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       // Forma de ExportacionGeoJsonSchema.
       return {
         type: 'FeatureCollection',
-        nota_metodologica: NOTA_METODOLOGICA,
+        nota_metodologica: nota,
         generado_en: generadoEn,
         total,
         exportados,
@@ -302,14 +307,13 @@ export async function rutasAdmin(app: FastifyInstance, dep: Dependencias) {
       'fotos',
       // Columnas de la plataforma multicategoría (0.20.0), al final para no mover las de inundación.
       // En un reporte de otra categoría las columnas de inundación de arriba quedan vacías y lo
-      // propio viaja en `detalle` (JSON). `categoria` es siempre inundacion mientras sea la única
-      // categoría activa.
+      // propio viaja en `detalle` (JSON).
       'categoria',
       'subtipo',
       'detalle',
     ];
     const lineas = [
-      `# ${NOTA_METODOLOGICA}`,
+      ...nota.split(/\r\n|\r|\n/).map((linea) => `# ${linea}`),
       `# Generado ${generadoEn} · ${exportados} de ${total} reportes · CRS EPSG:4326`,
     ];
     if (truncado)

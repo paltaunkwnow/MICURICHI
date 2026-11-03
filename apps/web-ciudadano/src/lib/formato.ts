@@ -18,13 +18,16 @@ export function colorSeveridad(s: Severidad) {
   return COLORES_SEVERIDAD[s];
 }
 export function etiquetaProfundidad(p: ReporteFeature['properties']['profundidad_estimada']) {
+  if (p === null || !Object.hasOwn(ETIQUETAS.profundidad, p)) return 'Sin datos';
   const e = ETIQUETAS.profundidad[p];
   return `${e.corta} · ${e.rango}`;
 }
 export function etiquetaFrecuencia(f: ReporteFeature['properties']['frecuencia']) {
+  if (f === null || !Object.hasOwn(ETIQUETAS.frecuencia, f)) return 'Sin datos';
   return ETIQUETAS.frecuencia[f];
 }
 export function etiquetaCausa(c: ReporteFeature['properties']['causa_presunta']) {
+  if (c === null || !Object.hasOwn(ETIQUETAS.causa_presunta, c)) return 'Sin datos';
   return ETIQUETAS.causa_presunta[c];
 }
 export function etiquetaEstado(e: ReporteFeature['properties']['estado']) {

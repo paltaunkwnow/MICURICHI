@@ -219,7 +219,7 @@ describe('migración 0014 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0014' });
   }, 240_000);
 
   afterAll(async () => {
@@ -239,7 +239,7 @@ describe('mantenimiento: cuotas de días anteriores según la zona horaria de la
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
     vecina = await crearCuenta(ex, 'cuota-mantenimiento@test.local');
     // La base en UTC, como el contenedor de PostgreSQL: su `current_date` no es el día de la ciudad.
     await ex.ejecutar(`SET TIME ZONE 'UTC'`);
@@ -254,17 +254,17 @@ describe('mantenimiento: cuotas de días anteriores según la zona horaria de la
   });
 
   const sembrar = async () => {
-    await ex.consultar('DELETE FROM cuota_reporte_diaria');
+    await ex.consultar('DELETE FROM cupo_contador');
     await ex.consultar(
-      `INSERT INTO cuota_reporte_diaria (usuario_id, dia, reportes_n, fotos_n) VALUES
-         ($1, '2026-09-25', 3, 12), ($1, '2026-09-26', 1, 2), ($1, '2026-09-27', 1, 0)`,
+      `INSERT INTO cupo_contador (usuario_id, clave, ventana_inicio, n) VALUES
+         ($1, 'reportes:inundacion', '2026-09-25T04:00:00Z', 3), ($1, 'reportes:inundacion', '2026-09-26T04:00:00Z', 1), ($1, 'reportes:inundacion', '2026-09-27T04:00:00Z', 1)`,
       [vecina],
     );
   };
   const dias = async () =>
     (
       await ex.consultar<{ dia: string }>(
-        'SELECT dia::text AS dia FROM cuota_reporte_diaria ORDER BY dia',
+        `SELECT (ventana_inicio AT TIME ZONE 'America/La_Paz')::date::text AS dia FROM cupo_contador ORDER BY ventana_inicio`,
       )
     ).map((f) => f.dia);
 
@@ -277,7 +277,7 @@ describe('mantenimiento: cuotas de días anteriores según la zona horaria de la
       zonaHoraria: 'America/La_Paz',
       ahora: A_LAS_21_DE_LA_PAZ,
     });
-    expect(r.cuotasDiariasBorradas).toBe(1);
+    expect(r.cupoContadorBorrado).toBe(1);
     // Con `current_date` (UTC) se habría ido también la del 26, que es la de HOY en la ciudad, y
     // la vecina habría recuperado sus turnos a las 20:00.
     expect(await dias()).toEqual(['2026-09-26', '2026-09-27']);
@@ -302,22 +302,22 @@ describe('mantenimiento: cuotas de días anteriores según la zona horaria de la
     const opciones = { zonaHoraria: 'America/La_Paz', ahora: A_LAS_21_DE_LA_PAZ };
     await ejecutarMantenimiento(ex, opciones);
     const segunda = await ejecutarMantenimiento(ex, opciones);
-    expect(segunda.cuotasDiariasBorradas).toBe(0);
+    expect(segunda.cupoContadorBorrado).toBe(0);
     expect(await dias()).toEqual(['2026-09-26', '2026-09-27']);
   });
 
   it('sin `ahora` decide con el reloj de la base: la fila de hoy en la ciudad se queda', async () => {
-    await ex.consultar('DELETE FROM cuota_reporte_diaria');
+    await ex.consultar('DELETE FROM cupo_contador');
     await ex.consultar(
-      `INSERT INTO cuota_reporte_diaria (usuario_id, dia, reportes_n)
-       VALUES ($1, (now() AT TIME ZONE 'America/La_Paz')::date, 1),
-              ($1, (now() AT TIME ZONE 'America/La_Paz')::date - 1, 3)`,
+      `INSERT INTO cupo_contador (usuario_id, clave, ventana_inicio, n)
+       VALUES ($1, 'reportes:inundacion', (now() AT TIME ZONE 'America/La_Paz')::date::timestamp AT TIME ZONE 'America/La_Paz', 1),
+              ($1, 'reportes:inundacion', ((now() AT TIME ZONE 'America/La_Paz')::date - 1)::timestamp AT TIME ZONE 'America/La_Paz', 3)`,
       [vecina],
     );
     const r = await ejecutarMantenimiento(ex, { zonaHoraria: 'America/La_Paz' });
-    expect(r.cuotasDiariasBorradas).toBe(1);
+    expect(r.cupoContadorBorrado).toBe(1);
     const [hoy] = await ex.consultar<{ ok: boolean }>(
-      `SELECT dia = (now() AT TIME ZONE 'America/La_Paz')::date AS ok FROM cuota_reporte_diaria`,
+      `SELECT (ventana_inicio AT TIME ZONE 'America/La_Paz')::date = (now() AT TIME ZONE 'America/La_Paz')::date AS ok FROM cupo_contador`,
     );
     expect(hoy?.ok).toBe(true);
   });
@@ -325,17 +325,15 @@ describe('mantenimiento: cuotas de días anteriores según la zona horaria de la
 
 describe('esquema Drizzle de la cuota diaria', () => {
   it('declara cuota_reporte_diaria con PK (usuario_id, dia) y la FK en cascada a usuario', () => {
-    const tabla = esquema.cuotaReporteDiaria;
+    const tabla = esquema.cuotaReporteDiariaArchivada;
     expect(getTableName(tabla)).toBe('cuota_reporte_diaria');
     const cfg = getTableConfig(tabla);
     expect(cfg.primaryKeys.map((pk) => pk.columns.map((c) => c.name))).toEqual([
       ['usuario_id', 'dia'],
     ]);
     const fk = cfg.foreignKeys.map((f) => f.reference());
-    expect(fk.map((r) => [r.columns.map((c) => c.name), getTableName(r.foreignTable)])).toEqual([
-      [['usuario_id'], 'usuario'],
-    ]);
-    expect(cfg.foreignKeys[0]!.onDelete).toBe('cascade');
+    expect(fk.map((r) => [r.columns.map((c) => c.name), getTableName(r.foreignTable)])).toEqual([]);
+    expect(cfg.schema).toBe('resguardo_m10');
     const c = getTableColumns(tabla) as Record<string, { name: string; getSQLType(): string }>;
     expect(Object.fromEntries(Object.values(c).map((x) => [x.name, x.getSQLType()]))).toStrictEqual(
       {

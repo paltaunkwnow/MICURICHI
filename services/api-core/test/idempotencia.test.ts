@@ -56,7 +56,7 @@ afterAll(async () => {
 
 beforeEach(async () => {
   await pool.query('DELETE FROM idempotencia');
-  await pool.query('DELETE FROM reporte_inundacion');
+  await pool.query("DELETE FROM reporte WHERE categoria = 'inundacion'");
 });
 
 /**
@@ -89,7 +89,9 @@ function enviar(clave: string | undefined, extra: Record<string, unknown> = {}) 
 }
 
 async function cuantosReportes(): Promise<number> {
-  const r = await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM reporte_inundacion');
+  const r = await pool.query<{ n: string }>(
+    "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
+  );
   return Number(r.rows[0]!.n);
 }
 

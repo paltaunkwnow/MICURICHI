@@ -17,4 +17,12 @@
   otras categorías.
 - Contracción (M10) tras una ventana medida.
 
+**Adenda aceptada el2026-10-29 (ADR0026).** El usuario aprobó separar contracción física
+compatible de retiro HTTP en el [plan final M10](../sdd/2026-10-29-pruebas-historicas-vigentes/plan-cierre-m10.md).
+La ventana externa medida sigue siendo obligatoria antes de retirar clientes/PWA y sus
+contratos. El almacenamiento puede contraerse conservando HTTP tras cumplir ensayos,
+resguardo de cuota y reversa coordinada de código+esquema. Esta adenda modifica el alcance
+original; no afirma que la ventana esté medida ni que la contracción se haya ejecutado.
+Las operaciones reales requieren todavía su protocolo concreto aprobado.
+
 **Alternativas descartadas.** Tabla nueva y copia; renombrar sin vista; *big bang*.

@@ -4,6 +4,7 @@ import {
   REGISTRO_CATEGORIAS,
   type RegistroCategorias,
 } from 'contracts';
+import { avisosCategoria, SIN_DERIVACION_AUTOMATICA } from './avisos-categoria';
 import {
   etiquetaCausa,
   etiquetaFrecuencia,
@@ -75,7 +76,7 @@ export function presentarReporte(
     };
   const datos = validado.data as Record<string, unknown>;
   const subtipo = p.subtipo ? def.subtipos?.find((s) => s.valor === p.subtipo)?.etiqueta : '';
-  if (p.subtipo && !subtipo)
+  if ((p.subtipo && !subtipo) || ((slug === 'area_verde' || slug === 'basura') && !p.subtipo))
     return {
       ...base,
       aviso:
@@ -133,5 +134,12 @@ export function presentarReporte(
       };
     campos.push({ etiqueta: pregunta.etiqueta, valor: texto });
   }
-  return { ...base, subtipo: subtipo ?? '', campos, nota };
+  const { aviso, destinoPrevisto } = avisosCategoria(slug, p.subtipo);
+  if (destinoPrevisto) {
+    campos.push({
+      etiqueta: 'Destino previsto',
+      valor: `${destinoPrevisto}. ${SIN_DERIVACION_AUTOMATICA}`,
+    });
+  }
+  return { ...base, subtipo: subtipo ?? '', campos, nota, aviso };
 }

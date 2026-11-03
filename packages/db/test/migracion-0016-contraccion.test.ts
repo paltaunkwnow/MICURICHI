@@ -230,7 +230,7 @@ describe('migración 0016 desde cero', () => {
     // Hasta la última (incluida la 0020): los seeds de abajo pasan por `reporte` (via la vista) y por
     // `rellenarGeometriaPublica`, que desde la 0020 escribe en `reporte`. `columnaPublicarEn` lee la
     // tabla base, así que la comparación con la base migrada desde 0015 sigue valiendo.
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
   }, 240_000);
 
   afterAll(async () => {

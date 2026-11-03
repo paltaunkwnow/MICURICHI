@@ -2,7 +2,7 @@
 
 > **Manual operativo del repositorio.** Cualquier agente o persona que trabaje aquí lo lee completo antes de tocar nada.
 > **Estado:** Fase 1 — Local, en curso. Las cinco partes corren con los datos reales del municipio; queda el cierre (tarea 9: E2E, seguridad, resumen de fase). Estado exacto y cómo retomar: **`docs/TRASPASO.md`**; mapa de la app, últimas pruebas y pendientes: **`docs/revision/2026-10-03-mapeo-y-pruebas.md`**. Plan de producción en una VPS: `docs/revision/2026-09-26-plan-produccion-vps.md` (ADR 0006). **Misión 1 ampliada a plataforma multitemática** (ADR 0008–0022): decisiones, roadmap y planes en **`docs/arquitectura/14-decisiones-m0-y-plan-m1.md`**.
-> Última actualización: 2026-10-08.
+> Última actualización de estado: 2026-11-02.
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)
 
@@ -26,7 +26,19 @@
 
 **Solución.** **Plataforma municipal multitemática de reportes ciudadanos georreferenciados** (ADR 0008). El vecino marca dónde está el problema cerca de donde está, saca una foto con la cámara y carga los datos; el sistema publica el reporte como «NO SE HA VERIFICADO» tras una demora corta, lo valida, lo clasifica por severidad y lo muestra en un mapa cruzado con la división oficial (**distrito municipal** y **unidad vecinal**).
 
-**Categorías iniciales: Inundaciones, Baches, Áreas verdes y Basura**, sobre **un mismo núcleo** (ADR 0009): no hay sistemas clonados por categoría. La implementación es incremental (roadmap de `docs/arquitectura/14`): **Inundaciones es la categoría en funcionamiento**; las demás se activan por instalación cuando completan su fase. Mientras tanto, lo que este manual describe de reportes, severidad y cupos es el de Inundaciones.
+**Categorías iniciales: Inundaciones, Baches, Áreas verdes y Basura**, sobre **un mismo núcleo** (ADR 0009): no hay sistemas clonados por categoría. Las cuatro funcionan en la instalación local separada `curichi_multitematica` (ADR 0025); la base habitual sigue protegida. Las reglas comunes y los modelos específicos conservan sus decisiones del roadmap de `docs/arquitectura/14`.
+
+**Entrega local de cuatro categorías aprobada el 2026-10-22 (ADR 0025):** plan e inventario en
+`docs/sdd/2026-10-22-cuatro-categorias/plan.md`. Contracts 0.24.0 incorpora Inundaciones,
+Baches, Basura y Áreas verdes: 512 pruebas, tipos y build aprobados; OpenAPI sin cambios.
+La instalación separada `curichi_multitematica` quedó preparada y activada el2026-10-24:
+21migraciones,capas municipales,cuentas sintéticas y ACL correctas. Web y panel responden
+en http://127.0.0.2:4000 y http://127.0.0.2:4100; controles estáticos de consumidores aprobados.
+La entrega funcional local se verificó el2026-10-25:14/14 E2E, siete desktop y siete móvil,
+incluidos formularios/cámara sintética, mapa con marcador exacto M6, moderación/exportación
+y roles. El reinicio conservó los datos y la revisión independiente fue conforme. Ver
+`docs/sdd/2026-10-22-cuatro-categorias/informe.md`. `curichi` y `curichi_revision` permanecen
+protegidas. M9 y M10.1/RF-01/M10.2/M10.3 están cerrados en local; sus informes en `docs/sdd/` delimitan las pruebas. M10.3 verificó dos restauraciones reales21→21 y19→21, con cuatro bancos conservados. M10.4, consumidores internos compatibles, quedó cerrado en local el29/10 con confirmación independiente (DB361, API562/12SKIP, Node19 y formato/tipos aprobados): mantiene cuota antigua/limpieza/ACL, estructuras y HTTP. Informe: `docs/sdd/2026-10-28-consumidores-internos/informe.md`. M10.5 cerrado el29/10 con375/375 y confirmación independiente; informe en `docs/sdd/2026-10-29-pruebas-historicas-vigentes/informe.md`. Cierre final M10 implementado en pruebas aisladas (ADR0026), con API compatible y confirmación independiente en curso. La demo permanece en21; no hay operaciones reales autorizadas. Preparar para subir después; web prevista `micurichi.lat`, sin despliegue ahora. M10 completo, cierre humano de Fase1 y producción siguen abiertos. Estado vigente: `VentanaContexto.md`.
 
 | Usuario | Qué hace | Parte |
 |---|---|---|
@@ -169,7 +181,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 
 ### 4.8 Transversal — `packages/contracts` (custodia: Parte 3)
 
-- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio; desde 0.19.0, el **registro de categorías** (`src/categorias/`, ADR 0009), y desde 0.20.0, el filtro `categoria`, la forma nueva de `POST /reportes` y los cupos por categoría (M3). Versión actual: **0.20.0**.
+- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio; desde 0.19.0, el **registro de categorías** (`src/categorias/`, ADR 0009), y desde 0.20.0, el filtro `categoria`, la forma nueva de `POST /reportes` y los cupos por categoría (M3). Versión actual **0.24.0** (ADR 0025): cuatro definiciones reales, incluidas Basura y Áreas verdes con detalle/severidad v1. Suite del paquete 512/512, tipos y build aprobados; OpenAPI generado idéntico. Consumidores estáticos y entrega funcional en instalación separada verificados:14/14 E2E el25/10 y revisión independiente conforme. M9 y M10.1/RF-01/M10.2/M10.3 cerrados en local; M10.4 cerrado en local el29/10 con verificación independiente, sin cambio de contratos. M10.5 cerrado el29/10 con375/375 y revisión/verificación conformes. ADR0026 y plan final M10 implementados como código/pruebas aisladas con API compatible; confirmación independiente en curso, retiro HTTP diferido y operaciones reales pendientes. Los resultados históricos no se presentan como ejecuciones de hoy.
 - **Ninguna parte define un tipo de intercambio por su cuenta**: lo agrega aquí en una tarea que lo anuncie; la Parte 3 lo revisa.
 - Todo cambio de contrato sube la versión, se documenta en `packages/contracts/CHANGELOG.md` y regenera el OpenAPI (`pnpm --filter contracts build`; el CI comprueba que no cambie al regenerarlo).
 - El ETL importa `contracts` directamente; `dist/dominio.json` queda para consumidores en otros lenguajes.
@@ -258,14 +270,16 @@ El esquema y las migraciones son de la **Parte 4** (`packages/db/`); los contrat
 
 ### 7.1 Tabla `reporte` (esquema `public`; hasta la migración 0020, `reporte_inundacion`)
 
-**Migración 0020 (ADR 0010, 0011):** la tabla se renombró a `reporte` y sumó lo común de la plataforma multitemática. **`reporte_inundacion` es ahora una vista de compatibilidad** (`security_invoker`, `WITH CASCADED CHECK OPTION`) filtrada a `categoria = 'inundacion'`: el código de hoy lee y escribe por ella sin cambios, y un `INSERT` de otra categoría por la vista falla. Su lista de columnas se fija al crearla: una columna nueva en `reporte` exige recrearla. Vuelta atrás (solo con inundaciones): `packages/db/migraciones/reversas/`.
+**Esquema22 implementado en pruebas aisladas (ADR0026):** `reporte` conserva el núcleo común y guarda el dominio exclusivamente en `detalle`/`detalle_version`. La0022 retira la vista `reporte_inundacion`, su sincronización, las seis columnas de Inundaciones y cinco ENUM SQL; conserva ambos POST y los alias HTTP/CSV. Código y esquema deben actualizarse o recuperarse juntos, con consentimiento explícito y reversa condicionada. La demo `curichi_multitematica` sigue en21: esta documentación no autoriza migrarla.
+
+**Historia0020–0021 (ADR0010/0011):** la tabla se renombró a `reporte` y se mantuvo una vista de Inundaciones con `security_invoker` y `WITH CASCADED CHECK OPTION`. El trigger reconstruía el detalle desde las seis columnas. Las migraciones históricas y su cobertura se conservan; la reversa0022 admite las cuatro categorías y no se sustituye por la reversa0020.
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `uuid` PK | generado por el servidor |
 | `categoria` | `text` NOT NULL FK `categoria` | `DEFAULT 'inundacion'` (0020) |
 | `subtipo` | `text` null | validado por el contrato de la categoría |
-| `detalle` / `detalle_version` | `jsonb` NOT NULL / `smallint` NOT NULL | lo propio de cada categoría; CHECK objeto y tope de 8192 bytes. En inundación lo arma un disparador desde las seis columnas de dominio de abajo (`detalle_version = 1`) |
+| `detalle` / `detalle_version` | `jsonb` NOT NULL / `smallint` NOT NULL | autoridad del dominio en22; CHECK objeto/tope8192bytes y versión1, con restricción específica de Inundaciones. Sin trigger que lo sobrescriba |
 | `geom` | `geometry(Point, 4326)` | GIST; coordenada exacta (solo técnico/admin) |
 | `creado_en` / `actualizado_en` | `timestamptz` | |
 | `publicar_en` | `timestamptz` NOT NULL | `now()` + 60 s (1.º del día de la cuenta en la categoría) o + 240 s (2.º y 3.º), fijado en el INSERT con el contador `reportes:<categoria>` de `cupo_contador` (desde M3b; antes, `cuota_reporte_diaria`); `CHECK` entre `creado_en` y + 1 h. La visibilidad es el filtro `publicar_en <= now()` |
@@ -296,12 +310,12 @@ El esquema y las migraciones son de la **Parte 4** (`packages/db/`); los contrat
 
 La API expone `severidad_efectiva = COALESCE(severidad_manual, severidad_calculada)`.
 
-Desde la 0020, las seis columnas de dominio de inundación (`profundidad_estimada` … `agua_brota_sumidero`) admiten `NULL`, con dos CHECK de no contaminación: un reporte de inundación trae profundidad, frecuencia y causa; uno de otra categoría no trae ninguna de las seis (tiene que poner `causa_presunta = NULL` explícito, porque su `DEFAULT` es `'desconocida'`). Siguen siendo la fuente de inundación hasta la contracción (M10).
+Las seis filas de dominio de Inundaciones de la tabla anterior describen los **alias HTTP y campos del detalle**, no columnas físicas en22: `profundidad_estimada`, `frecuencia`, `causa_presunta`, `sumidero_cercano`, `sumidero_estado` y `agua_brota_sumidero`. La API los deriva de JSON y conserva sus NULL para otras categorías. Hasta21 eran columnas sincronizadas; esa garantía histórica se prueba en su versión, sin recrear objetos retirados en las fixtures actuales.
 
 ### 7.2 Tablas complementarias
 
 - **`reporte_foto`**: `id`, `reporte_id`, `objeto_key` (`<uuid>.webp`), `mime`, `bytes`, `ancho`, `alto`, `exif_sanitizado` (debe ser `true` para servirse), `subido_por` (FK `usuario`, `ON DELETE SET NULL`), `creado_en`. Toda foto nueva es **WebP** calidad 80, 1600 px por lado como máximo, sin metadatos; las `.jpg` anteriores se sirven como están. Una foto solo se asocia a un reporte de quien la subió, dentro de las 24 h; sin reporte, solo la ve quien la subió.
-- **`cuota_reporte_diaria`** (0014): `(usuario_id, dia)` PK, `reportes_n`, `fotos_n`, `actualizado_en`. Se incrementa de forma atómica dentro de la transacción del reporte (`INSERT … ON CONFLICT DO UPDATE … WHERE reportes_n < máximo RETURNING`); el número devuelto fija la demora. El mantenimiento borra los días anteriores. **Sin uso desde M3b** (la reemplaza `cupo_contador`); se retira en M10.
+- **Cuota histórica0014:** sin uso operativo desde M3b. En22 se conserva íntegra en **`resguardo_m10.cuota_reporte_diaria`**, con `(usuario_id, dia)` PK y `reportes_n`, `fotos_n`, `actualizado_en`; sin FK, acceso exclusivo del dueño, sin limpieza ni sobrescritura automática. Se retira la tabla pública; un archivo existente divergente bloquea la contracción. La reversa exige poder reconstruir la cuota y sus usuarios exactamente. El mantenimiento actual devuelve `cuotasDiariasBorradas=0`; `cupo_contador` mantiene los límites vigentes.
 - **`categoria`** (0020): catálogo `slug` PK (`snake_case`), `activa`, `orden`, `activada_en`, `activada_por`. Filas `inundacion` (activa), `bache`, `area_verde`, `basura`. Lo demás de cada categoría (textos, icono, colores, preguntas, severidad) vive en `contracts` (`src/categorias/`).
 - **`cupo_contador`** (0020, ADR 0017): `(usuario_id, clave, ventana_inicio)` PK, `n`, `actualizado_en`; contador genérico con el mismo *upsert* atómico (`INSERT … ON CONFLICT DO UPDATE … WHERE n < límite RETURNING n`) dentro de la transacción del reporte, una vez por regla de cupo. **En uso desde M3b**: `reportes:<categoria>` (3 por día y por categoría; ventana desde la medianoche de `ZONA_HORARIA`; el número devuelto fija la demora) y `fotos:cuenta` (12 por día, **global**, decisión del 2026-10-08). El mantenimiento borra las ventanas viejas.
 - **`idempotencia`** (0004): clave con prefijo de la cuenta (`<usuario_id>:<clave>`); la posición del dispositivo no entra en la huella.
@@ -683,4 +697,4 @@ Fase 1: teselas raster de OpenStreetMap **solo para desarrollo**, con atribució
 | 4 | Retención | `ip_hash` 30 días | Retención de datos personales y de fotos rechazadas; RPO y RTO con el municipio. |
 | 5 | Plazo de revisión de la bandeja | 24 h provisional | Plazo y quién atiende la alerta (bloquea la apertura). |
 | 6 | Pendientes del 2026-10-03 (`docs/revision/2026-10-03-mapeo-y-pruebas.md`) | — | D2: botón «Usar ubicación de prueba» visible en producción. D3: **decidido** el 2026-10-08, «v2 extendida» (ADR 0023, §9.1). D4: `panel_url` para quien entra por el túnel. D5: IP compartida por el túnel. D6: demora de publicación en 0 en el `.env` local. D7: columna `ultimo_reporte_en` que la 0016 no borró en la base local (`pnpm --filter db privilegios` en rojo). |
-| 7 | Plataforma multitemática (2026-10-07) | ADR 0008–0023 aceptadas; roadmap y planes en `docs/arquitectura/14`. Decidido el 2026-10-08: cupo de fotos **global** (12 por cuenta y por día, ADR 0017) y D3 (ADR 0023) | Decidido el 2026-10-08: `fusionado_en_id` en `PATCH /estado` acepta UUID o ID corto, como `POST /fusionar` y §7.3 (cambio de contrato de M3). Antes de M6–M8: nombre de la plataforma, campos y severidad de cada categoría, radio de recurrencia, derivación, técnicos por categoría, paleta final, ciclo de basura, cambio de categoría de un reporte. **Antes de activar Áreas verdes en producción:** privacidad de «persona en situación de calle» (ADR 0018). Detalle en `docs/arquitectura/14` §8. |
+| 7 | Plataforma multitemática (entrega local aprobada el 2026-10-22) | ADR 0008–0025 aceptadas; roadmap en `docs/arquitectura/14`. Fotos globales 12/día, D3 v2 extendida, ID corto o UUID. Basura/Áreas verdes: subtipos y preguntas del prototipo, severidad v1 y radio provisional 10 m aprobados para local; Point, estados comunes y resolución manual | Entrega funcional local M6–M8 verificada el25/10: contracts0.24.0, consumidores y14/14 E2E, incluido marcador exacto M6; revisión independiente conforme. M9 y M10.1/RF-01/M10.2/M10.3 cerrados en local; M10.4 cerrado en local el29/10. M10.5 cerrado375/375; ADR0026 y plan final implementados como código/pruebas aisladas; confirmación independiente en curso. La0022 usa JSON y archivo de cuota restringido; la demo conserva21 y no hay autorización operacional para migrarla. Retiro HTTP diferido; M10 completo/Fase1/producción pendientes. Nueva base `curichi_multitematica` preparada y con cuatro categorías activas el24/10; nunca migrar `curichi`/`curichi_revision`. Sin caducidad automática ni cambio de categoría. Parámetros municipales y puerta de privacidad de Persona (0018) pendientes antes de producción; sin integración municipal automática. Commit/push/PR autorizados al terminar y verificar por petición expresa del01/11; sin merge ni despliegue. Plan e inventario: `docs/sdd/2026-10-22-cuatro-categorias/plan.md`. |

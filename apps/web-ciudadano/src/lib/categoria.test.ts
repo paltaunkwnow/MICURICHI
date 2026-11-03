@@ -4,7 +4,7 @@ import type {
   RegistroCategorias,
   SlugCategoria,
 } from 'contracts';
-import { REGISTRO_CATEGORIAS } from 'contracts';
+import { crearRegistroCategorias, DEFINICION_INUNDACION, REGISTRO_CATEGORIAS } from 'contracts';
 import { describe, expect, it, vi } from 'vitest';
 import {
   activasDelRegistro,
@@ -267,10 +267,20 @@ describe('categorías activas contra el registro (CA2)', () => {
     expect(activasDelRegistro(['inundacion', 'area_verde'], registroDos)).toEqual(['inundacion']);
   });
 
-  it('con el registro real de la instalación solo queda Inundaciones', () => {
+  it('con el registro real quedan Inundaciones y Baches si ambas están activas', () => {
     expect(activasDelRegistro(['inundacion', 'bache'], REGISTRO_CATEGORIAS)).toEqual([
       'inundacion',
+      'bache',
     ]);
+  });
+
+  it('registrar Baches no la activa cuando falta en el catálogo de la instalación', () => {
+    expect(activasDelRegistro(['inundacion'], REGISTRO_CATEGORIAS)).toEqual(['inundacion']);
+  });
+
+  it('descarta Baches activa con un registro explícito sin su definición', () => {
+    const sinBache = crearRegistroCategorias([DEFINICION_INUNDACION]);
+    expect(activasDelRegistro(['inundacion', 'bache'], sinBache)).toEqual(['inundacion']);
   });
 });
 

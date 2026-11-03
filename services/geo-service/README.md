@@ -15,6 +15,17 @@ Fastify + PostGIS. Responde "¿en qué distrito y UV cae este punto?" y sirve la
 | `POST /geo/v1/capas/invalidar` | Vacía la caché tras activar una versión |
 | `GET /health`, `GET /ready` | |
 
+## Almacenamiento y fixtures del cierre M10
+
+El esquema 0022 conserva el dominio en `reporte.detalle` con `detalle_version = 1`;
+retira la vista `reporte_inundacion` y las seis columnas planas de Inundaciones.
+Los fixtures actuales insertan JSON con categoría explícita y los UPDATE que usaban
+la vista conservan su alcance mediante `categoria = 'inundacion'`. Las rutas y sus
+respuestas mantienen la compatibilidad de [ADR 0026](../../docs/decisiones/0026-contraccion-fisica-con-api-compatible.md).
+
+El fixture del plan conserva 4000 filas, coordenadas, estados y predicados. Su EXPLAIN
+comprueba el índice; no vuelve a medir M9 ni demuestra una migración de una instalación real.
+
 ## Huella de las capas y cachés
 
 La huella son los primeros 16 caracteres hexadecimales del SHA-256 del GeoJSON web que el servicio tiene en memoria (del que salen también las teselas). Cambia con el contenido, no con el nombre de la versión: si el ETL recarga la misma versión (actualiza `geo.capa_version.cargado_en`), el servicio lo ve en 10 s como máximo y reconstruye la capa; si la geometría cambió, cambia la huella.
@@ -42,8 +53,10 @@ rutas de cifras públicas trabajan por categoría ([ADR 0009](../../docs/decisio
 [ADR 0012](../../docs/decisiones/0012-compatibilidad-de-api.md) y
 [ADR 0013](../../docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md)): los agregados leen la tabla
 `reporte` filtrada por `r.categoria` y los puntos críticos leen `punto_critico.categoria`. El resto del
-servicio (resolver, capas y teselas) no depende de la categoría. El registro de `contracts` define hoy solo
-Inundaciones (`REGISTRO_CATEGORIAS`), así que es la única categoría que puede estar activa.
+servicio (resolver, capas y teselas) no depende de la categoría. Desde `contracts` 0.23.0,
+`REGISTRO_CATEGORIAS` contiene las definiciones reales Inundaciones y Baches, con radios de
+recurrencia 25 y 10 m respectivamente. Registrar Baches no activa una instalación habitual:
+también exige catálogo activo. Su activación M6 se limita al piloto local aislado.
 
 ### El parámetro `categoria`
 
@@ -83,23 +96,39 @@ todas con el mismo TTL (`GEO_CACHE_AGREGADOS_MS`) y la misma edad máxima (`GEO_
 Hay una para los agregados y otra para los puntos críticos. La consulta de categoría inválida se corta con
 400 antes de llegar a la caché, así que las claves son solo las de categorías activas y no crecen sin tope.
 
-### Probar con una categoría sintética (`dep.registro`)
+Al desactivar una categoría, la puerta de disponibilidad vuelve a rechazarla aunque su cifra
+siga en caché. El cálculo DBSCAN de su historial registrado sigue siendo independiente de esa
+actividad. Cambiar el catálogo en una prueba requiere invalidar el proveedor de disponibilidad;
+no implica invalidar las celdas de cifras ni cambiar sus TTL.
+
+Los puntos publicados usan el centroide de `geom_publico`, incluidas las consultas por `bbox`.
+Si falta esa geometría pública en un miembro, el grupo no se publica. `radio_m`, `diametro_m`
+y `advertencia_diametro` permanecen internos porque derivan de coordenadas exactas; no salen
+por esta ruta pública ni se añade identidad del autor o posición del dispositivo.
+
+### Pruebas con registro real y ausencia inyectada (`dep.registro`)
 
 `crearApp(dep)` recibe el registro como dependencia opcional (`DependenciasGeo.registro`). Sin él se usa
-`REGISTRO_CATEGORIAS`, que es lo que hace `src/servidor.ts`. Para ejercitar el camino multicategoría sin
-tocar `contracts`, una prueba arma un registro propio con `crearRegistroCategorias([...])`:
+`REGISTRO_CATEGORIAS`, que es lo que hace `src/servidor.ts`. Las pruebas M6 usan sus dos
+definiciones reales. Para conservar el negativo de Bache sin definición, se inyecta expresamente
+un registro de solo Inundaciones:
 
 ```ts
-const app = await crearApp({ pool, cfg, registro: miRegistro });
+const sinBache = crearRegistroCategorias([DEFINICION_INUNDACION]);
+const app = await crearApp({ pool, cfg, registro: sinBache });
 ```
 
-Como la actividad exige catálogo **y** registro, la prueba también marca la fila del catálogo
-(`UPDATE categoria SET activa = true WHERE slug = '…'`) y llama a `app.categorias.invalidar()` para que la
-caché de 30 s lo vea ya. Para tener puntos críticos de la categoría sintética llama a
-`recalcularPuntosCriticos(ex, radio)` de `db` con un radio explícito. El ejemplo es
-`test/no-contaminacion-categoria.test.ts`: reportes de inundación y de una categoría sintética en la misma UV
-y las mismas coordenadas; sin parámetro solo salen los de inundación, con la categoría activa salen solo los
-suyos, y una inactiva, desconocida o `todas` da 400.
+`test/no-contaminacion-categoria.test.ts` comprueba las cuatro combinaciones catálogo activo/inactivo
+y definición presente/ausente: solo activo + presente obtiene 200; las otras dan
+`400 CATEGORIA_NO_DISPONIBLE` en ambas rutas. Conserva los negativos de desconocida y `todas`,
+el valor por defecto Inundaciones, y conteos distintos con reportes superpuestos.
+
+La prueba llama a `recalcularPuntosCriticos(ex)` sin forzar un radio común: Bache guarda 10 m
+e Inundación 25 m incluso con Bache inactiva en el catálogo efímero. También verifica cachés
+MISS/HIT independientes, cierre de disponibilidad con caché caliente, centroides con jitter
+real, `bbox` público y exclusión de grupos sin geometría publicable. Cada caso restaura la
+actividad previa en PGlite; no activa ni modifica bases habituales. La verificación M6.3
+se ejecuta con ambas definiciones reales, sin sustituirlas por un fixture de categoría.
 
 ## Cabecera interna y cupo del resolver
 

@@ -1,4 +1,10 @@
-import { CONFIG_DOMINIO, ETIQUETAS, REGISTRO_CATEGORIAS } from 'contracts';
+import {
+  CONFIG_DOMINIO,
+  crearRegistroCategorias,
+  DEFINICION_AREA_VERDE,
+  DEFINICION_INUNDACION,
+  ETIQUETAS,
+} from 'contracts';
 import { type ComponentProps, createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -13,6 +19,7 @@ import {
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
 import { etiquetaCausa, etiquetaFrecuencia, etiquetaProfundidad } from '@/lib/formato';
 import { archivosDeLaApp } from '@/lib/fuente-para-pruebas';
+import { PRESENTADOR_AREA_VERDE } from './area-verde';
 import { filasDeDetalle } from './filas';
 import { PRESENTADOR_GENERICO } from './generico';
 import { PRESENTADOR_INUNDACION } from './inundacion';
@@ -78,12 +85,46 @@ function filasDeAntes(p: ReturnType<typeof reporteDePrueba>['properties']) {
 /** El contenido del `<dl class="kv">` del detalle. */
 const filasDelDetalle = (marcado: string) => /<dl class="kv">(.*?)<\/dl>/s.exec(marcado)?.[1] ?? '';
 
+describe('Áreas verdes: aviso y destino previstos en el detalle público', () => {
+  it('Persona conserva foto, preguntas y severidad recibida; al cambiar desaparece su aviso', () => {
+    const aviso =
+      'Esto no es una denuncia. Se deriva a Desarrollo Social para ofrecer ayuda, no a seguridad. No subas fotos donde se vea la cara de la persona.';
+    const reporte = reporteDePrueba({
+      categoria: 'area_verde',
+      subtipo: 'persona_situacion_calle',
+      detalle: { gravedad_declarada: 'descuidado', tamano: 'rincon' },
+      profundidad_estimada: null,
+      frecuencia: null,
+      causa_presunta: null,
+      severidad: 'critica',
+      severidad_calculada: 'critica',
+      fotos: ['/api/v1/fotos/sintetica.webp'],
+    });
+    const mostrar = () =>
+      html(conCiudad(conCategorias(['area_verde'], createElement(HojaDetalle, { reporte }))));
+    expect(mostrar()).toContain(aviso);
+    expect(mostrar()).toContain('<dt>Destino previsto</dt><dd>Desarrollo Social');
+    expect(mostrar()).toContain('No hay derivación municipal automática.');
+    expect(mostrar()).toContain('<dt>¿Qué tan grave es?</dt><dd>Se ve descuidado</dd>');
+    expect(mostrar()).toContain('<dt>¿Qué tamaño tiene?</dt><dd>Un rincón</dd>');
+    expect(mostrar()).toContain('Severidad crítica');
+    expect(mostrar()).toContain('/api/v1/fotos/sintetica.webp');
+    reporte.properties.subtipo = 'juegos_infantiles_rotos';
+    const cambiado = mostrar();
+    expect(cambiado).not.toContain(aviso);
+    expect(cambiado).toContain('<dt>Destino previsto</dt><dd>Parques y jardines');
+    expect(cambiado).toContain('/api/v1/fotos/sintetica.webp');
+    expect(DEFINICION_AREA_VERDE.slug).toBe('area_verde');
+  });
+});
+
 describe('el registro de presentadores', () => {
-  it('Inundaciones tiene el suyo; las demás usan el genérico', () => {
+  it('Inundaciones y Áreas verdes tienen el suyo; las demás usan el genérico', () => {
     expect(presentadorDe('inundacion')).toBe(PRESENTADOR_INUNDACION);
     expect(presentadorDe('bache')).toBe(PRESENTADOR_GENERICO);
     expect(presentadorDe('lo-que-sea')).toBe(PRESENTADOR_GENERICO);
-    expect(Object.keys(PRESENTADORES)).toEqual(['inundacion']);
+    expect(presentadorDe('area_verde')).toBe(PRESENTADOR_AREA_VERDE);
+    expect(Object.keys(PRESENTADORES)).toEqual(['inundacion', 'area_verde']);
   });
 
   it('una categoría que registra el suyo lo recibe, y el código común no pregunta por Inundaciones', () => {
@@ -135,6 +176,52 @@ describe('Inundaciones: el detalle y la tarjeta dicen lo de hoy', () => {
       etiquetaProfundidad('rodilla'),
     );
   });
+
+  it('un detalle válido tiene prioridad incluso cuando los tres planos son nulos', () => {
+    const r = reporteDePrueba({
+      profundidad_estimada: null,
+      frecuencia: null,
+      causa_presunta: null,
+      detalle: {
+        profundidad_estimada: 'muslo',
+        frecuencia: 'permanente',
+        causa_presunta: 'sumidero_tapado',
+      },
+    });
+    const marcado = html(conCiudad(createElement(HojaDetalle, { reporte: r })));
+    expect(marcado).toContain(etiquetaProfundidad('muslo'));
+    expect(marcado).toContain(etiquetaFrecuencia('permanente'));
+    expect(marcado).toContain(etiquetaCausa('sumidero_tapado'));
+    expect(marcado).not.toContain('Sin datos');
+  });
+
+  it.each([null, undefined, 'inventado', 12, false, {}])(
+    'un detalle malformado (%j) conserva los tres planos válidos',
+    (valor) => {
+      const r = reporteDePrueba({
+        detalle: { profundidad_estimada: valor, frecuencia: valor, causa_presunta: valor },
+      });
+      const marcado = html(conCiudad(createElement(HojaDetalle, { reporte: r })));
+      expect(filasDelDetalle(marcado).startsWith(filasDeAntes(r.properties))).toBe(true);
+    },
+  );
+
+  it.each([null, undefined, 'inventado', '__proto__', 12])(
+    'sin detalle ni planos válidos (%j) muestra ausencia y no inventa agua',
+    (valor) => {
+      const r = reporteDePrueba({
+        profundidad_estimada: valor,
+        frecuencia: valor,
+        causa_presunta: valor,
+        detalle: { profundidad_estimada: 'ajena', frecuencia: null, causa_presunta: false },
+      });
+      const marcado = html(conCiudad(createElement(HojaDetalle, { reporte: r })));
+      expect(filasDelDetalle(marcado).match(/<dd>Sin datos<\/dd>/g)).toHaveLength(3);
+      const tarjeta = html(createElement(TarjetaReporte, { reporte: r }));
+      expect(tarjeta).toContain('<span class="mini">Sin datos</span>');
+      expect(filasDelDetalle(marcado)).not.toMatch(/Rodilla|Tobillo|Muslo|Desconocida/);
+    },
+  );
 
   it('la tarjeta lleva la pastilla de profundidad corta y la de cantidad de reportes', () => {
     const r = reporteDePrueba();
@@ -235,9 +322,18 @@ describe('una categoría sin presentador propio usa el genérico (definición si
     );
   });
 
-  it('con el registro real una categoría sin definición no inventa filas', () => {
-    expect(REGISTRO_CATEGORIAS.obtener('bache')).toBeUndefined();
-    const marcado = html(conCiudad(createElement(HojaDetalle, { reporte: bache })));
+  it('con un registro explícito sin definición no inventa filas', () => {
+    const sinBache = crearRegistroCategorias([DEFINICION_INUNDACION]);
+    expect(sinBache.obtener('bache')).toBeUndefined();
+    const marcado = html(
+      conCiudad(
+        conCategorias(
+          ['inundacion', 'bache'],
+          createElement(HojaDetalle, { reporte: bache }),
+          sinBache,
+        ),
+      ),
+    );
     expect(filasDelDetalle(marcado)).not.toContain('Tamaño del bache');
     expect(filasDelDetalle(marcado)).toContain('<dt>Reportes</dt>');
   });

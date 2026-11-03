@@ -67,16 +67,14 @@ async function insertar(
     lat = -17.79,
   } = opts;
   await ex.consultar(
-    `INSERT INTO reporte_inundacion
-       (id, geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-        descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
-        severidad_version, estado, estado_motivo, fusionado_en_id, publicar_en)
-     VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326),
-        ST_SetSRID(ST_MakePoint(round($2::numeric, 5)::float8, round($3::numeric, 5)::float8), 4326),
-        'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica',
-        'Reporte de prueba para la resolución del ID corto', 'rodilla', 'ocasional',
-        'media', 6, 2, $4::estado_reporte, $5, $6,
-        CASE WHEN $7 THEN now() ELSE now() + interval '30 minutes' END)`,
+    `INSERT INTO reporte (id, geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo,
+       ubicacion_tipo, descripcion, categoria, detalle, detalle_version, severidad_calculada,
+       severidad_puntaje, severidad_version, estado, estado_motivo, fusionado_en_id, publicar_en)
+     VALUES ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326), ST_SetSRID(ST_MakePoint(round($2::numeric, 5)::float8, round($3::numeric, 5)::float8), 4326), 'distrito_municipal:01',
+       'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba para la resolución del ID corto',
+       'inundacion', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media',
+       6, 2, $4::estado_reporte, $5,
+       $6, CASE WHEN $7 THEN now() ELSE now() + interval '30 minutes' END)`,
     [id, lon, lat, estado, motivo, canonico, publicado],
   );
 }

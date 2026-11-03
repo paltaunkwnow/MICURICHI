@@ -1,429 +1,305 @@
-# VentanaContexto — continuidad de Mi Curichi
+# VentanaContexto — Mi Curichi
 
-Actualizado: **2026-10-18**. Punto de entrada para retomar en GPT Astra/Codex.
-Este archivo responde al pedido explícito de continuidad del usuario. Sustituye los estados
-temporales obsoletos, pero conserva los documentos y snapshots históricos como evidencia.
+Actualizado el2026-11-03, America/La_Paz. Hechos y controles contrastados, sin porcentajes
+inventados. Historial detallado previo conservado en .turbo/m10-4-2026-10-28/cierre/
+VentanaContexto-historial-completo-m10-4-20261029.md; estados antiguos no prevalecen sobre este.
 
-## A. Estado general del proyecto
+## A. Estado general
 
-**Objetivo.** Plataforma municipal de reportes ciudadanos georreferenciados para Santa Cruz
-de la Sierra: Inundaciones, Baches, Áreas verdes y Basura, con un núcleo común. Es un inventario
-de percepción ciudadana, no una medición ni un modelo hidráulico o de inversión.
+Plataforma municipal de reportes georreferenciados de Santa Cruz: Inundaciones, Baches,
+Basura y Áreas verdes sobre un núcleo. pnpm/Turbo/TypeScript, Next/React/MapLibre, Fastify,
+PostgreSQL18/PostGIS3.6, Drizzle, contracts0.24.0/Zod4, ETLTypeScript, Vitest/Playwright, Docker.
+Apps nunca conectan DB; API escribe reportes; geo solo lee; solo db migra esquema.
+M0–M5 y entrega local M6–M8 cerrados; M9 y M10.1/RF-01/M10.2/M10.3/M10.4 cerrados en local.
+**M10.4 cerrado29/10 con confirmación independiente y adenda documental conformes.**
+**M10.5 cerrado29/10 con375/375 y confirmación independiente CIERRE_APTO.**
+M10 completo, cierre humano de Fase1 y producción siguen abiertos.
+Rama codex/cuatro-categorias, HEAD59b80781030707b8c3334bfbfd40f80000c60a57; sin nuevo Git.
 
-**Estado confirmado por archivos y pruebas locales:** Inundaciones es la única definición real
-registrada en `packages/contracts/src/categorias/`. La migración 0020 siembra las otras tres
-categorías inactivas. Las comprobaciones de ejecución se limitaron a `curichi_e2e`; no se
-consultó la activación de las bases habituales.
-M0–M5 tienen cierre local documentado. El usuario aprobó M5 el 2026-10-15;
-implementación, revisiones y F4 terminaron con 132/132 E2E, sin regresiones abiertas.
-Cierre documental consolidado el 2026-10-17; ver informe M5 y controles finales.
-M6–M10 siguen pendientes.
-No se ha comprobado un despliegue público.
+## B. Completado y pruebas
 
-| Parte | Directorios | Responsabilidad y funcionamiento existente |
-|---|---|---|
-| 1 | `apps/web-ciudadano/` | Next.js, mapa público, detalle, cuenta, formulario de cuatro pasos, cámara, borrador y PWA. M4 incorpora categoría, preferencia y formulario adaptable. |
-| 2 | `apps/panel-admin/` | Bandeja y mapa, validación/rechazo/fusión/reclasificación, exportación CSV/GeoJSON, indicadores, ejecutivo, usuarios y capas. La interfaz multitemática corresponde a M5. |
-| 3 | `services/api-core/` | Fastify, único escritor de reportes; sesión/roles, validación, severidad, cupos, publicación diferida, fotos, idempotencia y auditoría. |
-| Transversal | `packages/contracts/` | Zod, tipos, dominio, registro de categorías y OpenAPI. Versión real **0.22.0**, ampliación de exportación M5.0 aceptada localmente. |
-| 4 | `packages/db/`, `services/geo-service/` | Migraciones/Drizzle, PostGIS, PIP, capas/teselas, agregados y puntos críticos por categoría. Geo-service es de lectura. Última migración en el repositorio: **0021**. |
-| 5 | `pipelines/geodata-etl/`, `infra/`, `e2e/`, `scripts/`, `.github/`, `docs/` | ETL de shapefiles, Compose/Caddy, operación, pruebas y CI. Los datos originales no se modifican. |
+- Cuatro categorías: docs/sdd/2026-10-22-cuatro-categorias/informe.md; contracts512,
+  web739/panel709 y14/14E2E (7desktop7móvil,0skip/retry/flaky) el25/10, con cámara/GPS
+  sintéticos, publicación/mapa/M6, detalle/UV/foto, moderación/exportaciones/roles y reinicio.
+  No equivale a repetir G1 histórico; no certifica hardware ni producción.
+- M9: docs/sdd/2026-10-25-medicion-cuatro-categorias/informe.md;1M/250kcada,71casos,
+  136sentencias/1200muestras,95tests herramienta/revisión conforme. Banco197700 retenido.
+  Medianas/máximos SQL secuenciales, no HTTP/p95/concurrencia; totalpipeline NO_MEDIDO.
+  SQL capturado antesM10.1, no atribuir tiempos al SELECT cambiado después.
+- M10.1/RF-01: docs/sdd/2026-10-26-contraccion-compatible/informe.md;562PASS/12SKIP,
+  75delta independientes, tipos/build/Biome0. Lectura JSON con alias/compatibilidad HTTP y
+  escritura dual; replay causa omitida reconoce claves históricas sin reescribirlas.
+- M10.2: docs/sdd/2026-10-27-respaldos-multitematicos/informe.md;23Node+23Bash propios e
+  independientes; solo mocks. DROP heredado retirado por M10.3, no reprogramarlo.
+- M10.3: docs/sdd/2026-10-27-restauracion-real-segura/informe.md;93casos verificados,
+  dos ensayos REALES21→21/19→21, GPG2.4.9/PG18.6, byteigualdad, negativos y rollbackSHA
+  en ambas copias.139SELECT propios independientes,15checkpoints(4heredados11nuevos).
+  Original cifrar_actual INCIERTO porGPGexit2/clave perdida queda intacto; hijo02 completo,
+  corrección Windows→POSIX homedir con gate propio. No repetir ninguno de sus operadores.
+  Evidencia .turbo/m10-3-2026-10-27/, resumen cierre/resumen-operacion-real.json;
+  cápsula8fuentes cierre/fuente-operacion/ conserva CI original,8/8quieta en revisiónM10.4.
+- **M10.4:** docs/sdd/2026-10-28-consumidores-internos/informe.md;942casos únicos PASS:
+  DB361/361 (350anteriores+11nuevos), API562PASS/12SKIP históricos, Node19/19.
+  Full DB limpio31archivos/307,90s; API256,72s. Suites ejecutadas28/10 y reutilizadas tras
+  formato por AST/SHA; no declararlas reejecutadas29/10. Typegraph6tareas, sintaxis/YAML/
+  secretos nuevos aprobados. Biome raíz15archivos exit0 confirmado independientemente.
+  Revisión producto sin hallazgos;76casos/186aserciones antiguos conservados; adenda5/5
+  cotejos/0hallazgos. No retiro de cuota/ACL/estructuras/HTTP ni migraciones nuevas.
+  Incidentes conservados: timeoutbeforeAllDB352PASS9autoSKIP→dirigido9/9→full361limpio;
+  BiomeNO_CIERREinicial→formato1test→ASTigual→CIERRE_APTOindependiente.
+  Artefactos originales102/102quietos,17otrasfuentes+dist6quietos. Pruebasdirigidas10/10
+  antes/después pertenecen a Hume; AST/Biome correctivos propios de Hegel.
 
-**Flujo funcional.** El mapa público no exige cuenta. Para reportar se inicia sesión, se pide
-ubicación dentro del flujo, se elige el punto y se completan los datos; la foto de cámara es
-opcional. El servidor comprueba ubicación y cupo, calcula severidad y distrito/UV por PIP.
-Tras la demora se publica como «NO SE HA VERIFICADO»; luego el técnico valida, rechaza,
-fusiona o reclasifica. La ubicación pública se degrada cuando corresponde y no incluye al autor.
-El ejecutivo consulta indicadores y mapa sin moderar ni exportar.
+## C. Trabajo actual — cierre final M10
 
-**Tecnologías verificadas en manifiestos/instalación local** (no son una recomendación de
-versiones ni una comprobación de servicios desplegados): Node 24.15.0, pnpm 12.4.1,
-Turborepo 2.10.12, TypeScript 5.9.3, Next.js 16.3.6, React 19.3.0,
-MapLibre 6.9.0, TanStack Query 5.102.8, React Hook Form 7.88.0,
-Tailwind 4.3.3, Lucide 1.45.0, Fastify 5.12.4, Zod 4.6.4,
-Drizzle 0.45.2, Sharp 0.35.4, mapshaper 0.7.61 y Turf 7.4.0.
-Compose declara PostgreSQL 18/PostGIS 3.6. Pruebas: Vitest 4.1.11,
-Playwright 1.63.0 y Biome 2.5.13. Fotos en disco o almacenamiento S3 compatible.
+**Objetivo vigente:** versión completa y funcional en local, preparada para subir después.
+El usuario eligió `micurichi.lat` para la web; pidió expresamente SIN DESPLIEGUE ahora.
+No comprobaron DNS/TLS/propiedad; VPS y dominio del panel siguen sin elegir.
 
-**Git.** Respaldo solicitado por el usuario, ya creado y subido:
+M10.5 CERRADO en local, informe docs/sdd/2026-10-29-pruebas-historicas-vigentes/informe.md.
+Baseline361; full propio e independiente375PASS/0SKIP,361casos anteriores+14nuevos,
+137aserciones y27hooks conservados; tipos/Biome/revisión conformes0regresiones.
+El full independiente terminó11:51:48.590Z antes de cuota; se recuperó sin repetir.
+Tipos/Biome propios15:49Z y dictamen15:56:13.465Z CIERRE_APTO. Fuente7congelada en
+.turbo/m10-5-2026-10-29/cierre/fuente-cierre/ ymanifest hermano;freezeSHA
+ e3b1fab1d993cd2dd5ed081e7a705bf9e16d542e12b6e8c7b83a08dbe33d174c.
+Su sello de22archivos/82links0rotos estáen cierre/sello-cierre.json; no reabrir ese cierre
+por las modificaciones posteriores aprobadas. Fuentes anteriores de M10.4 también congeladas.
 
-- Rama local y remota: `respaldo-claude`.
-- Rama actual: `interfaz-prueba`, creada el 18/10 desde `codex/panel-por-categoria` para
-  la publicación solicitada. Las ramas de M4/M5 y el respaldo se conservan.
-- Commit de respaldo/base anterior a esta publicación: `09930a381c41d918d263c2b11a573f838835dcc0`.
-  El commit actual de la rama se consulta con `git log -1`; no confundirlo con esa base.
-- Remoto: `https://github.com/paltaunkwnow/MICURICHI.git`.
-- El SHA remoto se comprobó tras el push; el respaldo contiene 818 archivos versionados.
-- El respaldo no incluye `.env`, dependencias, datos ignorados ni bases de datos.
-- **Autorización nueva y puntual del 18/10:** el usuario pidió subir todos los archivos
-  cambiados/modificados a una rama nueva y crear PR. «interfaz prueba» se normaliza a
-  `interfaz-prueba` porque Git no admite espacios. Autoriza commit/push de este estado y PR
-  hacia `main`, sin merge ni despliegue. Se mantienen excluidos secretos/datos/dependencias
-  y artefactos ignorados. La confirmación remota y el enlace del PR se entregan en la respuesta.
-- El árbol estaba limpio al iniciar la auditoría del 13/10; sus cambios fueron documentación.
-  La continuación de M4 se detalla en C. Los cambios posteriores a `09930a3` son precisamente
-  los que se consolidan en la publicación autorizada del 18/10; comprobar la rama remota/PR.
+### Aprobaciones y antes del trabajo final
 
-**Publicación confirmada el 18/10:** se creó y subió `interfaz-prueba`, con el commit de
-consolidación `82914f1ffb8fc2b0f77f2c51964c1c3c70427bf6` (121 archivos locales).
-PR **[#23](https://github.com/paltaunkwnow/MICURICHI/pull/23)** abierto hacia `main`, sin
-merge. Se verificó el mismo SHA en GitHub y el repositorio local; pre-commit/commit-msg
-aprobaron sin alterar contenido. Esta nota se registra después en un commit documental;
-para el último HEAD exacto consultar Git y la rama remota. El árbol se entrega limpio.
+- Humano: «Aprobar plan, decisiones e inventario»,call_f5f56593962e47059c6c9e9d984ac262.
+  Plan canónico docs/sdd/2026-10-29-pruebas-historicas-vigentes/plan-cierre-m10.md.
+ 92rutas iniciales y ajustes acotados AGENTS/CLAUDE. ADR0026 aceptada/materializada;
+ adendas0011/0012/13.3 yroadmap registran la separación DROPfísico/retiradaHTTP.
+ APIv1/ambosPOST/aliasCSV se conservan; retiroHTTP diferido sin inventar adopción/plazo.
+ Archivo de cuota dueño-only sin limpieza/sobrescritura; reversa condicionada y parada
+ de código+esquema. Código/pruebasaisladas aprobados, operaciones reales NO.
+- Humano: «Autorizar los cuatro ajustes»,call_f8747937ff1644a885382715293bcd8d.
+ docs/sdd/2026-10-29-cierre-m10/ampliacion-guardas.md añade3DB+1API: local/opciones.ts,
+ cli/verificar-privilegios.mjs,migracion-0012-foto-subido-por.test.ts yAPI/fotos-cuota-concurrencia-pg.test.ts.
+ **96rutas**. Preimágenes4iguales alF0original en f0/ampliacion-guardas.json, sin sobrescribirlo.
+- Nueva petición explícita: guía breve de demo/original. **ARRANCAR.md CREADO** en raíz;
+ f0/guia-arranque.json registra autorización documental y que no existía. No ejecuté sus
+ comandos ni conecté DB/Docker/HTTP. Explica iniciar demo4000/panel4100/Ctrl+C y cuentas
+ sintéticas; Mi-Curichi.exe ausente, fuente/compilador como referencia, NO usar su arranque
+ que automigra sobre curichi protegido. Durante M10 no saltar guardas de builds/versiones.
+ 48links locales de guía/plan/baseline verificados,0rotos. Documentación de producción/
+ TRASPASO con adendas29/10 distingue estado nuevo de la historia anterior.
 
-**Petición del 18/10 completada:** publicación del estado local y apertura del PR #23.
-La preparación M6 del 17/10 fue solo lectura de roadmap, prototipo y contratos; sus dos
-subagentes de diagnóstico terminaron por límite de uso, sin informes entregados ni cambios
-funcionales. No existe aún un plan M6 aprobado ni definición real de Baches. Tras publicar,
-retomar esa preparación y sus decisiones; no presentar M6 como implementada.
+Corrida final: docs/sdd/2026-10-29-cierre-m10/{plan.md,protocolo-verificacion.md,linea-base.md,
+ ampliacion-guardas.md,arbol-inicial.txt,archivos.txt}. Artefactos .turbo/m10-cierre-2026-10-29/.
+F0manifest1017archivos/92rutas/7nuevas,mismoHEAD59b80781030707b8c3334bfbfd40f80000c60a57,
+rama codex/cuatro-categorias. Anexo4 aparte. Captura antes de primer cambio funcional:
+baseline-fuentes-antes-liberacion.json,75rutasfuncionales iguales y nuevas ausentes.
+Cápsula previa compilada21 f0/artefactos-21/365archivos/1488325bytes+manifest; preservada
+sin ejecutarla. No acredita por sí sola dependencias/runner/código21 recuperables: el
+protocolo operativo futuro debe probarlos y no resolver bare imports hacia dist22 por error.
 
-## B. Trabajo completado y evidencia
+### Baseline final M10 — ya completada, no repetir
 
-### Desarrollo anterior, contrastado con el árbol
+Hegel entregó BASELINE_LIBERADA,0procesos propios, y cerró; evidencia baseline/linea-base.md
+ yresultado.json. Copia canónica rebasó links al scratch.
+API562PASS/12SKIPhistóricos de574;geo110PASS;Node19bancos/29respaldo/31ensayo/40local/
+95medicióninyectados;Bash33PASS tras denegaciónNT inicial resuelta por mismo comando
+escalado. Guardar intento previo. TiposAPI/geo/ETLexit0. DB375 ytypesDB REUTILIZADOS M105,
+NO nuevos:157fuentes/dependencias+6distidénticos, snapshots/fechas originales preservados.
+No PG/Docker/S3/HTTPoperacional ni operadores reales.12SKIP conservan exactamente susnombres.
 
-| Hito | Trabajo que ya existe | Evidencia principal |
-|---|---|---|
-| M0 | Ampliación de misión, arquitectura y decisiones aprobadas | ADR 0008–0023; `docs/arquitectura/14-decisiones-m0-y-plan-m1.md` |
-| M1 | Registro de categorías, slugs, política y resolución inicial | `docs/sdd/2026-10-07-registro-de-categorias/informe.md` |
-| M2 | Modelo híbrido, catálogo, tabla `reporte`, vista de compatibilidad y reversas | `docs/sdd/2026-10-08-base-multicategoria/informe.md` |
-| M3a | Lecturas y puntos críticos por categoría; índice 0021 | `docs/sdd/2026-10-08-nucleo-por-categoria/informe.md` |
-| M3b | Escrituras, cupo atómico por categoría, fotos globales, fusión y auditoría | `docs/sdd/2026-10-09-cupo-por-categoria/informe.md` |
-| M4 | Contrato 0.21, mapa/preferencia/URL, adaptadores de formulario, borrador 3, dos ajustes E2E y README | `docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md`; **cerrada localmente 2026-10-15** |
-| M5 | Contrato 0.22, panel por categoría, exportación/detalle/ficha/indicadores/ejecutivo y corrección E2E de enlace autorizada | `docs/sdd/2026-10-15-panel-por-categoria/informe.md`; 551/52 panel y 132/132 E2E, cierre documental 2026-10-17 |
+### Estado vigente y reparto — 02/11
 
-M2 ya midió **1.000.000 de reportes en total, 250.000 por categoría**, en una base efímera.
-La medición motivó el índice parcial `(categoria, creado_en DESC)` de la 0021. No repetir el
-experimento como si nunca hubiera ocurrido: consultar `medicion.md` de M2.
+**ÚNICO HEAVY: Erdos01a1a1f6-48d1-7113-bac2-ece901cf1d52**, vueltaSCAN01 del escáner.
+Carver cerrado temporalmente tras154unitpropios/9controlesadendaexit0; no más ejecución.
+Lease actual publicacion/lease-independiente-adenda-20261103.json, freeze1088 en
+publicacion/freeze-adenda-20261103.json SHA0229f0953708d8015adbbb88caaa919e12ff9762fe7401c911836283243c66f7.
+Autoriza sólo9cambios existentes (7fixturesSQL+scanner+CI) ytestscanner nuevo; el resto
+coincide con el freeze original. Ese freeze original funcional1087fuentes/dist está en
+publicacion/freeze-verificacion-20261102.json, SHA902d0bd17c9a13cd707ac53b981dfb1e1bd64faee04739f70d194e987bc74401.
+Son fuentes fijadas para verificar, NO un dictamen ni autorización operacional. Documentación
+de continuidad queda fuera de ese freeze para registrar los resultados. P5 liberó turno,
+CIMescalado0procesos propios y3965MiB libres; los autores no pueden ejecutar más controles.
+GEO Mendel01a19933-9ea4-7322-89ea-6dd9243ece2d completó cinco rutas:110/110PASS/0SKIP,
+tipos/ROOTBiome0,324aserciones/14hooks/68llamadasHTTP conservados,0regresiones; runtime
+quieto ybuildinnecesario. Antes propio55FAIL/54PASS/1autoSKIP por vista/planos retirados,
+todos recuperados después; no repetir. Artefactos geo/continuacion-20261102/,resultado.json,
+fuentes-finales.json yprocesos-fin-01-escalado.json:0procesos. FuenteGEOcongelada.
+Los demás actores no pueden ejecutar suites/builds/tipos hasta nueva cesión explícita.
 
-M3b registra históricamente contracts 292, db 294, api-core 436 + 12 omitidas, geo-service 71,
-web 486, panel 458 y ETL 21 pruebas; también PostgreSQL real y E2E 87/87.
-Son resultados de esa corrida, **no una ejecución nueva del árbol completo**.
-La línea base de M4 registra E2E **159 aprobadas y una omitida**, combinando evidencia previa
-y su continuación. No demuestra que la implementación posterior de M4 haya pasado E2E.
+**DB propia terminada y congelada:** Raman01a19932-641b-7912-b49d-4967f790fb93, cerrado.
+Full429/429PASS/0SKIP,375casos anteriores conservados/0regresiones; tipos/build/ROOTBiome0.
+33fuentes y80dist quietos, freeze-20261102.json yhandoff.md/json en parte4/continuacion-20261102/.
+MigraciónSHAa0a78ddded5783a27ead6d6bb7835eaa36f14121b02e655ca52a9f4a9267666f;
+reversa7324ec250842b35ea4dc8bde2506d2db2154cfc10288091ae0084fea70364e25;
+dist80manifiestofe4396d665c9d569e4e4d80e34b7e8aac5d63b0df1491cfcc1a80946af0b15f6.
+DDL-01..04 y DDL-03-R/05 resueltos y probados. Incluye ACL heredadas de cuota/esquema/
+funciones/vista, PK del archivo, CHECK efectivos/historial futuro/columnas y attacl.
+El full previo01 conserva321PASS/18FAIL/83autoSKIP porEACCES; esos101casos se recuperaron.
+No repetir medición propia terminada; confirmación independiente aún debe ejecutarse.
 
-### Auditoría de continuidad del 2026-10-13
+**API propia terminada:** Lorentz01a19931-5232-7c82-b473-3e1525b0d47f ejecutó GREEN50/50
+(40filtrados) yfull02:612PASS/12SKIP/624,0diferencias por caso, fuentes quietas. Full01
+conserva607PASS/5FAIL/12SKIP: cinco inspecciones físicas M6/M7/M8 aún esperaban columnasNULL.
+Se adaptaron a ausencia física/JSONsinagua, conservando HTTP/CSVNULL y detalles íntegros.
+Principal consolidó con harness existente typecheck-02/build-01/biome-03:exit0, sin editar
+producto. Evidencia parte3/continuacion-20261102/consolidacion-principal/resultado.json.
+28fuentes quietas y runtime-finalSHA7a8452e19e3b1b9406ba96b8193e51764075e5ed1cf65aa52f6892aaf60890b0.
+Primer preflight del principal omitió--runtime y rechazó el manifiesto viejo, sin hijo;
+corregido y registrado. No es cambio de fuente. No repetir full02 al recuperar un corte.
+Las12omisiones PG/S3 siguen sin prueba real; warningspg9 se conservan, sin atribuir causa.
 
-Se inventariaron los 818 archivos versionados, incluidos 161 Markdown antes de este cambio.
-Se leyeron los manuales y documentos de continuidad, decisiones, planes e informes relevantes,
-configuraciones y código de los flujos afectados. No se afirma haber leído cada archivo del
-repositorio íntegramente. Se contrastaron especialmente registro, visibilidad, cupo, formulario,
-mapa, panel ejecutivo, migraciones y operación.
+**P5 entregado, SIN HEAVY:** Epicurus01a19932-6502-7382-8b98-6e2178470381,15rutas exactas.
+RED heredados:respaldo1PASS21FAIL/local14FAIL/ensayo12FAIL;Bash1PASS6FAIL/33filtrados.
+NuevoREDP5-02:2FAILesperados; parche de checkpoints ya aplicable/aplicado sinheavy después.
+P5-01 índices clave/INCLUDE se corrigió ANTES del negativo específico: desviación de orden
+registrada honestamente. Retrospectivo final de preimagen21 aprobó1/1; los intentos previos
+que fallaron antes del oráculo se conservan y no son rojos previos a programar.
+P5-02:dos negativos RED y GREEN2/2, también dentro del ensayo25. Suites propias completas:
+Node279/279=bancos19+respaldo55+local54+ensayo25+legacy31+medición95; Bash47/47. YAML,
+sintaxisNode8antesformato/Bash2 yROOTBiomecontrol03exit0. No se repitieron por el corte.
+freeze-parcial-20261102-01/{source15-sha.json,handoff-parcial.json,procesos-fin-escalado.json}
+conserva15fuentes/copias/0procesos. EquivalenciaAST del formato y conservación exacta de
+casos quedan para Carver/Peirce; no inventar conformidad a partir del TSprinter diferente.
+Copia22 es la única que se recupera21→22; otras copias permanecen22 quietas. Oráculos
+posteriores aPOST22/POST21 deben acreditar el delta completo; no basta autorcomparación.
 
-| Comprobación ejecutada hoy | Comando y directorio | Resultado |
-|---|---|---|
-| Contracts | `./node_modules/.bin/vitest.cmd run --maxWorkers=1`, en `packages/contracts` | **20 archivos / 303 pruebas**, exit 0 |
-| Web | `./node_modules/.bin/vitest.cmd run --maxWorkers=1`, en `apps/web-ciudadano` | **45 archivos / 625 pruebas**, exit 0 |
-| Tipos de contracts | `./node_modules/.bin/tsc.cmd -p tsconfig.json --noEmit`, en contracts | Exit 0 |
-| Tipos de web | `./node_modules/.bin/tsc.cmd --noEmit --incremental false`, en web | Exit 0 fuera del sandbox |
-| Lint global | `./node_modules/.bin/biome.cmd check . --reporter=summary`, en raíz | Exit 1: un error de formato y seis advertencias preexistentes, detallados en G |
+**Independientes:** Carver01a19934-abac-7e90-92fc-895866a36a99 preparó controles/matriz:
+89preimágenes/87artefactos,1306casos anteriores incluidos12SKIP. Ya tiene lease expreso;
+debe ejecutar sus propias suites en serie y comparar por caso/aserciones, sin atribuirse
+los verdes de autores. Evidencia verificacion-independiente/continuacion-20261101/turno-final-20261102/.
+**Las10suites independientes terminaron1477PASS/0FAIL/12SKIP:** DB429, API612+12SKIP,
+geo110, Node279, Bash47. Todos exit0/0cambiosfreeze;1306casos anteriores conservados sin
+issues en comparacion-casos-final-01.json. Grafo6/6exit0,0cache, contracts/DBbuild incluidos.
+No repetirlos al recuperar. APIbuild01–03 no lanzaron compilador por PNPMrunstate/link/ruta
+larga del espejo; no son fallosTS. compilador-equivalencia-01.json prueba igualTS5.9.3/SHA
+ybodytsc. Pendiente ejecutar ese bodydirecto en espejo, terminarOpenAPI/sintaxis/YAML/
+Biome/scans/aserciones yhandoff. El03Nov14:11Z se confirmóCIM0,3218MiB y1087SHA0mismatch;
+principal renovó lease8h para Carver. No más preparación general ni repetirlos.
+El03Nov terminaron buildAPI/DB bodyoriginalTS5.9.3:exit0; sintaxis8Node+2Bash/YAMLexit0,
+Biomedelta75exit0. Biomeglobal conserva1error6warnings en contextoajeno. Escáneroriginal
+delta2/publicación9alertas: expresiones calculadas y URL sintéticas; no son secretos
+confirmados, pero bloquean el hook. Plan ampliacion-escaneo.md aprobado03Nov porrespuesta
+«Sí, corregir y verificar (Recomendado)»,call_30337537331d4cdea56061d9a224ca34.
+Scanner+testnuevo+CIstep:3rutas,2nuevasalalcance/98únicas, sin cambiosoperadoreshistóricos.
+CIM03Nov15:09Z0procesos y3025MiB. Carver fue cerrado temporalmente, fuentes/resultados
+conservados. Aristotle terminó98/98PASS,0caseDiff,ROOTBiome0,47bytesexactos/gitdiffcheck0,
+0hijos yleaseLIBERADO15:14:50Z; hecho.json/proof-final.json en formato-api-20261102/. Cerrado.
+Erdos raíz01a1a1f6-48d1-7113-bac2-ece901cf1d52 terminó y cerró: original150casos
+101PASS49FAIL, final154/154PASS0SKIP;9FPresueltos;877tracked/1038incluntracked0alertas,
+ROOTBiome/syntax/YAML/diffcheck0,7fuenteshistóricasquietas y0hijos. hecho.json en escaneo-20261103/.
+Hubo1alerta en su testnegativo, corregida construyéndolo enmemoria sin eximirlo; intento
+conservado. Carver ejecutó154/154propios exit0 en turno-final.../adenda-20261103/unit-scanner-01/;
+cuenta total disjunta1631PASS/12SKIP, NO sumar98formatter. Faltan últimoscontroles/adenda/
+escaneo yreview3rutas dePeirce; luego Kant privado21→RED→mínimos→GREEN con leaseexpreso.
+**Bloqueante nuevo03Nov15:37Z SCAN01P2**, revisión adenda-escaneo-20261103/revision.md:
+la excepción acepta prefijo `decodeURIComponent(url.password)` seguido de fallback||/??/+
+con literal sensible.154PASS no cubrían ese caso; no permiten cierre/publicación. Mismo
+scope3yaaprobado, sin nueva pregunta. Se cerróCarver tras9checks0y se reabrióErdos con
+leaseexclusivo paraRED3variantes→fixfinalexpresiónúnica→GREEN154+nuevos/scan0/Biome0.
+Peirceconfirmará sóloSCAN01ySHAfinales. No fuentehistórica ni otras reglas/exenciones.
+Peirce01a19938-e4dc-75f3-9de0-84c3787a07a2 revisa/audita sinheavy; API y adenda dosfixtures
+conformes estáticas. AdendaP5 congelado también conforme,0P1/P2 nuevos;15quietas,7AST
+equivalentes y3deltasfuncionales leídos, sin inventar preimagen completa anterior al formato.
+CasosF0noeliminados/E2E7cuerposquietos/config14; sin E2Ereal aquí. revision-independiente-20261101/.
+Sartre01a19936-8431-7492-83b3-c56304af6587 preparó releases/adaptador/supervisor privados,
+sinheavy ni operaciones. Driver-real29KB y otros artefactos están en propuesta-operacional-20261101/
+continuacion-20261102/; no tienen aún prueba/cierre que permita pedir la operación real.
+Revisión privada encontró OP01–03P2: checkpoint siempre falla, no se exige incremento de
+cuota y login21 legítimo rechazado por el oráculo. Sartre cerró sin escribir ni ejecutar;
+Kant raíz01a19ecc-2039-7611-b068-3e30cad34fb7 es ahora el único escritor de esa carpeta
+privada para negativos/parches, SIN HEAVY. No aplicar antes deRED ni pedir autorización
+operacional con esos defectos abiertos. Turno pesado actual indicado al inicio de esta sección.
+Aristotle raíz01a19ed0-ae74-7a23-bcee-51ab6d3a30ff terminó limpieza exacta47bytes de siete
+fixturesAPI en formato-api-20261102/: hecho-preparacion.json,7copiasSHAquietas,98casos
+baseline dirigidos reutilizados del fullindependiente y98posterioresPASS,0caseDiff;
+una suite serial7, ROOTBiome7, proofSQLtokens/bytes y0hijos. Carver confirma adenda yscans
+finales trasErdos. No repetirfull1477 por un blancoSQL demostrado. OpenAPIprincipal02:
+F0manifest/actual/salidadelbuildindependienteidénticosSHA5a089fbb8cb75a509b446c8f6a3725c94a7aa7e0cb6b83d537f029a3ddd4623a;
+primer control diofalse por copiaF0inexistente, corregido usandoSHAoriginal delmanifest.
 
-Incidencias del entorno: el primer Vitest de contracts dentro del sandbox terminó con `EPERM`
-al renombrar su caché, sin ejecutar pruebas. El typecheck de web dentro del sandbox dio errores
-de resolución de tipos de dependencias. Repetidos fuera del sandbox, con aprobación, pasaron
-sin modificar código ni instalar nada. No se ha aislado la causa interna del sandbox.
-Vitest de web avisa además sobre sintaxis ESM en `vitest.config.ts`; no impidió las pruebas.
+**Próximos pasos:** verificación/revisión/auditoría independientes y controles
+del grafo/OpenAPI/secretos/publicación. Preparar operador real ejecutable/revisado antes de
+su aprobación concreta; luego ensayo nuevo y actualización de demo14E2E/reinicio autorizados.
+Nunca conectar curichi/curichi_revision/postgres; bancos anteriores retenidos, sinDROP/cleanup.
+Usuario01/02Nov autoriza commit/push/PR AL TERMINAR, sin merge/despliegue ni operaciones
+reales implícitas. Rama codex/cuatro-categorias aún no publicada; remoto main3121a0 e
+interfaz-prueba59b8078 confirmados por ls-remote escalado. Simulaciónpush exit0 confirmó
+que puede publicar la rama, sin publicación real. Candidatos277/0rutas sensibles, todavía
+sin stage/commit/PR; escaneo de contenido pendiente. NuevoPR a main incluirá también
+la historia hastaM5 delPR23 aún abierto. No publicar cierre incompleto como terminado.
 
-No se repitieron hoy builds, OpenAPI, pruebas de backend/DB, E2E ni auditoría de dependencias.
-Las comprobaciones anteriores no sustituyen F4a ni certifican producción.
+## D. Actores/evidencia para recuperar
 
-Al terminar los documentos: `git diff --check` sin errores; enlaces Markdown locales de los
-cinco documentos modificados/creados comprobados, sin destinos ausentes; secciones A–G presentes.
-El escáner del repositorio dio **sin hallazgos**, incluyendo los nuevos archivos sin seguimiento
-mediante una adaptación solo en memoria de la selección de archivos y con salida de valores
-redactada. No se modificó el script. El estado Git confirma cambios únicamente en Markdown.
+M10.4 .turbo/m10-4-2026-10-28/:
+- Hume raíz01a183db-c09e-7da3-847a-d340b9caf078 CERRADO, parte4/ ycorrectivo
+  parte4/correccion-formato/. Freezeoriginal13SHA dc68903bad3e12c087625f12c363a85d9deaa511b4078da79ad1361028880cbc
+  se conserva; nuevo13SHA3e689ccd6654e5f59d6cb58eff2150d7bca4c63a1a8f7bab3c70e0f34ca950b7.
+- Popper raíz01a18501-51b8-7ff3-9d28-656469121bd6 CERRADO, parte5/;
+  freeze5SHA1984a1f69aa41814afb76f91ad536a5f2c7f749868265e52587355a689d9e417.
+- Hegel verificador01a18513-5f63-74a1-88ad-12681dd31b3d CERRADO, verificador/;
+  originalresultadoNO_CIERREintacto; correccion-formato/{adenda.md,resultado.json}CIERRE_APTO.
+  Corte por cuota ocurrió DESPUÉS de AST/Biome exit0 a29/10T01:08Z; consolidó29/10 sin
+  repetirlos. No reiniciar suites al recuperar; comparar SHA/evidencia guardada primero.
+- Godel revisor01a183ea-6cee-78d0-a488-0f23b7cf5b60 CERRADO, revision/;
+  adenda-cierre/{adenda.md,resultado.json}conforme5/5. Cuatro preimágenes de docs
+  recuperadas byteexactas aF0 en f0/recuperadas/; no existía necesidad de inventar estados.
 
-**Documentos creados:** este archivo y el resumen de auditoría M4 recuperada del transcript,
-`docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/auditoria-recuperada.md`.
-**Documentos actualizados:** `README.md`, `docs/README.md`, `ContextosySkills/README.md`.
-Se corrigen descripción/estado/cupos y se enlaza el nuevo punto de continuidad.
-No se editaron funcionalidades, contratos, migraciones, configuración ni manuales protegidos;
-no se eliminaron archivos.
+Leer informeM10.4/confirmación verificacion-formato.md/revision-cierre.md → planM10.5 →
+AGENTS/CLAUDE → Git/fuentes reales antes de empezar. F0nuevo por corrida; HEAD no es el antes
+real porque hay cambios locales de varias fases. No usar PIDs antiguos ni controles *.running
+como prueba de vida: revisar *.control y la identidad actual. No duplicar escritores.
 
-## C. Último punto confirmado — M5 cerrada en local, consolidación 2026-10-17
+## E. Restricciones y decisiones
 
-**Implementación M5.0–5.5, revisiones independientes y verificación funcional terminadas.**
-El control final de secretos/diff pasó el 17/10 y se registra en `verificacion.md`:
-sin hallazgos, 20 candidatos revisados (19 documentales y un fixture), diff exit 0;
-cotejo actual 150 P2/6 P3/34 E2E idénticos al estado probado.
-No repetir implementación, línea base ni grupos E2E ya completos.
+ADR0008–0025: núcleo+categorías, catálogo Y definición activa, sin categoría=inundación;
+Todas solo panel. URL→preferencia dispositivo→inundación→primeraactiva;3reportes/cuenta/
+categoría/día configurable,12fotosglobal,demora porcategoría. D3v2extendida,IDcorto/UUID,
+ÁreasverdesPoint/sincapamunicipal,Persona permanece con puerta deprivacidad producción.
 
-Plan aprobado: `docs/sdd/2026-10-15-panel-por-categoria/plan.md`.
-Informe y comandos: `informe.md`, `verificacion.md`; decisiones/correcciones en
-`implementacion.md` y `revision.md` de esa corrida. Rama `codex/panel-por-categoria`,
-HEAD `09930a3`; sin nuevos commits/push. Los cambios de M4/CSP se preservan.
+Nunca conectar/consultar/migrar curichi,curichi_revision ni postgres. No migrarE2E.
+Demo solo iniciar normal; nunca preparar/seed/load/migrar de nuevo. M9 y cuatro bancos
+M10.3 conservados; noDROP DATABASE, Dockerdown/rm/-v, stash/reset/clean/checkoutdestructivo.
+Sin limpiarlogs/cachés (usuario rechazó), instalaciones/descargas/npx, env/sistema/seguridad/
+potencia persistentes, cambios globales de roles/contraseñas. data/raw inmutable.
+.env nunca valores. Commit/push/PR ahora autorizados expresamente01/11 al terminar y verificar;
+sin merge ni despliegue. La publicación anterior por sí sola no daba ese permiso.
+Principalcoordina/docs; raíz nativo sinmodeloverride. No roles sdd-* sin invocar skill.
+Unwriter/carpeta y unheavyglobal, RAM1500MiBunit/SQL,2500antesnavegador con servicios vivos.
+M10.5 solo fixtures/PGlite y loopback propio original, sin DBreal/Docker/S3/HTTPoperacional.
+Pnpm C:/Users/HP/.local/bin/pnpm.exe --config.verify-deps-before-run=false; no npx/install.
+Fallo sandbox se escala por misma herramienta/comando, sin bypass.
 
-**Resultado funcional.** Disponibilidad y selector compartidos; una categoría oculta el
-selector y cero explícito impide consultas/datos residuales. URL y retorno conservan categoría
-más zona/filtros comunes; cambios reinician filtros propios, página, selección y pestaña
-sin mover centro/zoom. Bandeja, mapas, conteos, exportación, detalle/ficha, indicadores y
-fusión respetan el ámbito. «Todas» incluye historial técnico inactivo; el mapa ejecutivo
-compone solo ubicaciones públicas de categorías disponibles y declara muestra/parcialidad.
-No se comparan puntajes de modelos diferentes ni se cambia la severidad de negocio.
+## F. Instalaciones y conservación
 
-**Alcance propio:** 53 rutas P2 en `apps/panel-admin/`, seis P3 de contracts 0.22.0
-aprobadas en `ampliacion-exportacion.md` y un archivo P5 autorizado por separado:
-`e2e/tests/panel-mapa-reactivo.spec.ts`. Lista completa, incluidos documentos, en
-`archivos.txt`. No hay permisos para otras fuentes, nuevas specs E2E, backend/infra,
-activaciones, despliegue, instalaciones o manuales protegidos. El principal coordinó/documentó;
-los subagentes implementaron y verificaron. La excepción de programación directa fue solo M4.
+Demo histórica: web http://127.0.0.2:4000/ ypanel http://127.0.0.2:4100/,
+curichi_multitematica OID181316/21migs. ÚltimoHTTPverificado28/10T18:32:23Z5GET200,
+APIdegradadofalse/4slugs; no controlHTTPnuevo enM10.4 ni afirmar disponibilidad actual
+por el navegador abierto. Inicio28/10T15:14Zsesión7826/launcher28024; PIDs pueden reutilizarse.
+DistAPI RF01 de27/10T21:14:39.917Z; warningNextstandalone preexistente.
 
-| Control final | Resultado confirmado |
-|---|---|
-| Panel | 551 pruebas / 52 archivos; escritor y caché válida del grafo independiente |
-| Consumidores sin suite completa DB | 2087 aprobadas + 12 omitidas conocidas; 8/8 tareas, cinco de caché |
-| DB geoespacial dirigido | 20/3, ejecución nueva; no se repitieron todas las migraciones |
-| Tipos de consumidores | 9/9 tareas, ocho de caché; grafo normal con dependencias |
-| OpenAPI/builds | 0.22.0 regenerado idéntico; panel/web aprobados |
-| Biome P2/E2E | Sin diagnósticos; E2E tipos y Biome antes/después del ajuste |
-| CA11 DOM real | 12/12, escritorio/móvil, Chromium; lector auditivo no verificado |
-| E2E producción aislada | G1 47, G4 43, G5 18 y fronteras 24: **132/132**, sin retries usados/flaky/skips en resultados vigentes |
-| Comparación E2E | Mismos 132 nombres/proyecto que FB; ningún caso perdido; CA10 oculto pasó primer intento |
-| Integridad | 150 P2 y seis P3 congelados iguales; entre 34 E2E solo delta autorizado |
-| Limpieza | Cero residuos propios/pesados; puertos 3000/3001/3002/3100 libres; PostGIS/MinIO healthy |
+M10.3 servidor7688456033622585387,dueñocurichi,bancosretenidos:
+curichi_sdd_m10_20261027_actual OID205892 y copia_actual207565 (21migs/4reportes1porcat);
+curichi_sdd_m10_20261027_pre0020 OID209239 (19migs/1flood) y copia_pre0020 OID210842(21).
+Sus cuatro Clients cerraron tras139SELECT; no repetir restauraciones/cifrado/negativos.
+M9 curichi_sdd_m9_20261025 OID197700,1M/250kcada,21migs16DM576UVreales,sinmanzanas.
 
-**Rojo de enlace resuelto con autorización.** G4 original dio 42/43: el popup abría, pero
-la expectativa antigua rechazaba los parámetros `categoria`/`volver` requeridos por CA2.
-El usuario aprobó «Sí, ajustar y verificar esa expectativa», con archivo/motivo/riesgo en
-`ampliacion-e2e-mapa.md`. Sagan reprodujo el rojo, cambió únicamente ese bloque por
-validaciones exactas de origen/ID/categoría/retorno/UV y pasó focal 1/1 y tipos/Biome.
-Tarjeta visible, fila resaltada, UV y demás casos permanecen intactos. Cicero revisó el patch
-conforme y repitió **G4 completo 43/43**, conservando los intentos rojos, sin rebuild de producto.
-Fuente final E2E SHA: `90390a7e5217dda2171d03425232fa9ce3dd54d01da45699dc6c128b7a8b7da1`.
+## G. Pendientes y límites
 
-**Evidencia ignorada preservada:** `.turbo/m5-2026-10-15/arbol-antes.json` guarda los
-842 hashes originales y `inicial/` sus copias. Fuente congelada:
-`m5-5-inventario-final-1792170440552.json` (150 entradas P2, 53 propias).
-Revisión Newton `revision-final-m5.md` y auditoría Feynman `auditoria-final-cierre.md`:
-CONFORMES. F4 Cicero en `f4/verificacion-retoma.md`; comparación definitiva
-`f4/e2e-comparacion-post-expectativa.json`, hashes `integridad-150p2-6p3-post-g4-final.json`,
-limpieza `g4-post-limpieza-final.json` y `g4-post-docker-final.log`.
-Entrega del escritor P5 en `f4/correccion-enlace/entrega.md`, con logs antes/después.
-DOM en `.turbo/f4/ca11/ejecuciones/2026-10-17T01-00-37-182Z-ddc47492/`.
-El grafo inicial interrumpido por timeout del arnés y el fallo de resolución ESM del arnés
-DOM se preservan como intentos incompletos; sus continuaciones pasaron sin cambiar producto.
+**Retomar sin reiniciar:** DB/API/GEO/P5 terminaron sus suites propias. No repetirlas.
+Recuperar primero controles actuales del turno final de Carver yformato-api-20261102;
+Erdos tiene el únicoheavy para SCAN01; después Carveradendaacotada y Kant privado.
+No inferir libre por ausencia de `.running`; autorP5 dejó handoff y0procesos. P5-01/02 tienen
+pruebas propias posteriores aprobadas; falta dictamen independiente de delta/formato.
+Carver ejecuta confirmación independiente con fuente congelada y compara1306
+casos históricos (incluidos12SKIP), aserciones/SHA; mismo transporte/entorno, sin operaciones.
+Kant continuará correcciones del operador privado de Sartre para una aprobación concreta.
+No pedir operaciones con su borrador anterior NO_EJECUTABLE ni anunciar PR antes del cierre.
 
-**Rojo ajeno y límites.** Lint conserva un error/seis avisos; audit conserva tres high,
-diez moderate/una low, ninguna crítica. Doce omisiones PG real/S3 no son PASS. No se
-certifican dos categorías reales ni lectura auditiva ni imágenes habituales Docker/Caddy.
-`contracts` 0.22.0 amplía exportación; los esquemas generales público/técnico siguen con
-validación anterior y deben reevaluarse al planear datos reales de Baches. Solo Inundaciones
-está registrada realmente; no activar otra por haber terminado el panel.
-
-**Operación.** E2E solo `curichi_e2e` existente, migración 0021 comprobada en lectura,
-sin migraciones/seeds, roles restringidos y fotos sintéticas de
-`.turbo/cierre-m4-2026-10-14/fotos-e2e`. Chromium físico existente con `channel: chromium`
-y variable únicamente de proceso. No se tocó `curichi`/`curichi_revision`, `.env`, imágenes
-habituales, volúmenes ni túneles. RAM medida: 1500 MiB estáticos/2500 MiB navegador;
-un pesado y un worker. Limpieza por identidad/fecha de procesos propios, sin matar Node ajenos;
-`HPMediaNetwork.exe` anterior se excluyó como ajeno. La incidencia de sincronización automática
-pnpm al principio de M5.0 se declara en implementación; el lockfile quedó intacto y las
-corridas posteriores usaron `--config.verify-deps-before-run=false`.
-
-**Responsables al cerrar:** Cicero `01a14755-65a7-7c91-8f44-bbe834a708ed` completó el
-G4 posterior y sus comprobaciones físicas, pero ya no existe tras el corte. Boole
-`01a149be-a1e8-7312-9d9d-55fb0d52b057` completó secretos/candidatos/diff y cotejo actual,
-sin repetir suites/E2E; entrega en `f4/cierre-documental-2026-10-17/entrega.md`.
-Su dictamen es **CONFORME** en ese alcance y liberó el turno; no quedan tareas de M5
-pendientes de un agente. El scanner conserva sus límites; ver `verificacion.md`.
-Sagan y Feynman finalizaron y se cerraron. Godel liberó su fuente P2 al entregar.
-No asumir agentes activos después de un corte:
-consultar los archivos físicos. El siguiente trabajo es preparar M6; no iniciar código sin plan
-aprobado ni reabrir Q1–Q3 de M5.
-
-### Antecedente terminado: cierre de M4
-
-**M4 cerrada y verificada en local.** Leer primero el informe de
-`docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/informe.md` y
-`verificacion-ejecucion.md`. Al cerrar M4 Git estaba en `codex/cierre-m4`, HEAD `09930a3`;
-no se hicieron nuevos commits/push. La foto anterior a M4 y los hashes iniciales se conservan.
-
-El usuario autorizó que el principal implementara/probara tras los límites de los agentes.
-También autorizó runner (consulta desde postgres), textos de ayudas E2E y expectativa HTTP
-separada de cuenta-ciudadana. Se corrigieron H1–H7 en dos vueltas y se documentó H8:
-validación completa del detalle en pruebas, registro especial por identificador, subtipos/lugar
-por defecto, fixture coherente, carrera de etiquetas incluida su integración real, cupo sin
-máximo supuesto y región viva estable. No se activaron categorías nuevas.
-
-**Resultados confirmados:**
-
-- Web **645 pruebas / 49 archivos**. Panel **458 / 40**. Suites combinadas de consumidores
-  **2228 aprobadas + 12 omitidas conocidas**, identificando caché de Turbo donde corresponde.
-- Tipos consumidores 9/9 y builds 7/7; web/panel repetidos tras los cambios finales.
-- OpenAPI regenerado idéntico; Biome web/E2E sin diagnósticos. Global conserva un error y
-  seis avisos ajenos. Escáner incluidos archivos nuevos sin hallazgos.
-- E2E G1 47, G2 31, G3 57 estables + una aprobada tras retry y una omitida, G5 18 y recorrido 5:
-  **159 culminan aprobadas + 1 omitida**. Cámara móvil intermitente en primer intento;
-  aislada después, sin retries, 2/2. No afirmar cero intermitentes en toda la corrida.
-- R3 DOM PASS en Chromium con componente real: mismo nodo vacío→aviso→cambio→limpieza;
-  al montar con aviso previo también comienza vacío. Lector de pantalla real no verificado.
-
-**Corrección adicional Zod/CSP aprobada y terminada:**
-`docs/sdd/2026-10-15-csp-zod/`. Los builds de producción detectaron cinco eventos eval de la
-sonda capturada de Zod, también en el panel intacto. Se crearon solamente
-`apps/{web-ciudadano,panel-admin}/src/instrumentation-client.ts`, con
-`z.config({ jitless: true })`, sin bajar CSP. Implementador distinto corrió preflight/post
-suites, tipos y builds; revisión independiente sin bloqueantes. Después el principal repitió
-**G5 producción 18/18 y recorrido producción 5/5**, ambos sin reintentos. G1–G3 anteceden a este
-ajuste; no se afirma una segunda ejecución de todos los grupos. Riesgo de rendimiento de
-validación cliente sin benchmark específico; backend intacto.
-
-Las E2E usaron exclusivamente `curichi_e2e`, roles restringidos y fotos sintéticas temporales.
-No se migró ni resembró, no hubo conexiones a `curichi`/`curichi_revision`, no se editaron
-secretos/.env. Se cerraron todos los procesos propios; puertos 3000/3001/3002/3100 libres;
-PostGIS/MinIO siguen healthy. Imágenes habituales y túneles no se modificaron.
-
-**Sin ejecutores pesados activos ni aprobaciones de M4 pendientes.** Los límites previos,
-intentos por sandbox, RAM y configuración temporal constan en las evidencias; no rehacer M4.
-Logs/JSON/harness en `.turbo/cierre-m4-2026-10-14/` (ignorados). Arbol inicial de 818 archivos
-allí, no sobrescribirlo. Listas de archivos de M4 y CSP en sus corridas. Las revisiones recuperadas
-son históricas; para el dictamen final usar informes más recientes.
-
-## D. Trabajo pendiente, en orden
-
-1. **Preparar M6, Baches:** concretar campos, severidad, radio y compatibilidad de respuestas
-   generales antes de activar datos reales; presentar plan verificable para aprobación.
-   M5 está terminada: no repetir implementación, línea base ni E2E sin motivo nuevo.
-   La prueba de cambio real entre categorías y cualquier ampliación fuera del paquete
-   se incluyen explícitamente en ese plan. Un escritor y un pesado a la vez.
-2. Mantener los rojos ajenos visibles: error/seis avisos Biome y las mismas tres high de
-   source-map-js/sharp/next (auditoría actual sin críticas). No arreglar dependencias fuera
-   de alcance. AGENTS/CLAUDE conservan versión 0.20; código 0.22, edición aún restringida.
-3. M6 Baches, M7 Basura, M8 Áreas verdes: definir campos, severidad, radio y demás decisiones
-   de doc 14 §8 antes de activar. Cambio real entre categorías en navegador diferido a M6.
-   Privacidad de persona en situación de calle es puerta de producción, ADR 0018.
-4. M9 rendimiento con cuatro definiciones reales; M10 contracción de compatibilidad.
-5. Producción: decisiones municipales, hosting/mapas/respaldos y restauración, privacidad,
-   lectores de pantalla reales e imagen de despliegue. Fase aparte sin autorización para desplegar.
-
-La spec nueva E2E de cambio real y los manuales protegidos siguen sin autorización de edición.
-El usuario autorizó ahora la publicación puntual del estado existente en `interfaz-prueba`
-y su PR; esta autorización no aprueba todavía el plan ni los campos/reglas de M6.
-
-## E. Decisiones técnicas y restricciones
-
-- Núcleo único y definiciones por categoría (ADR 0009); modelo híbrido D (0010),
-  `reporte` + catálogo + subtipo + `detalle` JSONB versionado. Mantener expand/contract (0011).
-- Una categoría está disponible si la habilita el catálogo **y** existe su definición.
-  Sin `categoria`, API = inundación; `todas` solo en rutas del panel (0012).
-- Un mapa, cambiando datos de la fuente para evitar clusters mezclados (0013).
-- Preferencia local del dispositivo: `micurichi.mapa.categoria = {v:1, slug}`.
-  URL válida/activa → guardada → inundación → primera activa (0014/0015).
-  Aclaración aprobada de M4: `?categoria=` se conserva solo con dos o más categorías activas.
-  El formulario no escribe la preferencia del mapa.
-- Al cambiar categoría se conservan centro, zoom y zona; se reinician filtros específicos
-  y selección (0016). No pedir cámara/GPS al cargar la página.
-- Cupo configurable de reportes por cuenta/categoría/día (valor inicial 3),
-  fotos globales por cuenta/día (12), contador atómico y demora por categoría (0017).
-- «Persona en situación de calle» se mantiene según lo aprobado; la privacidad de su
-  publicación exige resolver la puerta específica antes de producción (0018).
-- Áreas verdes: Point, sin dependencia de capa municipal (0019/0020).
-- Formulario común + declarativo/componentes registrados (0021), icono y acento por categoría
-  (0022); inundación conserva severidad v2 extendida (0023).
-
-**Restricciones operativas vigentes:**
-
-- No tocar `curichi` ni `curichi_revision`. No migrar la pila habitual para comprobar M4.
-  `curichi_e2e` solo en la ventana E2E autorizada; PostgreSQL de pruebas en bases efímeras
-  `curichi_sdd_*`. Los estados históricos 0009/0021 no se han reconsultado hoy.
-- Nunca `docker compose down`, `rm` o `-v` sobre la pila; no reset/clean/stash/checkout
-  destructivo. `data/raw/` inmutable. No imprimir `.env` ni valores de secretos.
-- No descargas/instalaciones ni variables persistentes de usuario/sistema sin autorización.
-- Un escritor por carpeta; no editar fuera del alcance aprobado. AGENTS/CLAUDE requieren
-  autorización específica. El principal coordina desarrollo; no sustituye a los implementadores.
-- Publicación puntual autorizada el 18/10 en `interfaz-prueba` con PR hacia `main`.
-  No autoriza merge, despliegue ni publicaciones posteriores ajenas a esta entrega.
-
-## F. Cómo recuperar y mantener el contexto
-
-**Orden de lectura:** este archivo → `AGENTS.md` y `CLAUDE.md` → informe/verificación M5,
-su plan y ampliaciones → roadmap 14 §8 y ADR → evidencia `.turbo/m5-2026-10-15/` →
-informe final de M4 como antecedente → código/diff real. No atribuir el cierre M4 a M5.
-`docs/TRASPASO.md` y snapshots 1–5 son antecedentes; sus ramas/tareas pueden estar superadas.
-
-Comandos iniciales de lectura, desde la raíz:
-
-```powershell
-git status --short
-git log -1 --oneline
-git show-ref --heads
-git for-each-ref refs/sdd --format="%(refname) %(objectname)"
-Get-Content docs/sdd/2026-10-15-panel-por-categoria/informe.md
-Get-Content docs/sdd/2026-10-15-panel-por-categoria/verificacion.md
-Get-Content docs/sdd/2026-10-15-panel-por-categoria/archivos.txt
-```
-
-Foto local de M4: `refs/sdd/mapa-y-formulario-por-categoria` =
-`48b1e408ea57ef924e94625f1d720bb98c6ae6cf`. Las fotos antiguas no incluían todos los archivos
-entonces sin seguimiento; combinar diff con hashes de `arbol-inicial.txt` y `archivos.txt`.
-El commit de respaldo consolidó el árbol completo y no sustituye esa línea base. No hacer reset
-a una foto SDD. Las refs SDD locales no se consideran respaldadas por el push de una sola rama.
-
-Para repetir las pruebas acotadas, usar los comandos de B en sus directorios. No instalar
-dependencias como respuesta automática a un fallo del sandbox. Para la verificación completa,
-seguir los comandos de la corrida y `--concurrency=1`, midiendo memoria antes.
-
-**Chromium histórico:** la instalación de Claude virtualiza AppData; el diagnóstico previo
-identificó error SxS 14001/`spawn UNKNOWN`. El usuario autorizó únicamente, en comandos de
-verificación, `PLAYWRIGHT_BROWSERS_PATH` apuntando a
-`C:\Users\HP\AppData\Local\Packages\claude_pzs8sxrjxfjjc\LocalCache\Local\ms-playwright`.
-Verificar que sigue existiendo antes de E2E; establecerla solo en el proceso y restaurar su
-valor al terminar. No quitar `channel: 'chromium'`: la cámara simulada depende de ese navegador.
-Ese diagnóstico es antecedente; el 15/10 Chromium arrancó desde Codex y G1 aprobó sus 47 casos.
-
-**Política actual de continuidad (pedido del usuario del 2026-10-13):**
-
-- Actualizar físicamente este archivo después de hitos, decisiones, antes de cambiar de fase,
-  antes de terminar una sesión extensa y ante compactación anticipable.
-- Guardar controles preventivos periódicos si no existe un indicador fiable de contexto.
-  No inventar porcentajes ni afirmar control sobre compactaciones automáticas.
-- Separar hechos ejecutados, resultados históricos, hipótesis y pendientes; enlazar evidencia.
-- Usar una escritura completa y segura; no dejar una plantilla vacía como único contexto.
-- Mantener Markdown afectado con cada cambio; preservar snapshots/ADR históricos.
-
-El mecanismo anterior `ContextosySkills/hooks/contexto.mjs` usa PostToolUse, PreCompact y
-SessionStart de Claude, estima tokens con una ventana inferida y crea snapshots >70% una vez
-por ciclo. **No hay evidencia de que esos hooks se ejecuten en Codex.** Se conserva como archivo
-histórico, sin cambiarlo. La regla del 70% no restringe las actualizaciones de este documento.
-
-**Próxima acción concreta:** preparar el plan M6 con las decisiones de Baches de doc 14 §8
-y contrastar los esquemas generales, sin activar categorías ni programar hasta aprobarlo.
-No repetir M4/M5 ni sus líneas base, ni reabrir Q1–Q3. Mantener restricciones de C/E y
-distinguir la publicación puntual del 18/10 de las autorizaciones de desarrollo;
-las pruebas de M5 no certifican dos categorías reales.
-
-## G. Riesgos, contradicciones y límites de la auditoría
-
-1. **M4 cerrada en local con salvedades explícitas:** una cámara móvil intermitente y omisiones conocidas; las imágenes habituales y lectores reales no están certificados.
-2. **Lint global rojo preexistente:** `ContextosySkills/hooks/contexto.mjs` tiene un error de
-   formato y cinco `noUndeclaredEnvVars`; `docs/dominio/infografia-plataformas-riesgo.html`
-   tiene un `noDescendingSpecificity`. No se corrigieron fuera de alcance.
-3. **Dependencias:** auditoría actual confirma las mismas tres high (Next, Sharp, source-map-js), cero críticas. No se actualizó el lockfile.
-4. **Versiones y textos obsoletos:** AGENTS/CLAUDE aún dicen contracts 0.20.0; es 0.22.0.
-   Se preservaron porque M4 no autorizó esas secciones. Roadmap 14 mezcla planificación inicial
-   y notas de implementación posteriores. Snapshots 4/5 aún dicen «sin commits» y M3b pendiente;
-   hoy existe el respaldo y M3b tiene informe de cierre.
-5. **Otras contradicciones documentales:** README raíz decía moderación previa y fase local
-   completa (corregido en la auditoría); README del panel ya documenta el mapa ejecutivo
-   tras M5. ADR 0010 menciona un spike ya realizado en M2;
-   el ejemplo de versiones de ADR 0012 no debe interpretarse como retirada ya hecha en 0.20.
-6. **Instrucciones de herramientas heredadas:** `.agents/skills/sdd/` existe, pero hay referencias
-   a `.Codex/skills/`, rutas de otra máquina y modelos/APIs de Claude en los archivos copiados.
-   Adaptarlas con alcance aprobado; no asumir que un cambio de nombre las hizo ejecutables.
-7. **Preparación de nuevas categorías:** M4 corrigió el registro de componentes especiales,
-   la validación de la definición efectiva, el cupo sin máximo supuesto y los subtipos/tipo
-   de lugar del formulario declarativo. Hay pruebas con categorías sintéticas; activar las
-   definiciones reales de M6–M8 y comprobar el cambio entre ellas sigue pendiente. El anuncio
-   `aria-live` pasó la prueba DOM en Chromium; no se verificó con un lector de pantalla real.
-8. **Pendientes anteriores:** botón de ubicación de prueba aún presente en `PedirUbicacion.tsx`;
-   casos de texto con carácter nulo reportados en API, configuración del túnel, retención y
-   parámetros municipales. No reproducidos ni arreglados hoy; consultar informes y doc 14 §8.
-9. **Datos/operación:** PostGIS y MinIO quedaron saludables, los procesos temporales cerrados
-   y sus puertos libres. Se comprobó `curichi_e2e` en la migración 0021; no se migró ni se
-   consultaron las bases habituales. No se reconstruyeron ni verificaron las imágenes para
-   despliegue. El backup Git no respalda la DB ni las fotos. El arranque general de Compose
-   puede ejecutar migraciones de la base habitual y no debe usarse como prueba inocua.
-10. **Alcance de revisión:** tras los fallos iniciales de agentes, el principal ejecutó las
-    correcciones y verificaciones con la excepción autorizada. Se recibieron revisiones
-    independientes de M4 y de Zod/CSP, además de la implementación acotada de CSP por otro
-    agente. Los revisores contrastaron código y evidencia; no se les atribuye la ejecución
-    de toda la matriz. El cierre local no certifica seguridad ni despliegue de producción.
+M10.5 cerrado; completar el plan final M10 con su F0/baseline ya conservados, sin repetirlos,
+para cuotaantigua/limpieza/ACL, autoridad JSON/reversa multitemática y convivencia clientes/PWA.
+No inventar duración de adopción ni interpretar cero tráfico como abandono. Reversa0020
+no sirve con cuatro categorías; cupo_contador no se retira. Retiro físico compatible aprobado como código/pruebas aisladas; retiradaHTTP diferida, operaciones reales aún sin autorización.
+Fase1/producción: fuente/licencia capas, parámetros/plazos/retención municipales, privacidad
+Persona, hosting/mapa/secrets/fotosoffsite/custodiaclave, hardware/lector/apagado/CI remoto.
+12SKIPPG/S3 siguen NO_VERIFICADO. Lint/auditglobalhistóricos1error6warnings y4high12moderate
+1low0critical, sin auditnuevo; no son problemas corregidos de pasada.14E2E25/10 y mediciónM9
+conservan su alcance, no prueban UI/HTTP de hoy ni sustituyen requisitos de producción.

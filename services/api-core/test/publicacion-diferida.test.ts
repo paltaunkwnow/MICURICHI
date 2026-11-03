@@ -271,7 +271,7 @@ describe('mientras espera no lo ve nadie más que su autor (prueba de tabla)', (
 
     const antes = await cifras();
     const n = await pool.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM reporte_inundacion WHERE estado = 'nuevo' AND publicar_en <= now()",
+      "SELECT count(*)::int AS n FROM reporte WHERE categoria = 'inundacion' AND estado = 'nuevo' AND publicar_en <= now()",
     );
     expect(antes.nuevos).toBe(n.rows[0]!.n);
     expect(antes.enRevision).toBe(n.rows[0]!.n);
@@ -309,7 +309,7 @@ describe('mientras espera no lo ve nadie más que su autor (prueba de tabla)', (
       severidad_manual: string | null;
       fusionado_en_id: string | null;
     }>(
-      'SELECT estado::text, severidad_manual::text, fusionado_en_id::text FROM reporte_inundacion WHERE id = $1',
+      "SELECT estado::text, severidad_manual::text, fusionado_en_id::text FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [id],
     );
     expect(estado.rows[0]).toEqual({
@@ -565,8 +565,8 @@ describe('GET /mis-reportes', () => {
     expect(mio.properties.segundos_para_publicar).toBeGreaterThan(0);
     expect(mio.properties).toMatchObject({ estado: 'nuevo', verificado: false, retirado: false });
     const autores = await pool.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM reporte_inundacion
-        WHERE id = ANY($1::uuid[]) AND autor_id <> (SELECT id FROM usuario WHERE email = $2)`,
+      `SELECT count(*)::int AS n FROM reporte
+        WHERE categoria = 'inundacion' AND id = ANY($1::uuid[]) AND autor_id <> (SELECT id FROM usuario WHERE email = $2)`,
       [lista, CUENTAS.ejecutivo],
     );
     expect(autores.rows[0]!.n).toBe(0);
@@ -595,15 +595,15 @@ describe('métrica de la bandeja sin verificar', () => {
 
   it('0 sin pendientes publicados; la antigüedad del más viejo si hay', async () => {
     await pool.query(
-      "UPDATE reporte_inundacion SET estado = 'rechazado', estado_motivo = 'x' WHERE estado = 'nuevo'",
+      "UPDATE reporte SET estado = 'rechazado', estado_motivo = 'x' WHERE categoria = 'inundacion' AND estado = 'nuevo'",
     );
     expect(await valor()).toBe(0);
     const r = await crear(cookies.vecino, reporteEn(-17.798, -63.198));
     // En espera no cuenta: todavía no está en la bandeja pública.
     expect(await valor()).toBe(0);
     await pool.query(
-      `UPDATE reporte_inundacion SET creado_en = now() - interval '2 hours',
-              publicar_en = now() - interval '2 hours' + interval '1 minute' WHERE id = $1`,
+      `UPDATE reporte SET creado_en = now() - interval '2 hours',
+              publicar_en = now() - interval '2 hours' + interval '1 minute' WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     const s = await valor();

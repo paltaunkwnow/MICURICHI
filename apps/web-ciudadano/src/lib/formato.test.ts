@@ -1,11 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ReporteFeature } from './api';
+import { reporteDePrueba } from './categoria-de-prueba';
 import type { Regional } from './ciudad';
 import * as formato from './formato';
 import {
   contadorDescripcion,
   distanciaDesde,
+  etiquetaCausa,
   etiquetaDistrito,
+  etiquetaFrecuencia,
   etiquetaProfundidad,
   etiquetaUnidadVecinal,
   fechaCorta,
@@ -106,6 +109,27 @@ describe('formato', () => {
   it('describe la profundidad con su rango en centímetros', () => {
     expect(etiquetaProfundidad('rodilla')).toBe('A la rodilla · 10–40 cm');
   });
+
+  it('los planos nulos muestran ausencia sin estimaciones de agua por defecto', () => {
+    expect(etiquetaProfundidad(null)).toBe('Sin datos');
+    expect(etiquetaFrecuencia(null)).toBe('Sin datos');
+    expect(etiquetaCausa(null)).toBe('Sin datos');
+  });
+
+  it.each([undefined, '', 'inventado', '__proto__', 'toString', 12, false])(
+    'un plano malformado (%j) no se usa como etiqueta ni rompe el formato',
+    (valor) => {
+      // Respuesta malformada deliberada: este fixture no pretende satisfacer el contrato HTTP.
+      const p = reporteDePrueba({
+        profundidad_estimada: valor,
+        frecuencia: valor,
+        causa_presunta: valor,
+      }).properties;
+      expect(etiquetaProfundidad(p.profundidad_estimada)).toBe('Sin datos');
+      expect(etiquetaFrecuencia(p.frecuencia)).toBe('Sin datos');
+      expect(etiquetaCausa(p.causa_presunta)).toBe('Sin datos');
+    },
+  );
 
   it('calcula la distancia solo si hay ubicación del vecino', () => {
     expect(distanciaDesde(null, reporte)).toBeNull();

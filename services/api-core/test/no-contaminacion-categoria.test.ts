@@ -8,7 +8,8 @@
  * lecturas devuelven solo las suyas.
  *
  * El registro se INYECTA con una categoría sintética (`bache`, con una definición propia): así se
- * ejercita el camino multicategoría sin tocar `contracts`, que hoy solo define Inundaciones.
+ * conserva la prueba de abstracción aunque `contracts` ya tenga cuatro definiciones reales.
+ * La ausencia de definición se prueba con un registro incompleto inyectado explícitamente.
  */
 import { randomUUID } from 'node:crypto';
 import {
@@ -113,6 +114,28 @@ afterAll(async () => {
 
 /** Las de otras categorías: todo lo que NO es inundación. */
 const otras = () => ['bache', 'area_verde', 'basura'].map((c) => idPorCategoria[c] as string);
+
+describe('M10.1: la lectura de detalle no fabrica campos de agua', () => {
+  it.each(['bache', 'basura', 'area_verde'])(
+    '%s conserva los seis planos nulos en Todas',
+    async (categoria) => {
+      const r = await get('/api/v1/tecnico/reportes?categoria=todas&limite=500', cookieTecnico);
+      expect(r.statusCode).toBe(200);
+      const f = r.json().features.find((f: { id: string }) => f.id === idPorCategoria[categoria]);
+      expect(f).toBeDefined();
+      expect(f.properties.detalle).toEqual({ sintetico: true });
+      for (const campo of [
+        'profundidad_estimada',
+        'frecuencia',
+        'causa_presunta',
+        'sumidero_cercano',
+        'sumidero_estado',
+        'agua_brota_sumidero',
+      ])
+        expect(f.properties[campo], campo).toBeNull();
+    },
+  );
+});
 
 describe('sin parámetro, cada ruta devuelve SOLO inundación', () => {
   it('listado y detalle públicos', async () => {
@@ -242,18 +265,49 @@ describe('/configuracion sin categorías extra activas', () => {
   });
 });
 
+describe('catálogo activo sin definición: falla cerrado con registro inyectado', () => {
+  it.each(['basura', 'area_verde'])(
+    '%s no se anuncia ni se publica aunque esté activa en la base',
+    async (categoria) => {
+      await ex.consultar('UPDATE categoria SET activa = true WHERE slug = $1', [categoria]);
+      const incompleta = await crearApp({
+        pool,
+        cfg: { ...configDePrueba({ DATABASE_URL: base.url }), rutaOpenApi: '/no-existe.yaml' },
+        resolver: resolverDePrueba,
+        almacen,
+        registro: crearRegistroCategorias([DEFINICION_INUNDACION]),
+      });
+      try {
+        const config = await incompleta.inject('/api/v1/configuracion');
+        expect(config.statusCode).toBe(200);
+        expect(config.json().categorias_activas).toEqual(['inundacion']);
+        const lista = await incompleta.inject(`/api/v1/reportes?categoria=${categoria}`);
+        expect(lista.statusCode).toBe(400);
+        expect(lista.json().codigo).toBe('CATEGORIA_NO_DISPONIBLE');
+        expect(
+          (await incompleta.inject(`/api/v1/reportes/${idPorCategoria[categoria]}`)).statusCode,
+        ).toBe(404);
+      } finally {
+        await incompleta.close();
+        await ex.consultar('UPDATE categoria SET activa = false WHERE slug = $1', [categoria]);
+        app.categorias.invalidar();
+      }
+    },
+  );
+});
+
 describe('la vista pública no expone en `detalle` nada fuera de camposPublicos (inundación)', () => {
   it('un campo del detalle que no es público (sumidero) sale al técnico pero no al público', async () => {
-    // Reporte de inundación con sumidero_cercano: el disparador lo suma al detalle. No está en los
+    // Reporte de inundación con sumidero_cercano guardado en el detalle JSON. No está en los
     // camposPublicos de inundación (solo profundidad/frecuencia/causa), así que el público no lo ve.
     const [fila] = await ex.consultar<{ id: string }>(
-      `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id,
-         ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-         sumidero_cercano, severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
-       VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326),
-         ST_SetSRID(ST_MakePoint(round($1::numeric, 5)::float8, round($2::numeric, 5)::float8), 4326),
-         'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Con sumidero cercano',
-         'rodilla', 'ocasional', 'si', 'media', 6, 2, 'validado', now()) RETURNING id::text`,
+      `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
+       descripcion, categoria, detalle, detalle_version, severidad_calculada, severidad_puntaje,
+       severidad_version, estado, publicar_en)
+     VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint(round($1::numeric, 5)::float8, round($2::numeric, 5)::float8), 4326), 'distrito_municipal:01', 'unidad_vecinal:A',
+       'manual', 'via_publica', 'Con sumidero cercano', 'inundacion',
+       '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","sumidero_cercano":"si","causa_presunta":"desconocida"}'::jsonb, 1, 'media', 6,
+       2, 'validado', now()) RETURNING id::text`,
       [P.lon, P.lat],
     );
     const id = fila!.id;

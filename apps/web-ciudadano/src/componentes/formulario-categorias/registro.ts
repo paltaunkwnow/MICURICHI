@@ -1,5 +1,7 @@
 import type { DefinicionCategoriaCualquiera } from 'contracts';
 import type { ValoresFormulario } from '@/lib/formulario-reporte';
+import { ADAPTADOR_AREA_VERDE } from './area-verde';
+import { ADAPTADOR_BASURA } from './basura';
 import { crearAdaptadorGenerico } from './generico';
 import { ADAPTADOR_INUNDACION } from './inundacion';
 import type { AdaptadorFormularioCategoria } from './tipos';
@@ -12,6 +14,8 @@ import type { AdaptadorFormularioCategoria } from './tipos';
  */
 export const ADAPTADORES_FORMULARIO: Readonly<Record<string, AdaptadorFormularioCategoria>> = {
   'inundacion/paso2': ADAPTADOR_INUNDACION,
+  'area_verde/paso2': ADAPTADOR_AREA_VERDE,
+  'basura/paso2': ADAPTADOR_BASURA,
 };
 
 /** El adaptador de formulario de una categoría: el registrado o, si no hay, el declarativo de su definición. */

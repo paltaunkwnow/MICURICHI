@@ -257,38 +257,41 @@ describe('0.22.0: la ampliación no relaja los campos comunes ni las otras respu
     ).toBe(false);
   });
 
-  it('no amplía el esquema público ni el técnico general', () => {
+  it('0.23.0 comparte la compatibilidad de exportación con público y técnico general', () => {
     const entrada = feature({ categoria: 'bache', ...PLANOS_NULOS });
-    expect(ReporteFeatureSchema.safeParse(entrada).success).toBe(false);
-    expect(ReporteTecnicoFeatureSchema.safeParse(entrada).success).toBe(false);
+    expect(ReporteFeatureSchema.safeParse(entrada).success).toBe(true);
+    expect(ReporteTecnicoFeatureSchema.safeParse(entrada).success).toBe(true);
     expect(ExportacionGeoJsonSchema.safeParse(coleccion([entrada])).success).toBe(true);
   });
 });
 
 describe('0.22.0: OpenAPI representa la misma condición que la validación', () => {
-  it('conserva la primera rama técnica intacta y documenta la rama nullable con categoría requerida', () => {
+  it('0.23.0 reutiliza el técnico y documenta la misma condición nullable con categoría requerida', () => {
     const doc = construirOpenApi() as {
       components: {
         schemas: {
           ReporteTecnicoFeature: unknown;
           ExportacionGeoJson: {
-            properties: { features: { items: { anyOf: unknown[] } } };
+            properties: {
+              features: {
+                items: {
+                  properties: { properties: { allOf: Array<{ anyOf: unknown[] }> } };
+                };
+              };
+            };
           };
         };
       };
     };
-    const ramas = doc.components.schemas.ExportacionGeoJson.properties.features.items.anyOf;
+    const tecnico = doc.components.schemas.ExportacionGeoJson.properties.features.items;
+    expect(tecnico).toEqual(doc.components.schemas.ReporteTecnicoFeature);
+    const ramas = tecnico.properties.properties.allOf[0]!.anyOf;
     expect(ramas).toHaveLength(2);
-    expect(ramas[0]).toEqual(doc.components.schemas.ReporteTecnicoFeature);
     const segunda = ramas[1] as {
-      properties: {
-        properties: {
-          required: string[];
-          properties: Record<string, { pattern?: string; minLength?: number; anyOf?: unknown[] }>;
-        };
-      };
+      required: string[];
+      properties: Record<string, { pattern?: string; minLength?: number; anyOf?: unknown[] }>;
     };
-    const propiedades = segunda.properties.properties;
+    const propiedades = segunda;
     expect(propiedades.required).toContain('categoria');
     const categoria = propiedades.properties.categoria;
     expect(categoria?.minLength).toBe(1);

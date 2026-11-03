@@ -167,7 +167,7 @@ function CuerpoPaso2Generico({ form, valores, errores, definicion }: PropsCuerpo
     <>
       {definicion.subtipos?.length ? (
         <fieldset className="mt-5">
-          <legend className="lbl">Subtipo</legend>
+          <legend className="lbl">Tipo de problema</legend>
           <div className="grid gap-2.5">
             {definicion.subtipos.map((opcion) => (
               <Opcion
@@ -225,7 +225,7 @@ export function crearAdaptadorGenerico(
     .string()
     .nullable()
     .optional()
-    .refine(subtipoValido, 'Elegí un subtipo válido.');
+    .refine(subtipoValido, 'Elegí un tipo de problema válido.');
   return {
     slug: def.slug,
     CuerpoPaso2: CuerpoPaso2Generico,
@@ -243,7 +243,7 @@ export function crearAdaptadorGenerico(
     filasRevision: (valores) => {
       const opcion = subtipos.find((o) => o.valor === valores.subtipo);
       return [
-        ...(opcion ? [{ etiqueta: 'Subtipo', valor: opcion.etiqueta, paso: 2 }] : []),
+        ...(opcion ? [{ etiqueta: 'Tipo de problema', valor: opcion.etiqueta, paso: 2 }] : []),
         ...filasRevisionDeclarativas(def, detalleDe(valores)),
       ];
     },

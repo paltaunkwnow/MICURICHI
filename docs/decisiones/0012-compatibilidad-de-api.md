@@ -18,4 +18,11 @@
 
 **Consecuencias.** Los clientes viejos y la PWA cacheada siguen funcionando.
 
+**Adenda aceptada el2026-10-29 (ADR0026).** El [cierre M10 aprobado](../sdd/2026-10-29-pruebas-historicas-vigentes/plan-cierre-m10.md)
+conserva ambos POST, alias planos de respuesta/CSV, default Inundaciones y Todas solo
+panel aunque se retire su almacenamiento duplicado. El retiro HTTP queda diferido sin
+fecha o adopción declaradas; requerirá ventana medida e inventario/aceptación propios.
+No cambia contratos0.24.0 por esta decisión ni declara que los clientes anteriores hayan
+desaparecido. Implementación y ensayos del cierre siguen pendientes.
+
 **Alternativas descartadas.** v2 paralela; romper los clientes.

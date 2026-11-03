@@ -218,9 +218,9 @@ describe('agregados por UV: publicados con y sin verificar (S21)', () => {
     const id = await insertarReporte(ejecutorPg(pool), lon!, lat!, estado, severidad);
     // insertarReporte deja todo en la UV A; publicar_en cae por defecto en now() (ya publicado).
     await pool.query(
-      `UPDATE reporte_inundacion SET unidad_vecinal_id = $2
+      `UPDATE reporte SET unidad_vecinal_id = $2
          ${enEspera ? ", publicar_en = creado_en + interval '10 minutes'" : ''}
-       WHERE id = $1`,
+       WHERE id = $1 AND categoria = 'inundacion'`,
       [id, uv],
     );
   }

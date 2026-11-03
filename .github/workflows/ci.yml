@@ -77,6 +77,9 @@ jobs:
       - name: Secretos (escaneo propio sobre el árbol)
         run: pnpm secretos
 
+      - name: Pruebas del escaneo de secretos
+        run: node --test --test-concurrency=1 scripts/buscar-secretos.test.mjs
+
       - name: Dependencias vulnerables
         # Bloquea en alto y crítico. Los avisos moderados de herramientas offline (el ETL) no
         # deben dejar rojo un PR que no los toca; se revisan con `pnpm audit` a mano.
@@ -136,7 +139,7 @@ jobs:
       # es decir, código de terceros distinto en cada ejecución.
       - name: Base local (PGlite + PostGIS) en segundo plano
         run: |
-          pnpm db:local > db-local.log 2>&1 &
+          pnpm db:local --autorizar-contraccion-compatible > db-local.log 2>&1 &
           npx --yes wait-on@9.1.0 tcp:127.0.0.1:5433 -t 180000
 
       - name: Datos sintéticos
@@ -222,7 +225,8 @@ jobs:
       - name: Migraciones desde cero (comando de producción)
         env:
           NODE_ENV: production
-        run: node packages/db/dist/cli/migrar.js
+        # Base efímera del job; consentimiento acotado a esta llamada, nunca PGOPTIONS global.
+        run: node packages/db/dist/cli/migrar.js --autorizar-contraccion-compatible
 
       # Se afirma lo positivo: la segunda pasada tiene que decir «ninguna». Antes se buscaba solo
       # «migraciones aplicadas:», pero el mensaje de «ninguna (al día)» también lo contiene, así
@@ -258,7 +262,7 @@ jobs:
           import { aplicarMigraciones, ejecutorPg } from './dist/index.js';
           const pool = new pg.Pool({ connectionString: process.env.CARRERA_URL, max: 2 });
           try {
-            const r = await aplicarMigraciones(ejecutorPg(pool));
+            const r = await aplicarMigraciones(ejecutorPg(pool), { autorizarContraccionCompatible: true });
             console.log(JSON.stringify({ replica: process.argv[2], ok: true, aplicadas: r.aplicadas.length }));
           } catch (e) {
             console.error(JSON.stringify({ replica: process.argv[2], ok: false, error: e.message }));
@@ -302,19 +306,19 @@ jobs:
           DO $$
           DECLARE n int;
           BEGIN
-            SELECT count(*) INTO n FROM reporte_inundacion;
+            SELECT count(*) INTO n FROM reporte WHERE categoria = 'inundacion';
             IF n = 0 THEN RAISE EXCEPTION 'no se sembró ningún reporte'; END IF;
 
             SELECT count(*) INTO n FROM geo.unidad_vecinal_vigente;
             IF n = 0 THEN RAISE EXCEPTION 'no hay unidades vecinales vigentes'; END IF;
 
             -- Fail-closed de la Fase 3: un reporte publicable sin punto publicable no puede salir.
-            SELECT count(*) INTO n FROM reporte_inundacion
-             WHERE estado IN ('validado','resuelto') AND geom_publico IS NULL
+            SELECT count(*) INTO n FROM reporte
+             WHERE categoria = 'inundacion' AND estado IN ('validado','resuelto') AND geom_publico IS NULL
                AND ubicacion_tipo <> 'vivienda_o_predio';
             IF n > 0 THEN RAISE EXCEPTION 'hay % reportes de vía pública publicables sin geom_publico', n; END IF;
 
-            SELECT count(*) INTO n FROM reporte_inundacion WHERE NOT ST_IsValid(geom);
+            SELECT count(*) INTO n FROM reporte WHERE categoria = 'inundacion' AND NOT ST_IsValid(geom);
             IF n > 0 THEN RAISE EXCEPTION 'hay % geometrías inválidas', n; END IF;
           END $$;
           FIN
@@ -329,7 +333,7 @@ jobs:
           POSTGRES_USER: curichi
           POSTGRES_PASSWORD: curichi
           POSTGRES_DB: curichi
-        run: node scripts/respaldo.mjs simulacro
+        run: node scripts/respaldo.mjs simulacro --autorizar-contraccion-compatible
 
   # Construir las imágenes en cada PR y escanearlas. Los servicios no se ejecutan (harían falta
   # secretos y una base); las apps y el proxy sí se arrancan, endurecidos como en el Compose, hasta
@@ -475,10 +479,75 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: .nvmrc
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+      - name: Dependencias fijadas del motor aislado (PGlite, sin PostgreSQL externo)
+        run: pnpm install --frozen-lockfile
+
+      - name: Respaldos multitemáticos (mocks y motor en memoria, sin operadores reales)
+        run: |
+          node --check scripts/respaldo.mjs
+          node --check scripts/respaldo.test.mjs
+          node --check scripts/ensayar-respaldo-multitematico.mjs
+          node --check scripts/ensayar-respaldo-multitematico.test.mjs
+          node --check scripts/ensayar-contraccion-compatible.mjs
+          node --check scripts/ensayar-contraccion-compatible.test.mjs
+          node --check scripts/multitematica-local.mjs
+          node --check scripts/multitematica-local.test.mjs
+          bash -n infra/respaldo/respaldo.sh
+          bash -n infra/respaldo/respaldo.test.sh
+          mkdir -p .turbo/m10-ci
+          cat > .turbo/m10-ci/offline.mjs <<'JS'
+          import net from 'node:net';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { syncBuiltinESMExports } from 'node:module';
+          const file = process.env.M10_FIXTURE_PORTS_FILE;
+          const listen = net.Server.prototype.listen;
+          net.Server.prototype.listen = function (...args) {
+            this.once('listening', () => { const a = this.address(); if (a && typeof a === 'object') appendFileSync(file, `${a.port}\n`); });
+            return listen.apply(this, args);
+          };
+          const own = (host, port) => ['localhost','127.0.0.1','::1','[::1]'].includes(host) && readFileSync(file,'utf8').split('\n').includes(String(port));
+          const connect = net.Socket.prototype.connect;
+          net.Socket.prototype.connect = function (...args) {
+            const d = Array.isArray(args[0]) ? args[0][0] : args[0];
+            if (!own(typeof d === 'object' ? d.host : args[1], typeof d === 'object' ? d.port : d)) throw Error('FUERA_DE_FIXTURE_PROPIA');
+            return connect.apply(this,args);
+          };
+          const fetchOriginal = globalThis.fetch;
+          globalThis.fetch = (input, options) => {
+            const u = new URL(typeof input === 'string' || input instanceof URL ? input : input.url);
+            if (!own(u.hostname, u.port)) throw Error('HTTP_FUERA_DE_FIXTURE_PROPIA');
+            return fetchOriginal(input, options);
+          };
+          syncBuiltinESMExports();
+          JS
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          import { mkdirSync, writeFileSync } from 'node:fs';
+          import { resolve } from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(PATH|PATHEXT|SYSTEMROOT|WINDIR|COMSPEC|TEMP|TMP|USERPROFILE|APPDATA|LOCALAPPDATA|HOMEDRIVE|HOMEPATH|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE)$/i.test(k)));
+          const scratch = resolve('.turbo/m10-ci/scratch'); mkdirSync(scratch,{recursive:true});
+          const ledger = resolve(scratch,'ports.txt'); writeFileSync(ledger,'');
+          Object.assign(env,{NODE_ENV:'test',CI:'true',TMPDIR:scratch,TEMP:scratch,TMP:scratch,M10_SCRATCH:scratch,M10_FIXTURE_PORTS_FILE:ledger,NODE_OPTIONS:`--import=${pathToFileURL(resolve('.turbo/m10-ci/offline.mjs')).href}`});
+          const files = ['bancos-internos','respaldo','ensayar-respaldo-multitematico','medir-cuatro-categorias','ensayar-contraccion-compatible','multitematica-local'];
+          for (const name of files) {
+            const r = spawnSync(process.execPath,['--test','--test-concurrency=1',`scripts/${name}.test.mjs`],{env,stdio:'inherit'});
+            if (r.status !== 0) process.exit(r.status ?? 1);
+          }
+          const bash = spawnSync('bash',['--noprofile','--norc','infra/respaldo/respaldo.test.sh'],{env,stdio:'inherit'});
+          process.exitCode = bash.status ?? 1;
+          JS
+
       - name: Scripts de infraestructura (shellcheck)
         run: |
           shellcheck --version
-          shellcheck -x infra/respaldo/respaldo.sh infra/minio/inicializar.sh \
+          shellcheck -x infra/respaldo/respaldo.sh infra/respaldo/respaldo.test.sh infra/minio/inicializar.sh \
             infra/observabilidad/arrancar-prometheus.sh infra/observabilidad/arrancar-alertmanager.sh \
             infra/sql/01-roles.sh infra/proxy/arrancar.sh
 

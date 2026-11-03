@@ -6,7 +6,7 @@ import {
   normalizarReporteCrear,
   ReporteFiltrosSchema,
 } from 'contracts';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
 import { type Dependencias, registroDe } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { cacheDeListadoPublico } from '../cache.js';
@@ -56,6 +56,21 @@ export function esTecnico(rol: string | undefined) {
 }
 
 export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
+  // Solo el entorno controlado del runner se identifica como prueba. Development y la demo
+  // pueden recibir tráfico real: quedan sin clasificar. Ninguna cabecera decide este origen.
+  const origen = process.env.NODE_ENV === 'test' ? 'entorno_prueba' : 'no_clasificado';
+  const registrarCompatibilidad = (
+    log: FastifyBaseLogger,
+    forma: ReturnType<typeof normalizarReporteCrear>['forma'],
+    resultado: 'aceptado' | 'replay',
+  ) => {
+    const etiquetas = { forma, resultado, origen };
+    app.metricas.contar('curichi_reportes_forma_total', etiquetas);
+    log.info(
+      { evento: 'compatibilidad_reporte', ...etiquetas },
+      'compatibilidad de creación de reportes',
+    );
+  };
   /*
    * ───────────────────────────── Creación de reportes ─────────────────────────────
    *
@@ -119,6 +134,19 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
       const registro = registroDe(dep);
       // Activa ⇒ tiene definición en el registro: `estaActiva` exige catálogo ∩ registro (regla 3).
       const def = registro.obtener(slug)!;
+      // Si hay opciones, el subtipo es obligatorio y pertenece a esta definición. Se corta antes
+      // del PIP y del cupo; las categorías sin subtipos conservan su comportamiento anterior.
+      if (def.subtipos?.length && !def.subtipos.some((opcion) => opcion.valor === datos.subtipo))
+        return res.status(400).send({
+          codigo: 'PAYLOAD_INVALIDO',
+          mensaje: 'Revisá los datos del reporte.',
+          detalles: [
+            {
+              campo: 'subtipo',
+              mensaje: 'Seleccioná un tipo de problema válido para esa categoría.',
+            },
+          ],
+        });
       /*
        * El `detalle` con el Zod ESTRICTO de la categoría: una clave de más o un valor fuera de
        * rango dan 400 con el mismo código de validación de siempre (PAYLOAD_INVALIDO); la base suma
@@ -193,7 +221,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
       // lectura) y tiene que devolver el mismo reporte, no un 409 por «otro contenido». `d` incluye
       // `categoria`, `subtipo` y `detalle`, así que la huella distingue envíos de categorías o
       // detalles distintos (idempotencia por categoría).
-      const huella = huellaDePayload(d);
+      const huella = huellaDePayload({ ...d, detalle });
 
       // Severidad de la definición de la categoría (puntaje, banda y versión), no una función fija:
       // para inundación es la misma v2 de siempre; para otra categoría, la suya.
@@ -219,7 +247,22 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         // Con el prefijo de la cuenta: la misma clave en dos cuentas son dos envíos distintos.
         const claveGuardada = clave.success ? claveDeCuenta(autor.id, clave.data) : null;
         if (claveGuardada) {
-          const estado = await reclamarClave(cliente, claveGuardada, huella);
+          let estado = await reclamarClave(cliente, claveGuardada, huella);
+          if (
+            estado.tipo === 'conflicto' &&
+            slug === 'inundacion' &&
+            detalle.causa_presunta === 'desconocida'
+          ) {
+            // Antes del detalle validado, la forma por categoría podía omitir este único default.
+            // Se conserva el bloqueo de la fila vigente y la misma transacción, sin reescribirla.
+            const detalleHistorico = { ...detalle };
+            delete detalleHistorico.causa_presunta;
+            estado = await reclamarClave(
+              cliente,
+              claveGuardada,
+              huellaDePayload({ ...d, detalle: detalleHistorico }),
+            );
+          }
           if (estado.tipo === 'conflicto') {
             await cliente.query('ROLLBACK');
             return res.status(409).send({
@@ -240,6 +283,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             const yaCreado = await obtenerReporte(cliente, estado.reporteId, 'cualquiera');
             if (yaCreado) {
               res.header('Idempotent-Replay', 'true');
+              registrarCompatibilidad(req.log, norm.forma, 'replay');
               return res.status(200).send(aFeature(vistaMiReporte(yaCreado, dep.cfg.urlPublica)));
             }
             // La clave apunta a un reporte que ya no está. Antes se seguía adelante, pero la
@@ -290,44 +334,36 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
          * `publicar_en <= now()`), y ningún cliente la puede adelantar.
          */
         const demoraS = cupo.n === 1 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS;
-        /*
-         * Las seis columnas planas de inundación salen del `detalle` validado (el disparador de la
-         * 0020 rearma el `detalle` desde ellas en cada escritura de inundación); en otra categoría
-         * van todas en NULL —`causa_presunta` explícito, porque su DEFAULT es 'desconocida'— para no
-         * violar el CHECK `no_inundacion_sin_campos`. El INSERT es en la tabla `reporte` (todas las
-         * categorías desde la 0020), no en la vista de compatibilidad.
-         */
-        const esInundacion = slug === 'inundacion';
-        const planas = esInundacion
-          ? {
-              profundidad_estimada: detalle.profundidad_estimada ?? null,
-              frecuencia: detalle.frecuencia ?? null,
-              causa_presunta: detalle.causa_presunta ?? null,
-              sumidero_cercano: detalle.sumidero_cercano ?? null,
-              sumidero_estado: detalle.sumidero_estado ?? null,
-              agua_brota_sumidero: detalle.agua_brota_sumidero ?? null,
-            }
-          : {
-              profundidad_estimada: null,
-              frecuencia: null,
-              causa_presunta: null,
-              sumidero_cercano: null,
-              sumidero_estado: null,
-              agua_brota_sumidero: null,
-            };
+        // Reproduce el JSON de la 0020 sin alterar el detalle validado de huella/RF-01/severidad.
+        // Los opcionales NULL se omiten; false se conserva. Otras categorías guardan todo su detalle.
+        const detallePersistido =
+          slug === 'inundacion'
+            ? {
+                profundidad_estimada: detalle.profundidad_estimada,
+                frecuencia: detalle.frecuencia,
+                causa_presunta: detalle.causa_presunta,
+                ...(detalle.sumidero_cercano != null && {
+                  sumidero_cercano: detalle.sumidero_cercano,
+                }),
+                ...(detalle.sumidero_estado != null && {
+                  sumidero_estado: detalle.sumidero_estado,
+                }),
+                ...(detalle.agua_brota_sumidero != null && {
+                  agua_brota_sumidero: detalle.agua_brota_sumidero,
+                }),
+              }
+            : detalle;
         const ins = await cliente.query<{ id: string; publicar_en: Date }>(
           `INSERT INTO reporte (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
            ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion,
            categoria, subtipo, detalle, detalle_version,
-           profundidad_estimada, frecuencia, causa_presunta, sumidero_cercano, sumidero_estado, agua_brota_sumidero,
            severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id,
            distancia_dispositivo_m, publicar_en)
-         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($27, $28), 4326), $3, $4, $5, $6, $7, $8::jsonb,
+         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($21, $22), 4326), $3, $4, $5, $6, $7, $8::jsonb,
            $9, $10, $11, $12,
            $13, $14, $15::jsonb, $16,
-           $17, $18, $19, $20, $21, $22,
-           $23, $24, $25, 'nuevo', $26, $29,
-           $30, now() + make_interval(secs => $31::int)) RETURNING id, publicar_en`,
+           $17, $18, $19, 'nuevo', $20, $23,
+           $24, now() + make_interval(secs => $25::int)) RETURNING id, publicar_en`,
           [
             d.lon,
             d.lat,
@@ -350,18 +386,11 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             ubicacion.precisionM,
             d.ubicacion_tipo,
             d.descripcion,
-            // Plataforma multicategoría (0.20.0): categoría, subtipo y detalle. Para inundación, el
-            // disparador de la 0020 reescribe `detalle` y `detalle_version` desde las columnas planas.
+            // Esquema 0022: JSON como única fuente física del dominio.
             slug,
             d.subtipo ?? null,
-            JSON.stringify(detalle),
+            JSON.stringify(detallePersistido),
             def.detalleVersion,
-            planas.profundidad_estimada,
-            planas.frecuencia,
-            planas.causa_presunta,
-            planas.sumidero_cercano,
-            planas.sumidero_estado,
-            planas.agua_brota_sumidero,
             sev.banda,
             sev.puntaje,
             def.severidad.version,
@@ -447,6 +476,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         // La vista del autor (contracts 0.11.0): coordenada exacta, publicar_en y los segundos que
         // faltan, calculados en la base; la cuenta regresiva de la interfaz parte de acá.
         const fila = await obtenerReporte(cliente, id, 'cualquiera');
+        registrarCompatibilidad(req.log, norm.forma, 'aceptado');
         return res.status(201).send(aFeature(vistaMiReporte(fila!, dep.cfg.urlPublica)));
       } catch (e) {
         // Con .catch(): si el ROLLBACK también falla (conexión ya caída), el error que sube

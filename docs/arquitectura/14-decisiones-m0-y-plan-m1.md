@@ -335,6 +335,90 @@ Ajustado al código real [RECOMENDACIÓN]:
 
 ## 5. Roadmap actualizado
 
+> **Cierre M10.4 del29/10:** [informe](../sdd/2026-10-28-consumidores-internos/informe.md),
+> DB361/361, API562PASS/12SKIP y Node19/19; tipos, formato y confirmación independiente
+> conformes,0regresiones. Consumidores internos compatibles y limpieza acotada, sin DDL/
+> operadores reales. Cuota/ACL, vista/columnas/trigger y HTTP conservados.
+> [M10.5 cerrado el29/10](../sdd/2026-10-29-pruebas-historicas-vigentes/informe.md):
+>375/375 propios e independientes,361anteriores conservados,14nuevos; tipos/Biome y revisión
+> conformes, sin cambios funcionales o DDL. El [plan de cierre M10](../sdd/2026-10-29-pruebas-historicas-vigentes/plan-cierre-m10.md)
+> fue aprobado después con sus decisiones/inventario: contracción física compatible separada
+> de retirada HTTP, cuota histórica archivada y parada/reversa coordinadas. Código y pruebas
+> aisladas autorizados; protocolo propio antes de operaciones reales. Preparar para subir
+> después con web prevista `micurichi.lat`, sin despliegue ahora.
+
+> **Cierre M10.3 del28/10:** [informe](../sdd/2026-10-27-restauracion-real-segura/informe.md),
+> corrección GPG93casos verificados, dos ensayos reales21→21/19→21 y139SELECT independientes
+> conformes. Cuatro bancos, intentos y archivos conservados; sin DROP ni acceso a bases protegidas.
+> Demo disponible con cuatro categorías al cerrar M10.3. [M10.4 cerró después el29/10](../sdd/2026-10-28-consumidores-internos/informe.md)
+> preparando consumidores internos y manteniendo compatibilidad; ver el cierre más reciente arriba.
+> Cuota/ACL, convivencia de clientes, reversa y contracción física/HTTP conservan sus puertas.
+
+> **Cierre M10.2 del27/10:** [informe](../sdd/2026-10-27-respaldos-multitematicos/informe.md),
+> Node23/23, Bash23/23, sintaxis/Biome/YAML y verificación/revisión independientes conformes.
+> Solo mocks; ShellCheck local y restauración real no verificados. Demo sigue abierta con
+> cuatro categorías, sin nuevo seed/migración. [M10.3 aprobado el27/10](../sdd/2026-10-27-restauracion-real-segura/plan.md)
+> incluye ocho archivos, cuatro bancos sintéticos nuevos conservados y ensayo cifrado/restaurado.
+> Gate inicial77/77independientes y revisión conforme. Banco sintético actual/dump creados;
+> cifrado incierto y [corrección GPG acotada](../sdd/2026-10-27-restauracion-real-segura/correccion-gpg.md)
+> en curso. Diario original y artefactos conservados; nueva gate antes de continuación manual.
+> Consumidores internos, convivencia, reversa y contracción mantienen sus puertas.
+
+> **CierreM10.1/RF-01 del27/10:** [informe](../sdd/2026-10-26-contraccion-compatible/informe.md),
+> API562PASS/12SKIP,75/75del delta independiente,tipos/build/Biome0 y revisión conforme.
+> Demo reabierta con el compilado verificado,sinseed/migración. [M10.2](../sdd/2026-10-27-respaldos-multitematicos/plan.md)
+> ya aprobado e iniciado después: controles multitemáticos de respaldo con mocks.
+> Sin ensayo de restauración real,retirada de estructuras/HTTP ni cierre humanoFase1/producción.
+
+> **Cierre M9 del27/10:** [informe](../sdd/2026-10-25-medicion-cuatro-categorias/informe.md),
+> banco1M/250kcada categoría,71casos/136sentencias/1200muestras,revisión independiente conforme.
+> Demo conservada/reabierta sin nuevas semillas/migraciones. Tiempo completo perdido NO_MEDIDO;
+> SQL secuencial no certifica HTTP/concurrencia. Se habilita M10.1 ya aprobado después deM9,
+> conservando compatibilidad;sin DROP/retiroHTTP ni cierre humano deFase1/producción/Git.
+
+> **Estado verificado del 2026-10-25, prevalece sobre las notas históricas siguientes:**
+> las cuatro categorías funcionan en la instalación separada `curichi_multitematica`,
+> con contracts0.24.0, capas municipales y ejemplos sintéticos. La corrida conjunta aprobó
+> **14/14 E2E** en escritorio/móvil, incluido el marcador exacto pendiente de M6, formularios,
+> fotos, publicación, validación técnica, exportaciones y roles. El reinicio conservó las
+> seis tablas de control. Ver [informe de entrega](../sdd/2026-10-22-cuatro-categorias/informe.md).
+> M6–M8 quedan verificados funcionalmente en esta instalación local; no se declara otra
+> ejecución del G1 histórico ni activación habitual. M9 (escala1M) y M10 (contracción)
+> conservan sus planes propios; no autoriza producción, cambios de bases protegidas o Git.
+> [M9 ya tiene propuesta concreta](../sdd/2026-10-25-medicion-cuatro-categorias/plan.md),
+> aprobada por el usuario el25/10. Al26/10 su banco propio quedó preparado/validado con1M
+> exacto/250kcada categoría. La medición se detuvo por recursos con diario conservado;
+> recuperación en revisión y demo pausada. [Evidencia M9](../sdd/2026-10-25-medicion-cuatro-categorias/medicion.md).
+> No hay cierre de rendimiento ni se comenzó M10 por cerrar la entrega funcional.
+> El26/10 se aprobó [M10.1 compatible](../sdd/2026-10-26-contraccion-compatible/plan.md)
+> para ejecutarlo **después de cerrar M9**: ocho archivos API y documentación; lectura
+> desde detalle/instrumentación conservando contratos. No autoriza contracción física/HTTP.
+
+> **Solicitud y aprobación del2026-10-22:** el usuario pidió entregar las cuatro categorías y
+> eligió una instalación local separada, sin tocar curichi. Aprobó el
+> [plan conjunto M7/M8 e instalación](../sdd/2026-10-22-cuatro-categorias/plan.md),incluidos
+> inventario y ajustes acotados de AGENTS/CLAUDE. Contracts0.24,campos del prototipo,modelosv1
+> y radios10m para ambas categorías son decisiones de esta entrega local. M6 continúa abierta:
+> F4 estática467 y auditoría del arnés conformes; preflight real PASS,diagnóstico de mapa
+> detenido antes de navegador por memoria. El cierre conjunto debe resolver/verificar ese
+> pendiente y el recorrido de cuatro; no se autoriza producción ni publicación Git.
+
+> **Avance del 2026-10-19 — M6.1 entregada, M6 en curso:** FB completa (2381 pruebas
+> aprobadas, 12 omisiones conocidas; navegador 197 aprobadas y una omisión). Contracts 0.23.0
+> incorpora Baches reales; 419 pruebas, tipos/build/OpenAPI reproducible y revisión de contratos
+> conforme en su alcance. API entregada con 495 aprobadas + 12 omisiones, cero regresiones,
+> tipos/build/Biome correctos y revisión API conforme acotada. Geoespacial entregada con
+> DB322/Geo82 aprobadas y revisión P4 conforme acotada. Web724 y panel586, tipos/Biome/builds
+> correctos y revisión UI conforme acotada; once diagnósticos P1 resueltos. M6.6 inicia arnés
+> y guardas; piloto real/restauración y F4 global pendientes. Ver [ejecución y evidencias M6](../sdd/2026-10-18-baches-piloto/implementacion.md).
+> M6 no está cerrada y no se activó una instalación habitual.
+
+> **Actualización del 2026-10-18 — M6 aprobada e iniciada:**
+> [plan e inventario](../sdd/2026-10-18-baches-piloto/plan.md) aceptados por el usuario,
+> incluidos ajustes acotados de AGENTS/CLAUDE. Decisión de piloto en ADR 0024; F0 preparada
+> y FB en curso, antes de programar. Los estados anteriores se conservan como historia.
+> Todavía no se certifica Baches ni se activa una instalación habitual; no hay nuevo permiso de publicación.
+
 > **Actualización posterior del 2026-10-15 — M5 aprobada:** el usuario aprobó
 > `docs/sdd/2026-10-15-panel-por-categoria/plan.md`, con inicio en Inundaciones, detalle/ficha
 > completos e historial completo en «Todas». Autorizó por separado seis archivos de contracts
@@ -381,6 +465,24 @@ Ajustado al código real [RECOMENDACIÓN]:
 | **M9** | Medición con 4 categorías y 1 M de filas | — | — |
 | **M10** | Contraer (vista, campos planos, `cuota_reporte_diaria`) | — | Suma retirar la tabla de cupo vieja |
 | ~~M11~~ | ~~Áreas verdes con capa (G2)~~ | — | **Pasa al backlog** (decisión 6) |
+
+**Criterio M10 aceptado el29/10 (ADR0026).** El cierre local contraerá almacenamiento
+conservando API/CSV compatibles; retirará la cuota del uso operativo con copia restringida
+íntegra. La retirada HTTP se difiere y requiere inventario de clientes/PWA y convivencia
+medida propios. Para cerrar M10 no basta código/mocks: se exigen verificación independiente,
+ensayo nuevo de recuperación código+esquema y actualización autorizada de la instalación
+elegida, con conservación comprobada de datos. El plan aprobado solo habilita por ahora
+código/pruebas aisladas; el protocolo operacional se aprobará después de hacerlo concreto.
+Se prepara la versión para subir posteriormente; no se publica `micurichi.lat` en esta tarea.
+
+**Criterio M10 aceptado el29/10 (ADR0026).** El cierre local contraerá almacenamiento
+conservando API/CSV compatibles; retirará la cuota del uso operativo con copia restringida
+íntegra. La retirada HTTP se difiere y requiere inventario de clientes/PWA y convivencia
+medida propios. Para cerrar M10 no basta código/mocks: se exigen verificación independiente,
+ensayo nuevo de recuperación código+esquema y actualización autorizada de la instalación
+elegida, con conservación comprobada de datos. El plan aprobado solo habilita por ahora
+código/pruebas aisladas; el protocolo operacional se aprobará después de hacerlo concreto.
+Se prepara la versión para subir posteriormente; no se publica `micurichi.lat` en esta tarea.
 
 ---
 
@@ -436,6 +538,24 @@ y `CLAUDE.md`. Los consumidores siguen importando lo de hoy, sin cambios.
 ---
 
 ## 8. Decisiones que todavía faltan
+
+> **Decisiones locales aprobadas el2026-10-22:** Basura y Áreas verdes tienen cinco subtipos
+> y dos respuestas del prototipo,modelosv1 con piso declarado,radios provisionales10m y ciclo
+> común sin caducidad ni cambio de categoría. Se mantienen marca/roles/paleta,Persona con
+> aviso/destino previsto y puerta de producción ADR0018. El usuario aprobó el
+> [plan e inventario de entrega local](../sdd/2026-10-22-cuatro-categorias/plan.md) y eligió
+> una base nueva separada. Esto resuelve esas elecciones para M7/M8 local; la validación
+> municipal y las decisiones de producción siguen pendientes. No hay cierre operativo todavía.
+
+> **Actualización del 2026-10-18 — M6 aprobada para piloto local:** el usuario aprobó el
+> [plan e inventario M6](../sdd/2026-10-18-baches-piloto/plan.md), incluidos ajustes acotados
+> de AGENTS/CLAUDE. [ADR 0024](../decisiones/0024-baches-v1-y-piloto-local.md): cinco subtipos,
+> gravedad/tamaño por referencia, severidad v1 con piso declarado e índice auxiliar 2–8,
+> radio 10 m, icono/paleta ADR 0022, marca/roles/estados actuales. No nueva derivación municipal.
+> Baches se activa temporalmente solo en base de pruebas existente mediante arnés aislado,
+> sin migración/seed y con restauración durable; ejecución comienza con F0/FB.
+> Esto resuelve esas decisiones de **Baches para el piloto**, no la validación municipal ni
+> las decisiones de Basura/Áreas verdes/producción. No se declara M6 implementada o cerrada.
 
 > **Nota del 2026-10-08.** Ya decididas: forma de la URL, «última usada», demora por categoría y
 > activación por catálogo (con la aprobación de las ADR, 2026-10-07); **cupo de fotos global**, 12 por

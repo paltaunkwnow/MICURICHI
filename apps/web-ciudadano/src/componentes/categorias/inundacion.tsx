@@ -5,16 +5,20 @@ import type { PresentadorCategoria, PropsPresentador } from './tipos';
 /**
  * Presentador de Inundaciones: el JSX que el detalle y la tarjeta tenían fijo, movido sin cambios
  * (profundidad por referencia corporal, frecuencia, causa presunta). Lee el valor del `detalle` de la
- * respuesta y, si no viene o no es un valor conocido, de los campos planos de siempre.
+ * respuesta y, si no viene o no es un valor conocido, de los campos planos válidos de siempre.
+ * Una respuesta incompleta no se rellena con una estimación de agua.
  */
 function valor<T extends string>(
   detalle: Record<string, unknown> | undefined,
   clave: string,
   permitidos: readonly T[],
-  plano: T,
-): T {
-  const v = detalle?.[clave];
-  return typeof v === 'string' && (permitidos as readonly string[]).includes(v) ? (v as T) : plano;
+  plano: unknown,
+): T | null {
+  return (
+    permitidos.find((opcion) => opcion === detalle?.[clave]) ??
+    permitidos.find((opcion) => opcion === plano) ??
+    null
+  );
 }
 
 function CamposDetalleInundacion({ reporte }: PropsPresentador) {

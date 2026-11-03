@@ -464,8 +464,10 @@ describe('una regla de cupo desconocida impide arrancar', () => {
     await pool.query(`UPDATE categoria SET activa = true WHERE slug = 'bache'`);
     try {
       await expect(verificarReglasDeCupoActivas(pool, registro)).rejects.toThrow(/bache/);
-      // Con el registro por defecto (bache sin definición) no hay nada que validar: no lanza.
-      await expect(verificarReglasDeCupoActivas(pool)).resolves.toBeUndefined();
+      // El registro real ya define Bache (M6). La ausencia se expresa en este registro inyectado.
+      const sinBache = crearRegistroCategorias([DEFINICION_INUNDACION]);
+      expect(sinBache.tiene('bache')).toBe(false);
+      await expect(verificarReglasDeCupoActivas(pool, sinBache)).resolves.toBeUndefined();
     } finally {
       await pool.query(`UPDATE categoria SET activa = false WHERE slug = 'bache'`);
     }

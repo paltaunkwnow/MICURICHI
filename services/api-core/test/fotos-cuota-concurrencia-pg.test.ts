@@ -63,7 +63,7 @@ describe.skipIf(!URL_ADMIN)('cuota de fotos por cuenta bajo concurrencia real (P
     pool = new pg.Pool({ connectionString: urlBase, max: 30 });
     const ex = ejecutorPg(pool);
     await ex.consultar('CREATE EXTENSION IF NOT EXISTS postgis');
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
     await cargarCapasDePrueba(ex);
     await crearUsuarios(ex);
     app = await crearApp({

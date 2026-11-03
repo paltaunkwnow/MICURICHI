@@ -448,7 +448,7 @@ describe('fotos asociadas al reporte', () => {
 
   it('rechaza claves inexistentes en vez de guardar el reporte sin fotos', async () => {
     const antes = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     const r = await crear({
       ...reporteValido,
@@ -458,7 +458,7 @@ describe('fotos asociadas al reporte', () => {
     expect(r.json().codigo).toBe('FOTOS_INVALIDAS');
     // Y la transacción se revirtió: no quedó un reporte a medias.
     const despues = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     expect(despues.rows[0]?.n).toBe(antes.rows[0]?.n);
   });
@@ -517,5 +517,41 @@ describe('exportación CSV: contenido del vecino', () => {
     expect(csv.body).toContain("'=HYPERLINK");
     // Nunca una celda que empiece por = sin neutralizar.
     for (const linea of csv.body.split('\n')) expect(linea.startsWith('=')).toBe(false);
+  });
+});
+
+describe('M10.1: POST plano sin categoria y por categoría conservan el contrato', () => {
+  it.each([false, true, null, undefined])('opcionales con agua_brota_sumidero=%s', async (agua) => {
+    const { profundidad_estimada, frecuencia, causa_presunta, ...nucleo } = reporteValido;
+    const opcionales = agua === undefined ? {} : { agua_brota_sumidero: agua };
+    const plana = await crear({ ...reporteValido, ...opcionales });
+    const nueva = await crear({
+      ...nucleo,
+      categoria: 'inundacion',
+      detalle: { profundidad_estimada, frecuencia, causa_presunta, ...opcionales },
+    });
+    expect(plana.statusCode, plana.body).toBe(201);
+    expect(nueva.statusCode, nueva.body).toBe(201);
+    const comparar = (r: typeof plana) => {
+      const { id, creado_en, publicar_en, ...props } = r.json().properties;
+      expect(typeof id).toBe('string');
+      expect(publicar_en).toBe(creado_en);
+      return { props, geometry: r.json().geometry };
+    };
+    expect(comparar(nueva)).toEqual(comparar(plana));
+    expect(nueva.json().properties.categoria).toBe('inundacion');
+    expect(nueva.json().properties.detalle.agua_brota_sumidero).toBe(agua ?? undefined);
+    const despues = [];
+    for (const r of [plana, nueva]) {
+      const [audit] = await ex.consultar<{ despues: Record<string, unknown> }>(
+        "SELECT despues FROM auditoria WHERE entidad_id = $1 AND accion = 'crear'",
+        [r.json().id],
+      );
+      expect(audit!.despues.publicar_en).toBe(r.json().properties.publicar_en);
+      const { publicar_en, ...dominio } = audit!.despues;
+      expect(typeof publicar_en).toBe('string');
+      despues.push(dominio);
+    }
+    expect(despues[1]).toEqual(despues[0]);
   });
 });

@@ -57,15 +57,15 @@ async function sembrar(o: {
   cuantos?: number;
 }) {
   const filas = await ex.consultar<{ id: string }>(
-    `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
-       ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-       severidad_calculada, severidad_puntaje, severidad_version, severidad_manual, severidad_motivo, estado,
-       estado_motivo, publicar_en)
-     SELECT ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326),
-       'distrito_municipal:01', $1, $2, 'manual', 'via_publica', 'Reporte sembrado para indicadores',
-       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::severidad, $5, $6::estado_reporte,
-       CASE WHEN $6 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE NULL END, now()
-     FROM generate_series(1, $7::int)
+    `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, ubicacion_metodo,
+       ubicacion_tipo, descripcion, categoria, detalle, detalle_version, severidad_calculada,
+       severidad_puntaje, severidad_version, severidad_manual, severidad_motivo, estado, estado_motivo,
+       publicar_en)
+     SELECT ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.195, -17.79), 4326), 'distrito_municipal:01', $1,
+       $2, 'manual', 'via_publica', 'Reporte sembrado para indicadores',
+       'inundacion', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, $3::severidad,
+       6, 2, $4::severidad, $5,
+       $6::estado_reporte, CASE WHEN $6 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE NULL END, now() FROM generate_series(1, $7::int)
      RETURNING id::text`,
     [
       o.uv ?? 'unidad_vecinal:A',
@@ -143,9 +143,12 @@ const indicadores = (app: FastifyInstance) =>
 /**
  * Consultas del cálculo: las que leen la tabla de reportes (la sesión no la toca). Desde M3 el
  * cálculo lee `reporte` (todas las categorías con filtro explícito), no la vista `reporte_inundacion`.
- * El `\b` evita contar `reporte_inundacion` (de los INSERT de siembra) y `reporte_foto`.
+ * Solo SELECT/WITH: las limpiezas de fixtures ahora también dicen FROM reporte y no son cálculos.
  */
-const consultasDeReportes = () => espia.contar(/FROM\s+reporte\b/i);
+const consultasDeReportes = () =>
+  espia.consultas.filter(
+    ({ sql }) => /^\s*(?:SELECT|WITH)\b/i.test(sql) && /\bFROM\s+reporte\b/i.test(sql),
+  ).length;
 
 describe('qué cuenta', () => {
   it('rechazados y duplicados solo en por_estado; el resto sobre nuevo, validado y resuelto', async () => {
@@ -253,12 +256,13 @@ describe('filtros del panel (0.16.0)', () => {
       [cuadrado],
     );
     const nuevos = await ex.consultar<{ id: string }>(
-      `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
-         ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-         severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
-       VALUES (ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326),
-         'distrito_municipal:02', 'unidad_vecinal:D', 'test', 'manual', 'via_publica', 'Reporte del distrito dos',
-         'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())
+      `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, ubicacion_metodo,
+       ubicacion_tipo, descripcion, categoria, detalle, detalle_version, severidad_calculada,
+       severidad_puntaje, severidad_version, estado, publicar_en)
+     VALUES (ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.095, -17.79), 4326), 'distrito_municipal:02', 'unidad_vecinal:D',
+       'test', 'manual', 'via_publica', 'Reporte del distrito dos',
+       'inundacion', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media',
+       6, 2, 'validado', now())
        RETURNING id::text`,
     );
     try {
@@ -288,9 +292,10 @@ describe('filtros del panel (0.16.0)', () => {
         ),
       ).toBe(true);
     } finally {
-      await ex.consultar(`DELETE FROM reporte_inundacion WHERE id = ANY($1::uuid[])`, [
-        nuevos.map((f) => f.id),
-      ]);
+      await ex.consultar(
+        `DELETE FROM reporte WHERE categoria = 'inundacion' AND id = ANY($1::uuid[])`,
+        [nuevos.map((f) => f.id)],
+      );
     }
   });
 
@@ -336,7 +341,7 @@ describe('sin caché: cada petición es la cifra del momento (plan S25)', () => 
     expect(despuesRes.activas.en_revision).toBe(antesRes.activas.en_revision + 1);
     // Se retira para no mover las cifras de las pruebas siguientes.
     await ex.consultar(
-      `UPDATE reporte_inundacion SET estado = 'rechazado', estado_motivo = 'Prueba' WHERE id = $1`,
+      `UPDATE reporte SET estado = 'rechazado', estado_motivo = 'Prueba' WHERE categoria = 'inundacion' AND id = $1`,
       [id],
     );
   });

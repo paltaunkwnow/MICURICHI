@@ -7,6 +7,8 @@
  *
  * `--publicar-nuevos-existentes` deja que la 0015 publique los reportes en `nuevo` anteriores
  * (sin la bandera, aborta si queda alguno).
+ * `--autorizar-contraccion-compatible` consiente explícitamente0022 pendiente. No se hereda
+ * del entorno ni prueba que los escritores estén pausados. Un no-op al día no la necesita.
  *
  * Lee DATABASE_URL y MIGRAR_LOCK_TIMEOUT_MS, escribe una línea JSON por evento y termina con
  * código 0 solo si todo quedó aplicado. La lógica vive en `migrar-comando.ts`.

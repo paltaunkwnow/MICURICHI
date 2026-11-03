@@ -17,11 +17,12 @@
  * verdad la geodésica en metros, con el margen del factor de escala de UTM.
  */
 import pg from 'pg';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Ejecutor, ejecutorPg } from '../src/ejecutor.js';
+import { listarMigraciones } from '../src/migrar.js';
 import { recalcularPuntosCriticos } from '../src/puntos-criticos.js';
 import { recalcularEntornoDeReporte } from '../src/puntos-criticos-entorno.js';
-import { type BaseEfimera, levantarBaseEfimera } from '../src/test-utils.js';
+import { type BaseEfimera, insertarReporte, levantarBaseEfimera } from '../src/test-utils.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
@@ -40,9 +41,13 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('DELETE FROM reporte_inundacion');
-  await pool.query('DELETE FROM punto_critico');
+  await limpiarInundaciones();
 });
+
+async function limpiarInundaciones() {
+  await pool.query("DELETE FROM reporte WHERE categoria = 'inundacion'");
+  await pool.query("DELETE FROM punto_critico WHERE categoria = 'inundacion'");
+}
 
 afterEach(() => {
   if (crsOriginal === undefined) delete process.env.CRS_METRICO_EPSG;
@@ -64,12 +69,12 @@ async function crearDesplazado(
   dy: number,
 ): Promise<string> {
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-       descripcion, profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje,
+    `INSERT INTO reporte (categoria, geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
+       descripcion, detalle, detalle_version, severidad_calculada, severidad_puntaje,
        severidad_version, estado, publicar_en)
-     VALUES (ST_Transform(ST_Translate(ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), $3::int), $4, $5), 4326),
+     VALUES ('inundacion', ST_Transform(ST_Translate(ST_Transform(ST_SetSRID(ST_MakePoint($1, $2), 4326), $3::int), $4, $5), 4326),
        'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica',
-       'Reporte de prueba de la metrica de recurrencia', 'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())
+       'Reporte de prueba de la metrica de recurrencia', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media', 6, 2, 'validado', now())
      RETURNING id::text`,
     [origen.lon, origen.lat, crs, dx, dy],
   );
@@ -85,25 +90,30 @@ async function crearPar(origen: { lon: number; lat: number }, crs: number, d: nu
     eje === 'este-oeste' ? d : 0,
     eje === 'norte-sur' ? d : 0,
   );
-  const [m] = (
-    await pool.query<{ metrica: number; geodesica: number }>(
-      `SELECT ST_Distance(ST_Transform(a.geom, $3::int), ST_Transform(b.geom, $3::int)) AS metrica,
-              ST_Distance(a.geom::geography, b.geom::geography) AS geodesica
-         FROM reporte_inundacion a, reporte_inundacion b WHERE a.id = $1 AND b.id = $2`,
-      [a, b, crs],
-    )
-  ).rows;
+  const [m] = await medirPar(a, b, crs);
   // El par está donde dice la prueba, y «metros» son metros de verdad (UTM escala ≤ 0,04 %).
   expect(Number(m!.metrica)).toBeCloseTo(d, 6);
   expect(Math.abs(Number(m!.geodesica) - d)).toBeLessThan(0.05);
   return { a, b };
 }
 
+async function medirPar(a: string, b: string, crs: number) {
+  return (
+    await pool.query<{ metrica: number; geodesica: number }>(
+      `SELECT ST_Distance(ST_Transform(a.geom, $3::int), ST_Transform(b.geom, $3::int)) AS metrica,
+              ST_Distance(a.geom::geography, b.geom::geography) AS geodesica
+         FROM reporte a, reporte b WHERE a.categoria = 'inundacion' AND b.categoria = 'inundacion'
+           AND a.id = $1 AND b.id = $2`,
+      [a, b, crs],
+    )
+  ).rows;
+}
+
 /** Partición actual de los reportes activos, en forma comparable. */
 async function particion(): Promise<string[][]> {
   const r = await pool.query<{ pc: string | null; id: string }>(
-    `SELECT punto_critico_id::text AS pc, id::text FROM reporte_inundacion
-     WHERE estado IN ('validado','resuelto') ORDER BY id`,
+    `SELECT punto_critico_id::text AS pc, id::text FROM reporte
+     WHERE categoria = 'inundacion' AND estado IN ('validado','resuelto') ORDER BY id`,
   );
   const grupos = new Map<string, string[]>();
   for (const f of r.rows) {
@@ -180,8 +190,7 @@ describe('el CRS métrico sale de configuración (una instalación por ciudad)',
     expect(unido.completo).toEqual(unido.incremental);
     expect(unido.enNode).toEqual(unido.incremental);
 
-    await pool.query('DELETE FROM reporte_inundacion');
-    await pool.query('DELETE FROM punto_critico');
+    await limpiarInundaciones();
     const lejos = await crearPar(OTRA_CIUDAD, OTRA_CIUDAD.crs, 25.1, 'este-oeste');
     const separado = await losTresCaminos(lejos.a, lejos.b);
     expect(separado.incremental).toHaveLength(2);
@@ -200,4 +209,92 @@ describe('el CRS métrico sale de configuración (una instalación por ciudad)',
     expect(completo).toEqual(incremental);
     expect(enNode).toEqual(incremental);
   }, 60_000);
+});
+
+describe('M10.5: métrica vigente y aislamiento de categoría', () => {
+  it('M10.5: SQL propio usa tabla física, acota ambos lados de distancia y conserva latest', async () => {
+    const espia = vi.spyOn(pool, 'query');
+    try {
+      await crearPar(SANTA_CRUZ, SANTA_CRUZ.crs, 24.0, 'este-oeste');
+      await particion();
+      const sql = espia.mock.calls
+        .map((c) => c[0])
+        .filter((q): q is string => typeof q === 'string');
+      expect(sql).toHaveLength(4);
+      expect(sql.every((q) => !q.includes('reporte_inundacion'))).toBe(true);
+      expect(sql[0]).toMatch(/INSERT INTO reporte\s*\(categoria,/);
+      expect(sql[1]).toMatch(/INSERT INTO reporte\s*\(categoria,/);
+      expect(sql[2]).toContain("a.categoria = 'inundacion'");
+      expect(sql[2]).toContain("b.categoria = 'inundacion'");
+      expect(sql[3]).toContain("categoria = 'inundacion'");
+    } finally {
+      espia.mockRestore();
+    }
+    const registradas = await pool.query<{ nombre: string }>(
+      'SELECT nombre FROM _migraciones ORDER BY nombre',
+    );
+    expect(registradas.rows.map((r) => r.nombre)).toEqual(listarMigraciones());
+  });
+
+  it('M10.5: pares cruzados y limpieza no incluyen ni eliminan las otras tres categorías', async () => {
+    const ids: string[] = [];
+    let puntos: string[] = [];
+    try {
+      const { a, b } = await crearPar(SANTA_CRUZ, SANTA_CRUZ.crs, 24.0, 'este-oeste');
+      for (const categoria of ['bache', 'basura', 'area_verde']) {
+        const id = await insertarReporte(
+          ex,
+          SANTA_CRUZ.lon,
+          SANTA_CRUZ.lat,
+          'validado',
+          'media',
+          categoria,
+        );
+        ids.push(id);
+        expect(await medirPar(a, id, SANTA_CRUZ.crs)).toEqual([]);
+        expect(await medirPar(id, a, SANTA_CRUZ.crs)).toEqual([]);
+      }
+      const { incremental, completo, enNode } = await losTresCaminos(a, b);
+      expect(incremental).toEqual([[a, b].sort()]);
+      expect(completo).toEqual(incremental);
+      expect(enNode).toEqual(incremental);
+      const filasAntes = await pool.query(
+        'SELECT to_jsonb(r) AS fila FROM reporte r WHERE id = ANY($1::uuid[]) ORDER BY id',
+        [ids],
+      );
+      expect(filasAntes.rows).toHaveLength(3);
+      const gruposAntes = await pool.query<{ id: string; categoria: string }>(
+        'SELECT p.id::text, p.categoria FROM punto_critico p JOIN reporte r ON r.punto_critico_id = p.id WHERE r.id = ANY($1::uuid[]) ORDER BY p.id',
+        [ids],
+      );
+      puntos = gruposAntes.rows.map((p) => p.id);
+      expect(gruposAntes.rows).toHaveLength(3);
+      expect(gruposAntes.rows.map((p) => p.categoria).sort()).toEqual([
+        'area_verde',
+        'bache',
+        'basura',
+      ]);
+      await limpiarInundaciones();
+      expect(await particion()).toEqual([]);
+      expect(
+        (
+          await pool.query(
+            'SELECT to_jsonb(r) AS fila FROM reporte r WHERE id = ANY($1::uuid[]) ORDER BY id',
+            [ids],
+          )
+        ).rows,
+      ).toEqual(filasAntes.rows);
+      expect(
+        (
+          await pool.query(
+            'SELECT id::text, categoria FROM punto_critico WHERE id = ANY($1::uuid[]) ORDER BY id',
+            [puntos],
+          )
+        ).rows,
+      ).toEqual(gruposAntes.rows);
+    } finally {
+      await pool.query('DELETE FROM reporte WHERE id = ANY($1::uuid[])', [ids]);
+      await pool.query('DELETE FROM punto_critico WHERE id = ANY($1::uuid[])', [puntos]);
+    }
+  });
 });

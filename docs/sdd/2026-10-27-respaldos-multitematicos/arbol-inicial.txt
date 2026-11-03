@@ -1,0 +1,26 @@
+M10.2 — fuentes iniciales conservadas
+Consolidado el 2026-10-27 (America/La_Paz) a partir de evidencia anterior a la edición.
+No es una captura retrospectiva inventada de git status global.
+
+F0 preparatorio: .turbo/m10-2-2026-10-27/f0/manifest.json
+Fecha de captura: 2026-10-27T20:47:06.588Z.
+Autorización: «Aprobar ambos bloques, en orden»; RF-01 se cerró antes de implementar M10.2.
+Copias originales: .turbo/m10-2-2026-10-27/f0/antes/<ruta>.
+
+Existentes, SHA-256 antes de editar:
+74f900bf2854d49e887899136791c8352c60311dc7277b86d50536c4db1dc3d5  scripts/respaldo.mjs
+5547e1fd336b430af0d6fa3282fa1ad04e6fb7f08486087549fb8ba029fb9465  infra/respaldo/respaldo.sh
+dd17d1e92ea877fcf88d19b43c638400f54962190beabda4e38176690e9f6f8f  .github/workflows/ci.yml
+49c2b94e11abb830544915d3e489f2ee260449484f134ae80dd2bc10d02d6ff7  docs/operaciones/respaldo-y-restauracion.md
+
+Nuevos: scripts/respaldo.test.mjs e infra/respaldo/respaldo.test.sh.
+Las cuatro copias originales fueron comprobadas por implementador, revisor y verificador.
+Comparación del delta con F0, nunca con HEAD: el checkout contiene otros hitos sin commit.
+No se crearon refs ni commits para esta corrida ni se ejecutó stash.
+
+Control al retomar el cierre: .turbo/m10-2-2026-10-27/cierre/retoma-antes.json
+Capturado 2026-10-28T00:45:48.888Z: 151 archivos modificados/sin seguimiento, cero borrados.
+Rama en esa comprobación: codex/cuatro-categorias.
+HEAD: 59b80781030707b8c3334bfbfd40f80000c60a57.
+Este control tardío no se presenta como estado global anterior a la implementación.
+Los archivos ajenos se conservaron; solo el inventario aprobado y su documentación son propios.

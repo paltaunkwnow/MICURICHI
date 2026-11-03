@@ -40,6 +40,7 @@ const INMUTABLE = [{ key: 'Cache-Control', value: 'public, max-age=31536000, imm
 const CON_VERSION = [{ type: 'query' as const, key: 'v' }];
 
 const nextConfig: NextConfig = {
+  ...(process.env.CURICHI_INSTALACION_LOCAL === '1' ? { distDir: '.next-multitematica' } : {}),
   reactStrictMode: true,
   // El manual del repositorio es el CLAUDE.md de la raíz: Next no debe generar los suyos.
   agentRules: false,

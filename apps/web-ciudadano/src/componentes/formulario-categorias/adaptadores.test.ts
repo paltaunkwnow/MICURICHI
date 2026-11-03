@@ -1,4 +1,10 @@
-import { DEFINICION_INUNDACION, type DefinicionCategoriaCualquiera, ETIQUETAS } from 'contracts';
+import {
+  DEFINICION_AREA_VERDE,
+  DEFINICION_BASURA,
+  DEFINICION_INUNDACION,
+  type DefinicionCategoriaCualquiera,
+  ETIQUETAS,
+} from 'contracts';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { UseFormReturn } from 'react-hook-form';
@@ -10,6 +16,8 @@ import {
   valoresTrasCambiarCategoria,
 } from '@/lib/formulario-reporte';
 import { archivosDeLaApp, leerFuente } from '@/lib/fuente-para-pruebas';
+import { ADAPTADOR_AREA_VERDE } from './area-verde';
+import { ADAPTADOR_BASURA } from './basura';
 import { crearAdaptadorGenerico } from './generico';
 import { ADAPTADOR_INUNDACION } from './inundacion';
 import { ADAPTADORES_FORMULARIO, adaptadorFormularioDe } from './registro';
@@ -54,12 +62,18 @@ function renderPaso2(
 }
 
 describe('el registro de adaptadores de formulario', () => {
-  it('Inundaciones trae el suyo; las demás usan el declarativo', () => {
+  it('registra Inundaciones y las dos envolturas; Bache usa el declarativo', () => {
     expect(adaptadorFormularioDe(DEFINICION_INUNDACION)).toBe(ADAPTADOR_INUNDACION);
+    expect(adaptadorFormularioDe(DEFINICION_AREA_VERDE)).toBe(ADAPTADOR_AREA_VERDE);
+    expect(adaptadorFormularioDe(DEFINICION_BASURA)).toBe(ADAPTADOR_BASURA);
     const bache = adaptadorFormularioDe(DEFINICION_BACHE_DE_PRUEBA);
     expect(bache).not.toBe(ADAPTADOR_INUNDACION);
     expect(bache.slug).toBe('bache');
-    expect(Object.keys(ADAPTADORES_FORMULARIO)).toEqual(['inundacion/paso2']);
+    expect(Object.keys(ADAPTADORES_FORMULARIO)).toEqual([
+      'inundacion/paso2',
+      'area_verde/paso2',
+      'basura/paso2',
+    ]);
   });
 
   it('el código común no pregunta por una categoría concreta (ADR 0009 §6.3)', () => {

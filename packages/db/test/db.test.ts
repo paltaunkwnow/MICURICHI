@@ -29,7 +29,8 @@ describe('migraciones y PostGIS', () => {
     const r = await pool.query('SELECT postgis_version() AS v');
     expect(r.rows[0].v).toMatch(/^3\./);
     const t = await pool.query(
-      `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_name IN ('reporte_inundacion','punto_critico','usuario','auditoria')`,
+      `SELECT count(*)::int AS n FROM information_schema.tables WHERE table_schema = 'public'
+        AND table_type = 'BASE TABLE' AND table_name IN ('reporte','punto_critico','usuario','auditoria')`,
     );
     expect(t.rows[0].n).toBe(4);
   });
@@ -74,7 +75,7 @@ describe('puntos críticos (DBSCAN, radio 25 m)', () => {
     expect(r.reportes).toBe(4);
     expect(r.puntos).toBe(2);
     const pc = await pool.query(
-      `SELECT punto_critico_id::text AS pc FROM reporte_inundacion WHERE id = ANY($1::uuid[]) ORDER BY id`,
+      `SELECT punto_critico_id::text AS pc FROM reporte WHERE categoria = 'inundacion' AND id = ANY($1::uuid[]) ORDER BY id`,
       [[a, b, c]],
     );
     expect(new Set(pc.rows.map((x) => x.pc)).size).toBe(1);
@@ -85,12 +86,13 @@ describe('puntos críticos (DBSCAN, radio 25 m)', () => {
     expect(grupo.rows[0].n_reportes).toBe(3);
     expect(grupo.rows[0].severidad_max).toBe('alta');
     expect(grupo.rows[0].unidad_vecinal_id).toBe('unidad_vecinal:A');
-    const solo = await pool.query(`SELECT punto_critico_id FROM reporte_inundacion WHERE id = $1`, [
-      lejos,
-    ]);
+    const solo = await pool.query(
+      `SELECT punto_critico_id FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
+      [lejos],
+    );
     expect(solo.rows[0].punto_critico_id).not.toBe(pc.rows[0].pc);
     const sinGrupo = await pool.query(
-      `SELECT punto_critico_id FROM reporte_inundacion WHERE id = $1`,
+      `SELECT punto_critico_id FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [nuevo],
     );
     expect(sinGrupo.rows[0].punto_critico_id).toBeNull();
@@ -111,11 +113,14 @@ describe('retención de datos (§13)', () => {
     const nuevo = await insertarReporte(ex, -63.194, -17.791, 'validado');
     await ex.consultar(
       // publicar_en se mueve con creado_en: el CHECK de la 0015 la exige a 1 hora como mucho.
-      `UPDATE reporte_inundacion SET ip_hash = 'abc', creado_en = now() - interval '40 days',
-         publicar_en = now() - interval '40 days' WHERE id = $1`,
+      `UPDATE reporte SET ip_hash = 'abc', creado_en = now() - interval '40 days',
+         publicar_en = now() - interval '40 days' WHERE categoria = 'inundacion' AND id = $1`,
       [viejo],
     );
-    await ex.consultar(`UPDATE reporte_inundacion SET ip_hash = 'def' WHERE id = $1`, [nuevo]);
+    await ex.consultar(
+      `UPDATE reporte SET ip_hash = 'def' WHERE categoria = 'inundacion' AND id = $1`,
+      [nuevo],
+    );
     await ex.consultar(
       `INSERT INTO reporte_foto (objeto_key, mime, bytes, ancho, alto, exif_sanitizado, creado_en)
        VALUES ('huerfana.jpg', 'image/jpeg', 1, 1, 1, true, now() - interval '3 days'),
@@ -130,7 +135,7 @@ describe('retención de datos (§13)', () => {
     const sesiones = await ex.consultar<{ id: string }>('SELECT id FROM sesion');
     expect(sesiones.map((s) => s.id)).toEqual(['vigente']);
     const [conservado] = await ex.consultar<{ ip_hash: string | null }>(
-      'SELECT ip_hash FROM reporte_inundacion WHERE id = $1',
+      "SELECT ip_hash FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [nuevo],
     );
     expect(conservado?.ip_hash).toBe('def'); // el reciente NO se toca
@@ -183,7 +188,7 @@ describe('mantenimiento: idempotencia y alcance', () => {
   it('no toca los datos vivos: reportes, fotos asociadas ni sesiones vigentes', async () => {
     const ex = ejecutorPg(pool);
     const reportes = await ex.consultar<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     const [u] = await ex.consultar<{ id: string }>(
       `INSERT INTO usuario (email, nombre, rol, password_hash) VALUES ('vivo@test.local', 'V', 'tecnico', 'x') RETURNING id::text`,
@@ -193,7 +198,7 @@ describe('mantenimiento: idempotencia y alcance', () => {
       [u!.id],
     );
     const [rep] = await ex.consultar<{ id: string }>(
-      'SELECT id::text FROM reporte_inundacion LIMIT 1',
+      "SELECT id::text FROM reporte WHERE categoria = 'inundacion' LIMIT 1",
     );
     await ex.consultar(
       `INSERT INTO reporte_foto (objeto_key, reporte_id, mime, bytes, ancho, alto, exif_sanitizado, creado_en)
@@ -204,7 +209,7 @@ describe('mantenimiento: idempotencia y alcance', () => {
     await ejecutarMantenimiento(ex);
 
     const despues = await ex.consultar<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     expect(despues[0]!.n).toBe(reportes[0]!.n);
     // Una foto vieja PERO asociada a un reporte no es huérfana: se queda.

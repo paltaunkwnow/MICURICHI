@@ -50,9 +50,10 @@ export interface FilaReporte {
   subtipo: string | null;
   /** Respuestas propias de la categoría (jsonb). En inundación, lo arma el disparador de la 0020. */
   detalle: Record<string, unknown>;
-  profundidad_estimada: ReportePublico['profundidad_estimada'];
-  frecuencia: ReportePublico['frecuencia'];
-  causa_presunta: ReportePublico['causa_presunta'];
+  /** Alias desde detalle: los tres obligatorios en Inundaciones son NULL en otras categorías. */
+  profundidad_estimada: ReportePublico['profundidad_estimada'] | null;
+  frecuencia: ReportePublico['frecuencia'] | null;
+  causa_presunta: ReportePublico['causa_presunta'] | null;
   sumidero_cercano: ReporteTecnico['sumidero_cercano'];
   sumidero_estado: ReporteTecnico['sumidero_estado'];
   agua_brota_sumidero: boolean | null;
@@ -80,8 +81,15 @@ export const SELECT_REPORTE = `
          r.unidad_vecinal_id, u.codigo AS uv_codigo, u.nombre AS uv_nombre, r.version_capa, r.resolucion_flags,
          r.ubicacion_metodo, r.precision_gps_m, r.distancia_dispositivo_m, r.ubicacion_tipo, r.descripcion,
          r.categoria, r.subtipo, r.detalle,
-         r.profundidad_estimada, r.frecuencia, r.causa_presunta,
-         r.sumidero_cercano, r.sumidero_estado, r.agua_brota_sumidero,
+         -- Alias HTTP/CSV históricos desde el JSON canónico. Fuera de inundación quedan NULL,
+         -- incluso si otra categoría tiene claves homónimas. ->> conserva NULL/ausencia;
+         -- el cast explícito conserva false como booleano, sin confundirlo con NULL.
+         CASE WHEN r.categoria = 'inundacion' THEN r.detalle->>'profundidad_estimada' END AS profundidad_estimada,
+         CASE WHEN r.categoria = 'inundacion' THEN r.detalle->>'frecuencia' END AS frecuencia,
+         CASE WHEN r.categoria = 'inundacion' THEN r.detalle->>'causa_presunta' END AS causa_presunta,
+         CASE WHEN r.categoria = 'inundacion' THEN r.detalle->>'sumidero_cercano' END AS sumidero_cercano,
+         CASE WHEN r.categoria = 'inundacion' THEN r.detalle->>'sumidero_estado' END AS sumidero_estado,
+         CASE WHEN r.categoria = 'inundacion' THEN (r.detalle->>'agua_brota_sumidero')::boolean END AS agua_brota_sumidero,
          r.severidad_calculada, r.severidad_puntaje, r.severidad_manual, r.severidad_motivo,
          r.estado, r.estado_motivo, r.fusionado_en_id, r.punto_critico_id, pc.n_reportes AS n_reportes_punto,
          r.validado_por, r.validado_en,

@@ -80,7 +80,7 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
     pool = new pg.Pool({ connectionString: urlBase, max: 20 });
     ex = ejecutorPg(pool);
     await ex.consultar('CREATE EXTENSION IF NOT EXISTS postgis');
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
     await cargarCapasDePrueba(ex);
     await crearUsuarios(ex);
     app = await crearApp({
@@ -120,8 +120,8 @@ describe.skipIf(!URL_ADMIN)('cuota por cuenta bajo concurrencia real (PostgreSQL
 
   async function reportesDeVecina(): Promise<number> {
     const r = await pool.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM reporte_inundacion
-        WHERE autor_id = (SELECT id FROM usuario WHERE email = $1)`,
+      `SELECT count(*)::text AS n FROM reporte
+        WHERE categoria = 'inundacion' AND autor_id = (SELECT id FROM usuario WHERE email = $1)`,
       [CUENTAS.vecina],
     );
     return Number(r.rows[0]!.n);
