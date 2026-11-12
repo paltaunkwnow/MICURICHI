@@ -1,10 +1,11 @@
 # Cuatro categorías en una instalación local separada
 
-## Estado de transición M10 al02/11/2026
+## Estado de la demo al 11/11/2026
 
-La instalación existente conserva **esquema21**. El código nuevo exige22íntegro; sus
-pruebas aisladas no significan que la demo se haya actualizado. La confirmación
-independiente está en curso. [Guía breve de arranque](../../ARRANCAR.md).
+La demo separada está en **esquema y release 22**. La actualización terminó
+después de restaurar el respaldo y cotejar la copia. Pasaron 14/14 E2E y los
+cuatro servicios respondieron tras reiniciar con las mismas huellas de
+ocho reportes y cuatro fotos. [Guía breve de arranque](../../ARRANCAR.md).
 
 - `iniciar` verifica identidad, versión e integridad y no migra, carga capas ni siembra.
   Un rechazo por versión requiere resolver el relevo coordinado; no saltar la guarda.
@@ -14,10 +15,9 @@ independiente está en curso. [Guía breve de arranque](../../ARRANCAR.md).
   funciones `updateInstallation`/`recoverInstallation` exigen respaldo restaurado
   comprobado, parada de los procesos propios y recuperación conjunta de código/esquema.
   Una bandera de migración no sustituye esas precondiciones.
-- Antes de operar se necesita el [protocolo concreto revisado y autorizado](../sdd/2026-10-29-cierre-m10/protocolo-operacional-propuesto.md).
-  Primero ensayo nuevo en bancos sintéticos; después una autorización separada para
-  demo, conservación de datos,14E2E y reinicio. No hay operaciones reales aprobadas
-  por el plan de código/pruebas aisladas.
+- La autorización y los controles ejecutados sobre esta demo están registrados
+  en el [protocolo de M10](../sdd/2026-10-29-cierre-m10/protocolo-operacional-propuesto.md).
+  Otra instalación requiere su propio protocolo.
 
 Los datos, recuentos, comandos y resultados fechados de abajo describen la entrega21
 histórica; no son instrucciones para reconstruirla con código22 ni pruebas de hoy.

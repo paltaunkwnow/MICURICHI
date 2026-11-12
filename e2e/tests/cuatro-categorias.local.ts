@@ -41,9 +41,14 @@ type Caso = (typeof CASOS)[number];
 type Creado = { caso: Caso; id: string; publicarEn: number; descripcion: string; fotos: number };
 type Cuenta = { email: string; password: string };
 type Evento = Record<string, string | number | boolean>;
+type Punto = { lat: number; lon: number };
 
+const MARGEN_CAJA = 0.002;
+const PUNTO_CHROMIUM = 'MULTITEMATICA_E2E_PUNTO_CHROMIUM';
+const PUNTO_MOVIL = 'MULTITEMATICA_E2E_PUNTO_MOVIL';
+const puntosDeCorrida = leerPuntosDeCorrida();
 let cuenta: Cuenta;
-let punto: { lat: number; lon: number };
+let punto: Punto;
 let marca: string;
 const creados: Creado[] = [];
 let eventos: Evento[] = [];
@@ -241,18 +246,49 @@ async function fotografiar(page: Page) {
   await expect(page.getByAltText('Foto que sacaste')).toBeVisible();
 }
 
-function caja(): string {
-  // ~200 m: exigir vacío antes de crear; nunca usar ni moderar fixtures ajenos.
-  return [punto.lon - 0.002, punto.lat - 0.002, punto.lon + 0.002, punto.lat + 0.002].join(',');
+function leerPunto(variable: string, valor: string): Punto {
+  const par = /^([+-]?(?:\d*\.)?\d+),([+-]?(?:\d*\.)?\d+)$/.exec(valor);
+  const lat = Number(par?.[1]);
+  const lon = Number(par?.[2]);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    throw new Error(`${variable} debe ser un par decimal lat,lon en rango`);
+  return { lat, lon };
 }
 
-async function verificarAreaLibre(request: APIRequestContext) {
-  const resuelta = await request.post(`${GEO}/geo/v1/resolver`, { data: punto });
+function leerPuntosDeCorrida() {
+  const valorChromium = process.env[PUNTO_CHROMIUM];
+  const valorMovil = process.env[PUNTO_MOVIL];
+  if (valorChromium === undefined && valorMovil === undefined) return;
+  if (process.env.MULTITEMATICA_E2E_DESTINO !== 'curichi_multitematica')
+    throw new Error('PUNTOS_E2E_REQUIEREN_DESTINO_EXPLICITO_CURICHI_MULTITEMATICA');
+  if (valorChromium === undefined || valorMovil === undefined)
+    throw new Error(`Se requieren ${PUNTO_CHROMIUM} y ${PUNTO_MOVIL} juntos`);
+
+  const chromium = leerPunto(PUNTO_CHROMIUM, valorChromium);
+  const movil = leerPunto(PUNTO_MOVIL, valorMovil);
+  const [oeste, sur, este, norte] = limitesCaja(chromium);
+  const [otroOeste, otroSur, otroEste, otroNorte] = limitesCaja(movil);
+  if (oeste <= otroEste && otroOeste <= este && sur <= otroNorte && otroSur <= norte)
+    throw new Error('CAJAS_E2E_SUPERPUESTAS');
+  return { chromium, movil };
+}
+
+function limitesCaja({ lat, lon }: Punto) {
+  return [lon - MARGEN_CAJA, lat - MARGEN_CAJA, lon + MARGEN_CAJA, lat + MARGEN_CAJA] as const;
+}
+
+function caja(centro = punto): string {
+  // ~200 m: exigir vacío antes de crear; nunca usar ni moderar fixtures ajenos.
+  return limitesCaja(centro).join(',');
+}
+
+async function verificarAreaLibre(request: APIRequestContext, centro: Punto) {
+  const resuelta = await request.post(`${GEO}/geo/v1/resolver`, { data: centro });
   expect(resuelta.status()).toBe(200);
   expect((await resuelta.json()).dentro_cobertura).toBe(true);
   for (const caso of CASOS) {
     const respuesta = await request.get(
-      `${API}/api/v1/reportes?categoria=${caso.slug}&bbox=${caja()}`,
+      `${API}/api/v1/reportes?categoria=${caso.slug}&bbox=${caja(centro)}`,
     );
     expect(respuesta.status()).toBe(200);
     const datos = (await respuesta.json()) as ReporteFeatureCollection;
@@ -346,14 +382,17 @@ test.describe
         throw new Error('FALTA_SECRETO_LOCAL_TECNICO_ANTES_DE_CREAR_DATOS');
       punto =
         info.project.name === 'movil'
-          ? { lat: -17.801217, lon: -63.175163 }
-          : { lat: -17.792, lon: -63.18 };
+          ? (puntosDeCorrida?.movil ?? { lat: -17.801217, lon: -63.175163 })
+          : (puntosDeCorrida?.chromium ?? { lat: -17.792, lon: -63.18 });
       const configuracion = await request.get(`${API}/api/v1/configuracion`);
       expect(configuracion.status()).toBe(200);
       expect((await configuracion.json()).categorias_activas.slice().sort()).toEqual(
         CASOS.map((c) => c.slug).sort(),
       );
-      await verificarAreaLibre(request);
+      await verificarAreaLibre(request, punto);
+      // Chromium corre primero con un solo worker. Comprobar también el área móvil antes del alta.
+      if (puntosDeCorrida && info.project.name === 'chromium')
+        await verificarAreaLibre(request, puntosDeCorrida.movil);
     });
 
     test.beforeEach(async ({ page }) => {

@@ -42,6 +42,15 @@ const salidaImport = [];
 process.argv = [process.execPath, 'prueba', '__import_sin_accion__'];
 console.log = (...args) => salidaImport.push(args);
 const modulo = await import('./respaldo.mjs');
+
+test('la comprobación del archivo acepta el booleano de node-pg y rechaza un dueño ajeno', () => {
+  assert.equal(modulo.archivoExclusivoDelDueno('t'), true);
+  assert.equal(modulo.archivoExclusivoDelDueno('true'), true);
+  assert.equal(modulo.archivoExclusivoDelDueno(true), true);
+  assert.equal(modulo.archivoExclusivoDelDueno('f'), false);
+  assert.equal(modulo.archivoExclusivoDelDueno('false'), false);
+  assert.equal(modulo.archivoExclusivoDelDueno(false), false);
+});
 const codigoImport = process.exitCode;
 process.argv = argvAnterior;
 process.exitCode = codigoAnterior;
@@ -734,15 +743,25 @@ for (const origen of [19, 21]) {
         await db.exec('COMMIT');
       }
     };
-    const sql = async (_base, q) => {
+    const formatosBooleanos = [
+      ['psql', (v) => (v ? 't' : 'f')],
+      ['node-pg texto', (v) => String(v)],
+      ['node-pg booleano', (v) => v],
+      ['psql espacios', (v) => (v ? ' T \r\n' : ' F \r\n')],
+      ['node-pg texto espacios', (v) => (v ? ' TrUe \r\n' : ' FaLsE \r\n')],
+    ];
+    let consultaExclusividad;
+    const sqlConFormato = (serializarBooleano) => async (_base, q) => {
       const lexico = q.replace(/'(?:''|[^'])*'|--[^\r\n]*|\/\*[\s\S]*?\*\//g, ' ');
       assert.match(lexico, /^\s*SELECT\b/i);
       assert.doesNotMatch(lexico, /\b(?:INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE)\b/i);
       const r = await db.query(q);
       assert.equal(r.rows.length, 1);
       const v = Object.values(r.rows[0])[0];
-      return v === true ? 't' : v === false ? 'f' : String(v ?? '');
+      if (q.startsWith('SELECT c.relowner=')) consultaExclusividad = q;
+      return typeof v === 'boolean' ? serializarBooleano(v) : String(v ?? '');
     };
+    const sql = sqlConFormato(formatosBooleanos[0][1]);
     try {
       await db.exec(
         'CREATE TABLE _migraciones(nombre text PRIMARY KEY,aplicada_en timestamptz NOT NULL DEFAULT now())',
@@ -795,6 +814,49 @@ for (const origen of [19, 21]) {
       const antes = await modulo.snapshotContraccion('fixture', { sql });
       await aplicar(origen, 22);
       const despues = await modulo.snapshotContraccion('fixture', { sql });
+      assert.ok(consultaExclusividad, 'snapshot consulta dueño y ACL de esquema/tabla/columnas');
+      for (const [formato, serializar] of formatosBooleanos) {
+        assert.deepEqual(
+          await modulo.snapshotContraccion('fixture', { sql: sqlConFormato(serializar) }),
+          despues,
+          formato,
+        );
+      }
+      for (const marca of [
+        false,
+        'f',
+        'false',
+        ' F \r\n',
+        ' FaLsE ',
+        null,
+        undefined,
+        '',
+        ' \t',
+        0,
+        1,
+        '1',
+        'yes',
+        'on',
+        'true false',
+        't\nf',
+        'true\ntrue',
+        {},
+        [],
+        [true],
+        ['t'],
+        { toString: () => 'true' },
+      ]) {
+        await assert.rejects(
+          () =>
+            modulo.snapshotContraccion('fixture', {
+              sql: async (base, q) => {
+                const valor = await sql(base, q);
+                return q === consultaExclusividad ? marca : valor;
+              },
+            }),
+          /archivo no exclusivo del dueño/,
+        );
+      }
       const conserva = modulo.compararSnapshotsContraccion(antes, despues);
       if (!conserva)
         fs.writeFileSync(
@@ -815,10 +877,16 @@ for (const origen of [19, 21]) {
         await db.exec('BEGIN');
         try {
           await db.exec(concesion);
-          await assert.rejects(
-            () => modulo.snapshotContraccion('fixture', { sql }),
-            /exclusivo|evidencia incompleta|integridad|esquema22 incompleto/,
-          );
+          if (!concesion.includes('pg_read_all_data')) {
+            const resultadoAcl = await db.query(consultaExclusividad);
+            assert.equal(Object.values(resultadoAcl.rows[0])[0], false);
+          }
+          for (const [, serializar] of formatosBooleanos) {
+            await assert.rejects(
+              () => modulo.snapshotContraccion('fixture', { sql: sqlConFormato(serializar) }),
+              /exclusivo|evidencia incompleta|integridad|esquema22 incompleto/,
+            );
+          }
         } finally {
           await db.exec('ROLLBACK');
         }

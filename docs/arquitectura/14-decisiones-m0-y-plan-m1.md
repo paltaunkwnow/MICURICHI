@@ -466,6 +466,11 @@ Ajustado al código real [RECOMENDACIÓN]:
 | **M10** | Contraer (vista, campos planos, `cuota_reporte_diaria`) | — | Suma retirar la tabla de cupo vieja |
 | ~~M11~~ | ~~Áreas verdes con capa (G2)~~ | — | **Pasa al backlog** (decisión 6) |
 
+**Cierre local del 11/11.** M10 completó la actualización autorizada de la
+demo al esquema 22 con respaldo restaurado, 14/14 E2E y huellas conservadas
+tras reiniciar. El retiro HTTP y la apertura de producción siguen sus
+decisiones propias. [Informe de cierre](../sdd/2026-10-29-cierre-m10/informe.md).
+
 **Criterio M10 aceptado el29/10 (ADR0026).** El cierre local contraerá almacenamiento
 conservando API/CSV compatibles; retirará la cuota del uso operativo con copia restringida
 íntegra. La retirada HTTP se difiere y requiere inventario de clientes/PWA y convivencia

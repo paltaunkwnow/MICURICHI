@@ -3,8 +3,8 @@
 ## Demo para exponer: cuatro categorías
 
 **La demo existe.** Tiene Inundaciones, Baches, Basura y Áreas verdes, cuentas y reportes
-sintéticos y las capas municipales. Su recorrido desktop/móvil aprobó 14/14 pruebas el 25/10.
-Utiliza la base separada `curichi_multitematica`; la instalación ya está preparada.
+sintéticos y las capas municipales. El 11/11 pasó 14/14 pruebas de escritorio
+y móvil con esquema 22. La base separada `curichi_multitematica` ya está preparada.
 
 1. Abre Docker Desktop y espera a que esté listo.
 2. Abre PowerShell y ejecuta:
@@ -24,10 +24,9 @@ Para detener los servicios de la demo, pulsa **Ctrl+C en esa consola**. Los dato
 El arranque exige dependencias/builds válidos y al menos 2500 MiB de memoria libre; no instala
 ni recompila automáticamente. No repitas `preparar`, seeds, carga de capas o migraciones.
 
-**Durante el cierre M10:** se están cambiando código y esquema de forma coordinada. Si el
-arranque rechaza compilados antiguos o una versión incompatible, conserva el mensaje y espera
-el release verificado; no recompiles ni migres la base por tu cuenta para saltar la guarda.
-Esta guía no afirma que se haya vuelto a comprobar la disponibilidad de la demo hoy.
+El reinicio de M10 conservó los ocho reportes y cuatro fotos de la corrida de
+verificación. Si aparece un rechazo de versión, conserva el mensaje para
+identificar qué artefacto requiere el release compatible con el esquema 22.
 
 Para exponer: cuenta `vecina` en la web y `tecnico` en el panel; `ejecutivo` muestra el
 resumen y `admin` la administración. En esta demo se configuraron contraseñas iguales

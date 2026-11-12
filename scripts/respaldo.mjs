@@ -697,6 +697,15 @@ function reporteLogico(r, version) {
   return fila;
 }
 
+/** node-pg entrega true/false; psql y el arnés entregan t/f. Los dos significan lo mismo. */
+export function archivoExclusivoDelDueno(valor) {
+  if (typeof valor !== 'boolean' && typeof valor !== 'string') return false;
+  const marca = String(valor ?? '')
+    .trim()
+    .toLowerCase();
+  return marca === 't' || marca === 'true';
+}
+
 /** Solo SELECT con SQL inyectado. Se captura en una transacción/snapshot del adaptador dueño. */
 export async function snapshotContraccion(base, { sql: consultar } = {}) {
   if (typeof consultar !== 'function') throw new Error('se requiere SQL inyectado');
@@ -817,17 +826,16 @@ export async function snapshotContraccion(base, { sql: consultar } = {}) {
         AND (r.rolcanlogin OR r.rolname IN ('curichi_api','curichi_geo')) AND
         (has_table_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') OR has_any_column_privilege(r.oid,c.oid,'SELECT,INSERT,UPDATE,REFERENCES'))))::text
       FROM pg_class c WHERE c.oid='${ARCHIVO}'::regclass`);
-    const propietarioValido = (
-      await consultar(
-        base,
-        `SELECT c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
+    const propietarioValido = await consultar(
+      base,
+      `SELECT c.relowner=(SELECT oid FROM pg_roles WHERE rolname=current_user)
       AND n.nspowner=c.relowner AND NOT EXISTS (SELECT 1 FROM aclexplode(coalesce(n.nspacl,acldefault('n',n.nspowner))) x WHERE x.grantee<>n.nspowner)
       AND NOT EXISTS (SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) x WHERE x.grantee<>c.relowner)
       AND NOT EXISTS (SELECT 1 FROM pg_attribute a CROSS JOIN LATERAL aclexplode(a.attacl) x WHERE a.attrelid=c.oid AND x.grantee<>c.relowner)
       FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid='${ARCHIVO}'::regclass`,
-      )
-    ).trim();
-    if (propietarioValido !== 't') throw new Error('archivo no exclusivo del dueño');
+    );
+    if (!archivoExclusivoDelDueno(propietarioValido))
+      throw new Error('archivo no exclusivo del dueño');
   }
   const filas = todas[tabla].map((r) => reporteLogico(r, version));
   const categorias = [...new Set(filas.map((r) => r.categoria))].sort().map((categoria) => ({

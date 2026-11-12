@@ -935,3 +935,66 @@ describe('0022: precondiciones y reversa multicategoría exacta', () => {
     120_000,
   );
 });
+
+describe('0022: ACL explícitas de columna en cuota y archivo', () => {
+  it.each(['curichi_geo', 'PUBLIC'])(
+    'ACL-origen: grants de columna a %s en cuota antigua no pasan al archivo nuevo',
+    async (destinatario) =>
+      base21(async (ex) => {
+        await ex.ejecutar(`GRANT SELECT (usuario_id),INSERT (reportes_n),UPDATE (fotos_n),REFERENCES (dia)
+          ON TABLE public.cuota_reporte_diaria TO ${destinatario}`);
+        expect(
+          await ex.consultar(`SELECT p.privilege_type FROM pg_attribute a
+            CROSS JOIN LATERAL aclexplode(a.attacl) p JOIN pg_class c ON c.oid=a.attrelid
+            WHERE c.oid='public.cuota_reporte_diaria'::regclass AND p.grantee<>c.relowner
+            ORDER BY p.privilege_type`),
+        ).toEqual(
+          ['INSERT', 'REFERENCES', 'SELECT', 'UPDATE'].map((privilege_type) => ({
+            privilege_type,
+          })),
+        );
+        const antes = await foto(ex);
+        const historial = await ex.consultar('SELECT * FROM public._migraciones ORDER BY nombre');
+        const defaults = await ex.consultar('SELECT * FROM pg_default_acl ORDER BY oid');
+        const [origen] = await ex.consultar<{ relowner: number }>(
+          `SELECT relowner FROM pg_class WHERE oid='public.cuota_reporte_diaria'::regclass`,
+        );
+        const fk = () =>
+          ex.consultar(`SELECT n.nspname,c.relname,k.conname,pg_get_constraintdef(k.oid,false) AS definicion
+            FROM pg_constraint k JOIN pg_class c ON c.oid=k.conrelid
+            JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE k.contype='f' AND n.nspname IN ('public','geo')
+              AND c.relname<>'cuota_reporte_diaria' ORDER BY 1,2,3`);
+        const claves = await fk();
+        await contraer(ex);
+        expect(await ex.consultar('SELECT * FROM public.estado_esquema_m10()')).toEqual([
+          { version: 22, integro: true },
+        ]);
+        expect(
+          await ex.consultar(`SELECT p.grantee FROM pg_attribute a
+            CROSS JOIN LATERAL aclexplode(a.attacl) p JOIN pg_class c ON c.oid=a.attrelid
+            WHERE c.oid='resguardo_m10.cuota_reporte_diaria'::regclass AND p.grantee<>c.relowner`),
+        ).toEqual([]);
+        expect(
+          await ex.consultar(`SELECT c.relowner,n.nspowner=c.relowner AS mismo_dueno
+            FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+            WHERE c.oid='resguardo_m10.cuota_reporte_diaria'::regclass`),
+        ).toEqual([{ relowner: origen!.relowner, mismo_dueno: true }]);
+        expect(await foto(ex)).toStrictEqual(antes);
+        expect(await fk()).toStrictEqual(claves);
+        expect(await ex.consultar('SELECT * FROM pg_default_acl ORDER BY oid')).toStrictEqual(
+          defaults,
+        );
+        expect(
+          await ex.consultar('SELECT * FROM public._migraciones WHERE nombre<>$1 ORDER BY nombre', [
+            ARCHIVO,
+          ]),
+        ).toStrictEqual(historial);
+        expect(
+          await ex.consultar(`SELECT conname FROM pg_constraint
+            WHERE conrelid='resguardo_m10.cuota_reporte_diaria'::regclass AND contype='f'`),
+        ).toEqual([]);
+      }),
+    120_000,
+  );
+});

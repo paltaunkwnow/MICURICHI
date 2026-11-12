@@ -1,7 +1,8 @@
 # Cierre M10 — integración en curso
 
-**Estado parcial, sin cierre ni autorización operacional.** Las fuentes continúan en
-edición. Esta corrida parte de su F0 propio, no de HEAD; conserva los cambios anteriores.
+**Código verificado, cierre operacional pendiente.** Las fuentes de producto están
+congeladas y Carver emitió CIERRE_CODIGO_APTOCONLIMITES el03/11. Esta corrida parte de
+su F0 propio, no de HEAD; conserva los cambios anteriores.
 
 Reanudación01/11: se recuperaron los controles antes de repetir comandos. La revisión
 independiente guardada encontró DDL-01P1 y DDL-02/03/04P2 (grants heredados al volver,
@@ -24,7 +25,8 @@ confirma las dos fixtures y AST equivalente del formato de runtime; no ejecutó 
 
 ## Alcance y decisiones
 
-Plan92rutas y ampliación4 aprobados; [guía de arranque](../../../ARRANCAR.md) adicional
+Plan92rutas, ampliación4 y ampliación del escáner3 aprobados:98rutas únicas, porque CI ya
+estaba incluida; [guía de arranque](../../../ARRANCAR.md) adicional
 solicitada expresamente. [Lista de archivos](archivos.txt) provisional, que se completará
 al congelar las entregas. Captura inicial de alcance en
 `.turbo/m10-cierre-2026-10-29/alcance-provisional-01.json`, sin tratarla como freeze final.
@@ -43,7 +45,8 @@ al congelar las entregas. Captura inicial de alcance en
 | DB |Propio e independiente429/429,0SKIP;375casos previos conservados; tipos/build/ROOTBiome aprobados; revisión de seis hallazgos DDL conforme |Ensayo real posterior autorizado; no sumar parciales como casos únicos |
 | API |Propio e independiente612PASS/12SKIP de624; tipos/build/ROOTBiome aprobados; adenda de revisión conforme. Formato7fixtures:98/98posteriores y47bytesexactos |Mantener12SKIP como no verificados; sin repetir full por formato demostrado |
 | Geoespacial |Propio e independiente110/110,0SKIP; tipos/ROOTBiome aprobados;324aserciones/14hooks/68HTTP conservados; runtime quieto |Recorrido operacional posterior autorizado |
-| Operadores |Propio e independiente: bancos19, respaldo55, local54, ensayo nuevo25, legacy31 y medición inyectada95; Node279PASS y Bash47PASS. Revisión P5 conforme |Operador privado real con OP01–03 pendientes; no son nuevos fallos de estas suites |
+| Operadores |Propio e independiente: bancos19, respaldo55, local54, ensayo nuevo25, legacy31 y medición inyectada95; Node279PASS y Bash47PASS. Revisión P5 conforme |Operador privado:OP01–03 corregidos,21+32mocks aprobados y revisión conforme; falta acreditar el runtime |
+| Escáner |157PASS independientes,154casos anteriores conservados; tres escaneos sin alertas; SCAN01 cerrado por revisión |Hooks y CI remoto se verifican al publicar; no sumar repeticiones |
 | Documentación |ADR0026, adendas de compatibilidad, índices/traspaso/producción y guía de arranque |Actualizar estado final con resultados efectivos, sin adelantarlo |
 
 La integración DB inicial tuvo65PASS/1FAIL por una lectura plana en el bloque actual de0010;
