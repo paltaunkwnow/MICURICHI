@@ -192,12 +192,144 @@ descifrar() {
 # `spatial_ref_sys` no cuenta: es la tabla de configuración de PostGIS; el volcado solo lleva los
 # SRID añadidos a mano (ninguno) y `CREATE EXTENSION postgis` ya trae los ~8500 estándar.
 contar_filas() {
-  pg_restore --data-only --schema=public --schema=geo --file=- "$1" |
+  local esquemas=(--schema=public --schema=geo)
+  if [[ -n ${2:-} ]]; then
+    tabla_reportes "$2" >/dev/null
+    if (( 10#${2:0:4} >= 21 )); then esquemas+=(--schema=resguardo_m10); fi
+  fi
+  pg_restore --data-only "${esquemas[@]}" --file=- "$1" |
     awk -v OFS='\t' '
       /^COPY / { tabla = $2; n = 0; dentro = 1; next }
       dentro && $0 == "\\." { if (tabla != "public.spatial_ref_sys") print tabla, n; dentro = 0; next }
       dentro { n++ }
     ' | sort
+}
+
+# La 0020 renombra la tabla física; la vista compatible nunca tiene TABLE DATA.
+tabla_reportes() {
+  [[ $1 =~ ^[0-9]{4}([_-][a-zA-Z0-9_.-]+)?$ && ${1:0:4} != 0000 ]] || fallar "migración inválida."
+  case ${1:0:4} in 0019|0021|0022) ;; *) fallar 'perfil de migración no soportado.' ;; esac
+  if (( 10#${1:0:4} >= 20 )); then printf 'public.reporte'; else printf 'public.reporte_inundacion'; fi
+}
+
+validar_tabla_filas() {
+  local tabla otra
+  tabla=$(tabla_reportes "$2")
+  if [[ $tabla == public.reporte ]]; then otra=public.reporte_inundacion; else otra=public.reporte; fi
+  awk -F'\t' -v tabla="$tabla" -v otra="$otra" -v version="${2:0:4}" '
+    NF != 2 || ($1 !~ /^(public|geo)\.[a-z_][a-z0-9_]*$/ && $1 != "resguardo_m10.cuota_reporte_diaria") || $2 !~ /^[0-9]+$/ || vistos[$1]++ { mala=1; exit 1 }
+    $1 == tabla { encontrada = 1 }
+    $1 == otra { prohibida = 1 }
+    $1 == "resguardo_m10.cuota_reporte_diaria" { archivo=1 }
+    END { if (mala || !encontrada || prohibida || (version == "0022" && !archivo) || (version == "0019" && archivo)) exit 1 }
+  ' "$1" || fallar "el volcado/manifiesto no trae exclusivamente la tabla física de reportes de su migración."
+}
+
+comprobar_destino_vacio() {
+  local url=$1 migracion=$2 ejecutor=${3:-} tabla filas
+  [[ -n $ejecutor ]] && declare -F "$ejecutor" >/dev/null || fallar "se requiere ejecutor SQL inyectado."
+  tabla=$(tabla_reportes "$migracion")
+  filas=$("$ejecutor" "$url" "SELECT (SELECT count(*) FROM $tabla) + (SELECT count(*) FROM usuario)") ||
+    fallar "no se pudo comprobar el destino vacío."
+  [[ $filas == 0 ]] || fallar "la base destino ya tiene reportes o usuarios: se restaura sobre una base vacía, nunca encima."
+}
+
+# Solo para un destino NUEVO ya migrado. Nunca vacía una instalación: cualquier fila ajena
+# a _migraciones/PostGIS o cualquier diferencia del seed aborta la sentencia completa.
+preparar_catalogo() {
+  local url=$1 migracion=$2 declaracion=${3:-} ejecutor=${4:-} version catalogo='' consulta
+  [[ $declaracion == destino_nuevo ]] || fallar 'se requiere declaración de destino nuevo.'
+  [[ -n $ejecutor ]] && declare -F "$ejecutor" >/dev/null || fallar 'se requiere ejecutor SQL inyectado.'
+  tabla_reportes "$migracion" >/dev/null
+  version=${migracion:0:4}
+  local saltar=''
+  if (( 10#$version >= 20 )); then
+    saltar="IF t.nspname='public' AND t.relname='categoria' THEN CONTINUE; END IF;"
+    catalogo=$(cat <<'SQL'
+  SELECT jsonb_agg(to_jsonb(c) ORDER BY slug) INTO semillas FROM public.categoria c;
+  IF semillas IS DISTINCT FROM '[
+    {"slug":"area_verde","activa":false,"orden":3,"activada_en":null,"activada_por":null},
+    {"slug":"bache","activa":false,"orden":2,"activada_en":null,"activada_por":null},
+    {"slug":"basura","activa":false,"orden":4,"activada_en":null,"activada_por":null},
+    {"slug":"inundacion","activa":true,"orden":1,"activada_en":null,"activada_por":null}
+  ]'::jsonb THEN RAISE EXCEPTION 'catálogo inicial inesperado'; END IF;
+  DELETE FROM public.categoria WHERE slug IN ('inundacion','bache','area_verde','basura');
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 4 THEN RAISE EXCEPTION 'semillas incompletas'; END IF;
+SQL
+)
+  fi
+  consulta=$(cat <<SQL
+DO \$preparar\$
+DECLARE t record; n bigint; semillas jsonb;
+BEGIN
+  IF '$version' = '0022' AND to_regclass('resguardo_m10.cuota_reporte_diaria') IS NULL
+    THEN RAISE EXCEPTION 'falta archivo de cuota'; END IF;
+  IF (SELECT left(max(nombre),4) FROM public._migraciones) IS DISTINCT FROM '$version'
+    THEN RAISE EXCEPTION 'migración destino inesperada'; END IF;
+  FOR t IN SELECT ns.nspname, c.relname FROM pg_class c JOIN pg_namespace ns ON ns.oid=c.relnamespace
+    WHERE ns.nspname IN ('public','geo','resguardo_m10') AND c.relkind IN ('r','p')
+      AND NOT (ns.nspname='public' AND c.relname IN ('_migraciones','spatial_ref_sys')) ORDER BY ns.nspname,c.relname
+  LOOP
+    IF t.nspname='resguardo_m10' AND t.relname<>'cuota_reporte_diaria' THEN RAISE EXCEPTION 'archivo inesperado'; END IF;
+    EXECUTE format('LOCK TABLE %I.%I IN ACCESS EXCLUSIVE MODE',t.nspname,t.relname);
+    $saltar
+    EXECUTE format('SELECT count(*) FROM %I.%I',t.nspname,t.relname) INTO n;
+    IF n <> 0 THEN RAISE EXCEPTION 'destino contiene datos o configuración'; END IF;
+  END LOOP;
+$catalogo
+END \$preparar\$;
+SQL
+)
+  "$ejecutor" "$url" "$consulta" || fallar 'no se pudo preparar el destino nuevo; no cargar datos.'
+}
+
+# Formato 1 generado por este servicio: leer todas las entradas, rechazar duplicados y basura.
+filas_manifiesto() {
+  awk '
+    /^[[:space:]]*"tablas": \{$/ { if (abierto++) exit 1; dentro=1; next }
+    dentro && /^[[:space:]]*\}$/ { dentro=0; cerrado=1; next }
+    dentro {
+      if ($0 !~ /^[[:space:]]*"((public|geo)\.[a-z_][a-z0-9_]*|resguardo_m10\.cuota_reporte_diaria)": [0-9]+,?$/) exit 1
+      linea=$0; sub(/^[[:space:]]*"/, "", linea); split(linea, partes, "\": ")
+      tabla=partes[1]; filas=partes[2]; sub(/,$/, "", filas)
+      if (vistos[tabla]++) exit 1
+      print tabla "\t" filas; n++
+    }
+    END { if (abierto != 1 || !cerrado || dentro || !n) exit 1 }
+  ' "$1" | sort
+}
+
+validar_manifiesto() {
+  local archivo=$1 filas=$2 clave valor migracion version
+  for clave in formato instalacion objeto creado_en migracion migracion_archivo excluye \
+    servidor_postgresql postgis pg_dump cifrado bytes_volcado sha256_volcado bytes_cifrado sha256_cifrado; do
+    [[ $(grep -c "^  \"$clave\":" "$archivo") == 1 ]] || fallar "manifiesto incompleto o ambiguo: $clave."
+  done
+  [[ $(campo_manifiesto "$archivo" formato) == "$VERSION_MANIFIESTO" ]] || fallar "formato de manifiesto no admitido."
+  migracion=$(campo_manifiesto "$archivo" migracion_archivo)
+  version=$(campo_manifiesto "$archivo" migracion)
+  tabla_reportes "$migracion" >/dev/null
+  [[ $version =~ ^[0-9]{4}$ && $version == "${migracion:0:4}" ]] || fallar "versión de manifiesto inconsistente."
+  valor=$(campo_manifiesto "$archivo" objeto)
+  [[ $valor =~ -m${version}\.dump\.gpg$ ]] || fallar "objeto y migración del manifiesto no coinciden."
+  for clave in bytes_volcado bytes_cifrado; do
+    valor=$(campo_manifiesto "$archivo" "$clave")
+    [[ $valor =~ ^[1-9][0-9]*$ ]] || fallar "tamaño ausente o inválido en manifiesto."
+  done
+  for clave in instalacion creado_en servidor_postgresql postgis pg_dump cifrado; do
+    [[ -n $(campo_manifiesto "$archivo" "$clave") ]] || fallar "campo vacío en manifiesto: $clave."
+  done
+  grep -Fqx '  "excluye": ["public._migraciones"],' "$archivo" || fallar "exclusión de migraciones inválida en manifiesto."
+  for clave in sha256_volcado sha256_cifrado; do
+    valor=$(campo_manifiesto "$archivo" "$clave")
+    [[ $valor =~ ^[a-f0-9]{64}$ ]] || fallar "sha256 ausente o inválido en manifiesto."
+  done
+  local esperadas reales
+  esperadas=$(filas_manifiesto "$archivo") || fallar "lista de tablas inválida en manifiesto."
+  reales=$(sort "$filas")
+  [[ $esperadas == "$reales" ]] || fallar "el manifiesto no coincide con todas las tablas/filas del volcado."
+  validar_tabla_filas "$filas" "$migracion"
 }
 
 # --- Alertas y latido ---------------------------------------------------------------------------
@@ -252,9 +384,8 @@ respaldar() {
   [ "$migracion" = "$migracion_despues" ] ||
     fallar "se aplicó una migración durante el volcado ($migracion → $migracion_despues); se descarta y se reintenta en la próxima pasada."
 
-  contar_filas "$volcado" >"$trabajo/filas.tsv"
-  grep -q $'^public\\.reporte_inundacion\t' "$trabajo/filas.tsv" ||
-    fallar "el volcado no trae los datos de public.reporte_inundacion: no se sube."
+  contar_filas "$volcado" "$migracion" >"$trabajo/filas.tsv"
+  validar_tabla_filas "$trabajo/filas.tsv" "$migracion"
 
   local sha_volcado bytes_volcado
   sha_volcado=$(sha256sum "$volcado" | cut -d' ' -f1)
@@ -421,8 +552,53 @@ campo_manifiesto() {
   sed -n "s/^  \"$2\": \"\\{0,1\\}\\([^\",]*\\)\"\\{0,1\\},\\{0,1\\}\$/\\1/p" "$1" | head -n 1
 }
 
+# La misma ruta de carga se usa tras descargar un respaldo y en el ensayo local autorizado.
+# El archivo y el esquema ya se validaron; no descarga, no migra, no crea ni borra bases.
+cargar_datos_local() {
+  local url=$1 archivo=$2 migracion=$3 declaracion=$4 ejecutor=${5:-} restaurador=${6:-} actual superusuario
+  local perfil_archivo=${7:-} esquemas=(--schema=public --schema=geo)
+  tabla_reportes "$migracion" >/dev/null
+  if [[ ${migracion:0:4} == 0022 || $perfil_archivo == archivo ]]; then esquemas+=(--schema=resguardo_m10); fi
+  [[ -z $perfil_archivo || $perfil_archivo == archivo ]] || fallar 'perfil de archivo inválido.'
+  local verificador=${8:-}
+  if [[ ${migracion:0:4} == 0022 || $perfil_archivo == archivo ]]; then
+    [[ -n $verificador ]] && declare -F "$verificador" >/dev/null || fallar 'perfil de archivo requiere validación semántica/FK inyectada.'
+  fi
+  [[ -n $ejecutor && -n $restaurador ]] && declare -F "$ejecutor" >/dev/null && declare -F "$restaurador" >/dev/null ||
+    fallar 'se requieren operadores inyectados para la carga.'
+  actual=$("$ejecutor" "$url" "SELECT coalesce(max(nombre), '') FROM public._migraciones") || fallar 'error leyendo migración.'
+  [[ $actual == "$migracion" ]] || fallar 'migración destino diferente del respaldo.'
+  comprobar_destino_vacio "$url" "$migracion" "$ejecutor"
+  preparar_catalogo "$url" "$migracion" "$declaracion" "$ejecutor"
+  superusuario=$("$ejecutor" "$url" 'SELECT rolsuper FROM pg_roles WHERE rolname = current_user') || fallar 'error leyendo rol.'
+  if [[ $superusuario == t ]]; then
+    "$restaurador" --dbname="$url" --data-only "${esquemas[@]}" --disable-triggers \
+      --exit-on-error --single-transaction "$archivo"
+  elif [[ $superusuario == f ]]; then
+    PGOPTIONS='-c session_replication_role=replica' "$restaurador" --dbname="$url" --data-only \
+      "${esquemas[@]}" --exit-on-error --single-transaction "$archivo"
+  else fallar 'rol no comprobado.'; fi
+  if [[ -n $verificador ]]; then
+    [[ $("$verificador" "$url" "$archivo" "$migracion") == true ]] || fallar 'carga semántica/FK no coincide con el dump.'
+  fi
+}
+
+# El orquestador nuevo inyecta el capturador versionado y el comparador íntegro.
+# Bash no migra, no interpreta un conteo como hash ni sustituye una FK efectiva por convalidated.
+verificar_contraccion_local() {
+  local origen=$1 destino=$2 capturador=${3:-} comparador=${4:-} antes despues
+  [[ -n $capturador && -n $comparador ]] && declare -F "$capturador" >/dev/null && declare -F "$comparador" >/dev/null ||
+    fallar 'se requieren capturador/comparador semánticos inyectados.'
+  antes=$("$capturador" "$origen" m10-contraccion-v1) || fallar 'evidencia origen inválida.'
+  despues=$("$capturador" "$destino" m10-contraccion-v1) || fallar 'evidencia destino inválida.'
+  [[ -n $antes && -n $despues && $("$comparador" "$antes" "$despues") == true ]] || fallar 'contracción sin igualdad semántica.'
+}
+
+pg_restore_local() { pg_restore "$@"; }
+
 restaurar() {
-  local pedido=${1:-} base_destino=${2:-}
+  local pedido=${1:-} base_destino=${2:-} declaracion=${3:-}
+  [[ $declaracion == --destino-nuevo ]] || fallar 'restaurar requiere --destino-nuevo: base nueva, nunca una instalación existente.'
   [ -n "$pedido" ] && [ -n "$base_destino" ] || fallar "uso: curichi-respaldo restaurar <objeto|ultimo> <base_destino>"
   [[ $base_destino =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || fallar "nombre de base no admitido: «$base_destino»."
   verificar_configuracion
@@ -440,12 +616,16 @@ restaurar() {
   migracion=$(campo_manifiesto "$trabajo/manifiesto.json" migracion)
   migracion_archivo=$(campo_manifiesto "$trabajo/manifiesto.json" migracion_archivo)
   [[ $migracion =~ ^[0-9]{4}$ ]] || fallar "el manifiesto no dice la migración del respaldo."
+  tabla_reportes "$migracion_archivo" >/dev/null
+  [[ ${migracion_archivo:0:4} == "$migracion" ]] || fallar "versión de manifiesto inconsistente."
   [ "$(sha256sum "$trabajo/respaldo.dump.gpg" | cut -d' ' -f1)" = "$(campo_manifiesto "$trabajo/manifiesto.json" sha256_cifrado)" ] ||
     fallar "el archivo descargado no coincide con el sha256 de su manifiesto."
   descifrar "$trabajo/respaldo.dump.gpg" "$trabajo/respaldo.dump"
   rm -f "$trabajo/respaldo.dump.gpg"
   [ "$(sha256sum "$trabajo/respaldo.dump" | cut -d' ' -f1)" = "$(campo_manifiesto "$trabajo/manifiesto.json" sha256_volcado)" ] ||
     fallar "el volcado descifrado no coincide con el de su manifiesto (¿otra clave?)."
+  contar_filas "$trabajo/respaldo.dump" "$migracion_archivo" >"$trabajo/filas.tsv"
+  validar_manifiesto "$trabajo/manifiesto.json" "$trabajo/filas.tsv"
 
   local url
   url=$(url_con_base "$RESPALDO_DATABASE_URL" "$base_destino")
@@ -457,35 +637,26 @@ restaurar() {
   if [ "$actual" != "$migracion_archivo" ]; then
     fallar "la base «$base_destino» está en «${actual:-sin migraciones}» y el respaldo en «$migracion_archivo». Primero migrala hasta esa versión: migrar.js --hasta $migracion (docs/operaciones/respaldo-y-restauracion.md)."
   fi
-  [ "$(sql "$url" "SELECT (SELECT count(*) FROM reporte_inundacion) + (SELECT count(*) FROM usuario)")" = 0 ] ||
-    fallar "la base «$base_destino» ya tiene reportes o usuarios: se restaura sobre una base vacía, nunca encima."
-
   # Las claves foráneas se desactivan mientras se carga (el orden de las tablas no las respeta, y
   # `fusionado_en_id` se apunta a sí misma). Como superusuario, --disable-triggers; si no (base
   # gestionada), session_replication_role=replica, que los proveedores suelen permitir al rol admin.
-  local superusuario
-  superusuario=$(sql "$url" "SELECT rolsuper FROM pg_roles WHERE rolname = current_user")
-  log info "restauración: cargando datos" migracion="$migracion_archivo" superusuario="$superusuario"
+  log info "restauración: cargando datos" migracion="$migracion_archivo"
   local inicio
   inicio=$(date +%s)
-  if [ "$superusuario" = t ]; then
-    pg_restore --dbname="$url" --data-only --schema=public --schema=geo --disable-triggers \
-      --exit-on-error --jobs="${RESPALDO_RESTAURAR_HILOS:-4}" "$trabajo/respaldo.dump"
-  else
-    PGOPTIONS='-c session_replication_role=replica' pg_restore --dbname="$url" --data-only \
-      --schema=public --schema=geo --exit-on-error --jobs="${RESPALDO_RESTAURAR_HILOS:-4}" "$trabajo/respaldo.dump"
-  fi
+  local perfil_archivo=''
+  if grep -q '^resguardo_m10\.cuota_reporte_diaria' "$trabajo/filas.tsv"; then perfil_archivo=archivo; fi
+  cargar_datos_local "$url" "$trabajo/respaldo.dump" "$migracion_archivo" destino_nuevo sql pg_restore_local "$perfil_archivo"
 
   # Comprobación: filas de cada tabla, exactamente las que el manifiesto dice que se respaldaron.
   local tabla filas reales distintas=0
   while IFS=$'\t' read -r tabla filas; do
-    [[ $tabla =~ ^(public|geo)\.[a-z_][a-z0-9_]*$ ]] || continue
+    [[ $tabla =~ ^(public|geo)\.[a-z_][a-z0-9_]*$ || $tabla == resguardo_m10.cuota_reporte_diaria ]] || fallar 'tabla de verificación no permitida.'
     reales=$(sql "$url" "SELECT count(*) FROM $tabla")
     if [ "$reales" != "$filas" ]; then
       log error "restauración: no coinciden las filas" tabla="$tabla" respaldadas="$filas" restauradas="$reales"
       distintas=$((distintas + 1))
     fi
-  done < <(sed -n 's/^    "\([a-z_]*\.[a-z0-9_]*\)": \([0-9]*\),\{0,1\}$/\1\t\2/p' "$trabajo/manifiesto.json")
+  done <"$trabajo/filas.tsv"
   [ "$distintas" -eq 0 ] || fallar "restauración: $distintas tabla(s) con un número de filas distinto al respaldado."
   log info "restauración de datos completa y verificada" base="$base_destino" migracion="$migracion_archivo" \
     segundos="$(($(date +%s) - inicio))"
@@ -521,6 +692,7 @@ salud() {
   exit 1
 }
 
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
 accion=${1:-programado}
 shift || true
 case $accion in
@@ -531,6 +703,11 @@ case $accion in
     ;;
   listar) listar ;;
   restaurar) restaurar "$@" ;;
+  cargar-local)
+    [[ $# == 3 && -n ${RESPALDO_DATABASE_URL:-} ]] || fallar 'uso local: archivo migracion --destino-nuevo; URL explícita.'
+    [[ $3 == --destino-nuevo ]] || fallar 'se requiere destino nuevo.'
+    cargar_datos_local "$RESPALDO_DATABASE_URL" "$1" "$2" destino_nuevo sql pg_restore_local
+    ;;
   verificar) verificar ;;
   salud) salud ;;
   *)
@@ -538,3 +715,4 @@ case $accion in
     exit 2
     ;;
 esac
+fi

@@ -116,6 +116,40 @@ export const SesionActualSchema = UsuarioSchema.extend({
       description:
         'URL base del panel (http/https). Solo para tecnico, admin y ejecutivo; null si el despliegue no la configuró. Ausente para ciudadano.',
     }),
+  /**
+   * Cupo por categoría ACTIVA (0.20.0, ADR 0012, 0017): para cada slug activo, cuántos reportes le
+   * quedan hoy, cuánto tardaría en publicarse el próximo y desde cuándo vuelve a poder reportar. Los
+   * campos sueltos de arriba (`reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde`)
+   * siguen y valen para inundación. OPCIONAL hasta M4/M5 (regla 5 del plan M3): api-core (M3.6) lo
+   * manda, pero volverlo obligatorio rompería los fixtures `: SesionActual` de web-ciudadano.
+   */
+  cupos: z
+    .record(
+      z.string(),
+      z.object({
+        restantes: z.number().int().min(0),
+        demora_proximo_s: z.number().int().min(0).max(3600),
+        puede_reportar_desde: z.iso.datetime({ offset: true }).nullable(),
+      }),
+    )
+    .optional()
+    .meta({
+      description:
+        'Cupo por categoría activa: { <slug>: { restantes, demora_proximo_s, puede_reportar_desde } }. Obligatorio desde M4/M5.',
+    }),
+  /**
+   * Fotos que le quedan hoy a la cuenta, de las que puede subir por día. A diferencia de los
+   * reportes (por categoría), el cupo de fotos es GLOBAL: suma todas las categorías (ADR 0017).
+   * OPCIONAL hasta M4/M5 (regla 5).
+   */
+  fotos_restantes_hoy: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .meta({
+      description: `Fotos que le quedan hoy a la cuenta, de ${CONFIG_DOMINIO.FOTOS_POR_DIA_POR_CUENTA} por día calendario, global (todas las categorías). Obligatorio desde M4/M5.`,
+    }),
 }).refine((s) => s.panel_url === undefined || esRolDelPanel(s.rol), {
   path: ['panel_url'],
   message: 'panel_url solo se manda a los roles del panel.',

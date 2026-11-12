@@ -142,7 +142,11 @@ describe('CLI de migraciones: DATABASE_URL, --hasta, JSON y código de salida', 
   it('sin --hasta aplica el resto, y una segunda pasada dice «ninguna (al día)»', async () => {
     const primera = capturar();
     expect(
-      await ejecutarComandoMigrar([], { DATABASE_URL: base.url }, { escribir: primera.escribir }),
+      await ejecutarComandoMigrar(
+        ['--autorizar-contraccion-compatible'],
+        { DATABASE_URL: base.url },
+        { escribir: primera.escribir },
+      ),
     ).toBe(0);
     const aplicadas = primera.lineas.find((l) => Array.isArray(l.json.aplicadas))?.json.aplicadas;
     expect(aplicadas).toEqual(listarMigraciones().filter((f) => hastaNumero(f) > '0009'));
@@ -208,7 +212,7 @@ describe('CLI de migraciones: DATABASE_URL, --hasta, JSON y código de salida', 
       throw Object.assign(new Error('canceling statement due to lock timeout'), { code: '55P03' });
     };
     const codigo = await ejecutarComandoMigrar(
-      [],
+      ['--autorizar-contraccion-compatible'],
       { DATABASE_URL: 'postgresql://nadie:x@127.0.0.1:9/nada' },
       {
         escribir: salida.escribir,
@@ -268,7 +272,7 @@ describe('--publicar-nuevos-existentes (migración 0015)', () => {
     const sinBandera = capturar();
     expect(
       await ejecutarComandoMigrar(
-        [],
+        ['--autorizar-contraccion-compatible'],
         { DATABASE_URL: otra.url },
         { escribir: sinBandera.escribir },
       ),
@@ -282,7 +286,7 @@ describe('--publicar-nuevos-existentes (migración 0015)', () => {
     const conBandera = capturar();
     expect(
       await ejecutarComandoMigrar(
-        ['--', '--publicar-nuevos-existentes'],
+        ['--', '--publicar-nuevos-existentes', '--autorizar-contraccion-compatible'],
         { DATABASE_URL: otra.url },
         { escribir: conBandera.escribir },
       ),
@@ -308,6 +312,42 @@ describe('--publicar-nuevos-existentes (migración 0015)', () => {
       ),
     ).toBe(1);
     expect(JSON.stringify(salida.lineas.at(-1)?.json)).toMatch(/publicar-nuevos-existentes/);
+  });
+});
+
+describe('--autorizar-contraccion-compatible (0022)', () => {
+  it('la invocación general sin bandera rechaza antes de crear tablas, aunque el entorno intente autorizar', async () => {
+    const aislada = await levantarBaseVacia();
+    const { default: pg } = await import('pg');
+    const pool = new pg.Pool({ connectionString: aislada.url, max: 1 });
+    try {
+      const salida = capturar();
+      expect(
+        await ejecutarComandoMigrar(
+          [],
+          { DATABASE_URL: aislada.url, AUTORIZAR_CONTRACCION_COMPATIBLE: '1' },
+          { escribir: salida.escribir },
+        ),
+      ).toBe(1);
+      expect(JSON.stringify(salida.lineas)).toMatch(/autorizar-contraccion-compatible/);
+      expect(
+        (await pool.query("SELECT to_regclass('public._migraciones') AS control")).rows,
+      ).toEqual([{ control: null }]);
+    } finally {
+      await pool.end();
+      await aislada.cerrar();
+    }
+  }, 120_000);
+  it('no acepta valores pegados ni habilita conexión al interpretar una bandera inválida', async () => {
+    const salida = capturar();
+    expect(
+      await ejecutarComandoMigrar(
+        ['--autorizar-contraccion-compatible=no'],
+        { DATABASE_URL: base.url },
+        { escribir: salida.escribir, crearPool: NO_CONECTAR },
+      ),
+    ).toBe(1);
+    expect(JSON.stringify(salida.lineas)).toMatch(/autorizar-contraccion-compatible/);
   });
 });
 

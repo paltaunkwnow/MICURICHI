@@ -14,6 +14,12 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 
+// Marcadores exactos de pruebas locales; nunca autorizan por sí solos un host ajeno.
+const CLAVES_FIXTURE_LOCAL = new Set(['sentinel', 'solo-prueba']);
+// La prueba Shell histórica usa una autoridad sintética fija, fuera de loopback.
+// Se admite solo esa autoridad completa y únicamente en el contexto .test.sh.
+const AUTORIDAD_FIXTURE_SHELL = 'postgresql://sentinel:sentinel@invalid.example';
+
 /** Cada regla es algo que NO debería estar escrito en el repositorio. */
 const REGLAS = [
   { nombre: 'clave privada', re: /-----BEGIN (RSA |EC |OPENSSH |PGP |DSA )?PRIVATE KEY-----/ },
@@ -36,17 +42,28 @@ const REGLAS = [
     // del repositorio (`curichi`, `cambiar_en_local…`), un marcador de documentación (`<VAR>`,
     // `…`, `***`), una interpolación de código (`${…}`) o un valor de una o dos letras de una
     // prueba. Una contraseña real no es nada de eso, así que sigue saltando.
-    permitido: (t) => {
-      const contrasenas = [
+    permitido: (t, archivo) => {
+      const conexiones = [
         ...t.matchAll(
-          /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:([^\s@/]+)@/g,
+          /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp):\/\/[^\s:@/]+:([^\s@/]+)@(\[[^\]\s]+\]|[^\s:/'"`),;]+)?(?::[0-9]+)?/g,
         ),
-      ].map((m) => m[1]);
+      ];
       return (
-        contrasenas.length > 0 &&
-        contrasenas.every((c) =>
-          /^(curichi|cambiar_en_local\w*|<[^>]+>|…+|\.{3}|\*+|\$\{[^}]+\}|[a-z]{1,2})$/i.test(c),
-        )
+        conexiones.length > 0 &&
+        conexiones.every(([autoridad, clave, host]) => {
+          if (
+            /^(curichi|cambiar_en_local\w*|<[^>]+>|…+|\.{3}|\*+|\$\{[^}]+\}|[a-z]{1,2})$/i.test(
+              clave,
+            )
+          )
+            return true;
+          if (!/\.test\.(?:mjs|sh)$/.test(archivo)) return false;
+          return (
+            (CLAVES_FIXTURE_LOCAL.has(clave) &&
+              /^(?:localhost|127\.0\.0\.1|\[::1\])$/.test(host)) ||
+            (/\.test\.sh$/.test(archivo) && autoridad === AUTORIDAD_FIXTURE_SHELL)
+          );
+        })
       );
     },
   },
@@ -55,8 +72,20 @@ const REGLAS = [
     // CLAVE=valor largo; se ignoran los placeholders y lo que apunte a otra variable.
     re: /\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)\s*[:=]\s*["']?([A-Za-z0-9/+_-]{16,})["']?/i,
     permitido: (t) =>
-      /\$\{|process\.env|cambiar_en_local|<[^>]+>|xxx|placeholder|ejemplo|example|curichi-(admin|tecnico)-local|contrasena-|incorrect|tu-|your-/i.test(
-        t,
+      [
+        ...t.matchAll(
+          /\b(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)\s*[:=]\s*(["']?)([A-Za-z0-9/+_-]{16,})["']?/gi,
+        ),
+      ].every(
+        (m) =>
+          (!m[1] &&
+            m[2] === 'decodeURIComponent' &&
+            /^\s*\(\s*[A-Za-z_$][\w$]*\.password\s*\)(?=\s*(?:[;,}`]|$))/.test(
+              t.slice(m.index + m[0].length),
+            )) ||
+          /\$\{|process\.env|cambiar_en_local|<[^>]+>|xxx|placeholder|ejemplo|example|curichi-(admin|tecnico)-local|contrasena-|incorrect|tu-|your-/i.test(
+            m[2],
+          ),
       ),
   },
 ];
@@ -98,7 +127,7 @@ for (const archivo of archivos()) {
     if (linea.length > 500) return; // líneas minificadas: ruido garantizado
     for (const regla of REGLAS) {
       if (!regla.re.test(linea)) continue;
-      if (regla.permitido?.(linea)) continue;
+      if (regla.permitido?.(linea, archivo)) continue;
       hallazgos.push({
         archivo,
         linea: i + 1,

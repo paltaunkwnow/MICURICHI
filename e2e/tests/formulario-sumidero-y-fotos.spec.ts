@@ -247,8 +247,10 @@ test.describe('formulario: lo que se envía del sumidero y cómo se sacan y sube
 
     const cuerpo = await enviarYLeerCuerpo(page);
     // Antes la casilla mandaba `false` al montarse: todo reporte decía que el agua no brotaba.
+    // Con la forma nueva (M4, D2) esos campos viajan dentro de `detalle`.
+    const detalle = cuerpo.detalle as Record<string, unknown>;
     for (const campo of ['sumidero_cercano', 'sumidero_estado', 'agua_brota_sumidero']) {
-      expect(cuerpo, campo).toHaveProperty(campo, null);
+      expect(detalle, campo).toHaveProperty(campo, null);
     }
     await expect(page.getByTestId('reporte-creado')).toBeVisible();
   });

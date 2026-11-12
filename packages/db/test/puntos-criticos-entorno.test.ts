@@ -4,11 +4,17 @@
  * que produce el recálculo completo sobre el mismo estado.
  */
 import pg from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ejecutorPg } from '../src/ejecutor.js';
+import { listarMigraciones } from '../src/migrar.js';
 import { recalcularPuntosCriticos } from '../src/puntos-criticos.js';
 import { recalcularEntornoDeReporte } from '../src/puntos-criticos-entorno.js';
-import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from '../src/test-utils.js';
+import {
+  type BaseEfimera,
+  cargarCapasDePrueba,
+  insertarReporte,
+  levantarBaseEfimera,
+} from '../src/test-utils.js';
 
 let base: BaseEfimera;
 let pool: pg.Pool;
@@ -25,18 +31,22 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('DELETE FROM reporte_inundacion');
-  await pool.query('DELETE FROM punto_critico');
+  await limpiarInundaciones();
 });
+
+async function limpiarInundaciones() {
+  await pool.query("DELETE FROM reporte WHERE categoria = 'inundacion'");
+  await pool.query("DELETE FROM punto_critico WHERE categoria = 'inundacion'");
+}
 
 /** Inserta un reporte en (lon, lat). Por defecto validado, es decir, activo para la agrupación. */
 async function crear(lon: number, lat: number, estado = 'validado'): Promise<string> {
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-       descripcion, profundidad_estimada, frecuencia, severidad_calculada,
+    `INSERT INTO reporte (categoria, geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
+       descripcion, detalle, detalle_version, severidad_calculada,
        severidad_puntaje, severidad_version, estado, publicar_en)
-     VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual',
-       'via_publica', 'Reporte de prueba de agrupacion incremental', 'rodilla', 'ocasional',
+     VALUES ('inundacion', ST_SetSRID(ST_MakePoint($1, $2), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual',
+       'via_publica', 'Reporte de prueba de agrupacion incremental', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1,
        'media', 6, 2, $3::estado_reporte, now()) RETURNING id::text`,
     [lon, lat, estado],
   );
@@ -48,7 +58,7 @@ async function cambiarEstado(id: string, estado: string) {
   // fija al moderar). El motivo no influye en la agrupación, que es lo único que prueba este
   // archivo; se pone uno fijo para que el fixture sea válido bajo el nuevo CHECK.
   await pool.query(
-    'UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = $3 WHERE id = $1',
+    "UPDATE reporte SET estado = $2::estado_reporte, estado_motivo = $3 WHERE categoria = 'inundacion' AND id = $1",
     [id, estado, 'Cambio de estado en prueba de recálculo'],
   );
 }
@@ -56,8 +66,8 @@ async function cambiarEstado(id: string, estado: string) {
 /** Partición actual: conjuntos de ids que comparten punto crítico, en forma comparable. */
 async function particion(): Promise<string[][]> {
   const r = await pool.query<{ pc: string | null; id: string }>(
-    `SELECT punto_critico_id::text AS pc, id::text FROM reporte_inundacion
-     WHERE estado IN ('validado','resuelto') ORDER BY id`,
+    `SELECT punto_critico_id::text AS pc, id::text FROM reporte
+     WHERE categoria = 'inundacion' AND estado IN ('validado','resuelto') ORDER BY id`,
   );
   const grupos = new Map<string, string[]>();
   for (const f of r.rows) {
@@ -131,7 +141,7 @@ describe('recálculo incremental de puntos críticos', () => {
 
     // Y el reporte que salió queda sin punto crítico, no colgando del viejo.
     const r = await pool.query<{ pc: string | null }>(
-      'SELECT punto_critico_id::text AS pc FROM reporte_inundacion WHERE id = $1',
+      "SELECT punto_critico_id::text AS pc FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [b],
     );
     expect(r.rows[0]?.pc).toBeNull();
@@ -150,7 +160,7 @@ describe('recálculo incremental de puntos críticos', () => {
     const lejano = await crear(-63.18, -17.785);
     await recalcularEntornoDeReporte(ejecutorPg(pool), lejano);
     const antes = await pool.query<{ pc: string }>(
-      'SELECT punto_critico_id::text AS pc FROM reporte_inundacion WHERE id = $1',
+      "SELECT punto_critico_id::text AS pc FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [lejano],
     );
 
@@ -158,7 +168,7 @@ describe('recálculo incremental de puntos críticos', () => {
     await recalcularEntornoDeReporte(ejecutorPg(pool), cerca);
 
     const despues = await pool.query<{ pc: string }>(
-      'SELECT punto_critico_id::text AS pc FROM reporte_inundacion WHERE id = $1',
+      "SELECT punto_critico_id::text AS pc FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [lejano],
     );
     // Esta es la diferencia con el recálculo completo, que borraba y recreaba TODO.
@@ -215,13 +225,13 @@ describe('el coste no crece con el tamaño de la tabla', () => {
       const lat = -17.7995 + Math.floor(foco / 40) * 0.0005 + (i % 2) * 0.00002;
       const b = params.length;
       filas.push(
-        `(ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', 'rodilla', 'ocasional', 'media', 6, 2, 'validado', now())`,
+        `('inundacion', ST_SetSRID(ST_MakePoint($${b + 1}, $${b + 2}), 4326), 'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba de escala del recalculo', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media', 6, 2, 'validado', now())`,
       );
       params.push(lon, lat);
     }
     await pool.query(
-      `INSERT INTO reporte_inundacion (geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-        profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
+      `INSERT INTO reporte (categoria, geom, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
+        detalle, detalle_version, severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
        VALUES ${filas.join(',')}`,
       params,
     );
@@ -232,7 +242,9 @@ describe('el coste no crece con el tamaño de la tabla', () => {
     expect(Number(puntosAntes.rows[0]!.n)).toBeGreaterThan(500);
 
     const [uno] = (
-      await pool.query<{ id: string }>('SELECT id::text FROM reporte_inundacion LIMIT 1')
+      await pool.query<{ id: string }>(
+        "SELECT id::text FROM reporte WHERE categoria = 'inundacion' LIMIT 1",
+      )
     ).rows;
     const r = await recalcularEntornoDeReporte(ejecutorPg(pool), uno!.id);
 
@@ -268,4 +280,91 @@ describe('concurrencia del recálculo', () => {
     const incremental = await particion();
     expect(await particionDeReferencia()).toEqual(incremental);
   }, 60_000);
+});
+
+describe('M10.5: recurrencia vigente sobre tabla física', () => {
+  it('M10.5: INSERT, UPDATE y lecturas propias usan reporte con filtro flood y base latest', async () => {
+    const espia = vi.spyOn(pool, 'query');
+    try {
+      const id = await crear(-63.195, -17.79);
+      await cambiarEstado(id, 'resuelto');
+      await particion();
+      const sql = espia.mock.calls
+        .map((c) => c[0])
+        .filter((q): q is string => typeof q === 'string');
+      expect(sql).toHaveLength(3);
+      expect(sql.every((q) => !q.includes('reporte_inundacion'))).toBe(true);
+      expect(sql[0]).toMatch(/INSERT INTO reporte\s*\(categoria,/);
+      expect(sql[0]).toContain("'inundacion'");
+      expect(sql[1]).toContain("categoria = 'inundacion'");
+      expect(sql[2]).toContain("categoria = 'inundacion'");
+    } finally {
+      espia.mockRestore();
+    }
+    const registradas = await pool.query<{ nombre: string }>(
+      'SELECT nombre FROM _migraciones ORDER BY nombre',
+    );
+    expect(registradas.rows.map((r) => r.nombre)).toEqual(listarMigraciones());
+  });
+
+  it('M10.5: otras tres categorías superpuestas conservan filas, estado y grupos al limpiar inundación', async () => {
+    const ex = ejecutorPg(pool);
+    const ids: string[] = [];
+    let puntos: string[] = [];
+    try {
+      for (const categoria of ['bache', 'basura', 'area_verde']) {
+        const id = await insertarReporte(ex, -63.195, -17.79, 'validado', 'media', categoria);
+        ids.push(id);
+        await recalcularEntornoDeReporte(ex, id);
+      }
+      const gruposAntes = await pool.query<{ id: string; categoria: string }>(
+        'SELECT p.id::text, p.categoria FROM punto_critico p JOIN reporte r ON r.punto_critico_id = p.id WHERE r.id = ANY($1::uuid[]) ORDER BY p.id',
+        [ids],
+      );
+      puntos = gruposAntes.rows.map((p) => p.id);
+      expect(gruposAntes.rows).toHaveLength(3);
+      expect(gruposAntes.rows.map((p) => p.categoria).sort()).toEqual([
+        'area_verde',
+        'bache',
+        'basura',
+      ]);
+      const filasAntes = await pool.query(
+        'SELECT to_jsonb(r) AS fila FROM reporte r WHERE id = ANY($1::uuid[]) ORDER BY id',
+        [ids],
+      );
+      expect(filasAntes.rows).toHaveLength(3);
+      const flood = await crear(-63.195, -17.79);
+      const resumen = await recalcularEntornoDeReporte(ex, flood);
+      expect(resumen.afectados).toBe(1);
+      expect(await particion()).toEqual([[flood]]);
+      for (const id of ids) await cambiarEstado(id, 'rechazado');
+      expect(
+        (
+          await pool.query(
+            'SELECT to_jsonb(r) AS fila FROM reporte r WHERE id = ANY($1::uuid[]) ORDER BY id',
+            [ids],
+          )
+        ).rows,
+      ).toEqual(filasAntes.rows);
+      await limpiarInundaciones();
+      expect(await particion()).toEqual([]);
+      expect(
+        (
+          await pool.query(
+            'SELECT to_jsonb(r) AS fila FROM reporte r WHERE id = ANY($1::uuid[]) ORDER BY id',
+            [ids],
+          )
+        ).rows,
+      ).toEqual(filasAntes.rows);
+      const gruposDespues = await pool.query(
+        'SELECT id::text, categoria FROM punto_critico WHERE id = ANY($1::uuid[]) ORDER BY id',
+        [puntos],
+      );
+      expect(gruposDespues.rows).toEqual(gruposAntes.rows);
+    } finally {
+      // Sólo filas de esta prueba; no se amplía la limpieza de los casos históricos de flood.
+      await pool.query('DELETE FROM reporte WHERE id = ANY($1::uuid[])', [ids]);
+      await pool.query('DELETE FROM punto_critico WHERE id = ANY($1::uuid[])', [puntos]);
+    }
+  });
 });

@@ -1,15 +1,13 @@
 'use client';
 
-import { ETIQUETAS } from 'contracts';
 import { Shield, X } from 'lucide-react';
 import Link from 'next/link';
 import type { ReporteFeature } from '@/lib/api';
+import { categoriaDeReporte, hrefReportar, textosParaCategoria } from '@/lib/categoria';
+import { useCategoriasOpcional } from '@/lib/categorias-contexto';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import {
-  etiquetaCausa,
   etiquetaDistrito,
-  etiquetaFrecuencia,
-  etiquetaProfundidad,
   etiquetaUnidadVecinal,
   fechaCorta,
   subtituloReporte,
@@ -21,6 +19,7 @@ import { useSesionOpcional } from '@/lib/sesion';
 import { estaVerificado, TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
 import { Aviso } from './Aviso';
 import { ChipEstado, ChipSeveridad } from './ChipSeveridad';
+import { presentadorDe } from './categorias/registro';
 import { IconoSinVerificar } from './IconoSinVerificar';
 
 interface Props {
@@ -53,6 +52,10 @@ export function HojaDetalle({
 }: Props) {
   const p = reporte.properties;
   const ciudad = useCiudad();
+  const { activas, registro } = useCategoriasOpcional();
+  const slug = categoriaDeReporte(p);
+  const { CamposDetalle } = presentadorDe(slug);
+  const textos = textosParaCategoria(registro, slug);
   const sesion = useSesionOpcional();
   const usuario = sesion?.usuario;
   const [lon, lat] = reporte.geometry.coordinates;
@@ -116,18 +119,7 @@ export function HojaDetalle({
       <p className="mt-3 text-[16px] leading-[1.55]">{p.descripcion}</p>
 
       <dl className="kv">
-        <div>
-          <dt>{ETIQUETAS.campos.profundidad}</dt>
-          <dd>{etiquetaProfundidad(p.profundidad_estimada)}</dd>
-        </div>
-        <div>
-          <dt>Frecuencia</dt>
-          <dd>{etiquetaFrecuencia(p.frecuencia)}</dd>
-        </div>
-        <div>
-          <dt>Causa presunta</dt>
-          <dd>{etiquetaCausa(p.causa_presunta)}</dd>
-        </div>
+        <CamposDetalle reporte={reporte} definicion={registro.obtener(slug)} />
         <div>
           <dt>Reportes</dt>
           <dd>
@@ -153,7 +145,7 @@ export function HojaDetalle({
         {/* «Me pasa a mí»: arranca un reporte nuevo ya ubicado acá. Si cae dentro del radio de
             recurrencia, el sistema lo agrupa solo en el mismo punto crítico (CLAUDE.md §9.2). */}
         <Link
-          href={`/reportar?lat=${lat}&lon=${lon}`}
+          href={hrefReportar({ categoria: slug, cantidadActivas: activas.length, lat, lon })}
           className="btn btn-tinta btn-sm flex-1 no-underline"
         >
           Me pasa a mí
@@ -188,8 +180,7 @@ export function HojaDetalle({
       ) : null}
 
       <Aviso tono="tinta" className="mt-3.5">
-        Dato de percepción, no medido: la profundidad se estima por referencia corporal y la
-        ubicación tiene el error del GPS.
+        {`Dato de percepción, no medido: ${textos.avisoPercepcion} y la ubicación tiene el error del GPS.`}
       </Aviso>
     </section>
   );

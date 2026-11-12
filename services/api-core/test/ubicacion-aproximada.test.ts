@@ -76,7 +76,9 @@ async function crear(payload: Record<string, unknown>, headers: Record<string, s
 }
 
 async function cuantosReportes(): Promise<number> {
-  const r = await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM reporte_inundacion');
+  const r = await pool.query<{ n: string }>(
+    "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
+  );
   return Number(r.rows[0]!.n);
 }
 
@@ -119,7 +121,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await pool.query('DELETE FROM auditoria');
   await pool.query('DELETE FROM idempotencia');
-  await pool.query('DELETE FROM reporte_inundacion');
+  await pool.query("DELETE FROM reporte WHERE categoria = 'inundacion'");
   await liberarCuota(ex);
 });
 
@@ -179,7 +181,7 @@ describe('POST /reportes con ubicacion_aproximada', () => {
     expect(r.statusCode, r.body).toBe(201);
     const fila = await pool.query(
       `SELECT ubicacion_metodo::text, precision_gps_m::float8 AS precision, distancia_dispositivo_m
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     expect(fila.rows[0]).toEqual({
@@ -229,7 +231,7 @@ describe('POST /reportes con ubicacion_aproximada', () => {
     expect(r.statusCode, r.body).toBe(201);
     const fila = await pool.query<{ metodo: string; distancia: number | null }>(
       `SELECT ubicacion_metodo::text AS metodo, distancia_dispositivo_m AS distancia
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     expect(fila.rows[0]).toEqual({ metodo: 'aproximada', distancia: null });
@@ -278,7 +280,7 @@ describe('reporte aproximado: auditoría, vista técnica y exportación', () => 
     expect(aud.rows[0]!.metodo).toBe('aproximada');
 
     const fila = await pool.query<{ t: string }>(
-      'SELECT row_to_json(r)::text AS t FROM reporte_inundacion r WHERE id = $1',
+      "SELECT row_to_json(r)::text AS t FROM reporte r WHERE r.categoria = 'inundacion' AND id = $1",
       [id],
     );
     const lugares: Record<string, string> = {

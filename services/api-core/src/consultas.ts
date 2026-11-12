@@ -1,5 +1,5 @@
 /** Construcción de la consulta de listado con filtros (§7.5). */
-import { CONFIG_DOMINIO, type ReporteFiltros } from 'contracts';
+import { CATEGORIA_TODAS, CONFIG_DOMINIO, type ReporteFiltros } from 'contracts';
 import type pg from 'pg';
 import { condicionPublicado, condicionPublico } from './visibilidad.js';
 import { type FilaReporte, SELECT_REPORTE } from './vistas.js';
@@ -33,6 +33,10 @@ export function armarWhere(o: OpcionesListado): { where: string; params: unknown
     // modera ni exporta un reporte antes de que sea público.
     cond.push(condicionPublicado('r'));
   }
+  // Categoría (0.20.0, ADR 0012, 0013). Un slug concreto filtra `r.categoria = $n`; `todas` (solo
+  // en las rutas del panel) no filtra. La ruta ya rechazó antes un `null` (desconocida) y, en lo
+  // público, una categoría inactiva o `todas`, así que aquí `f.categoria` es un slug o `todas`.
+  if (f.categoria && f.categoria !== CATEGORIA_TODAS) cond.push(`r.categoria = ${p(f.categoria)}`);
   // En la ruta pública el filtro por estado se aplica DENTRO de los públicos (p. ej. solo los
   // verificados); pedir `rechazado` ahí devuelve vacío, nunca lo amplía.
   if (f.estado?.length) cond.push(`r.estado = ANY(${p(f.estado)}::estado_reporte[])`);
@@ -91,7 +95,7 @@ export async function listarReportes(pool: pg.Pool, o: OpcionesListado): Promise
   const offset = (o.filtros.pagina - 1) * o.filtros.limite;
 
   const conteo = await pool.query<{ n: string }>(
-    `SELECT count(*)::text AS n FROM (SELECT 1 FROM reporte_inundacion r ${where} LIMIT $${params.length + 1}) t`,
+    `SELECT count(*)::text AS n FROM (SELECT 1 FROM reporte r ${where} LIMIT $${params.length + 1}) t`,
     [...params, TOPE_CONTEO + 1],
   );
   const bruto = Number(conteo.rows[0]?.n ?? 0);
@@ -132,7 +136,7 @@ export async function seleccionarParaExportar(
   try {
     await cliente.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     const conteo = await cliente.query<{ n: string }>(
-      `SELECT count(*)::text AS n FROM reporte_inundacion r ${where}`,
+      `SELECT count(*)::text AS n FROM reporte r ${where}`,
       params,
     );
     const [sql, valores] = consultaDePagina(where, params, o.filtros, offset);

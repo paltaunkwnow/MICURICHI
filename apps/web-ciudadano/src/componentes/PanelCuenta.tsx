@@ -4,7 +4,7 @@ import { CONFIG_DOMINIO } from 'contracts';
 import { LayoutDashboard, LogOut, UserRound } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FOTOS_POR_DIA, REPORTES_POR_DIA, TEXTO_CUPO_AGOTADO, textoCupo } from '@/lib/cupo';
+import { FOTOS_POR_DIA, TEXTO_CUPO_AGOTADO, textoCupo } from '@/lib/cupo';
 import { destinoDelPanelDeSesion, textoDelPanel } from '@/lib/panel';
 import { useCerrarSesion, useSesion } from '@/lib/sesion';
 import { Aviso } from './Aviso';
@@ -109,7 +109,7 @@ export function PanelCuenta() {
         </Aviso>
       )}
       <p className="ayuda mt-3">
-        Cada cuenta puede enviar {REPORTES_POR_DIA} reportes por día, con hasta{' '}
+        Cada cuenta tiene un cupo diario de reportes por categoría, con hasta{' '}
         {CONFIG_DOMINIO.FOTOS_MAX_POR_REPORTE} fotos cada uno y {FOTOS_POR_DIA} fotos por día. El
         cupo vuelve entero a la medianoche. Es para que el inventario no se llene de envíos
         repetidos del mismo punto.

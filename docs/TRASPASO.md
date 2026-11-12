@@ -1,5 +1,43 @@
 # Traspaso — estado exacto al 2026-09-27
 
+> **Estado vigente del 11/11/2026.** M10 técnico local quedó verificado. R4
+> acreditó 24 etapas con cotejo independiente. La demo pasó al esquema 22
+> tras restaurar su respaldo en una copia nueva. Pasaron 14/14 E2E y el
+> reinicio conservó las huellas de ocho reportes y cuatro fotos. Queda
+> publicar el PR solicitado. Pruebas y límites en el
+> [informe M10](sdd/2026-10-29-cierre-m10/informe.md).
+
+> **Continuidad del03/11/2026:** el contenido que sigue es histórico. El estado vigente
+> está en [`VentanaContexto.md`](../VentanaContexto.md). Las cuatro categorías tienen
+> entrega local verificada; M10.5 cerró con375/375 y confirmación independiente. Está
+> aprobada y en implementación aislada la [contracción compatible final M10](sdd/2026-10-29-cierre-m10/plan.md)
+> (ADR0026), con inventario y ampliación de guardas aprobados. No se ha aplicado0022 a
+> la demo ni a bases protegidas. [`ARRANCAR.md`](../ARRANCAR.md) explica demo y arranque
+> habitual, evitando la migración automática de `curichi`. El usuario pide preparar para
+> subir después a `micurichi.lat`, sin desplegar ahora; Fase1/producción siguen abiertas.
+> Commit/push/PR autorizados al terminar y verificar; sin merge. Las suites independientes
+> afectadas aprobaron1477casos con12SKIP históricos y conservan1306casos anteriores.
+> Tipos/builds necesarios, sintaxis/YAML y Biome del delta aprobaron; formatoSQL98casos
+> posteriores,47bytesexactos ydiff-check0. La [ampliación del escáner](sdd/2026-10-29-cierre-m10/ampliacion-escaneo.md)
+> está aprobada:157casos finales también confirmados independientemente,0FAIL y SCAN01
+> cerrado por revisión; total1634PASS/12SKIP sin duplicar dirigidos. La rama fue publicada
+> en1f37824 por el relevo de la tarde; todavía no hay PR ni cierre operacional.
+> Ver [verificación](sdd/2026-10-29-cierre-m10/verificacion.md). El ensayo nuevo y la
+> actualización de demo requieren aún su protocolo concreto revisado y autorización.
+
+> **Adenda del 05/11/2026.** La verificación independiente de los archivos corregidos
+> aprobó 431 casos de base y 56 de respaldo. La primera candidata del ensayo pasó
+> los controles aislados, pero el revisor detectó dependencias fuera del manifiesto
+> y tres guardas incompletas. R2 corrigió esos hallazgos, pasó 114 pruebas privadas,
+> obtuvo dictamen conforme y pasó la comprobación de la puerta. Falta autorizar el
+> [ensayo de seis bancos nuevos](sdd/2026-10-29-cierre-m10/protocolo-operacional-propuesto.md).
+
+> **Adenda del 06/11/2026.** El ensayo R2 autorizado terminó con 15 de 24 etapas
+> verificadas y conservó sus seis bancos. R3 corrige la comparación de fechas y
+> geometrías, pasó 121 pruebas y obtuvo un dictamen independiente conforme. Falta
+> aprobar los seis destinos distintos de R3 y completar la reversa real. La demo
+> y el PR siguen sus pasos posteriores. [Informe](sdd/2026-10-29-cierre-m10/informe.md).
+
 Este documento dice **dónde quedó el trabajo**, **qué funciona verificado**, **qué falta** y **cómo retomarlo**. Léelo junto con `CLAUDE.md`, que es el manual operativo y no cambia con el traspaso.
 
 > **Lo más nuevo está en §0** (plan de producción en una VPS, aprobado el 2026-09-26): la tabla de

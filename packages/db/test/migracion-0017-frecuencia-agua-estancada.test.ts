@@ -63,6 +63,27 @@ function insertarReporte(ex: Ejecutor, frecuencia: string) {
   );
 }
 
+/** Acredita la versión histórica con catálogo, control y filas reales, no leyendo el código. */
+async function comprobarHistoria0017(ex: Ejecutor) {
+  const [fila] = await insertarReporte(ex, 'agua_estancada');
+  expect(fila?.id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(fila?.frecuencia).toBe('agua_estancada');
+  await expect(insertarReporte(ex, 'frecuencia_inexistente')).rejects.toMatchObject({
+    code: '22P02',
+  });
+  const [relacion] = await ex.consultar<{ tipo: string; moderna: string | null }>(
+    `SELECT relkind::text AS tipo, to_regclass('public.reporte')::text AS moderna
+       FROM pg_class WHERE oid = 'public.reporte_inundacion'::regclass`,
+  );
+  expect(relacion).toEqual({ tipo: 'r', moderna: null });
+  const registradas = await ex.consultar<{ nombre: string }>(
+    'SELECT nombre FROM _migraciones ORDER BY nombre',
+  );
+  expect(registradas.map((r) => r.nombre)).toEqual(
+    listarMigraciones().filter((f) => numero(f) <= '0017'),
+  );
+}
+
 describe('migración 0017 sobre una base en uso (desde 0016)', () => {
   let db: Awaited<ReturnType<typeof crearPglite>>;
   let ex: Ejecutor;
@@ -75,7 +96,7 @@ describe('migración 0017 sobre una base en uso (desde 0016)', () => {
     ex = ejecutorPglite(db);
     hasta0016 = await aplicarMigraciones(ex, { hasta: '0016' });
     valoresAntes = await valoresFrecuencia(ex);
-    con0017 = await aplicarMigraciones(ex);
+    con0017 = await aplicarMigraciones(ex, { hasta: '0017' });
   }, 240_000);
 
   afterAll(async () => {
@@ -110,12 +131,16 @@ describe('migración 0017 sobre una base en uso (desde 0016)', () => {
   });
 
   it('volver a migrar no aplica nada y ejecutar el archivo a mano no falla ni duplica el valor', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0017' });
     expect(otra.aplicadas).toEqual([]);
     await ex.transaccion((tx) =>
       tx.ejecutar(readFileSync(join(DIRECTORIO_MIGRACIONES, ARCHIVO_0017), 'utf8')),
     );
     expect(await valoresFrecuencia(ex)).toEqual(FRECUENCIAS_ESPERADAS);
+  });
+
+  it('M10.5: transición e idempotencia conservan catálogo 0017 y filas del enum histórico', async () => {
+    await comprobarHistoria0017(ex);
   });
 });
 
@@ -126,7 +151,7 @@ describe('migración 0017 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0017' });
   }, 240_000);
 
   afterAll(async () => {
@@ -140,5 +165,9 @@ describe('migración 0017 desde cero', () => {
   it('acepta un reporte con frecuencia = agua_estancada', async () => {
     const [r] = await insertarReporte(ex, 'agua_estancada');
     expect(r?.frecuencia).toBe('agua_estancada');
+  });
+
+  it('M10.5: desde cero termina en 0017 con tabla física y filas válidas', async () => {
+    await comprobarHistoria0017(ex);
   });
 });

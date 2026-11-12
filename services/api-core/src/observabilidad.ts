@@ -258,7 +258,8 @@ export function instrumentarPool(pool: PoolObservable, metricas: Metricas): void
  * `curichi_reportes_sin_verificar_antiguedad_segundos`: cuánto hace que está publicado el reporte
  * sin verificar (`nuevo`) más viejo; 0 si no hay ninguno. Sin moderación previa (ADR 0006) es lo
  * que dice si la bandeja se atrasa: la alerta `BandejaSinVerificarAtrasada` lo mira. Se cuenta
- * desde `publicar_en`, que es cuando empieza a estar a la vista; lo que espera no cuenta.
+ * desde `publicar_en`, que es cuando empieza a estar a la vista; lo que espera no cuenta. Sobre
+ * `reporte` (todas las categorías desde la 0020): la bandeja atendida es la de todas.
  */
 export function instalarMetricaDeBandeja(
   metricas: Metricas,
@@ -268,7 +269,7 @@ export function instalarMetricaDeBandeja(
   metricas.alExponer(async () => {
     const r = await pool.query(
       `SELECT COALESCE(extract(epoch FROM now() - min(publicar_en)), 0)::float8 AS s
-         FROM reporte_inundacion WHERE estado = 'nuevo' AND publicar_en <= now()`,
+         FROM reporte WHERE estado = 'nuevo' AND publicar_en <= now()`,
     );
     segundos = Math.max(0, Math.floor(Number(r.rows[0]?.s ?? 0)));
   });

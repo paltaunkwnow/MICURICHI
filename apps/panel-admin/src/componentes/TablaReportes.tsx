@@ -1,6 +1,6 @@
 'use client';
 
-import { ETIQUETAS, type ReporteTecnicoFeature } from 'contracts';
+import { ETIQUETAS, type RegistroCategorias } from 'contracts';
 import { LocateOff } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -13,12 +13,19 @@ import {
   etiquetaProfundidad,
   etiquetaUnidadVecinal,
 } from '@/lib/formato';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
+import { urlDetallePanel } from '@/lib/seleccion-panel';
+import { InsigniaCategoria } from './InsigniaCategoria';
 
 interface Props {
   reportes: ReporteTecnicoFeature[];
   /** Fila resaltada; su pastilla en el mapa se pinta en tinta (M-02 del prototipo). */
   seleccionado?: string | null;
   onSeleccionar?: (id: string | null) => void;
+  categoria?: string | null;
+  registro?: RegistroCategorias;
+  mostrarCategoria?: boolean;
+  volver?: string;
 }
 
 /**
@@ -57,22 +64,39 @@ function InsigniaUbicacionAproximada() {
  * Bandeja de triaje. La fila entera es clicable y navega al detalle del reporte.
  * Además incluye un botón explícito de acción para accesibilidad y claridad.
  */
-export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) {
+export function TablaReportes({
+  reportes,
+  seleccionado,
+  onSeleccionar,
+  categoria = 'inundacion',
+  registro,
+  mostrarCategoria = categoria !== 'inundacion',
+  volver,
+}: Props) {
   const router = useRouter();
   const { fechaCorta, numero } = useFormato();
   return (
     <div className="overflow-x-auto">
       <table className="tabla">
-        <caption className="sr-only">Reportes de inundación filtrados</caption>
+        <caption className="sr-only">
+          {categoria === 'inundacion'
+            ? 'Reportes de inundación filtrados'
+            : 'Reportes filtrados por categoría'}
+        </caption>
         <thead>
           <tr>
             <th scope="col">Fecha</th>
+            {mostrarCategoria && <th scope="col">Categoría</th>}
             <th scope="col">Unidad vecinal</th>
             <th scope="col">Distrito</th>
             <th scope="col">Severidad</th>
             <th scope="col">Estado</th>
-            <th scope="col">{ETIQUETAS.campos.profundidad}</th>
-            <th scope="col">Frecuencia</th>
+            {categoria === 'inundacion' && (
+              <>
+                <th scope="col">{ETIQUETAS.campos.profundidad}</th>
+                <th scope="col">Frecuencia</th>
+              </>
+            )}
             <th scope="col" className="numero">
               N en el punto
             </th>
@@ -84,20 +108,25 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
         <tbody>
           {reportes.map((f) => {
             const p = f.properties;
+            const detalle = urlDetallePanel(
+              p.id,
+              volver || mostrarCategoria ? categoria : null,
+              volver,
+            );
             return (
               <tr
                 key={p.id}
                 data-testid="fila-reporte"
                 data-id={p.id}
                 className={`${seleccionado === p.id ? 'on' : ''} cursor-pointer hover:bg-agua-50/50 transition-colors`}
-                onClick={() => router.push(`/reportes/${p.id}`)}
+                onClick={() => router.push(detalle)}
                 onMouseEnter={() => onSeleccionar?.(p.id)}
                 onMouseLeave={() => onSeleccionar?.(null)}
                 onFocus={() => onSeleccionar?.(p.id)}
               >
                 <td>
                   <Link
-                    href={`/reportes/${p.id}`}
+                    href={detalle}
                     className="font-semibold text-agua-500 underline underline-offset-2"
                     data-testid="abrir-reporte"
                     onClick={(e) => e.stopPropagation()}
@@ -106,6 +135,14 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                     <span className="sr-only"> · abrir reporte</span>
                   </Link>
                 </td>
+                {mostrarCategoria && (
+                  <td>
+                    <InsigniaCategoria
+                      categoria={p.categoria ?? 'inundacion'}
+                      registro={registro}
+                    />
+                  </td>
+                )}
                 <td>
                   {etiquetaUnidadVecinal(p.unidad_vecinal?.codigo)}
                   {p.ubicacion_metodo === 'aproximada' ? (
@@ -122,14 +159,18 @@ export function TablaReportes({ reportes, seleccionado, onSeleccionar }: Props) 
                 <td>
                   <ChipEstado estado={p.estado} />
                 </td>
-                <td>{etiquetaProfundidad(p.profundidad_estimada)}</td>
-                <td>{etiquetaFrecuencia(p.frecuencia)}</td>
+                {categoria === 'inundacion' && (
+                  <>
+                    <td>{etiquetaProfundidad(p.profundidad_estimada)}</td>
+                    <td>{etiquetaFrecuencia(p.frecuencia)}</td>
+                  </>
+                )}
                 <td className="numero">
                   {p.n_reportes_punto === null ? '—' : numero(p.n_reportes_punto)}
                 </td>
                 <td className="text-right whitespace-nowrap">
                   <Link
-                    href={`/reportes/${p.id}`}
+                    href={detalle}
                     className="btn btn-sm btn-secundario inline-flex items-center gap-1 text-xs py-1 px-2.5 font-normal"
                     data-testid="boton-ver-detalle"
                     onClick={(e) => e.stopPropagation()}

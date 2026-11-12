@@ -1,8 +1,8 @@
 # CLAUDE.md — Mi Curichi
 
 > **Manual operativo del repositorio.** Cualquier agente o persona que trabaje aquí lo lee completo antes de tocar nada.
-> **Estado:** Fase 1 — Local, en curso. Las cinco partes corren con los datos reales del municipio; queda el cierre (tarea 9: E2E, seguridad, resumen de fase). Estado exacto y cómo retomar: **`docs/TRASPASO.md`**; mapa de la app, últimas pruebas y pendientes: **`docs/revision/2026-10-03-mapeo-y-pruebas.md`**. Plan de producción en una VPS: `docs/revision/2026-09-26-plan-produccion-vps.md` (ADR 0006).
-> Última actualización: 2026-10-04.
+> **Estado:** Fase 1 — Local, en curso. Las cinco partes corren con los datos reales del municipio; queda el cierre (tarea 9: E2E, seguridad, resumen de fase). Estado exacto y cómo retomar: **`docs/TRASPASO.md`**; mapa de la app, últimas pruebas y pendientes: **`docs/revision/2026-10-03-mapeo-y-pruebas.md`**. Plan de producción en una VPS: `docs/revision/2026-09-26-plan-produccion-vps.md` (ADR 0006). **Misión 1 ampliada a plataforma multitemática** (ADR 0008–0022): decisiones, roadmap y planes en **`docs/arquitectura/14-decisiones-m0-y-plan-m1.md`**.
+> Última actualización de estado: 2026-11-11.
 
 ## 0. Reglas de oro (leer aunque no se lea nada más)
 
@@ -16,7 +16,7 @@
 8. **La ubicación de un reporte es dato sensible.** Vista pública con precisión degradada cuando corresponda; identidad del reportante nunca en el mapa público. La posición del dispositivo, que se usa para comprobar el radio de 60 m (o, sin GPS preciso, solo para centrar el mapa de la ubicación aproximada, ADR 0007), **nunca se guarda ni se registra en logs**. Los permisos de ubicación y de cámara se piden **solo al reportar**, nunca al cargar la web.
 9. **Antes de programar: plan → aprobación → reparto.** El agente principal, con el modelo más potente, arma el plan con metas verificables; el usuario lo aprueba; recién entonces se reparte a subagentes según su nivel (§12.4). Sin excepciones.
 10. **Probar antes de tocar y verificar al terminar.** Quien edita código corre antes las pruebas del paquete y las vuelve a correr después: lo que estaba verde no puede quedar rojo, y lo que ya estaba rojo se informa, no se arregla de pasada. **Toda función nueva o arreglo termina con la verificación SDD hecha por subagentes** (§12.4), aunque no se haya pedido `/sdd`. El `/sdd` completo (`docs/proceso/sdd.md`), solo cuando el usuario lo pide.
-11. **Alcance de la Misión 1 cerrado** (§3). Todo lo demás va al backlog (§15).
+11. **Alcance de la Misión 1 cerrado** (§3): una plataforma multitemática con cuatro categorías iniciales (ADR 0008), construida por el roadmap de `docs/arquitectura/14`. Todo lo demás va al backlog (§15).
 
 ---
 
@@ -24,7 +24,21 @@
 
 **Mi Curichi.** En Santa Cruz (Bolivia), *curichi* es un bajío donde el agua se estanca. La municipalidad no tiene un inventario georreferenciado, alimentado por la ciudadanía, de **dónde**, **con qué frecuencia** y **con qué profundidad** se anega la ciudad.
 
-**Solución.** Plataforma web de **reporte ciudadano georreferenciado de puntos de inundación**. El vecino marca dónde se estanca el agua cerca de donde está, saca una foto con la cámara y carga los datos; el sistema publica el reporte como «NO SE HA VERIFICADO» tras una demora corta, lo valida, lo clasifica por severidad y lo muestra en un mapa cruzado con la división oficial (**distrito municipal** y **unidad vecinal**).
+**Solución.** **Plataforma municipal multitemática de reportes ciudadanos georreferenciados** (ADR 0008). El vecino marca dónde está el problema cerca de donde está, saca una foto con la cámara y carga los datos; el sistema publica el reporte como «NO SE HA VERIFICADO» tras una demora corta, lo valida, lo clasifica por severidad y lo muestra en un mapa cruzado con la división oficial (**distrito municipal** y **unidad vecinal**).
+
+**Categorías iniciales: Inundaciones, Baches, Áreas verdes y Basura**, sobre **un mismo núcleo** (ADR 0009): no hay sistemas clonados por categoría. Las cuatro funcionan en la instalación local separada `curichi_multitematica` (ADR 0025); la base habitual sigue protegida. Las reglas comunes y los modelos específicos conservan sus decisiones del roadmap de `docs/arquitectura/14`.
+
+**Entrega local de cuatro categorías aprobada el 2026-10-22 (ADR 0025):** plan e inventario en
+`docs/sdd/2026-10-22-cuatro-categorias/plan.md`. Contracts 0.24.0 incorpora Inundaciones,
+Baches, Basura y Áreas verdes: 512 pruebas, tipos y build aprobados; OpenAPI sin cambios.
+La instalación separada `curichi_multitematica` quedó preparada y activada el2026-10-24:
+21migraciones,capas municipales,cuentas sintéticas y ACL correctas. Web y panel responden
+en http://127.0.0.2:4000 y http://127.0.0.2:4100; controles estáticos de consumidores aprobados.
+La entrega funcional local se verificó el2026-10-25:14/14 E2E, siete desktop y siete móvil,
+incluidos formularios/cámara sintética, mapa con marcador exacto M6, moderación/exportación
+y roles. El reinicio conservó los datos y la revisión independiente fue conforme. Ver
+`docs/sdd/2026-10-22-cuatro-categorias/informe.md`. `curichi` y `curichi_revision` permanecen
+protegidas. M9 y M10.1/RF-01/M10.2/M10.3 están cerrados en local; sus informes en `docs/sdd/` delimitan las pruebas. M10.3 verificó dos restauraciones reales21→21 y19→21, con cuatro bancos conservados. M10.4, consumidores internos compatibles, quedó cerrado en local el29/10 con confirmación independiente (DB361, API562/12SKIP, Node19 y formato/tipos aprobados): mantiene cuota antigua/limpieza/ACL, estructuras y HTTP. Informe: `docs/sdd/2026-10-28-consumidores-internos/informe.md`. M10.5 cerrado el29/10 con375/375 y confirmación independiente; informe en `docs/sdd/2026-10-29-pruebas-historicas-vigentes/informe.md`. Cierre final M10 implementado en pruebas aisladas (ADR0026), con API compatible y confirmación independiente de código el 03/11 y adenda del 05/11 con 431 pruebas de base y 56 de respaldo aprobadas; el ensayo R4 registra 24/24 etapas y su evidencia fue cotejada independientemente el 09/11, con límites de custodia y fixtures detallados en el informe M10. M10 quedó verificado en local el 11/11. La demo se actualizó a esquema 22 después de restaurar y cotejar el respaldo. Pasaron 14/14 E2E y el reinicio conservó las huellas de ocho reportes y cuatro fotos. El cierre humano de Fase 1 y la preparación de producción para `micurichi.lat` siguen sus propias puertas. Estado vigente: `VentanaContexto.md`.
 
 | Usuario | Qué hace | Parte |
 |---|---|---|
@@ -53,7 +67,9 @@
 | **EPSG:4326 / EPSG:32720** | WGS 84 geográfico (obligatorio en la web y en `geom`) / WGS 84 UTM 20S, métrico, el de las capas de Santa Cruz. |
 | **Teselas vectoriales** | Capa cortada por zoom para no descargar el GeoJSON entero. Aquí se generan al vuelo en `geo-service`. |
 | **Jitter** | Desplazamiento pequeño y determinista de la coordenada pública para no exponer una vivienda. |
-| **Demora de publicación** | 1 min para el 1.º reporte del día de la cuenta y 4 min para el 2.º y el 3.º; la fija el servidor en `publicar_en`. Mientras espera, solo lo ve su autor. |
+| **Demora de publicación** | 1 min para el 1.º reporte del día de la cuenta **en esa categoría** y 4 min para el 2.º y el 3.º; la fija el servidor en `publicar_en`. Mientras espera, solo lo ve su autor. |
+| **Cupo diario** | Por cuenta y por día en `ZONA_HORARIA`: 3 reportes **por categoría** (clave `reportes:<categoria>` de `cupo_contador`) y 12 fotos en total (`fotos:cuenta`), ADR 0017. |
+| **Categoría activa** | Activa en el catálogo `categoria` **y** con definición en el registro de `contracts` (`src/categorias/`). Si falta cualquiera, se trata como inactiva. Sin parámetro `categoria`, la API usa `inundacion` (ADR 0012). |
 | **Reporte sin verificar** | Publicado en estado `nuevo`, sin revisión técnica: etiqueta exacta «NO SE HA VERIFICADO»; los validados dicen «Verificado». |
 | **Radio del dispositivo** | Distancia máxima (60 m) entre el punto y la posición del teléfono al enviar. La posición se usa para comprobarlo y no se guarda. |
 | **Ubicación aproximada** | Camino para un dispositivo que no llega a 50 m de precisión (por ejemplo una computadora): el punto se pone a mano en cualquier lugar de la cobertura, se guarda con `ubicacion_metodo = aproximada` y sin distancia al dispositivo, y los técnicos lo ven «sin comprobar con el dispositivo» (ADR 0007). |
@@ -73,10 +89,11 @@ Vocabulario de drenaje y pavimento (sumidero, colector, contrapendiente, PCI, IR
 5. **Panel técnico**: bandeja (tabla + mapa reactivo) con filtros, moderación posterior a la publicación, exportación CSV y GeoJSON, indicadores — Parte 2.
 6. **ETL** shapefile → GeoJSON → PostGIS con un comando — Parte 5.
 7. **Entorno local completo** con Docker Compose y el lanzador `Mi-Curichi.exe` — Parte 5.
+8. **Plataforma multitemática** (ampliación del 2026-10-07, ADR 0008–0022): núcleo común + categorías Inundaciones, Baches, Áreas verdes y Basura, por el roadmap M0–M10 de `docs/arquitectura/14` — todas las partes. Una categoría no se activa hasta completar su fase. Áreas verdes usa `Point`, sin capa municipal (ADR 0019, 0020).
 
 ### 3.2 Fuera de alcance (va a §15)
 
-Modelación hidráulica; priorización de inversión; notificaciones; app nativa (la PWA cubre el MVP); lluvia en tiempo real; analítica avanzada; órdenes de trabajo; autenticación social, perfiles y gamificación; multi-municipio compartido (la estrategia es **una instalación por ciudad**, ADR 0004).
+Geometrías no puntuales (polígonos, líneas, dibujo de áreas) y detección de parques por capa (ADR 0019, 0020); «Me pasa a mí» (sumarse a un punto existente); modelación hidráulica; priorización de inversión; notificaciones; app nativa (la PWA cubre el MVP); lluvia en tiempo real; analítica avanzada; órdenes de trabajo; autenticación social, perfiles y gamificación; multi-municipio compartido (la estrategia es **una instalación por ciudad**, ADR 0004).
 
 ---
 
@@ -164,7 +181,7 @@ Reglas de dependencia: los frontends **nunca** hablan con la base. `api-core` es
 
 ### 4.8 Transversal — `packages/contracts` (custodia: Parte 3)
 
-- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio. Versión actual: **0.18.0**.
+- Enums, esquemas Zod de payloads y respuestas, tipos inferidos, **OpenAPI 3.1** (`openapi/openapi.yaml`, generado), tabla de severidad versionada y constantes de dominio; desde 0.19.0, el **registro de categorías** (`src/categorias/`, ADR 0009), y desde 0.20.0, el filtro `categoria`, la forma nueva de `POST /reportes` y los cupos por categoría (M3). Versión actual **0.24.0** (ADR 0025): cuatro definiciones reales, incluidas Basura y Áreas verdes con detalle/severidad v1. Suite del paquete 512/512, tipos y build aprobados; OpenAPI generado idéntico. Consumidores estáticos y entrega funcional en instalación separada verificados:14/14 E2E el25/10 y revisión independiente conforme. M9 y M10.1/RF-01/M10.2/M10.3 cerrados en local; M10.4 cerrado en local el29/10 con verificación independiente, sin cambio de contratos. M10.5 cerrado el29/10 con375/375 y revisión/verificación conformes. ADR0026 y plan final M10 implementados como código/pruebas aisladas con API compatible; confirmación independiente de código el 03/11 y adenda del 05/11 con 431 pruebas de base y 56 de respaldo aprobadas; retiro HTTP diferido. La actualización local a 22, las 14 E2E y el reinicio quedaron verificados el 11/11. Los resultados históricos no se presentan como ejecuciones de hoy.
 - **Ninguna parte define un tipo de intercambio por su cuenta**: lo agrega aquí en una tarea que lo anuncie; la Parte 3 lo revisa.
 - Todo cambio de contrato sube la versión, se documenta en `packages/contracts/CHANGELOG.md` y regenera el OpenAPI (`pnpm --filter contracts build`; el CI comprueba que no cambie al regenerarlo).
 - El ETL importa `contracts` directamente; `dist/dominio.json` queda para consumidores en otros lenguajes.
@@ -251,14 +268,21 @@ Vive en `pipelines/geodata-etl/` (Parte 5), en **TypeScript con mapshaper** y `@
 
 El esquema y las migraciones son de la **Parte 4** (`packages/db/`); los contratos HTTP, de `packages/contracts/` (custodia: Parte 3). El ETL solo **carga filas** en `geo.*`.
 
-### 7.1 Tabla `reporte_inundacion` (esquema `public`)
+### 7.1 Tabla `reporte` (esquema `public`; hasta la migración 0020, `reporte_inundacion`)
+
+**Esquema 22 verificado en la demo local (ADR 0026):** `reporte` conserva el núcleo común y guarda el dominio exclusivamente en `detalle`/`detalle_version`. La0022 retira la vista `reporte_inundacion`, su sincronización, las seis columnas de Inundaciones y cinco ENUM SQL; conserva ambos POST y los alias HTTP/CSV. Código y esquema deben actualizarse o recuperarse juntos, con consentimiento explícito y reversa condicionada. La autorización del 11/11 se ejecutó sobre la demo separada `curichi_multitematica`. Su respaldo restaurado y estado en 22 constan en el informe M10.
+
+**Historia0020–0021 (ADR0010/0011):** la tabla se renombró a `reporte` y se mantuvo una vista de Inundaciones con `security_invoker` y `WITH CASCADED CHECK OPTION`. El trigger reconstruía el detalle desde las seis columnas. Las migraciones históricas y su cobertura se conservan; la reversa0022 admite las cuatro categorías y no se sustituye por la reversa0020.
 
 | Columna | Tipo | Notas |
 |---|---|---|
 | `id` | `uuid` PK | generado por el servidor |
+| `categoria` | `text` NOT NULL FK `categoria` | `DEFAULT 'inundacion'` (0020) |
+| `subtipo` | `text` null | validado por el contrato de la categoría |
+| `detalle` / `detalle_version` | `jsonb` NOT NULL / `smallint` NOT NULL | autoridad del dominio en22; CHECK objeto/tope8192bytes y versión1, con restricción específica de Inundaciones. Sin trigger que lo sobrescriba |
 | `geom` | `geometry(Point, 4326)` | GIST; coordenada exacta (solo técnico/admin) |
 | `creado_en` / `actualizado_en` | `timestamptz` | |
-| `publicar_en` | `timestamptz` NOT NULL | `now()` + 60 s (1.º del día de la cuenta) o + 240 s (2.º y 3.º), fijado en el INSERT con el contador de `cuota_reporte_diaria`; `CHECK` entre `creado_en` y + 1 h. La visibilidad es el filtro `publicar_en <= now()` |
+| `publicar_en` | `timestamptz` NOT NULL | `now()` + 60 s (1.º del día de la cuenta en la categoría) o + 240 s (2.º y 3.º), fijado en el INSERT con el contador `reportes:<categoria>` de `cupo_contador` (desde M3b; antes, `cuota_reporte_diaria`); `CHECK` entre `creado_en` y + 1 h. La visibilidad es el filtro `publicar_en <= now()` |
 | `evento_en` | `timestamptz` null | si null, se asume `creado_en` |
 | `autor_id` | `uuid` null FK `usuario` | sale de la sesión; null solo en reportes previos a las cuentas o si se borró la cuenta |
 | `distrito_id`, `unidad_vecinal_id` | `text` FK a `geo.*` | **calculados por el sistema** |
@@ -286,14 +310,18 @@ El esquema y las migraciones son de la **Parte 4** (`packages/db/`); los contrat
 
 La API expone `severidad_efectiva = COALESCE(severidad_manual, severidad_calculada)`.
 
+Las seis filas de dominio de Inundaciones de la tabla anterior describen los **alias HTTP y campos del detalle**, no columnas físicas en22: `profundidad_estimada`, `frecuencia`, `causa_presunta`, `sumidero_cercano`, `sumidero_estado` y `agua_brota_sumidero`. La API los deriva de JSON y conserva sus NULL para otras categorías. Hasta21 eran columnas sincronizadas; esa garantía histórica se prueba en su versión, sin recrear objetos retirados en las fixtures actuales.
+
 ### 7.2 Tablas complementarias
 
 - **`reporte_foto`**: `id`, `reporte_id`, `objeto_key` (`<uuid>.webp`), `mime`, `bytes`, `ancho`, `alto`, `exif_sanitizado` (debe ser `true` para servirse), `subido_por` (FK `usuario`, `ON DELETE SET NULL`), `creado_en`. Toda foto nueva es **WebP** calidad 80, 1600 px por lado como máximo, sin metadatos; las `.jpg` anteriores se sirven como están. Una foto solo se asocia a un reporte de quien la subió, dentro de las 24 h; sin reporte, solo la ve quien la subió.
-- **`cuota_reporte_diaria`** (0014): `(usuario_id, dia)` PK, `reportes_n`, `fotos_n`, `actualizado_en`. Se incrementa de forma atómica dentro de la transacción del reporte (`INSERT … ON CONFLICT DO UPDATE … WHERE reportes_n < máximo RETURNING`); el número devuelto fija la demora. El mantenimiento borra los días anteriores.
+- **Cuota histórica0014:** sin uso operativo desde M3b. En22 se conserva íntegra en **`resguardo_m10.cuota_reporte_diaria`**, con `(usuario_id, dia)` PK y `reportes_n`, `fotos_n`, `actualizado_en`; sin FK, acceso exclusivo del dueño, sin limpieza ni sobrescritura automática. Se retira la tabla pública; un archivo existente divergente bloquea la contracción. La reversa exige poder reconstruir la cuota y sus usuarios exactamente. El mantenimiento actual devuelve `cuotasDiariasBorradas=0`; `cupo_contador` mantiene los límites vigentes.
+- **`categoria`** (0020): catálogo `slug` PK (`snake_case`), `activa`, `orden`, `activada_en`, `activada_por`. Filas `inundacion` (activa), `bache`, `area_verde`, `basura`. Lo demás de cada categoría (textos, icono, colores, preguntas, severidad) vive en `contracts` (`src/categorias/`).
+- **`cupo_contador`** (0020, ADR 0017): `(usuario_id, clave, ventana_inicio)` PK, `n`, `actualizado_en`; contador genérico con el mismo *upsert* atómico (`INSERT … ON CONFLICT DO UPDATE … WHERE n < límite RETURNING n`) dentro de la transacción del reporte, una vez por regla de cupo. **En uso desde M3b**: `reportes:<categoria>` (3 por día y por categoría; ventana desde la medianoche de `ZONA_HORARIA`; el número devuelto fija la demora) y `fotos:cuenta` (12 por día, **global**, decisión del 2026-10-08). El mantenimiento borra las ventanas viejas.
 - **`idempotencia`** (0004): clave con prefijo de la cuenta (`<usuario_id>:<clave>`); la posición del dispositivo no entra en la huella.
 - **`geo.distrito_municipal`**, **`geo.unidad_vecinal`**, **`geo.manzana`**: `id`, `codigo`, `nombre`, `geom MultiPolygon 4326` con GIST, `version_capa`, `fuente`, `fecha_vigencia`, `distrito_id` (UV y manzana), `unidad_vecinal_id` (manzana), `distrito_inferido` (UV). PK `(id, version_capa)`; vistas `geo.<capa>_vigente`.
 - **`geo.capa_version`**: `id`, `capa`, `version`, `fuente`, `fecha_vigencia`, `crs_origen`, `sha256_manifiesto`, `n_features`, `cargado_en`, `vigente`, `activado_por`, `activado_en`.
-- **`punto_critico`**: `id`, `geom` (centroide), `n_reportes`, `primer_reporte_en`, `ultimo_reporte_en`, `severidad_max`, `distrito_id`, `unidad_vecinal_id`, `radio_m`, `calculado_en`.
+- **`punto_critico`**: `id`, `geom` (centroide), `n_reportes`, `primer_reporte_en`, `ultimo_reporte_en`, `severidad_max`, `distrito_id`, `unidad_vecinal_id`, `radio_m`, `calculado_en` y, desde la 0020, `categoria`: desde M3 el DBSCAN agrupa dentro de cada categoría, con el radio de su definición.
 - **`usuario`**: `id`, `email` (único), `nombre`, `rol` (`ciudadano` \| `tecnico` \| `ejecutivo` \| `admin`), `activo`, `creado_en`; contraseña con **Argon2id**. Autenticación propia de `api-core` (sesión por cookie).
 - **`auditoria`**: `id`, `entidad`, `entidad_id`, `accion`, `actor_id`, `antes`, `despues`, `creado_en`, en cada creación (con `publicar_en`, sin la posición del dispositivo), transición, reclasificación, fusión, retiro y activación de capa.
 
@@ -338,24 +366,33 @@ Respuesta: `{ dentro_cobertura, distrito: {id, codigo, nombre}, unidad_vecinal: 
 
 ### 7.5 Endpoints de `api-core` (prefijo `/api/v1`)
 
+**Categorías (M3, `contracts` 0.20.0, ADR 0012):**
+- **Parámetro `categoria`:**
+  - **Valor y forma:** lo aceptan las lecturas y `POST /reportes`. Es el slug, con alias normalizados. **Sin él, `inundacion`**: lo de hoy sigue igual.
+  - **`categoria=todas`:** solo en las rutas del panel (`/tecnico/reportes`, `/exportar`, `/indicadores`, `/ejecutivo/resumen`).
+  - **Rutas públicas:** una categoría desconocida, inactiva o `todas` da `400 CATEGORIA_NO_DISPONIBLE`.
+  - **Categoría activa:** ver §2.
+- **Respuestas:** suman `categoria`, `subtipo` y `detalle`; la vista pública recorta el `detalle` a los `camposPublicos` de la definición.
+- **Datos:** las lecturas y escrituras usan la tabla `reporte`.
+
 | Método y ruta | Rol | Descripción |
 |---|---|---|
-| `POST /reportes` | autenticado (rate limited) | Crea en `nuevo`; autor de la sesión (sin sesión, `401 SIN_SESION`). Body `ReporteCrearSchema` con `dispositivo` **obligatorio** (`lat`, `lon`, `precision_m`, `antiguedad_s`), sin `ubicacion_metodo` ni `precision_gps_m`. Antes de resolver y sin gastar cupo: `422 PRECISION_INSUFICIENTE` (> 50 m), `422 POSICION_VENCIDA` (> 600 s `<a confirmar>`), `422 UBICACION_FUERA_DE_RADIO` (> 60 m). Con `ubicacion_aproximada: true` (ADR 0007) no se comprueba el radio y se guarda método `aproximada`, pero la precisión tiene que ser de más de 50 m (si no, `422 UBICACION_PRECISA_DISPONIBLE`). Límite por IP y **3 reportes por cuenta y por día** en `ZONA_HORARIA` (`429 CUOTA_DE_REPORTES` con `Retry-After` hasta la medianoche). Resuelve UV, calcula severidad, fija `publicar_en`; devuelve `publicar_en` y `segundos_para_publicar` (también en el replay idempotente). |
+| `POST /reportes` | autenticado (rate limited) | Crea en `nuevo`; autor de la sesión (sin sesión, `401 SIN_SESION`). Body `ReporteCrearSchema` con `dispositivo` **obligatorio** (`lat`, `lon`, `precision_m`, `antiguedad_s`), sin `ubicacion_metodo` ni `precision_gps_m`. Antes de resolver y sin gastar cupo: `422 PRECISION_INSUFICIENTE` (> 50 m), `422 POSICION_VENCIDA` (> 600 s `<a confirmar>`), `422 UBICACION_FUERA_DE_RADIO` (> 60 m). Con `ubicacion_aproximada: true` (ADR 0007) no se comprueba el radio y se guarda método `aproximada`, pero la precisión tiene que ser de más de 50 m (si no, `422 UBICACION_PRECISA_DISPONIBLE`). Límite por IP y **3 reportes por cuenta, por día y por categoría** en `ZONA_HORARIA` (`429 CUOTA_DE_REPORTES` con `detalles.categoria` y `Retry-After` hasta la medianoche). Resuelve UV, calcula severidad con la definición de la categoría, fija `publicar_en`; devuelve `publicar_en` y `segundos_para_publicar` (también en el replay idempotente). **Dos formas de cuerpo** (M3b): la plana de hoy (= inundación) y `{ …núcleo, categoria, subtipo?, detalle }` con el `detalle` validado estricto por la definición; una categoría inactiva o desconocida da `422 CATEGORIA_NO_DISPONIBLE` sin gastar cupo. |
 | `POST /fotos` | autenticado (rate limited) | Multipart; `FOTO_MAX_BYTES` (8 MB) y 3 fotos por reporte `<a confirmar>`; entran JPEG, PNG y WebP por magic bytes y **sale WebP**. 12 fotos por cuenta y por día (`429 CUOTA_DE_FOTOS`, devueltas si falla el procesamiento); `507 SIN_ESPACIO` bajo `FOTOS_MIN_LIBRE_BYTES`. Devuelve un `objeto_key` que solo esa cuenta puede asociar. |
 | `GET /fotos/:key` | público (rate limited) | Foto de reporte publicado: `public, no-cache` con `ETag` (revalida la visibilidad). El autor ve las suyas en cualquier estado y técnico/admin las de publicados luego rechazados o fusionados, con `private, no-store`. Sin reporte, solo quien la subió. Lo demás, `404`. |
 | `GET /reportes` | público | **Siempre vista pública**: `nuevo`, `validado`, `resuelto` con `publicar_en <= now()`, jitter, sin autor. Filtros: `bbox`, `estado` (dentro de los públicos), `distrito_id`, `unidad_vecinal_id`, `punto_critico_id`, `severidad`, `desde`, `hasta`, `pagina`, `limite`. |
 | `GET /reportes/:id` | público | Detalle público; `404` si espera, está rechazado o duplicado. |
 | `GET /mis-reportes` | autenticado | Los propios (50 máx.) en cualquier estado, con `estado`, `verificado`, `publicar_en` y `retirado`; `private, no-store`, `Vary: Cookie`. |
 | `GET /tecnico/reportes`, `/tecnico/reportes/:id` | técnico, admin | Vista técnica de los publicados: todos los estados, coordenada exacta, precisión, distancia al dispositivo; mismos filtros (incluido `bbox`). |
-| `PATCH /reportes/:id/estado` | técnico, admin | `{ estado, estado_motivo?, fusionado_en_id? }` según §7.3. |
+| `PATCH /reportes/:id/estado` | técnico, admin | `{ estado, estado_motivo?, fusionado_en_id? }` según §7.3; `fusionado_en_id` acepta UUID o ID corto (contracts 0.20.0). Fusionar con un canónico de otra categoría da `409 FUSION_ENTRE_CATEGORIAS`. |
 | `PATCH /reportes/:id/severidad` | técnico, admin | `{ severidad_manual, severidad_motivo }` o `null`. |
-| `POST /reportes/:id/fusionar` | técnico, admin | Marca `:id` como `duplicado` de `{ canonico_id }`. |
+| `POST /reportes/:id/fusionar` | técnico, admin | Marca `:id` como `duplicado` de `{ canonico_id }`; `409 FUSION_ENTRE_CATEGORIAS` si son de categorías distintas. |
 | `GET /exportar` | **técnico, admin** | `formato=csv\|geojson` + filtros, vista técnica, hasta 50 000 filas; si hay más, lo dice (`total`, `exportados`, `truncado`, encabezado del CSV y `X-Curichi-Truncado: 1`). El ejecutivo recibe `403`. |
 | `GET /indicadores` | técnico, admin | `total`, `por_estado`, `por_severidad`, `por_distrito`, `por_unidad_vecinal` (con `distrito_id`), puntos críticos con `n ≥ 2` y capas vigentes, solo de publicados. Filtros opcionales (contracts 0.16.0): `severidad` (lista, severidad efectiva) y `distrito_id`; inválidos, `400 FILTROS_INVALIDOS`. Los puntos críticos solo se acotan por distrito. Sin caché; deduplica consultas en vuelo. |
 | `GET /ejecutivo/resumen` | ejecutivo, técnico, admin | `ventana=7d\|30d\|todo`: `activas` (`total`, `verificadas`, `en_revision`, `por_severidad`), `resueltas`, `por_estado`, `por_distrito`, `ultimo_reporte_en`. Sin caché. Forma exacta en el CHANGELOG (0.6.0). |
-| `GET /configuracion` | público | Ciudad de la instalación (`nombre`, `pais`, `zona_horaria`, `locale`, `centro`, `zoom_inicial`); `public, max-age=300`. |
+| `GET /configuracion` | público | Ciudad de la instalación (`nombre`, `pais`, `zona_horaria`, `locale`, `centro`, `zoom_inicial`) y `categorias_activas` (slugs en orden canónico, M3); `public, max-age=300`. |
 | `POST /auth/registro` | público (rate limited) | Alta ciudadana (rol siempre `ciudadano`); responde igual exista o no el correo; `429 DEMASIADAS_CUENTAS` por IP (hora y tope diario `ALTAS_POR_DIA_POR_IP` = 10 `<a confirmar>`). |
-| `POST /auth/login`, `/auth/logout`, `GET /auth/yo` | — / autenticado | Login con correo o con el usuario solo (se completa con `@curichi.local`); rota la sesión. `/auth/yo` suma `reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde` y, a técnico, admin y ejecutivo, `panel_url`. |
+| `POST /auth/login`, `/auth/logout`, `GET /auth/yo` | — / autenticado | Login con correo o con el usuario solo (se completa con `@curichi.local`); rota la sesión. `/auth/yo` suma `reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde` (los de inundación), `cupos` (`{ <categoria>: { restantes, demora_proximo_s, puede_reportar_desde } }` por categoría activa, M3b), `fotos_restantes_hoy` y, a técnico, admin y ejecutivo, `panel_url`. |
 | `GET /admin/capas` | técnico, admin | Versiones cargadas (el panel la muestra solo al admin). |
 | `POST /admin/capas/:id/activar` | admin | Activa una versión, con auditoría, e invalida la caché de `geo-service`. |
 | `GET /health`, `GET /ready` | público | `/ready` prueba la base, `geo-service` y el almacén de fotos (escribiendo y borrando un archivo en disco y mirando que quede espacio sobre `FOTOS_MIN_LIBRE_BYTES`, o S3); `503` solo si falla la base; lo demás, `200` con `degradado: true` (`fotos: 'poco_espacio'` si falta disco). |
@@ -369,8 +406,8 @@ Respuesta: `{ dentro_cobertura, distrito: {id, codigo, nombre}, unidad_vecinal: 
 | `GET /capas`, `GET /capas/vigentes` | Capas vigentes: modo (GeoJSON o teselas) y `url` con la **huella** del contenido; versión vigente por capa. `public, no-cache`. |
 | `GET /capas/{capa}/v/{huella}` | GeoJSON web: con la huella vigente, `immutable` 1 año y `ETag`; con una vieja, `410 CAPA_CAMBIO`; `413 USAR_TESELAS` si es demasiado grande. |
 | `GET /teselas/{capa}/{huella}/{z}/{x}/{y}.mvt` | Teselas al vuelo, mismas reglas de huella; `204` si está vacía. |
-| `GET /agregados/unidades-vecinales` | Por UV: publicados, `n_verificados`, `severidad_max_verificada`, puntos críticos. Cifras con 2 min de antigüedad como máximo. |
-| `GET /puntos-criticos?bbox=` | Puntos críticos (solo verificados) con centroide público; 5000 máx. |
+| `GET /agregados/unidades-vecinales?categoria=` | Por UV: publicados, `n_verificados`, `severidad_max_verificada`, puntos críticos, **de una categoría activa** (sin parámetro, `inundacion`; inactiva o `todas`, `400 CATEGORIA_NO_DISPONIBLE`). Caché por categoría; cifras con 2 min de antigüedad como máximo. |
+| `GET /puntos-criticos?categoria=&bbox=` | Puntos críticos (solo verificados) de una categoría activa, con centroide público; 5000 máx. El DBSCAN agrupa dentro de cada categoría con su radio (§9.2). |
 | `POST /capas/invalidar` | **Interna** (token; el proxy la corta con `404`). |
 | `GET /health`, `/ready`, `/metrics` | `/metrics` con `METRICAS_TOKEN`. |
 
@@ -449,11 +486,11 @@ Escalamiento (solo sube): **E1** P = 4 → `critica` (se anota siempre que P = 4
 | 4 | 1 | 9 | `critica` (E1) |
 | 4 | 5 | 13 | `critica` (E1) |
 
-Pesos, cortes y reglas son parámetros iniciales a validar con el técnico municipal `<a confirmar>`. Todo cambio es de contrato con versión. **Pendiente (D3)**: `agua_estancada` amplió el rango a 13 sin subir `severidad_version` ni documentarlo en el CHANGELOG, y las etiquetas de `permanente` y `cada_lluvia_fuerte` cambiaron sin migrar datos.
+Pesos, cortes y reglas son parámetros iniciales a validar con el técnico municipal `<a confirmar>`. Todo cambio es de contrato con versión. **D3, decidido el 2026-10-08 (ADR 0023): «v2 extendida».** `agua_estancada` (F = 5, migración 0017) amplió el rango a 13 sin subir `severidad_version`; como las combinaciones anteriores dan el mismo puntaje y la misma banda, no se sube la versión ni se migran datos. Las etiquetas de `permanente` y `cada_lluvia_fuerte` cambiaron sin migrar datos: los reportes anteriores se cargaron con los textos de entonces. Desde la plataforma multitemática, `severidad_version` es la versión del modelo de severidad **de su categoría**.
 
 ### 9.2 Puntos críticos (recurrencia espacial)
 
-- Varios reportes del mismo charco se ven como **un punto crítico**, sin perder ningún reporte.
+- Varios reportes del mismo charco se ven como **un punto crítico**, sin perder ningún reporte. **Por categoría** (M3): nunca se agrupan reportes de categorías distintas, y cada categoría usa el `recurrenciaRadioM` de su definición (inundación: 25 m).
 - **Solo con verificados** (`validado` y `resuelto`): un reporte sin revisar no fabrica recurrencia ni pinta de crítica una UV (`severidad_max_verificada`).
 - `RECURRENCIA_RADIO_M = 25` `<a confirmar>`; `ST_ClusterDBSCAN(ST_Transform(geom, CRS_METRICO_EPSG), eps := 25, minpoints := 1)`; el recálculo incremental mide en la misma proyección.
 - Salida en `punto_critico` (centroide, `n_reportes`, fechas, `severidad_max`, distrito y UV por PIP del centroide); cada reporte guarda `punto_critico_id`.
@@ -587,7 +624,7 @@ El plan pasa por la aprobación del usuario (regla 9). Después el agente princi
 | **Permisos del navegador** | La web no pide ubicación ni cámara al cargar: la ubicación al tocar «Compartir mi ubicación», la cámara al tocar «Sacar foto». `Permissions-Policy: geolocation=(self), camera=(self), microphone=(), payment=(), usb=()`. Al cerrar la cámara se detienen sus pistas. Ambas exigen HTTPS. |
 | **Jitter público** | `vivienda_o_predio` → desplazamiento determinista (semilla = `id`) de hasta 30 m `<a confirmar>`; vista pública redondeada a 5 decimales. El técnico ve la coordenada exacta. |
 | **EXIF y fotos** | Conversión a **WebP** sin metadatos **antes** de guardar; `exif_sanitizado = true` para servir; test que verifica, por los chunks RIFF, que no queda EXIF, XMP ni ICC. Tipos por magic bytes; nombres generados por el servidor; `507 SIN_ESPACIO` bajo el umbral de disco. Las de reportes publicados se sirven con `public, no-cache` y `ETag` (retirar el reporte deja de servir la foto sin purgar cachés). Una foto sin reporte solo la ve quien la subió. «Solo cámara» es una barrera de interfaz, no una garantía. |
-| **Rate limiting y cupos** | Por IP en reportes (10/h `<a confirmar>`), fotos (el triple) y registro; **por cuenta y por día** en `ZONA_HORARIA`: 3 reportes y 12 fotos; tope de 10 altas por IP y día. El límite por IP es por proceso; cupos y tope de altas viven en la base. Honeypot en el formulario; `ip_hash` con sal rotativa, borrado a los N días. |
+| **Rate limiting y cupos** | Por IP en reportes (10/h `<a confirmar>`), fotos (el triple) y registro; **por cuenta y por día** en `ZONA_HORARIA`: 3 reportes **por categoría** y 12 fotos en total (`cupo_contador`, M3b; `REPORTES_POR_DIA_POR_CUENTA` reemplaza el límite de reportes de todas las categorías de la instalación); tope de 10 altas por IP y día. api-core **no arranca** si una categoría activa tiene una regla de cupo con ámbito o ventana desconocidos (falla cerrado). El límite por IP es por proceso; cupos y tope de altas viven en la base. Honeypot en el formulario; `ip_hash` con sal rotativa, borrado a los N días. |
 | **Publicación sin moderación previa (ADR 0006)** | Se publica sola al vencer `publicar_en` (ningún cliente puede adelantarla); mientras espera, solo la ve su autor. Se muestra «NO SE HA VERIFICADO» con su foto; rechazar o fusionar la retira; el admin retira verificados. Alerta `BandejaSinVerificarAtrasada` (24 h provisional `<plazo a confirmar con el municipio>`). Sin difuminado de caras ni filtro de texto (backlog). |
 | **Secretos** | Nunca en el repo; `.env.example` sin valores; GitHub Secrets en CI; escaneo en pre-commit y gitleaks en CI. |
 | **Validación y autorización** | Todo payload pasa por Zod de `contracts` en el servidor. Autorización por rol en cada handler: moderación y exportación exigen técnico o admin; retirar un verificado, admin; el ejecutivo solo `/ejecutivo/resumen` (y crear reportes) y recibe `403` en moderación, exportación, indicadores y admin. `geo-service` no escribe. |
@@ -645,7 +682,7 @@ Fase 1: teselas raster de OpenStreetMap **solo para desarrollo**, con atribució
 | Prioridad | Ítem |
 |---|---|
 | Alta | Reporte offline con cola de envío; geocodificación inversa; Fase 2 (despliegue, dominio, CDN, HTTPS, respaldos, monitoreo). |
-| Media | Analítica temporal; cruce con lluvia registrada; capas de drenaje; notificaciones al reportante; órdenes de trabajo; rate limit compartido entre réplicas; «Reportar contenido»; retirar una sola foto; difuminado de caras y patentes; SSE en los paneles. |
+| Media | Analítica temporal; cruce con lluvia registrada; capas de drenaje; notificaciones al reportante; órdenes de trabajo; rate limit compartido entre réplicas; «Reportar contenido»; retirar una sola foto; difuminado de caras y patentes; SSE en los paneles; capa municipal de áreas verdes y geometrías no puntuales (ADR 0019, 0020); «Me pasa a mí» (sumarse a un punto existente). |
 | Baja | Anular envío durante la demora; recodificar a WebP las `.jpg` viejas; app nativa; priorización de inversión; modelación hidráulica; multi-municipio compartido; invalidación de cachés entre réplicas (`LISTEN/NOTIFY`); número de emergencias por país (hoy 911 fijo); deck.gl. |
 
 ---
@@ -659,4 +696,5 @@ Fase 1: teselas raster de OpenStreetMap **solo para desarrollo**, con atribució
 | 3 | Parámetros de dominio | Severidad §9.1, radio 25 m, jitter 30 m, hueco 20 m, rate limit 10/h, foto 8 MB × 3, radio 60 m, precisión 50 m, antigüedad 600 s, demoras 60/240 s, 3 reportes y 12 fotos por día, 10 altas por IP | Validar con el técnico municipal. |
 | 4 | Retención | `ip_hash` 30 días | Retención de datos personales y de fotos rechazadas; RPO y RTO con el municipio. |
 | 5 | Plazo de revisión de la bandeja | 24 h provisional | Plazo y quién atiende la alerta (bloquea la apertura). |
-| 6 | Pendientes del 2026-10-03 (`docs/revision/2026-10-03-mapeo-y-pruebas.md`) | — | D2: botón «Usar ubicación de prueba» visible en producción. D3: versión de severidad, CHANGELOG y etiquetas de frecuencia. D4: `panel_url` para quien entra por el túnel. D5: IP compartida por el túnel. D6: demora de publicación en 0 en el `.env` local. D7: columna `ultimo_reporte_en` que la 0016 no borró en la base local (`pnpm --filter db privilegios` en rojo). |
+| 6 | Pendientes del 2026-10-03 (`docs/revision/2026-10-03-mapeo-y-pruebas.md`) | — | D2: botón «Usar ubicación de prueba» visible en producción. D3: **decidido** el 2026-10-08, «v2 extendida» (ADR 0023, §9.1). D4: `panel_url` para quien entra por el túnel. D5: IP compartida por el túnel. D6: demora de publicación en 0 en el `.env` local. D7: columna `ultimo_reporte_en` que la 0016 no borró en la base local (`pnpm --filter db privilegios` en rojo). |
+| 7 | Plataforma multitemática (entrega local aprobada el 2026-10-22) | ADR 0008–0025 aceptadas; roadmap en `docs/arquitectura/14`. Fotos globales 12/día, D3 v2 extendida, ID corto o UUID. Basura/Áreas verdes: subtipos y preguntas del prototipo, severidad v1 y radio provisional 10 m aprobados para local; Point, estados comunes y resolución manual | Entrega funcional local M6–M8 verificada el25/10: contracts0.24.0, consumidores y14/14 E2E, incluido marcador exacto M6; revisión independiente conforme. M9 y M10.1/RF-01/M10.2/M10.3 cerrados en local; M10.4 cerrado en local el29/10. M10.5 cerrado375/375; ADR0026 y plan final implementados como código/pruebas aisladas; confirmación independiente de código el 03/11 y adenda del 05/11 con 431 pruebas de base y 56 de respaldo aprobadas. La0022 usa JSON y archivo de cuota restringido; la demo está en 22 con respaldo restaurado, 14/14 E2E y huellas iguales tras reiniciar. M10 técnico local verificado. Retiro HTTP diferido; cierre humano de Fase 1 y producción pendientes. Nueva base `curichi_multitematica` preparada y con cuatro categorías activas el24/10; nunca migrar `curichi`/`curichi_revision`. Sin caducidad automática ni cambio de categoría. Parámetros municipales y puerta de privacidad de Persona (0018) pendientes antes de producción; sin integración municipal automática. Commit/push/PR autorizados al terminar y verificar por petición expresa del01/11; sin merge ni despliegue. Plan e inventario: `docs/sdd/2026-10-22-cuatro-categorias/plan.md`. |

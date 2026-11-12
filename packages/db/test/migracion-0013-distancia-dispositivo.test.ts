@@ -209,7 +209,10 @@ describe('migración 0013 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    // Hasta 0019: esta prueba es del universo de una sola categoría. La 0020 renombra la tabla a una
+    // VISTA `reporte_inundacion`, donde `pg_constraint` por `::regclass` no ve el CHECK de la columna;
+    // su propia prueba (migracion-0020) cubre ese estado.
+    await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {
@@ -235,7 +238,7 @@ describe('alineación con contracts 0.9.0', () => {
   });
 
   it('el esquema Drizzle declara distancia_dispositivo_m como smallint que admite NULL', () => {
-    const c = getTableColumns(esquema.reporteInundacion) as Record<
+    const c = getTableColumns(esquema.reporte) as Record<
       string,
       { name: string; notNull: boolean; getSQLType(): string }
     >;

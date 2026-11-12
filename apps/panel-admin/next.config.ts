@@ -21,6 +21,7 @@ const cabeceras = [
 ];
 
 const nextConfig: NextConfig = {
+  ...(process.env.CURICHI_INSTALACION_LOCAL === '1' ? { distDir: '.next-multitematica' } : {}),
   reactStrictMode: true,
   // El manual del repositorio es el CLAUDE.md de la raíz: Next no debe generar los suyos.
   agentRules: false,

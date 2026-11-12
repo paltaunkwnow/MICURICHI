@@ -4,9 +4,19 @@ import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-qu
 import type { Ciudad } from 'contracts';
 import { type ReactNode, useState } from 'react';
 import { ErrorApi } from '@/lib/api';
+import { ProveedorCategoriasPanel } from '@/lib/categorias-contexto';
 import { ProveedorCiudad } from '@/lib/ciudad-contexto';
+import type { EstadoConfiguracion } from '@/lib/configuracion';
 
-export function Proveedores({ ciudad, children }: { ciudad: Ciudad; children: ReactNode }) {
+export function Proveedores({
+  ciudad,
+  configuracion,
+  children,
+}: {
+  ciudad: Ciudad;
+  configuracion: EstadoConfiguracion;
+  children: ReactNode;
+}) {
   const [cliente] = useState(() => {
     const qc: QueryClient = new QueryClient({
       defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
@@ -24,7 +34,9 @@ export function Proveedores({ ciudad, children }: { ciudad: Ciudad; children: Re
   });
   return (
     <ProveedorCiudad ciudad={ciudad}>
-      <QueryClientProvider client={cliente}>{children}</QueryClientProvider>
+      <QueryClientProvider client={cliente}>
+        <ProveedorCategoriasPanel inicial={configuracion}>{children}</ProveedorCategoriasPanel>
+      </QueryClientProvider>
     </ProveedorCiudad>
   );
 }

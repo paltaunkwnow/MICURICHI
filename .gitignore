@@ -3,6 +3,7 @@ node_modules/
 .pnpm-store/
 dist/
 .next/
+.next-multitematica/
 out/
 coverage/
 .turbo/

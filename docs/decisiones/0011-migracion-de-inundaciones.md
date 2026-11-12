@@ -1,0 +1,28 @@
+# ADR 0011 — Migración de inundaciones
+
+- **Estado:** aceptada.
+- **Fecha:** 2026-10-07
+- **Decide:** el usuario, que aprobó la propuesta de `docs/arquitectura/14.1` el 2026-10-07.
+- **Origen:** [`docs/arquitectura/14`](../arquitectura/14-decisiones-m0-y-plan-m1.md) y [`14.1`](../arquitectura/14.1-adr-propuestos.md) (detalle y alternativas).
+
+**Decisión.**
+
+- **Expandir → convivir → contraer** (13.3 §3).
+- `RENAME reporte_inundacion → reporte`, que conserva ID, FK de fotos e idempotencia, índices y
+  *grants*.
+- Columnas nuevas y copia de los campos de inundación al `detalle`.
+- **Vista `reporte_inundacion` filtrada a inundación** (`WITH CHECK OPTION`), para que el código viejo
+  no se contamine.
+- Ensayo en una copia con conteos y sumas, respaldo restaurado y vuelta atrás probada mientras no haya
+  otras categorías.
+- Contracción (M10) tras una ventana medida.
+
+**Adenda aceptada el2026-10-29 (ADR0026).** El usuario aprobó separar contracción física
+compatible de retiro HTTP en el [plan final M10](../sdd/2026-10-29-pruebas-historicas-vigentes/plan-cierre-m10.md).
+La ventana externa medida sigue siendo obligatoria antes de retirar clientes/PWA y sus
+contratos. El almacenamiento puede contraerse conservando HTTP tras cumplir ensayos,
+resguardo de cuota y reversa coordinada de código+esquema. Esta adenda modifica el alcance
+original; no afirma que la ventana esté medida ni que la contracción se haya ejecutado.
+Las operaciones reales requieren todavía su protocolo concreto aprobado.
+
+**Alternativas descartadas.** Tabla nueva y copia; renombrar sin vista; *big bang*.

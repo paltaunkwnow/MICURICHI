@@ -280,6 +280,45 @@ h4,
   flex: none;
 }
 
+/*
+ * Selector de categoría del mapa (ADR 0022). Pestañas de 48 px con icono y nombre; el color de la
+ * categoría llega por `style` solo en la activa y el foco es el de la marca (`:focus-visible` de
+ * arriba), nunca el de la categoría. La lista se desplaza a los lados si no entra (cuatro
+ * categorías en un celular); el relleno de 5 px evita que el anillo de foco quede recortado.
+ */
+.pestanas-categoria {
+  display: flex;
+  gap: 8px;
+  padding: 5px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pestanas-categoria::-webkit-scrollbar {
+  display: none;
+}
+.pestana-categoria {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 1.5px solid var(--color-filete);
+  border-radius: var(--radius-pastilla);
+  background: #fff;
+  color: var(--color-tinta-900);
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.pestana-categoria:hover {
+  border-color: var(--color-tinta-300);
+}
+
 /* Pastilla informativa pequeña, no interactiva. */
 .mini,
 .chip-suave {

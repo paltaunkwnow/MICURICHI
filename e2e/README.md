@@ -1,5 +1,154 @@
 # e2e — Parte 5 (calidad)
 
+## Piloto M6 de Baches: arnés dedicado
+
+Para M6 se usa exclusivamente `scripts/piloto-m6.mjs` y
+`playwright.piloto-m6.config.ts`, conforme al plan aprobado en
+`docs/sdd/2026-10-18-baches-piloto/plan.md` (§5, CA8–12 y §9).
+Las instrucciones históricas del runner general que siguen en este documento no son
+el procedimiento del piloto: preparan la base y quedan fuera de esta ejecución.
+
+**Estado:** código y dobles implementados; ejecución real de PG/piloto pendiente de la
+revisión independiente del conjunto. La CLI falla cerrada con
+`ADAPTADORES_NO_REVISADOS` mientras no exista un recibo válido del corte auditado.
+Los tests unitarios con dobles y el listado de Playwright no acreditan E2E real.
+
+| Modo | Efecto autorizado tras la revisión |
+|---|---|
+| `--preflight` | Conecta solo al destino validado; comprueba identidades, privilegios, inventario exacto hasta 0021, capas/conteos, cuentas, catálogo y fotos existentes. Lecturas/transacciones READ ONLY, sin servidores ni sonda de escritura |
+| `--grupo G1` … `--grupo G5` | Regresión anterior, de un grupo por vez y Baches inactiva; conserva el setup general y sus comprobaciones |
+| `--piloto` | Solo `tests/piloto-m6.piloto.ts`, seis casos por proyecto, escritorio y móvil; activa temporalmente Baches y restaura su fila |
+| `--restaurar <diario>` | Recuperación explícita de una corrida pendiente; repite guardas, identidad, locks y CAS; no depende de fotos/builds para restaurar |
+
+Comandos, **sin ejecución implícita ni descarga de dependencias**:
+
+```text
+node --test --test-concurrency=1 e2e/scripts/piloto-m6.test.mjs
+node e2e/node_modules/typescript/bin/tsc --noEmit --incremental false -p e2e
+node e2e/node_modules/@playwright/test/cli.js test --config=e2e/playwright.piloto-m6.config.ts --list
+node e2e/scripts/piloto-m6.mjs --preflight
+node e2e/scripts/piloto-m6.mjs --grupo G2
+node e2e/scripts/piloto-m6.mjs --piloto
+node e2e/scripts/piloto-m6.mjs --restaurar .turbo/piloto-m6/<id>/catalogo.json
+```
+
+El listado aislado admite la configuración dedicada sin servidores. Para los modos reales,
+el recibo `.turbo/m6-2026-10-18/m6-6/revision-runtime.json` debe contener `schema: 1`,
+`accepted: true` y `hashes`: un objeto con los SHA256 exactos de las cinco rutas aprobadas
+(`scripts/piloto-m6.mjs`, su test, la configuración dedicada, la spec y este README, todos
+con prefijo `e2e/`). Lo emite el cierre de revisión sobre fuentes congeladas; no se crea
+como atajo para ejecutar. Cualquier diferencia mantiene la CLI cerrada.
+
+**Destino y entorno.** Lee credenciales del `.env` existente sin modificarlo. Deriva juntas
+las tres URLs sin conectar a su origen: PostgreSQL local en 5432, base exacta `curichi_e2e`,
+roles `curichi`, `curichi_api`, `curichi_geo`; sin parámetros, fragmentos ni endpoints
+divergentes. Valida antes de cargar driver o construir cualquier Client. Elimina destinos,
+credenciales PG/POSTGRES/DATABASE/S3/AWS y overrides heredados; cada backend recibe su rol
+restringido también en `DATABASE_URL`. No crea base, migra, siembra, carga capas ni ejecuta
+el runner normal. Ausencia o divergencia aborta sin reparación.
+
+Se conserva literalmente el entorno operativo probado en FB: **backends compilados
+NODE_ENV=test + Next producción**. No se afirma que los cuatro procesos usen producción;
+no se modifica la configuración de cookies/CSP del producto. API/geo usan `dist/servidor.js`,
+Next usa `next start`, las URLs runtime son 3001/3002 y el mantenimiento queda aplazado
+con `MANTENIMIENTO_ESPERA_MS=2147483647`. Exige libres 3000/3001/3002/3100 antes y después,
+un solo ejecutor pesado, RAM ≥1500 MiB para estáticos/preflight/recuperación y ≥2500 MiB
+para navegador, un worker, cero retries y ejecución serial.
+
+Chromium completo ya instalado debe llegar mediante `PLAYWRIGHT_BROWSERS_PATH` al entorno
+efímero del proceso de verificación; se pasa solo al hijo Playwright. No hay ruta personal
+en fuentes ni comandos de instalación, copias del navegador, `setx` o cambio de usuario.
+Las identidades de procesos guardan PID, padre, fecha de creación y huella de comando/ejecutable;
+no guardan comandos completos, URLs con credenciales ni entornos. El worker espera su registro
+durable antes de recibir `go` por IPC y cargar producto. Cierre/recovery cotejan identidad;
+ante discrepancia se aborta sin matar un proceso ajeno.
+Cada captura acredita el observer CIM por su propio handle execute y su fila exacta antes
+de excluirlo: PID, padre, creación, ejecutable/comando y finalización deben coincidir. No se
+admite PowerShell genérico en el árbol. Los rechazos de raíz/descendiente anteriores a prepared
+guardan etapa, campos e identidades/huellas en `artefactos/<id>/identidad/`, sin comandos ni
+entorno. El autocierre con su probe era un defecto reproducido; su corrección no demuestra
+la causa del fallo central de G1, que sigue pendiente de esa evidencia.
+
+Diagnóstico focal futuro del mapa: `node e2e/scripts/piloto-m6.mjs --grupo G1 --diagnostico-mapa`.
+Es la única combinación admitida. Conserva receipt, guardas, preflight, locks, Baches inactiva,
+setup de grupo y cierre por identidad; ejecuta solo `@diag-mapa-g1` en Chromium, un worker,
+cero retries, sin trace/video ni flags GPU. Crea por API una cuenta/reporte Inundación con foto
+y marca de corrida, espera publicación y exige la misma pastilla ARIA literal del caso G1.
+Los datos sintéticos permanecen; no modera ni corrige datos. Observa antes de navegar consola,
+pageerror, recursos/worker y canvas, y adjunta screenshot en finally. Mensajes se guardan como
+clasificación/huella; sin URLs completas, queries, cuerpos API, cookies, credenciales o coordenadas.
+Solo el cuerpo del worker público local se resume por MIME/bytes/hash. El piloto por defecto
+conserva sus 12 casos; el diagnóstico añade una definición separada, no equivale a G1 completo
+ni al piloto y no acredita una causa del mapa hasta ejecutarse bajo un nuevo corte revisado.
+Si falta el root pero quedan hijos relacionados sin política natural acreditada, o el cotejo final descubre descendientes
+nuevos, el cierre no se acredita y se conserva el diario pendiente. La cancelación llega
+al launcher: comprueba aborto antes de spawn/go, tras ready/identificación/registro, entre
+servicios y durante readiness; los workers gated se cierran sin habilitar producto.
+Las relaciones de cierre se publican con sync/rename en
+`.turbo/piloto-m6-artefactos/<id>/cierres/`, antes de matar y al observar/cerrar el árbol;
+el host nuevo de recuperación las consume antes del CAS. Los registros son acumulativos,
+sin comandos/URLs ni borrados. Una publicación incompleta o prepared sin observación final
+acreditada mantiene pending; conservar esa evidencia para cotejo de lectura, sin inventar
+un cierre ni editar marcadores para desbloquearlo.
+La única consola con política de cierre natural es la ruta exacta `SystemDirectory/conhost.exe`
+obtenida de CIM, hija directa de un Node propio acreditado en la misma captura, con creación
+posterior o igual y huella de ejecutable/comando. Su identidad, sujeto y política se publican
+antes de matar el Node (registro de cierre versión 2; versión 1 sigue legible). No entra en
+el recorrido de kill. El coordinador vivo espera hasta cinco capturas, sin iniciar otro sondeo
+tras 5 s; cada CIM conserva su timeout de 10 s. Solo publica `closed` al observar la ausencia
+de todas las identidades y descendientes. Timeout, cambio de identidad/ruta o evidencia ausente
+conservan pending y bloquean CAS. Un worker que se mata a sí mismo deja `observed` durable
+antes de morir: nunca acredita la salida posterior de su consola. Un host nuevo conserva esa
+política y puede comprobar su desaparición; no se amplía la recuperación de otros pendientes.
+
+**Diarios y evidencia.** `.turbo/piloto-m6/<id>/catalogo.json` está reservado a diarios;
+resultados, listado, fotos propias y canal interno están en la raíz hermana
+`.turbo/piloto-m6-artefactos/<id>/`. Un listado o grupo no ocupa el espacio de diarios.
+El piloto conserva lock local `wx` y advisory lock PG de sesión; publica y sincroniza
+`prepared` antes del UPDATE de Baches, exige CAS de sus cinco campos y etiqueta inequívoca
+COMMIT, registra `applied` y solo marca `restored` después de confirmar la restauración.
+`activada_en` se obtiene como texto SQL con seis microsegundos; no pasa por `Date` de pg.
+Otras filas se comparan y nunca se corrigen. Conflicto externo conserva evidencia sin overwrite.
+
+Diario ausente/incompleto/corrupto o pendiente bloquea una nueva corrida. La recuperación
+admite el ejemplo de ruta relativa al proyecto mostrado arriba y rechaza escapes/junctions.
+Con original íntegro recuperable, reconcilia temporales propios coherentes bajo ambos locks,
+preservándolos como evidencia fuera del estado bloqueante. Sin original válido devuelve
+`DIARIO_INCOMPLETO`: conservar archivos y cotejar el original mediante investigación de lectura;
+no editar un diario, inventar la fila anterior ni declarar RESTORED para desbloquearlo.
+
+Pérdida de sesión, transporte o resultado SQL desconocido inutilizan el cliente: detener
+propios, conservar pending y devolver `RECUPERACION_REQUERIDA`; usar `--restaurar` con una
+sesión nueva que obtenga el lock. Hay detección por eventos/consultas con límite, sin heartbeat
+activo. El deadline local no es cancelación SQL confirmada ni `statement_timeout`; el cierre
+acotado destruye solo el stream propio si es necesario. No se garantiza el instante de
+liberación del lock remoto ante partición; lo comprueba la nueva adquisición. Los tests de
+estado/hook simulan interrupciones; el test del worker gated sí crea un proceso sin producto.
+Write/sync/close/rename sobre scratch y sus fallos prueban esas operaciones, no un power loss.
+Tampoco se promete atomicidad frente a sustitución hostil concurrente entre CIM y kill.
+
+**Datos y almacenamiento.** El preflight de fotos lee referencias, bytes, espacio y fuentes
+sintéticas conocidas. Solo para una referencia de `curichi_e2e` ausente en esas fuentes admite
+su archivo exacto en `infra/.storage/fotos`: antes exige procedencia compuesta calculada en
+SQL READ ONLY (reporte enlazado, autor=subidor, cuentas ciudadanas con correo generado y nombre
+de `cuentaNuevaConSesion`, prefijo literal de `reporteValido`). `marca` es libre; no exige
+`E2E-` en la descripción. No enumera ese almacén ni lee otros objetos. Valida ruta física sin
+enlaces/junctions, archivo regular y tamaño; SHA-256 fija el contenido inspeccionado, se
+revalida antes de copiar con `COPYFILE_EXCL` y se compara con la copia propia. Ese hash prueba
+estabilidad de la copia, no una huella histórica guardada en DB. Si hay fuente conocida, no
+consulta el almacén habitual. Después prepara el almacén de la corrida sin alterar originales
+ni DB. `/ready` se consulta al arrancar la API y **escribe/borra una sonda**
+en esa copia; no forma parte del preflight de solo lectura. No se usan clientes S3 heredados.
+Fixtures del piloto se seleccionan con separación métrica respecto de reportes existentes y
+entre proyectos; cada reporte se crea por API y se identifica por corrida/proyecto. El canal
+de archivos interno publica request/response con temporal único, sync, close y rename, valida
+nonce/runId y admite cancelación. Solo el controlador abre PG: vuelve a comprobar fixture y
+aislamiento métrico antes de cada moderación; falta de prueba aborta sin moderar. No hay
+escrituras SQL de reportes, recálculo global ni borrado de datos para limpiar.
+Restaurar significa catálogo y procesos propios: cuentas, reportes y fotos sintéticos
+permanecen identificados. No se promete restauración idéntica de toda la base, ni conformidad
+de Docker habitual o lectura auditiva no ejecutada.
+
 Pruebas end-to-end **transversales**: las que cruzan varias partes. Los E2E propios de cada app viven dentro de la app.
 
 | Archivo | Qué cubre |
@@ -225,3 +374,85 @@ La contraseña del ejecutivo la fija el seed con `SEED_EJECUTIVO_PASSWORD` (por 
 | `la respuesta volvió cuando el reporte ya podía estar publicado` en `publicacion-diferida.spec.ts` | La máquina está tan cargada que unas consultas locales tardaron más que la demora de prueba (2 s) | No es un defecto del código: repetir con la máquina menos cargada |
 | `401` en exportación, indicadores o `/auth/yo` justo después de un login por API que dio 200 | La pila corre con `COOKIE_SEGURA=1`: la cookie es `Secure` y el cliente de Playwright no la manda sobre http | Correr contra un `pnpm dev` con `COOKIE_SEGURA=0` (lo pone `webServer`), no contra la pila de producción ni la del Compose |
 | `panel_url` es `null` en `acceso-panel.spec.ts` | api-core arrancó sin `PANEL_ADMIN_URL` | Ver la tabla del entorno de prueba |
+
+## Cuatro categorías: instalación local separada (2026-10-22)
+
+Estado: **borrador preparado, sin validación estática ni ejecución de navegador**.
+El plan aprobado está en `docs/sdd/2026-10-22-cuatro-categorias/plan.md`.
+La configuración exclusiva es `playwright.cuatro-categorias.config.ts`; solo descubre
+`tests/cuatro-categorias.local.ts`. El sufijo `.local.ts` queda fuera de la suite normal.
+No hereda config, setup, helpers ni arnés M6. No prepara, migra, siembra o activa bases.
+
+La instalación debe existir, estar activada y haber sido comprobada por el runner de
+operación `scripts/multitematica-local.mjs`, con destino fijo `curichi_multitematica`:
+web `http://127.0.0.2:4000`, API `http://127.0.0.2:4001`, geo `http://127.0.0.2:4002` y
+panel `http://127.0.0.2:4100`. La suite no abre conexiones PG ni importa ese runner.
+La confirmación por entorno no acredita por sí sola la identidad de la base: esa evidencia
+corresponde al runner y debe revisarse antes de autorizar navegador.
+
+**Orden de ejecución:** primero señal del principal y validación estática, después otra
+señal para navegador con la instalación viva, ≥2500 MiB libres y un único pesado global.
+La redacción inicial fue autorizada sin suite previa propia (`baseNoSuitePrev`); no se
+reutilizan los PASS del piloto como evidencia de esta suite. Comandos pendientes:
+
+```text
+node e2e/node_modules/typescript/bin/tsc --noEmit --incremental false -p e2e
+node e2e/node_modules/@playwright/test/cli.js test --config=e2e/playwright.cuatro-categorias.config.ts --list
+node e2e/node_modules/@playwright/test/cli.js test --config=e2e/playwright.cuatro-categorias.config.ts
+```
+
+El listado no inicia servidores ni navegador. Antes de la corrida real, el proceso hijo
+recibe únicamente el entorno efímero necesario; no editar `.env`, usar `setx`, instalar
+navegadores ni cambiar el entorno global. Variables propias:
+
+| Variable | Uso |
+|---|---|
+| `MULTITEMATICA_E2E_DESTINO` | Confirmación explícita: `curichi_multitematica` |
+| `MULTITEMATICA_E2E_RUN_ID` | Identificador nuevo y único, 1–64 caracteres alfanuméricos, guion o guion bajo; nunca reutilizar una salida |
+| `PLAYWRIGHT_BROWSERS_PATH` | Ruta física absoluta de Chromium completo ya instalado, inyectada solo al proceso ejecutor; no se escribe una ruta personal en fuentes |
+| `MULTITEMATICA_E2E_TECNICO_EMAIL`, `MULTITEMATICA_E2E_TECNICO_PASSWORD` | Secretos locales obligatorios; ausencia corta antes de crear cuentas/reportes; sin credenciales predeterminadas |
+| `MULTITEMATICA_E2E_ADMIN_EMAIL`, `MULTITEMATICA_E2E_ADMIN_PASSWORD` | Rol admin opcional; ausente queda omitido y NO VERIFICADO |
+| `MULTITEMATICA_E2E_EJECUTIVO_EMAIL`, `MULTITEMATICA_E2E_EJECUTIVO_PASSWORD` | Rol ejecutivo opcional; ausente queda omitido y NO VERIFICADO |
+
+Ambos proyectos usan Chromium completo (`channel: chromium`), escritorio y Pixel 7,
+serie, un worker, cero retries y una repetición. Primer fallo detiene la corrida. No usar
+`--repeat-each` ni reintentos manuales indiscriminados: presupuestar intentos anteriores
+antes de una nueva autorización. Son **dos altas ciudadanas nuevas y ocho POST de reportes**
+para la corrida completa: una cuenta por proyecto, un reporte por categoría y cuenta.
+Dos fotos por cuenta (Inundaciones y Basura) comprueban el contador global; Baches y Persona
+se envían sin foto. Los permisos se conceden al contexto; el flujo usa GPS y la cámara
+sintética real de Chromium dentro de la página, sin mock de mapa o respuestas.
+
+Se conservan los límites operativos: 10 reportes/IP/hora y hasta 10 altas/IP/día.
+Cada alta usa prefijo propio y UUID; los ocho reportes no tienen reenvíos automáticos.
+Antes de escribir se comprueban cobertura por HTTP y ausencia de reportes públicos en dos
+áreas separadas, una por proyecto. Un área ocupada corta; nunca se limpian fixtures.
+Las descripciones son sintéticas y únicas. La moderación actúa únicamente sobre los IDs
+creados y coteja su descripción. No se fusiona ni elimina ningún reporte.
+
+La API debe fijar 60 s exactos entre creación y publicación. La propia cuenta ve el reporte
+en Mis reportes mientras la vista pública devuelve 404. Se consulta publicación con límite
+basado en `segundos_para_publicar` de la API, como máximo 60 s + 10 s; no se adelanta por SQL.
+El próximo turno de cada categoría conserva 240 s y dos reportes restantes. El panel valida
+solo después de publicación; las descargas GeoJSON/CSV filtran categoría y área propia,
+verifican detalle, notas metodológicas y `null`/celdas vacías de las seis columnas de agua.
+
+Se recorren selector de cuatro, URL y última preferencia, cuatro formularios, cambio de
+selección Persona/Quema y sus avisos, foto opcional, detalle y marcador ARIA real. Se exige
+el marcador de severidad media de Inundaciones que falló en M6, también en móvil, con canvas,
+teselas raster recibidas y ausencia de pérdida de contexto WebGL/CSP. No se certifica M6
+cerrada antes de ejecutar y revisar capturas; un mapa gris conserva el fallo.
+
+Consola, pageerror, recursos fallidos y worker se registran por clase/estado/huella, sin
+mensajes literales, URLs completas, queries, cuerpos API, cookies o contraseñas. Solo del
+worker público local se resume MIME, bytes y hash. Hay capturas del mapa y del estado final;
+trace/video están desactivados. Un error de JavaScript o de las aserciones del mapa falla.
+
+Preparación y hashes: `.turbo/cuatro-categorias-2026-10-22/e2e/`. Resultados futuros:
+`salidas/<RUN_ID>/playwright.json` y `salidas/<RUN_ID>/artefactos/`; registrar después
+metadatos, salidas y freeze con la evidencia real. Se preservaron `README-pre-467.md` y
+`receipt467-preservado.json` antes de esta sección, con SHA coincidente. El agregado cambia
+el hash del README: **el receipt M6 de 467 queda histórico y no autoriza ejecutar fuentes
+modificadas**; no se modifica ni se reemite aquí. Los cuatro archivos de código/config M6,
+los specs, config y helpers normales quedan intactos. Sin cambios a bases habituales,
+secretos, Git ni archivos de otros escritores.

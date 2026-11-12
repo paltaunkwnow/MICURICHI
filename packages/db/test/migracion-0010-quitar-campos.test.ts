@@ -247,7 +247,7 @@ beforeAll(async () => {
 
   dbNueva = await crearPglite();
   exNueva = ejecutorPglite(dbNueva);
-  await aplicarMigraciones(exNueva);
+  await aplicarMigraciones(exNueva, { autorizarContraccionCompatible: true });
 }, 240_000);
 
 afterAll(async () => {
@@ -274,12 +274,12 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
     const columnas = (
       await exNueva.consultar<{ column_name: string }>(
         `SELECT column_name FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'reporte_inundacion'`,
+         WHERE table_schema = 'public' AND table_name = 'reporte'`,
       )
     ).map((c) => c.column_name);
     for (const campo of CUATRO_CAMPOS) expect(columnas, `columna ${campo}`).not.toContain(campo);
     // Con todas las migraciones, la 0011 ya renombró tirante_estimado → profundidad_estimada.
-    for (const campo of ['profundidad_estimada', 'frecuencia', 'severidad_version'])
+    for (const campo of ['detalle', 'detalle_version', 'severidad_version'])
       expect(columnas, `columna ${campo}`).toContain(campo);
 
     const tipos = await exNueva.consultar<{ typname: string }>(
@@ -304,7 +304,7 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
       'SELECT nombre FROM _migraciones ORDER BY nombre',
     );
     expect(registradas.map((r) => r.nombre)).toEqual(archivos);
-    const otraVez = await aplicarMigraciones(exNueva);
+    const otraVez = await aplicarMigraciones(exNueva, { autorizarContraccionCompatible: true });
     expect(otraVez.aplicadas).toEqual([]);
     expect(otraVez.omitidas).toEqual(archivos);
   });
@@ -364,10 +364,12 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
   });
 
   it('CA-D5: el esquema Drizzle de reporteInundacion no declara los cuatro campos ni sus enums; manzana sigue exportada', () => {
-    const nombres = Object.values(getTableColumns(esquema.reporteInundacion)).map((c) => c.name);
+    const nombres = Object.values(getTableColumns(esquema.reporte)).map((c) => c.name);
     for (const campo of CUATRO_CAMPOS) expect(nombres, `columna ${campo}`).not.toContain(campo);
-    for (const campo of ['profundidad_estimada', 'frecuencia', 'severidad_version'])
+    for (const campo of ['detalle', 'detalle_version', 'severidad_version'])
       expect(nombres).toContain(campo);
+    for (const campo of ['profundidad_estimada', 'frecuencia'])
+      expect(nombres).not.toContain(campo);
 
     const enums = Object.values(esquema)
       .filter((v) => isPgEnum(v))
@@ -409,8 +411,8 @@ describe('migración 0010: quitar los cuatro campos del reporte', () => {
       severidad_puntaje: number;
       severidad_version: number;
     }>(
-      `SELECT profundidad_estimada::text, frecuencia::text, severidad_calculada::text, severidad_puntaje,
-         severidad_version FROM reporte_inundacion`,
+      `SELECT detalle->>'profundidad_estimada' AS profundidad_estimada, detalle->>'frecuencia' AS frecuencia, severidad_calculada::text, severidad_puntaje,
+         severidad_version FROM reporte WHERE categoria = 'inundacion'`,
     );
     expect(filas.length).toBe(r.reportes);
     for (const f of filas) {

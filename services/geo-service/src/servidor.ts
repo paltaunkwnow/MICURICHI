@@ -49,12 +49,13 @@ try {
   });
   /**
    * geo-service es de SOLO LECTURA por contrato (CLAUDE.md §4.6). Que no tenga privilegios de
-   * administración no basta: con permiso de escritura sobre `reporte_inundacion` seguiría pudiendo
-   * borrar reportes. Se comprueba contra la tabla que más importa y en producción no se arranca:
-   * si alguien concede escritura por error, tiene que verse el día que se despliega, no después.
+   * administración no basta: con permiso de escritura sobre `reporte` seguiría pudiendo borrar
+   * reportes. Se comprueba contra `reporte`, la tabla donde viven los datos de TODAS las categorías
+   * desde la migración 0020 (`reporte_inundacion` es ahora una vista de compatibilidad); en producción
+   * no se arranca: si alguien concede escritura por error, tiene que verse el día que se despliega.
    */
-  if (await puedeEscribir(pool, 'reporte_inundacion')) {
-    const aviso = `geo-service: el rol «${privilegios.usuario}» puede ESCRIBIR en reporte_inundacion; este servicio solo debe leer (§4.6).`;
+  if (await puedeEscribir(pool, 'reporte')) {
+    const aviso = `geo-service: el rol «${privilegios.usuario}» puede ESCRIBIR en reporte; este servicio solo debe leer (§4.6).`;
     if (produccion) throw new Error(aviso);
     app.log.warn(aviso);
   }

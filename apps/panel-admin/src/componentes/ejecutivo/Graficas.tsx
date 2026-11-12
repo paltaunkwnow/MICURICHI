@@ -111,11 +111,13 @@ export function GraficaInundaciones({
   barras,
   color,
   rotuloSeveridad,
+  nombre = 'Inundaciones activas',
 }: {
   barras: BarraSimple[];
   color: string;
   /** «crítica y alta», «media», «baja» o «todas las severidades». */
   rotuloSeveridad: string;
+  nombre?: string;
 }) {
   const uid = idSeguro(useId());
   const { numero } = useFormato();
@@ -125,8 +127,8 @@ export function GraficaInundaciones({
   return (
     <>
       <Marco
-        titulo={`Inundaciones activas por distrito (${rotuloSeveridad})`}
-        descripcion={`Inundaciones activas (en revisión o verificadas) por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}. «Otros» suma los distritos de una capa anterior y lo que no tiene distrito.`}
+        titulo={`${nombre} por distrito (${rotuloSeveridad})`}
+        descripcion={`${nombre} (en revisión o verificadas) por distrito municipal, ${rotuloSeveridad}. ${numero(total)} en total; el mayor es ${numero(maximo)}. «Otros» suma los distritos de una capa anterior y lo que no tiene distrito.`}
         testId="ejecutivo-grafica-inundaciones"
         uid={uid}
       >
@@ -172,7 +174,9 @@ export function GraficaInundaciones({
         })}
       </Marco>
       <table className="sr-only">
-        <caption>Inundaciones activas por distrito, {rotuloSeveridad}</caption>
+        <caption>
+          {nombre} por distrito, {rotuloSeveridad}
+        </caption>
         <thead>
           <tr>
             <th scope="col">Distrito</th>

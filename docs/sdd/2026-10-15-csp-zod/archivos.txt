@@ -1,0 +1,2 @@
+apps/web-ciudadano/src/instrumentation-client.ts
+apps/panel-admin/src/instrumentation-client.ts

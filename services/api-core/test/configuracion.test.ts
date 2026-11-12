@@ -161,6 +161,9 @@ describe('GET /api/v1/configuracion', () => {
         centro: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO.centro,
         zoom_inicial: CONFIG_DOMINIO.CIUDAD_POR_DEFECTO.zoom_inicial,
       },
+      // 0.20.0: el pool de mentira de este bloque no tiene catálogo de categorías, así que la lista
+      // sale vacía. Que trae las activas de verdad lo prueba el bloque con base real de más abajo.
+      categorias_activas: [],
     });
   });
 

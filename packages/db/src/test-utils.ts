@@ -21,7 +21,7 @@ export async function levantarBaseEfimera(): Promise<BaseEfimera> {
   const { PGLiteSocketServer } = await import('@electric-sql/pglite-socket');
   const db = await PGlite.create({ dataDir: 'memory://', extensions: { postgis } });
   const ejecutor = ejecutorPglite(db);
-  await aplicarMigraciones(ejecutor);
+  await aplicarMigraciones(ejecutor, { autorizarContraccionCompatible: true });
   const server = new PGLiteSocketServer({ db, port: 0, host: '127.0.0.1', maxConnections: 8 });
   await server.start();
   const puerto = (server as unknown as { port?: number }).port ?? 0;
@@ -87,19 +87,37 @@ export async function insertarReporte(
   lat: number,
   estado = 'validado',
   severidad = 'media',
+  categoria = 'inundacion',
 ) {
+  // Tabla física/categoría explícita; representación0020 preservada, ahora sin trigger ni planos.
+  if (categoria === 'inundacion') {
+    const [r] = await ex.consultar<{ id: string }>(
+      // `via_publica` no lleva jitter, así que el punto publicable es la coordenada redondeada a
+      // 5 decimales (§13). Sin él, el reporte no saldría en las consultas públicas.
+      `INSERT INTO reporte (categoria, geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
+         detalle, detalle_version, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, publicar_en)
+       VALUES ('inundacion', ST_SetSRID(ST_MakePoint($1, $2), 4326),
+         ST_SetSRID(ST_MakePoint(round($1::numeric, 5)::float8, round($2::numeric, 5)::float8), 4326),
+         'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba automatizada',
+         -- rechazado y duplicado exigen estado_motivo no vacío desde la 0018; en los demás queda NULL.
+         '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, $3::severidad, 6, 2, $4::estado_reporte,
+         CASE WHEN $4 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba automatizada' END, now()) RETURNING id::text`,
+      [lon, lat, severidad, estado],
+    );
+    return r!.id;
+  }
+  // Otras categorías: fixture sintético genérico, objeto/version1, sin imponer contratos literales.
   const [r] = await ex.consultar<{ id: string }>(
-    // `via_publica` no lleva jitter, así que el punto publicable es la coordenada redondeada a
-    // 5 decimales (§13). Sin él, el reporte no saldría en las consultas públicas.
-    `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
-       profundidad_estimada, frecuencia, severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, publicar_en)
+    `INSERT INTO reporte (geom, geom_publico, categoria, detalle, detalle_version,
+       distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo, descripcion,
+       severidad_calculada, severidad_puntaje, severidad_version, estado, estado_motivo, publicar_en)
      VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326),
        ST_SetSRID(ST_MakePoint(round($1::numeric, 5)::float8, round($2::numeric, 5)::float8), 4326),
+       $5, '{"sintetico": true}'::jsonb, 1,
        'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'via_publica', 'Reporte de prueba automatizada',
-       -- rechazado y duplicado exigen estado_motivo no vacío desde la 0018; en los demás queda NULL.
-       'rodilla', 'ocasional', $3::severidad, 6, 2, $4::estado_reporte,
+       $3::severidad, 6, 1, $4::estado_reporte,
        CASE WHEN $4 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba automatizada' END, now()) RETURNING id::text`,
-    [lon, lat, severidad, estado],
+    [lon, lat, severidad, estado, categoria],
   );
   return r!.id;
 }

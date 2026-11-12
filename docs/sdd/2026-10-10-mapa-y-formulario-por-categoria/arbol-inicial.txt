@@ -1,0 +1,284 @@
+# git status --porcelain (2026-10-10, antes de M4)
+ M CLAUDE.md
+ M docs/decisiones/README.md
+ M docs/seguridad/modelo-de-seguridad.md
+ M e2e/tests/api-contratos.spec.ts
+ M packages/contracts/CHANGELOG.md
+ M packages/contracts/README.md
+ M packages/contracts/openapi/openapi.yaml
+ M packages/contracts/package.json
+ M packages/contracts/src/esquemas/admin.ts
+ M packages/contracts/src/esquemas/auth.ts
+ M packages/contracts/src/esquemas/comunes.ts
+ M packages/contracts/src/esquemas/configuracion.ts
+ M packages/contracts/src/esquemas/ejecutivo.ts
+ M packages/contracts/src/esquemas/geo.ts
+ M packages/contracts/src/esquemas/reporte.ts
+ M packages/contracts/src/index.ts
+ M packages/contracts/src/openapi.ts
+ M packages/contracts/test/contrato-0-16.test.ts
+ M packages/db/README.md
+ M packages/db/src/cli/matriz-privilegios.mjs
+ M packages/db/src/cli/verificar-privilegios.mjs
+ M packages/db/src/esquema/index.ts
+ M packages/db/src/geometria-publica.ts
+ M packages/db/src/mantenimiento.ts
+ M packages/db/src/puntos-criticos-entorno.ts
+ M packages/db/src/puntos-criticos.ts
+ M packages/db/src/test-utils.ts
+ M packages/db/test/esquema-drizzle.test.ts
+ M packages/db/test/migracion-0013-distancia-dispositivo.test.ts
+ M packages/db/test/migracion-0016-contraccion.test.ts
+ M packages/db/test/migracion-0018-integridad-moderacion.test.ts
+ M packages/db/test/puntos-criticos-volumen.test.ts
+ M scripts/respaldo.mjs
+ M services/api-core/README.md
+ M services/api-core/src/app.ts
+ M services/api-core/src/config.ts
+ M services/api-core/src/consultas.ts
+ M services/api-core/src/cuota.ts
+ M services/api-core/src/id-reporte.ts
+ M services/api-core/src/mantenimiento.ts
+ M services/api-core/src/observabilidad.ts
+ M services/api-core/src/rutas/admin.ts
+ M services/api-core/src/rutas/auth.ts
+ M services/api-core/src/rutas/configuracion.ts
+ M services/api-core/src/rutas/ejecutivo.ts
+ M services/api-core/src/rutas/fotos.ts
+ M services/api-core/src/rutas/moderacion.ts
+ M services/api-core/src/rutas/reportes.ts
+ M services/api-core/src/servidor.ts
+ M services/api-core/src/vistas.ts
+ M services/api-core/test/ayudas.ts
+ M services/api-core/test/configuracion.test.ts
+ M services/api-core/test/cuentas-y-cuota.test.ts
+ M services/api-core/test/cuota-concurrencia-pg.test.ts
+ M services/api-core/test/cupo-diario.test.ts
+ M services/api-core/test/fotos-cuota-concurrencia-pg.test.ts
+ M services/api-core/test/fotos-cuota.test.ts
+ M services/api-core/test/guarda-disco.test.ts
+ M services/api-core/test/indicadores.test.ts
+ M services/api-core/test/moderacion.test.ts
+ M services/api-core/test/publicacion-diferida.test.ts
+ M services/api-core/test/reportes.test.ts
+ M services/api-core/test/resiliencia.test.ts
+ M services/api-core/test/seguridad.test.ts
+ M services/api-core/test/ubicacion-dispositivo.test.ts
+ M services/geo-service/README.md
+ M services/geo-service/src/app.ts
+ M services/geo-service/src/cache-corta.ts
+ M services/geo-service/src/servidor.ts
+ M services/geo-service/src/visibilidad.ts
+ M services/geo-service/test/plan-agregados.test.ts
+?? .claude/settings.local.json
+?? ContextosySkills/
+?? PROJECT_STRUCTURE_AND_FUNCTIONALITY.md
+?? docs/arquitectura/
+?? docs/decisiones/0008-ampliacion-mision-1-plataforma-multitematica.md
+?? docs/decisiones/0009-nucleo-y-registro-de-categorias.md
+?? docs/decisiones/0010-modelo-de-datos-hibrido-del-reporte.md
+?? docs/decisiones/0011-migracion-de-inundaciones.md
+?? docs/decisiones/0012-compatibilidad-de-api.md
+?? docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md
+?? docs/decisiones/0014-categoria-inicial-en-el-dispositivo.md
+?? docs/decisiones/0015-prioridad-url-y-categoria-guardada.md
+?? docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md
+?? docs/decisiones/0017-cupo-por-categoria-configurable.md
+?? docs/decisiones/0018-persona-en-situacion-de-calle.md
+?? docs/decisiones/0019-areas-verdes-con-point.md
+?? docs/decisiones/0020-areas-verdes-sin-capa-municipal.md
+?? docs/decisiones/0021-formularios-por-categoria.md
+?? docs/decisiones/0022-paleta-e-iconografia-de-categorias.md
+?? docs/decisiones/0023-severidad-de-inundacion-v2-extendida.md
+?? docs/sdd/2026-10-07-registro-de-categorias/
+?? docs/sdd/2026-10-08-base-multicategoria/
+?? docs/sdd/2026-10-08-nucleo-por-categoria/
+?? docs/sdd/2026-10-09-cupo-por-categoria/
+?? docs/sdd/2026-10-10-mapa-y-formulario-por-categoria/
+?? packages/contracts/src/categorias/
+?? packages/contracts/test/contrato-0-19.test.ts
+?? packages/contracts/test/contrato-0-20.test.ts
+?? packages/db/migraciones/0020_base_multicategoria.sql
+?? packages/db/migraciones/0021_indice_categoria_creado.sql
+?? packages/db/migraciones/reversas/
+?? packages/db/test/migracion-0020-base-multicategoria.test.ts
+?? packages/db/test/migracion-0021-indice-categoria-creado.test.ts
+?? packages/db/test/puntos-criticos-categoria.test.ts
+?? services/api-core/src/categorias.ts
+?? services/api-core/test/no-contaminacion-categoria.test.ts
+?? services/geo-service/src/categorias.ts
+?? services/geo-service/test/no-contaminacion-categoria.test.ts
+
+# git diff --stat
+ CLAUDE.md                                          |  70 +++-
+ docs/decisiones/README.md                          |  16 +
+ docs/seguridad/modelo-de-seguridad.md              |  11 +-
+ e2e/tests/api-contratos.spec.ts                    |  16 +-
+ packages/contracts/CHANGELOG.md                    | 150 +++++++
+ packages/contracts/README.md                       |  29 +-
+ packages/contracts/openapi/openapi.yaml            | 465 ++++++++++++++++++++-
+ packages/contracts/package.json                    |   2 +-
+ packages/contracts/src/esquemas/admin.ts           |   4 +-
+ packages/contracts/src/esquemas/auth.ts            |  34 ++
+ packages/contracts/src/esquemas/comunes.ts         |  44 ++
+ packages/contracts/src/esquemas/configuracion.ts   |  15 +-
+ packages/contracts/src/esquemas/ejecutivo.ts       |   3 +
+ packages/contracts/src/esquemas/geo.ts             |  37 +-
+ packages/contracts/src/esquemas/reporte.ts         | 177 +++++++-
+ packages/contracts/src/index.ts                    |   1 +
+ packages/contracts/src/openapi.ts                  |  44 +-
+ packages/contracts/test/contrato-0-16.test.ts      |   4 +-
+ packages/db/README.md                              | 133 +++++-
+ packages/db/src/cli/matriz-privilegios.mjs         |  17 +-
+ packages/db/src/cli/verificar-privilegios.mjs      |   4 +-
+ packages/db/src/esquema/index.ts                   |  97 +++++
+ packages/db/src/geometria-publica.ts               |   8 +-
+ packages/db/src/mantenimiento.ts                   |  20 +-
+ packages/db/src/puntos-criticos-entorno.ts         |  57 ++-
+ packages/db/src/puntos-criticos.ts                 | 190 +++++++--
+ packages/db/src/test-utils.ts                      |  36 +-
+ packages/db/test/esquema-drizzle.test.ts           |  24 +-
+ .../migracion-0013-distancia-dispositivo.test.ts   |   5 +-
+ .../db/test/migracion-0016-contraccion.test.ts     |  28 +-
+ .../migracion-0018-integridad-moderacion.test.ts   |  13 +-
+ packages/db/test/puntos-criticos-volumen.test.ts   |   1 +
+ scripts/respaldo.mjs                               |   4 +-
+ services/api-core/README.md                        | 241 +++++++++--
+ services/api-core/src/app.ts                       |  20 +-
+ services/api-core/src/config.ts                    |  33 +-
+ services/api-core/src/consultas.ts                 |  10 +-
+ services/api-core/src/cuota.ts                     | 151 ++++---
+ services/api-core/src/id-reporte.ts                |   5 +-
+ services/api-core/src/mantenimiento.ts             |  15 +-
+ services/api-core/src/observabilidad.ts            |   5 +-
+ services/api-core/src/rutas/admin.ts               |  58 ++-
+ services/api-core/src/rutas/auth.ts                |  47 ++-
+ services/api-core/src/rutas/configuracion.ts       |   6 +-
+ services/api-core/src/rutas/ejecutivo.ts           |  40 +-
+ services/api-core/src/rutas/fotos.ts               |  18 +-
+ services/api-core/src/rutas/moderacion.ts          |  42 +-
+ services/api-core/src/rutas/reportes.ts            | 238 +++++++++--
+ services/api-core/src/servidor.ts                  |   5 +
+ services/api-core/src/vistas.ts                    |  48 ++-
+ services/api-core/test/ayudas.ts                   |  10 +-
+ services/api-core/test/configuracion.test.ts       |   3 +
+ services/api-core/test/cuentas-y-cuota.test.ts     |   4 +
+ .../api-core/test/cuota-concurrencia-pg.test.ts    |  76 +++-
+ services/api-core/test/cupo-diario.test.ts         | 443 +++++++++++++++++++-
+ .../test/fotos-cuota-concurrencia-pg.test.ts       |   4 +-
+ services/api-core/test/fotos-cuota.test.ts         |  20 +-
+ services/api-core/test/guarda-disco.test.ts        |   5 +-
+ services/api-core/test/indicadores.test.ts         |   8 +-
+ services/api-core/test/moderacion.test.ts          |  50 ++-
+ .../api-core/test/publicacion-diferida.test.ts     |  66 ++-
+ services/api-core/test/reportes.test.ts            |  18 +-
+ services/api-core/test/resiliencia.test.ts         |   4 +
+ services/api-core/test/seguridad.test.ts           |   7 +
+ .../api-core/test/ubicacion-dispositivo.test.ts    |   6 +-
+ services/geo-service/README.md                     |  76 +++-
+ services/geo-service/src/app.ts                    |  86 +++-
+ services/geo-service/src/cache-corta.ts            |  32 ++
+ services/geo-service/src/servidor.ts               |  11 +-
+ services/geo-service/src/visibilidad.ts            |  13 +-
+ services/geo-service/test/plan-agregados.test.ts   |  22 +-
+ 71 files changed, 3279 insertions(+), 426 deletions(-)
+
+# sha256 de archivos sin seguimiento
+08b92f96039a93361f182bf4bf81b6c9e5f976a83d2d3898284bde340aed0d50 *.claude/settings.local.json
+240a3e0d37d2e86b614063f5347eb02d4f99ca6c254de6b82871ff8d95532a7d *ContextosySkills/.estado/.gitignore
+ac41083065ac198dfd9fcf43d24c745080e29036170996c4d42a6cf1964da7c5 *ContextosySkills/README.md
+f5752f0b613673146b38540808994526b0d2d947859e1962138c4ef04c5ffc35 *ContextosySkills/VentanaContextoSesion1.md
+20a289679303015b6467104eb098c0afde4a2d663090c4e0b41acb1f209a743b *ContextosySkills/VentanaContextoSesion2.md
+b207c9512e4e4c5d00ce511fc73318b11969abf1c17bcae8eb08509bb763305b *ContextosySkills/VentanaContextoSesion3.md
+c14f7c639d96908cbba78fbebfc471e6cb3e6eb9cfa30938ae45275af8102917 *ContextosySkills/VentanaContextoSesion4.md
+24d3ec3d82a4a7e375f520b3b5f4bbee20c3cc82ac76b3eff1a625fab6743563 *ContextosySkills/VentanaContextoSesion5.md
+3e864ffe960d5156a91be7fbb638b2b7a7152ed3bc36f71691baa6b80d96e039 *ContextosySkills/hooks/contexto.mjs
+437a68dc4f933044186f35ec5ffde73d087d78e63c9408f2fc2a3708ee11b416 *PROJECT_STRUCTURE_AND_FUNCTIONALITY.md
+f420b696dd454f5e9850d4dd9448938540bab2d33d0cf8ae57f3fe44eb26023c *docs/arquitectura/00-puesta-en-marcha-y-prueba-manual.md
+3c08b6a158db117d48c3a86c27b8f87ac0369a552e3959b6df1f5aa90df18388 *docs/arquitectura/01-contracts.md
+d6ca325d4bd986449aa5de9e7f321e44d1521604fa5c0ab6915e7af556f92d7e *docs/arquitectura/02-db.md
+971810e349dd444c857085a5f5ac13b0df732635132408364fc0b8cf5f456ce6 *docs/arquitectura/03-geo-service.md
+bdbc058a70113f24c7230501e2ea0ccc0fdd091c30496c7ae2acea1429370eb3 *docs/arquitectura/04-api-core.md
+af93e4d9988b0cfb092484c8a7c6e318df93cb2faa76e2faba0adec5a0d6743f *docs/arquitectura/05-web-ciudadano.md
+4722485e2d57762a98e93b0b57b25193592d7b6aa70f1dea2d882179e9080b63 *docs/arquitectura/06-panel-admin.md
+27232e06865f18d97e046d024f897b0914a909080f2d070455c43faadab5b084 *docs/arquitectura/07-geodata-etl.md
+97f2b11dd6357e2dce9bb79c6b7e568463dbaf53d51f7c27f24ab26eaa413172 *docs/arquitectura/08-infraestructura-y-devops.md
+05ee70a667ec95361baf584472725a10a85471aec61b1bc95761fa2922d58098 *docs/arquitectura/09-calidad-y-pruebas.md
+db89fc6fd506d397a7865277ed7c8b079edb829ddb3f8f1e6126efdb75dcce3a *docs/arquitectura/10-flujos-de-punta-a-punta.md
+a335366a901b38a2125fe2ceaa136fa93eb955c556236cc0c6f72b2cdbc8dab7 *docs/arquitectura/11-escalado-y-ecosistema.md
+bc347ff9377384729e77eb862ba2872c86efbfa914327e39f45bd536ce4d0fac *docs/arquitectura/12-evaluacion-arquitectonica-y-escalabilidad.md
+7bd9613f651851031501ce0109ec8d87ddc8aa5e13566f28dd9db08b04b1ef43 *docs/arquitectura/13-planificacion-plataforma-multitematica.md
+ff1fa65fb078be8722311174932c49b5b6a9ec1dda66242e3ed6263d5ffe95a7 *docs/arquitectura/13.1-analisis-html-y-ux.md
+8a9cb44b795d0565182bea0c6b5250404aa19ec050a6ac545b7e9e4c96dc1546 *docs/arquitectura/13.2-modelo-core-y-categorias.md
+415202034ed4fb4a28ec45d7f76774a437b63d3800edaaadbe22ba6d75420060 *docs/arquitectura/13.3-plan-migracion.md
+24960f8878dbdad4bdaf14f41f1dfa58368bc77205c49fc24f40b29aad15746f *docs/arquitectura/14-decisiones-m0-y-plan-m1.md
+a2fd1a0ea860249cf0c7a5b75367bdc63adf63642e4aea0ca1c7d42525a63b1e *docs/arquitectura/14.1-adr-propuestos.md
+c94105480fb7adc776f18a7ab426c27e96be20e7400f211fba39ef589f3208df *docs/arquitectura/README.md
+7235f585af2bc10ef7bc9a5b0fc4c06b8f9260640fe665d548260df3a5dc39e1 *docs/decisiones/0008-ampliacion-mision-1-plataforma-multitematica.md
+d7c9d57c189fac641a849a6af4bea1dce48333ae6fef2d9e4f9625abbeca398e *docs/decisiones/0009-nucleo-y-registro-de-categorias.md
+844d8e6f135801419f91f60d1bb16af0dc6a0c1fea1a1aa3dd308df063db9ef6 *docs/decisiones/0010-modelo-de-datos-hibrido-del-reporte.md
+aa92ac0def072dcd6a6bb33d1edb6865c423d9b236f3f2a5095a2534503e5663 *docs/decisiones/0011-migracion-de-inundaciones.md
+8a0d60ed7cae4158ac19301eb27a1b74a3359d9cb0e1cfa4102038f0518397e3 *docs/decisiones/0012-compatibilidad-de-api.md
+40087610b675c0609422c24d99ebdb5f4186400580f5b4d9c721b119ec99dd12 *docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md
+9070c515561aedbcd592803fdadf02e1ab4a5e16a758c42b61963cdca4131b8f *docs/decisiones/0014-categoria-inicial-en-el-dispositivo.md
+c2c1f47da342b1a740e1b75a953aa8494a5e1634c4e799dc6aca48ffa2e446c7 *docs/decisiones/0015-prioridad-url-y-categoria-guardada.md
+4588ca477ab31e74b706909defcf1f0144b9104440105d914f1bbbbbee99d29f *docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md
+35d37e006d82a0aa9beeb74ac1a8758c01f1e74d34d41314ee32be7ad490cf6e *docs/decisiones/0017-cupo-por-categoria-configurable.md
+837256f8175924d29bf10c193c1d832faeb70365ce4931e21936d017b06c6986 *docs/decisiones/0018-persona-en-situacion-de-calle.md
+d67dc51a5c98201a2244bfc927c49df224ef4664c3aebdb5f3bf549398f1b62e *docs/decisiones/0019-areas-verdes-con-point.md
+80a49b79662d1ef136f755f94e058a15df0021ae6838e2b9d1aa83f2bbfd2ef1 *docs/decisiones/0020-areas-verdes-sin-capa-municipal.md
+8bc3713367763ed780faf4b0ece3799787ed92251810f8abad5b00aedbc26317 *docs/decisiones/0021-formularios-por-categoria.md
+dd3b1f651ca9bfe8ed96669520e0436645fc0779f147f1c30e4fcaed2e4587d3 *docs/decisiones/0022-paleta-e-iconografia-de-categorias.md
+24dd36a274425a49cf06690e5a7266a5371c0bba6df36812351086ee5f02c58a *docs/decisiones/0023-severidad-de-inundacion-v2-extendida.md
+a51fc6d5a6a1462575ee2e7ec02daf8e60218f5690ff0e94340da97f59059750 *docs/sdd/2026-10-07-registro-de-categorias/arbol-inicial.txt
+d8f345885aa8b17565036e1b6449f0da78c1e321eae4962691a12e056b9abb1a *docs/sdd/2026-10-07-registro-de-categorias/archivos.txt
+420dbca9158c3bc45d9101f75ffd039b50221c539760d32f1d58bed4cae56154 *docs/sdd/2026-10-07-registro-de-categorias/implementacion.md
+ca809ba25c0ca37b1451864a94d8939cdc56689e5e5188405a7cb7f8f201ba66 *docs/sdd/2026-10-07-registro-de-categorias/informe.md
+363bad607c96e00d90900d5ee489afbfe7b43efa0b3e367240f40ffb1b65e993 *docs/sdd/2026-10-07-registro-de-categorias/linea-base.md
+11633c7530f950a73b78b53d302cef799682b18ae6b961240079920ace25937b *docs/sdd/2026-10-07-registro-de-categorias/plan.md
+ccba6f8468238f75248d425965908995b71e93ab3aac9e7a916a484f13d125d6 *docs/sdd/2026-10-07-registro-de-categorias/verificacion.md
+e029e50bff18e52291367069171c55d74a68c13256701f1ab629fd11a4526c70 *docs/sdd/2026-10-08-base-multicategoria/arbol-inicial.txt
+59ef48bfc3cb82e6179c2c89052fb23c649896f743f7069e5e750609a5758bb5 *docs/sdd/2026-10-08-base-multicategoria/archivos.txt
+4e8c6ad0827654817f754ff75c6c596b6636c47c026319dae5839d06d50ea508 *docs/sdd/2026-10-08-base-multicategoria/implementacion.md
+0372f37c6faa7f4c7989a4126b253cc1bc28ce885acaa803d979211468dfe5e6 *docs/sdd/2026-10-08-base-multicategoria/informe.md
+19d8d78fbc298aa6cc7cd6905a1bcc2f5c736488ad3370758186feb1f9a9b864 *docs/sdd/2026-10-08-base-multicategoria/linea-base.md
+c2ef8c7175a3922abf34b5d1ed77c8f4b339201ada93cfae224f7bcf1ff7c132 *docs/sdd/2026-10-08-base-multicategoria/medicion.md
+dba0ed669214da366e14d705b8163af411e22514b40b8eb17a8d0fc96793ebc3 *docs/sdd/2026-10-08-base-multicategoria/plan.md
+c5022c6309f6ad1c611be4802537e9934e91c5910c3ae5f156c0994502171756 *docs/sdd/2026-10-08-base-multicategoria/verificacion.md
+60b6e5681689a856082f20ca378054e5d2e9422062f148a76daf123e78756ba7 *docs/sdd/2026-10-08-nucleo-por-categoria/arbol-inicial.txt
+7abdb9cc94ae4c482321cd491fdd931095f62b5d186f7ffd3c045ee72d2b2fec *docs/sdd/2026-10-08-nucleo-por-categoria/archivos.txt
+899e7e07606b9a4bb32da9c251858b569e8169dffc59c81df6fc708a6ff02989 *docs/sdd/2026-10-08-nucleo-por-categoria/implementacion.md
+2d04422e27c0c017c224e3a3f70037452fabec6fe2da5c3e7ffb8db111c37d65 *docs/sdd/2026-10-08-nucleo-por-categoria/informe.md
+7ea4649ce61d9ce47b265a1cc94858f11b86302ca1b7aa401819413824cbeda0 *docs/sdd/2026-10-08-nucleo-por-categoria/linea-base.md
+edbd6101a19c1411224fd6790471558ee5664d270290a0eb1f4254a80c2bce1a *docs/sdd/2026-10-08-nucleo-por-categoria/pila-antes.txt
+edbd6101a19c1411224fd6790471558ee5664d270290a0eb1f4254a80c2bce1a *docs/sdd/2026-10-08-nucleo-por-categoria/pila-despues.txt
+a12f8320d70f155915acaee524de1ab68b5fdae8ac784860b5aefd5a71afd5b5 *docs/sdd/2026-10-08-nucleo-por-categoria/plan.md
+b5530a05e2aa800df7524ec4469cb970990e1849281adbdfe5f2971f0c67d6f6 *docs/sdd/2026-10-08-nucleo-por-categoria/verificacion.md
+f6653dd5c2981f99ad675aabbdf64df040af4cfb618d00b4f53fc944c5c74729 *docs/sdd/2026-10-09-cupo-por-categoria/arbol-inicial.txt
+8dd34ee9a18ae42a2bdf66566fd73938d4ef35065f843bc837cf2ea9db660487 *docs/sdd/2026-10-09-cupo-por-categoria/archivos.txt
+61f1ecf3204b67df0f250f5459a2f3a5ad2d8179996c54a1b13b2aa140e467f2 *docs/sdd/2026-10-09-cupo-por-categoria/implementacion.md
+75ea39fb9037cdf72b33e2037bf43a7a03250bccca685493cfc277d7335406d6 *docs/sdd/2026-10-09-cupo-por-categoria/informe.md
+ac6819edc1804529ee256d4653e40fddf843d88dec9cba52422a640766a23089 *docs/sdd/2026-10-09-cupo-por-categoria/linea-base.md
+edbd6101a19c1411224fd6790471558ee5664d270290a0eb1f4254a80c2bce1a *docs/sdd/2026-10-09-cupo-por-categoria/pila-antes.txt
+edbd6101a19c1411224fd6790471558ee5664d270290a0eb1f4254a80c2bce1a *docs/sdd/2026-10-09-cupo-por-categoria/pila-despues.txt
+f4d576963e621c60ecf329b815d4053c504cdf6208f36792ed1a394605d8f412 *docs/sdd/2026-10-09-cupo-por-categoria/plan.md
+1398c737ae2d1631d8b237599c4689578cca310833d79fbde2e84182ccc696df *docs/sdd/2026-10-09-cupo-por-categoria/verificacion.md
+51f4792f2a50e57b849777ea36b127981ee03734eeddff59ce1fb3a8004024cf *packages/contracts/src/categorias/index.ts
+b30694e0e462cfc9468bc5f023e719dabb7fc6201036cb2f773870ff3dfcc944 *packages/contracts/src/categorias/inundacion/definicion.ts
+609060dfe10de570b2a41c663a87b2218106695f9e129e0e58238161e0db5761 *packages/contracts/src/categorias/inundacion/esquema.ts
+168649211b0b5630151c8317a31ea6faaeff8acb9b7d2ab89bd68440fd8fd7af *packages/contracts/src/categorias/resolver.ts
+c5735ffa918ed8da760497f1b49f938ec0b343192b353cfb109c989bb865bb0e *packages/contracts/src/categorias/slugs.ts
+30d18c1d698eb921cd2add15dd45f452380ce53f7c845f34328cb78979573a6e *packages/contracts/src/categorias/tipos.ts
+1e09326890fcdb043adc910d2b4c8aecb3a249beb42bb24899a5a9007967ac81 *packages/contracts/test/contrato-0-19.test.ts
+88beaff5a16015dbb39324bbdacaedd87eb11a3e95a86e5b388b5a6e54c027c1 *packages/contracts/test/contrato-0-20.test.ts
+82fa81e63f7519113c41992e979731061cc616f886f89b1e7f2f6738e789b434 *packages/db/migraciones/0020_base_multicategoria.sql
+d4079d0e082ec9c86d09b1692395204a70877dc9633982e7fe6281b5885c2189 *packages/db/migraciones/0021_indice_categoria_creado.sql
+d4b6cf3d1f6a5358d8c056aead6a81121b3f5b2830572ca7526506bf571a400b *packages/db/migraciones/reversas/0020_base_multicategoria_reversa.sql
+57b6b8d378f415eeacfbe114547dc72be2f85a684c97c7b80baea9b2e6748ad7 *packages/db/migraciones/reversas/0021_indice_categoria_creado_reversa.sql
+ee035a7631a2ddec236007bcb6da014bd150ef132dfe5dece6a689f1866dc10e *packages/db/test/migracion-0020-base-multicategoria.test.ts
+4f99b2e3e751ae48114e9aa90cd03fec2742b95e2963c807da2c4a85ca200725 *packages/db/test/migracion-0021-indice-categoria-creado.test.ts
+e90e355fe776018fb9a5c623519be7cba4dfa4ca1aafad3e3e6a21274c62c666 *packages/db/test/puntos-criticos-categoria.test.ts
+c4a15b9c354830181ae2ab7ff372664a6d5241a614e3b7e8276b67a9b32e6a22 *services/api-core/src/categorias.ts
+7faaed66edcfa9b99891416bbe5843629630bb597d5ae63e598dd3ddf8b502fa *services/api-core/test/no-contaminacion-categoria.test.ts
+51a57f231e5f1fade69a877f4791491e0af0a32b6355be6ae5f0ccfc24c05f1f *services/geo-service/src/categorias.ts
+7f10593953d53278e50a8ba853258623fb8389ed70f1a5417a6c47410db2caf9 *services/geo-service/test/no-contaminacion-categoria.test.ts

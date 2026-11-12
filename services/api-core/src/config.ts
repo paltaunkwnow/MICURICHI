@@ -92,12 +92,20 @@ export interface ConfigApi {
   registroPorIp: number;
   registroVentanaMinutos: number;
   /**
-   * Reportes por CUENTA y por día calendario en `zonaHoraria` (contracts 0.10.0), contados en la
-   * base (`cuota_reporte_diaria`). Es el límite antiabuso principal desde que reportar exige
-   * cuenta: el de IP no resiste a una IP dinámica, este sí. `REPORTES_POR_DIA_POR_CUENTA`; sin
-   * definir, el del contrato.
+   * Reportes de INUNDACIÓN por CUENTA y por día calendario en `zonaHoraria` (contracts 0.10.0),
+   * contados en la base (`cupo_contador`, clave `reportes:<categoria>`, desde M3b). Es el límite
+   * efectivo de esa categoría: `REPORTES_POR_DIA_POR_CUENTA` o, sin definir, el del contrato. Es el
+   * límite antiabuso principal desde que reportar exige cuenta: el de IP no resiste a una IP
+   * dinámica, este sí. Sostiene los campos sueltos de `/auth/yo` y el mensaje del 429.
    */
   reportesPorDia: number;
+  /**
+   * `REPORTES_POR_DIA_POR_CUENTA` explícito, o `null` si no se configuró (ADR 0017, M3). Cuando
+   * tiene valor, REEMPLAZA el límite de la `ReglaCupo` de CADA categoría para toda la instalación;
+   * cuando es `null`, cada categoría usa su propio `def.cupo.limite`. `reportesPorDia` es el límite
+   * efectivo de inundación (override ?? contrato) y sostiene los campos sueltos de `/auth/yo`.
+   */
+  reportesPorDiaOverride: number | null;
   /** Fotos por cuenta y por día calendario (`FOTOS_POR_DIA_POR_CUENTA`, contrato: 12). */
   fotosPorDia: number;
   /**
@@ -169,6 +177,15 @@ export interface ConfigApi {
 export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
   const produccion = env.NODE_ENV === 'production';
   const zonaHoraria = leerZonaHoraria(env.ZONA_HORARIA);
+  // Override de instalación del cupo de reportes (ADR 0017): solo si la variable viene con valor.
+  // Sin ella, `null`, y cada categoría usa el límite de su propia `ReglaCupo`.
+  const reportesPorDiaOverride = env.REPORTES_POR_DIA_POR_CUENTA?.trim()
+    ? enteroPositivo(
+        'REPORTES_POR_DIA_POR_CUENTA',
+        env.REPORTES_POR_DIA_POR_CUENTA,
+        CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
+      )
+    : null;
   const cfg: ConfigApi = {
     puerto: Number(env.API_CORE_PORT ?? 3001),
     host: env.API_CORE_HOST ?? '127.0.0.1',
@@ -201,11 +218,9 @@ export function leerConfig(env: NodeJS.ProcessEnv = process.env): ConfigApi {
     registroPeticionesPorVentana: Number(env.REGISTRO_PETICIONES_POR_VENTANA ?? 10),
     registroPorIp: Number(env.REGISTRO_MAX_POR_IP ?? REGISTROS_POR_IP_POR_DEFECTO),
     registroVentanaMinutos: Number(env.REGISTRO_VENTANA_MINUTOS ?? REGISTRO_VENTANA_MINUTOS),
-    reportesPorDia: enteroPositivo(
-      'REPORTES_POR_DIA_POR_CUENTA',
-      env.REPORTES_POR_DIA_POR_CUENTA,
-      CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
-    ),
+    // Límite efectivo de inundación: el override de instalación, o el del contrato (= inundacion.cupo.limite).
+    reportesPorDia: reportesPorDiaOverride ?? CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA,
+    reportesPorDiaOverride,
     fotosPorDia: enteroPositivo(
       'FOTOS_POR_DIA_POR_CUENTA',
       env.FOTOS_POR_DIA_POR_CUENTA,

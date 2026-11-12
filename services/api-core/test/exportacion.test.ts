@@ -6,7 +6,14 @@
  * La sesión de la base se pone en UTC, como en el contenedor de Docker. PGlite hereda la zona de
  * la máquina, y en una máquina de La Paz el defecto de la zona horaria no se veía.
  */
-import { CONFIG_DOMINIO, ExportacionGeoJsonSchema } from 'contracts';
+import {
+  CONFIG_DOMINIO,
+  crearRegistroCategorias,
+  DEFINICION_BACHE,
+  DEFINICION_INUNDACION,
+  ExportacionGeoJsonSchema,
+  NOTA_METODOLOGICA,
+} from 'contracts';
 import { ejecutorPg } from 'db';
 import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
@@ -76,13 +83,14 @@ const exportar = (query: string, a: FastifyInstance = app) =>
 /** Reportes sembrados en la base, con la UV, el estado y la fecha de creación que haga falta. */
 async function sembrar(o: { uv: string; estado?: string; creado?: string; cuantos?: number }) {
   const filas = await ex.consultar<{ id: string }>(
-    `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
-       ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-       severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
-     SELECT ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326),
-       'distrito_municipal:01', $1, 'test', 'manual', 'via_publica', 'Reporte sembrado número ' || g,
-       'rodilla', 'ocasional', 'media', 6, 2, $2::estado_reporte, COALESCE($3::timestamptz, now()), COALESCE($3::timestamptz, now())
-     FROM generate_series(1, $4::int) g
+    `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, ubicacion_metodo,
+       ubicacion_tipo, descripcion, categoria, detalle, detalle_version, severidad_calculada,
+       severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
+     SELECT ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.175, -17.79), 4326), 'distrito_municipal:01', $1,
+       'test', 'manual', 'via_publica', 'Reporte sembrado número ' || g,
+       'inundacion', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media',
+       6, 2, $2::estado_reporte, COALESCE($3::timestamptz, now()),
+       COALESCE($3::timestamptz, now()) FROM generate_series(1, $4::int) g
      RETURNING id::text`,
     [o.uv, o.estado ?? 'nuevo', o.creado ?? null, o.cuantos ?? 1],
   );
@@ -294,4 +302,288 @@ describe('ZONA_HORARIA en la configuración', () => {
     // PostgreSQL lee «-04:00» con el signo POSIX (al revés que ISO 8601): mejor no aceptarlo.
     expect(() => leerConfig({ ZONA_HORARIA: '-04:00' })).toThrow(/ZONA_HORARIA/);
   });
+});
+
+describe('M6 real: notas por selección y exportación Bache sin agua inventada', () => {
+  const punto = { lat: -17.78555, lon: -63.18555 };
+  const puntoSoloBache = { lat: -17.78666, lon: -63.18666 };
+  const bboxSoloBache = '-63.18667,-17.78667,-63.18665,-17.78665';
+  const vacia = 'bbox=-1,-1,1,1';
+  const detalle = { gravedad_declarada: 'hay_que_esquivar', tamano: 'rueda' };
+  let idBache: string;
+  let idSegundoBache: string;
+  let idFlood: string;
+
+  const cuerpo = (p: typeof punto) => ({
+    ...p,
+    dispositivo: { ...p, precision_m: 8, antiguedad_s: 3 },
+    ubicacion_tipo: 'via_publica',
+    descripcion: 'Bache real para exportación M6, de prueba.',
+    categoria: 'bache',
+    subtipo: 'hundimiento_calzada',
+    detalle,
+  });
+
+  beforeAll(async () => {
+    await pool.query("UPDATE categoria SET activa = true WHERE slug = 'bache'");
+    app.categorias.invalidar();
+    await liberarCuota(ex);
+    const ids: string[] = [];
+    for (const p of [punto, puntoSoloBache]) {
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/v1/reportes',
+        cookies: sesion(cookieVecina),
+        payload: cuerpo(p),
+      });
+      expect(r.statusCode, r.body).toBe(201);
+      ids.push(r.json().id);
+    }
+    [idBache, idSegundoBache] = ids as [string, string];
+    const r = await app.inject({
+      method: 'POST',
+      url: '/api/v1/reportes',
+      cookies: sesion(cookieVecina),
+      payload: {
+        ...reporteValido,
+        ...punto,
+        dispositivo: { ...punto, precision_m: 8, antiguedad_s: 3 },
+      },
+    });
+    expect(r.statusCode, r.body).toBe(201);
+    idFlood = r.json().id;
+  }, 60_000);
+
+  afterAll(async () => {
+    await pool.query("UPDATE categoria SET activa = false WHERE slug = 'bache'");
+    app.categorias.invalidar();
+  });
+
+  async function archivos(query: string, target = app) {
+    const csv = await exportar(`formato=csv&${query}`, target);
+    const geo = await exportar(`formato=geojson&${query}`, target);
+    expect(csv.statusCode, csv.body).toBe(200);
+    expect(geo.statusCode, geo.body).toBe(200);
+    const coleccion = ExportacionGeoJsonSchema.parse(geo.json());
+    const lineas = csv.body.replace(/^\uFEFF/, '').split('\n');
+    const generado = lineas.findIndex((linea) => linea.startsWith('# Generado '));
+    expect(generado).toBeGreaterThan(0);
+    const comentariosNota = lineas.slice(0, generado);
+    expect(comentariosNota.every((linea) => linea.startsWith('# '))).toBe(true);
+    const notaCsv = comentariosNota.map((linea) => linea.slice(2)).join('\n');
+    expect(notaCsv).toBe(coleccion.nota_metodologica);
+    return { csv, geo, coleccion, nota: notaCsv };
+  }
+
+  function limitacionesComunes(nota: string) {
+    expect(nota).toMatch(/inventario de reportes ciudadanos/i);
+    expect(nota).toContain('percepción');
+    expect(nota).toMatch(/GPS/);
+    expect(nota).toMatch(/estudio técnico formal/i);
+    expect(nota).toContain('NO SE HA VERIFICADO');
+    expect(nota).toMatch(/erróneo/i);
+    expect(nota).toMatch(/aproximada/i);
+    expect(nota).toMatch(/mano/);
+    expect(nota).toMatch(/no se comprobó|sin comprobación|no.*comprobad/i);
+    expect(nota).toContain(String(CONFIG_DOMINIO.REPORTE_RADIO_DISPOSITIVO_M));
+    expect(nota).toMatch(/falsear|falsific/i);
+    expect(nota).toMatch(/ausencia de reportes|que no haya reportes/i);
+  }
+
+  it.each(['', 'categoria=inundacion', `categoria=inundacion&${vacia}`])(
+    'conserva la nota Flood completa y exacta para selección «%s»',
+    async (query) => {
+      const { nota } = await archivos(query);
+      expect(nota).toBe(NOTA_METODOLOGICA);
+    },
+  );
+
+  it.each(['categoria=bache', `categoria=bache&${vacia}`])(
+    'Baches usa nota propia y límites comunes aun sin filas: %s',
+    async (query) => {
+      const { nota, coleccion } = await archivos(query);
+      limitacionesComunes(nota);
+      expect(nota).toContain(DEFINICION_BACHE.notaMetodologica);
+      expect(nota).not.toContain(NOTA_METODOLOGICA);
+      expect(nota).not.toMatch(/profundidad|anegamiento|sumidero/i);
+      if (query.includes(vacia)) expect(coleccion.total).toBe(0);
+    },
+  );
+
+  it('CSV conserva todos los encabezados, seis celdas vacías y el detalle JSON sin columnas nuevas', async () => {
+    const { csv, coleccion } = await archivos('categoria=bache');
+    const registros = leerCsv(csv.body.replace(/^\uFEFF/, '')).filter(
+      (r) => !r[0]?.startsWith('#'),
+    );
+    const [cabecera, ...filas] = registros;
+    expect(cabecera).toEqual([
+      'id',
+      'estado',
+      'severidad',
+      'severidad_calculada',
+      'severidad_manual',
+      'severidad_puntaje',
+      'lat',
+      'lon',
+      'precision_gps_m',
+      'distancia_dispositivo_m',
+      'ubicacion_metodo',
+      'ubicacion_tipo',
+      'distrito_id',
+      'distrito',
+      'unidad_vecinal_id',
+      'unidad_vecinal',
+      'creado_en',
+      'evento_en',
+      'validado_en',
+      'profundidad_estimada',
+      'frecuencia',
+      'causa_presunta',
+      'sumidero_cercano',
+      'sumidero_estado',
+      'agua_brota_sumidero',
+      'descripcion',
+      'punto_critico_id',
+      'n_reportes_punto',
+      'estado_motivo',
+      'fusionado_en_id',
+      'fotos',
+      'categoria',
+      'subtipo',
+      'detalle',
+    ]);
+    const fila = filas.find((f) => f[0] === idBache)!;
+    expect(fila).toBeDefined();
+    expect(fila).toHaveLength(cabecera!.length);
+    for (const campo of [
+      'profundidad_estimada',
+      'frecuencia',
+      'causa_presunta',
+      'sumidero_cercano',
+      'sumidero_estado',
+      'agua_brota_sumidero',
+    ])
+      expect(fila[cabecera!.indexOf(campo)], campo).toBe('');
+    expect(fila[cabecera!.indexOf('categoria')]).toBe('bache');
+    expect(fila[cabecera!.indexOf('subtipo')]).toBe('hundimiento_calzada');
+    expect(JSON.parse(fila[cabecera!.indexOf('detalle')]!)).toEqual(detalle);
+    expect(coleccion.features.find((f) => f.id === idBache)!.properties.detalle).toEqual(detalle);
+  });
+
+  it('Todas identifica las dos categorías presentes y no agrega las categorías sin filas', async () => {
+    const { coleccion, nota } = await archivos('categoria=todas');
+    expect(coleccion.features.map((f) => f.id)).toEqual(expect.arrayContaining([idBache, idFlood]));
+    limitacionesComunes(nota);
+    expect(nota).toContain('Inundaciones');
+    expect(nota).toContain('Baches');
+    expect(nota).toContain(NOTA_METODOLOGICA);
+    expect(nota).toContain(DEFINICION_BACHE.notaMetodologica);
+    expect(nota.split(DEFINICION_BACHE.notaMetodologica)).toHaveLength(2);
+    expect(nota).not.toMatch(/Basura|Áreas verdes/);
+  });
+
+  it('Todas con solo Bache presente no incorpora la nota de agua', async () => {
+    const { coleccion, nota } = await archivos(`categoria=todas&bbox=${bboxSoloBache}`);
+    expect(coleccion.features.map((f) => f.id)).toEqual([idSegundoBache]);
+    limitacionesComunes(nota);
+    expect(nota).toContain(DEFINICION_BACHE.notaMetodologica);
+    expect(nota).not.toContain(NOTA_METODOLOGICA);
+    expect(nota).not.toMatch(/profundidad|anegamiento|sumidero/i);
+  });
+
+  it('Todas vacía conserva límites neutrales sin inventar categorías presentes', async () => {
+    const { coleccion, nota } = await archivos(`categoria=todas&${vacia}`);
+    expect(coleccion.features).toEqual([]);
+    limitacionesComunes(nota);
+    expect(nota).not.toContain(NOTA_METODOLOGICA);
+    expect(nota).not.toContain(DEFINICION_BACHE.notaMetodologica);
+    expect(nota).not.toMatch(/profundidad|anegamiento|sumidero/i);
+  });
+
+  it('historial sin definición usa el registro inyectado y declara el límite sin fallback Flood', async () => {
+    const sinBache = await crearApp({
+      pool,
+      cfg: configuracion(),
+      resolver: resolverDePrueba,
+      almacen: new AlmacenMemoria(),
+      registro: crearRegistroCategorias([DEFINICION_INUNDACION]),
+    });
+    try {
+      const { coleccion, nota } = await archivos('categoria=bache', sinBache);
+      expect(coleccion.features.map((f) => f.id)).toContain(idBache);
+      limitacionesComunes(nota);
+      expect(nota).toContain('bache');
+      expect(nota).toMatch(/definición.*(no disponible|ausente)|sin definición/i);
+      expect(nota).not.toContain(DEFINICION_BACHE.notaMetodologica);
+      expect(nota).not.toContain(NOTA_METODOLOGICA);
+    } finally {
+      await sinBache.close();
+    }
+  });
+
+  it('una selección truncada sigue avisando y sus notas describen las categorías incluidas', async () => {
+    const { csv, geo, coleccion, nota } = await archivos('categoria=todas&limite=1');
+    expect(coleccion.total).toBeGreaterThan(coleccion.exportados);
+    expect(coleccion.exportados).toBe(1);
+    expect(coleccion.truncado).toBe(true);
+    expect(csv.headers['x-curichi-truncado']).toBe('1');
+    expect(geo.headers['x-curichi-truncado']).toBe('1');
+    expect(csv.body).toContain('# INCOMPLETO:');
+    const categoria = coleccion.features[0]!.properties.categoria;
+    expect(nota).toMatch(/incluid|presentes.*archivo/i);
+    expect(nota).toContain(
+      categoria === 'bache' ? DEFINICION_BACHE.notaMetodologica : NOTA_METODOLOGICA,
+    );
+    expect(nota).not.toContain(
+      categoria === 'bache' ? NOTA_METODOLOGICA : DEFINICION_BACHE.notaMetodologica,
+    );
+  });
+});
+
+describe('M10.1: CSV y GeoJSON conservan false y opcionales ausentes', () => {
+  it.each([false, null, undefined])(
+    'agua_brota_sumidero=%s por defecto y en Todas',
+    async (agua) => {
+      await liberarCuota(ex);
+      const r = await app.inject({
+        method: 'POST',
+        url: '/api/v1/reportes',
+        cookies: sesion(cookieVecina),
+        payload: { ...reporteValido, ...(agua === undefined ? {} : { agua_brota_sumidero: agua }) },
+      });
+      expect(r.statusCode, r.body).toBe(201);
+      const unidadVecinalId = r.json().properties.unidad_vecinal?.id;
+      expect(unidadVecinalId).toBe('unidad_vecinal:A');
+      // Estos valores se comprueban en la UV del reporte, aparte del fixture masivo de UV C.
+      const zona = `unidad_vecinal_id=${encodeURIComponent(unidadVecinalId)}`;
+      for (const query of ['', 'categoria=inundacion', 'categoria=todas']) {
+        const csv = await exportar(`formato=csv&${query}&${zona}`);
+        const geo = await exportar(`formato=geojson&${query}&${zona}`);
+        expect(csv.statusCode).toBe(200);
+        expect(geo.statusCode).toBe(200);
+        const [cabecera, ...filas] = leerCsv(csv.body.replace(/^\uFEFF/, '')).filter(
+          (f) => !f[0]?.startsWith('#'),
+        );
+        const fila = filas.find((f) => f[0] === r.json().id)!;
+        expect(fila).toHaveLength(cabecera!.length);
+        const p = geo.json().features.find((f: { id: string }) => f.id === r.json().id).properties;
+        expect(p.agua_brota_sumidero).toBe(agua ?? null);
+        expect(p.sumidero_cercano).toBeNull();
+        expect(p.sumidero_estado).toBeNull();
+        for (const campo of [
+          'profundidad_estimada',
+          'frecuencia',
+          'causa_presunta',
+          'sumidero_cercano',
+          'sumidero_estado',
+          'agua_brota_sumidero',
+        ])
+          expect(fila[cabecera!.indexOf(campo)], campo).toBe(
+            p[campo] == null ? '' : String(p[campo]),
+          );
+        expect(JSON.parse(fila[cabecera!.indexOf('detalle')]!)).toEqual(p.detalle);
+        expect(p.detalle).toEqual(r.json().properties.detalle);
+      }
+    },
+  );
 });

@@ -196,6 +196,8 @@ interface VisibilidadFoto extends Record<string, unknown> {
   subido_por: string | null;
   /** Autor del reporte al que está pegada (null sin reporte, o si se borró la cuenta). */
   autor_id: string | null;
+  /** Categoría del reporte al que está pegada (null sin reporte). */
+  categoria: string | null;
   /** El reporte está en la vista pública (`condicionPublico`). */
   publica: boolean;
   /** El reporte ya pasó su demora, en cualquier estado (`condicionPublicado`). */
@@ -312,7 +314,7 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         // un fallo del almacén. Se devuelve ANTES de responder, así un reintento inmediato ya lo
         // encuentra, y del día en que se reservó aunque la medianoche haya pasado en el medio.
         if (!resultado?.guardada)
-          await devolverTurnoDeFoto(dep.pool, autor.id, reserva.dia).catch((err) =>
+          await devolverTurnoDeFoto(dep.pool, autor.id, reserva.ventanaInicio).catch((err) =>
             req.log.warn({ err }, 'no se pudo devolver el turno de foto'),
           );
       }
@@ -428,14 +430,24 @@ export async function rutasFotos(app: FastifyInstance, dep: Dependencias) {
         `SELECT f.reporte_id IS NULL AS sin_reporte,
                 f.subido_por::text AS subido_por,
                 r.autor_id::text AS autor_id,
+                r.categoria::text AS categoria,
                 coalesce(${condicionPublico('r')}, false) AS publica,
                 coalesce(${condicionPublicado('r')}, false) AS publicado
          FROM reporte_foto f
-         LEFT JOIN reporte_inundacion r ON r.id = f.reporte_id
+         LEFT JOIN reporte r ON r.id = f.reporte_id
         WHERE f.objeto_key = $1 AND f.exif_sanitizado`,
         [key],
       );
-      const meta = fila.rows[0];
+      let meta = fila.rows[0];
+      // Lo público depende también de que la categoría del reporte esté ACTIVA (M3.3): una foto de
+      // un reporte de categoría inactiva no se sirve a cualquiera. El autor y el técnico la siguen
+      // viendo (modo privado). `publicado` no cambia: la moderación técnica no mira la categoría.
+      if (
+        meta?.publica &&
+        meta.categoria !== null &&
+        !(await app.categorias.estaActiva(meta.categoria))
+      )
+        meta = { ...meta, publica: false };
       // La visibilidad se decide ANTES de mirar If-None-Match: una foto de un reporte retirado da
       // 404 aunque la caché del navegador todavía tenga su ETag, nunca 304.
       const modo = meta ? modoDeFoto(meta, req.usuario?.id, req.usuario?.rol) : null;

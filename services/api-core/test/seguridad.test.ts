@@ -164,6 +164,13 @@ function fila(parcial: Partial<FilaReporte> = {}): FilaReporte {
     distancia_dispositivo_m: null,
     ubicacion_tipo: 'vivienda_o_predio',
     descripcion: 'Se junta agua hasta la rodilla en la puerta de casa cada lluvia.',
+    categoria: 'inundacion',
+    subtipo: null,
+    detalle: {
+      profundidad_estimada: 'rodilla',
+      frecuencia: 'ocasional',
+      causa_presunta: 'desconocida',
+    },
     profundidad_estimada: 'rodilla',
     frecuencia: 'ocasional',
     causa_presunta: 'desconocida',

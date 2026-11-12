@@ -11,7 +11,7 @@
  * 100 reportes 283 ms, 1000 reportes 1233 ms, 5000 reportes 5213 ms; es decir ~3,1 ms por punto
  * crítico, y corría dentro de la petición HTTP en cada validación.
  */
-import { CONFIG_DOMINIO } from 'contracts';
+import { REGISTRO_CATEGORIAS, type RegistroCategorias } from 'contracts';
 import { crsMetricoEpsg } from './configuracion.js';
 import type { Ejecutor } from './ejecutor.js';
 import {
@@ -65,6 +65,9 @@ const MARGEN_PREFILTRO_M = 1;
  * «radio / 111 320 × 1,05» grados en los dos ejes, que razonaba al revés: fuera del ecuador un grado
  * de longitud mide MENOS metros, así que a −18° la caja ya no llegaba a los 25 m y a −34° (otra
  * ciudad) se quedaba en ~21,6 m.
+ *
+ * `b.categoria = a.categoria` (ADR 0009/0013): la vecindad no cruza categorías. Como las semillas son
+ * todas de la categoría del reporte, esto restringe los vecinos a esa misma categoría.
  */
 async function vecinosDe(
   ex: Ejecutor,
@@ -75,9 +78,10 @@ async function vecinosDe(
   if (!ids.length) return [];
   return ex.consultar<Arista>(
     `SELECT a.id::text AS origen, b.id::text AS vecino
-     FROM reporte_inundacion a
-     JOIN reporte_inundacion b
+     FROM reporte a
+     JOIN reporte b
        ON b.id <> a.id
+      AND b.categoria = a.categoria
       AND b.estado IN ('validado', 'resuelto')
       AND b.geom && ST_Transform(ST_Expand(ST_Transform(a.geom, $3::int), $4::float8), 4326)
       AND ST_DWithin(ST_Transform(b.geom, $3::int), ST_Transform(a.geom, $3::int), $2::float8)
@@ -147,12 +151,18 @@ function componentes(nodos: string[], aristas: Arista[]): Map<string, string[]> 
  * Recalcula solo los puntos críticos que pudo alterar el cambio de estado de un reporte.
  * Devuelve `completo: true` si la componente era tan grande que convino rehacer la tabla entera.
  * `crsMetrico`, por defecto `CRS_METRICO_EPSG`: el mismo que usa el recálculo completo.
+ *
+ * `radioM`, por defecto `undefined`: el radio sale de la definición de la categoría del reporte en
+ * `registro` (por defecto `REGISTRO_CATEGORIAS`). Un `radioM` explícito lo fuerza (lo usan pruebas).
+ * Si la categoría del reporte no tiene definición (ni radio explícito), no se agrupa: el reporte
+ * queda sin punto crítico y se disuelve el que tuviera (fail-closed, §9.2).
  */
 export async function recalcularEntornoDeReporte(
   ex: Ejecutor,
   reporteId: string,
-  radioM: number = CONFIG_DOMINIO.RECURRENCIA_RADIO_M,
+  radioM?: number,
   crsMetrico?: number,
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
 ): Promise<ResumenEntorno> {
   const crs = crsMetrico ?? crsMetricoEpsg();
   return ex.transaccion(async (tx) => {
@@ -160,12 +170,30 @@ export async function recalcularEntornoDeReporte(
     // sin él, dos validaciones sobre la misma zona leen el mismo grafo y crean puntos duplicados.
     await tx.consultar('SELECT pg_advisory_xact_lock($1)', [CLAVE_LOCK]);
 
-    const [reporte] = await tx.consultar<{ punto_critico_id: string | null; activo: boolean }>(
-      `SELECT punto_critico_id::text, (estado IN ('validado','resuelto')) AS activo
-       FROM reporte_inundacion WHERE id = $1`,
+    const [reporte] = await tx.consultar<{
+      punto_critico_id: string | null;
+      activo: boolean;
+      categoria: string;
+    }>(
+      `SELECT punto_critico_id::text, (estado IN ('validado','resuelto')) AS activo, categoria
+       FROM reporte WHERE id = $1`,
       [reporteId],
     );
     if (!reporte) return { afectados: 0, puntos: 0, disueltos: 0, completo: false };
+
+    // Radio de recurrencia de la categoría del reporte. Sin definición (ni radio explícito) no hay
+    // forma segura de agrupar: se desvincula del punto previo —dato derivado— y no se crea ninguno.
+    const radio = radioM ?? registro.obtener(reporte.categoria)?.recurrenciaRadioM;
+    if (radio === undefined) {
+      if (reporte.punto_critico_id)
+        await tx.consultar('DELETE FROM punto_critico WHERE id = $1', [reporte.punto_critico_id]);
+      return {
+        afectados: 0,
+        puntos: 0,
+        disueltos: reporte.punto_critico_id ? 1 : 0,
+        completo: false,
+      };
+    }
 
     // Semillas: el propio reporte (si sigue activo) y los que compartían su punto crítico,
     // que son justamente los que pueden quedar partidos si el reporte sale del grupo.
@@ -173,19 +201,14 @@ export async function recalcularEntornoDeReporte(
     if (reporte.activo) semillas.add(reporteId);
     if (reporte.punto_critico_id) {
       const companeros = await tx.consultar<{ id: string }>(
-        `SELECT id::text FROM reporte_inundacion
+        `SELECT id::text FROM reporte
          WHERE punto_critico_id = $1 AND id <> $2 AND estado IN ('validado','resuelto')`,
         [reporte.punto_critico_id, reporteId],
       );
       for (const c of companeros) semillas.add(c.id);
     }
 
-    const { nodos, aristas, desbordado } = await expandirComponentes(
-      tx,
-      [...semillas],
-      radioM,
-      crs,
-    );
+    const { nodos, aristas, desbordado } = await expandirComponentes(tx, [...semillas], radio, crs);
     if (desbordado) {
       // Antes, aquí se lanzaba el recálculo COMPLETO de la tabla. Medido en la Fase 4 con 750 021
       // reportes publicables: **41,9 segundos**. Esto corre dentro de un `PATCH /estado`, con el
@@ -208,7 +231,7 @@ export async function recalcularEntornoDeReporte(
     if (reporte.punto_critico_id) aBorrar.add(reporte.punto_critico_id);
     if (idsAfectados.length) {
       const previos = await tx.consultar<{ pc: string }>(
-        `SELECT DISTINCT punto_critico_id::text AS pc FROM reporte_inundacion
+        `SELECT DISTINCT punto_critico_id::text AS pc FROM reporte
          WHERE id = ANY($1::uuid[]) AND punto_critico_id IS NOT NULL`,
         [idsAfectados],
       );
@@ -223,7 +246,7 @@ export async function recalcularEntornoDeReporte(
 
     const filas = await tx.consultar<FilaReporte>(
       `SELECT ${COLUMNAS_AGRUPACION}
-       FROM reporte_inundacion WHERE id = ANY($1::uuid[]) AND estado IN ('validado','resuelto')`,
+       FROM reporte WHERE id = ANY($1::uuid[]) AND estado IN ('validado','resuelto')`,
       [idsAfectados],
     );
     const porId = new Map(filas.map((f) => [f.id, f]));
@@ -233,7 +256,7 @@ export async function recalcularEntornoDeReporte(
         aristas,
       ).values(),
     ].map((ids) => ids.map((i) => porId.get(i)!).filter(Boolean));
-    const puntos = await construirPuntosCriticos(tx, radioM, grupos);
+    const puntos = await construirPuntosCriticos(tx, radio, grupos);
     return {
       afectados: filas.length,
       puntos: puntos.puntos,

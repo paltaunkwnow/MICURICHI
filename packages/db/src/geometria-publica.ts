@@ -1,5 +1,7 @@
 /**
- * Relleno de `reporte_inundacion.geom_publico` (migración 0005).
+ * Relleno de `reporte.geom_publico` (migración 0005; la tabla se llamó `reporte_inundacion` hasta la
+ * 0020). Se trabaja sobre la tabla `reporte` directamente —no sobre la vista de compatibilidad—
+ * porque el punto publicable vale para cualquier categoría.
  *
  * El punto publicable de un reporte de vivienda lleva un jitter sembrado con `id|JITTER_SAL`, y
  * esa sal es un secreto del servidor que no puede vivir en la base. Por eso la migración deja en
@@ -38,7 +40,7 @@ export async function rellenarGeometriaPublica(
   for (let vuelta = 0; vuelta < maxLotes; vuelta++) {
     const filas = await ex.consultar<Pendiente>(
       `SELECT id::text, ST_X(geom) AS lon, ST_Y(geom) AS lat, ubicacion_tipo::text
-         FROM reporte_inundacion WHERE geom_publico IS NULL LIMIT $1`,
+         FROM reporte WHERE geom_publico IS NULL LIMIT $1`,
       [LOTE],
     );
     if (!filas.length) return total;
@@ -62,7 +64,7 @@ export async function rellenarGeometriaPublica(
     // Un solo UPDATE por lote: con unos miles de reportes, una consulta por fila convierte el
     // arranque en varios minutos de idas y vueltas a la base.
     const actualizadas = await ex.consultar<{ id: string }>(
-      `UPDATE reporte_inundacion AS r
+      `UPDATE reporte AS r
           SET geom_publico = ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326)
          FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::float8[]) AS lon, unnest($3::float8[]) AS lat) AS v
         WHERE r.id = v.id AND r.geom_publico IS NULL

@@ -5,11 +5,13 @@ export function Paginacion({
   pagina,
   limite,
   total,
+  totalExacto = true,
   onCambiar,
 }: {
   pagina: number;
   limite: number;
   total: number;
+  totalExacto?: boolean;
   onCambiar: (pagina: number) => void;
 }) {
   const { numero } = useFormato();
@@ -24,7 +26,7 @@ export function Paginacion({
       <p className="text-tinta-600">
         {total === 0
           ? 'Sin resultados'
-          : `Mostrando ${numero(desde)}–${numero(hasta)} de ${numero(total)} reportes`}
+          : `Mostrando ${numero(desde)}–${numero(hasta)} de ${totalExacto ? '' : 'al menos '}${numero(total)} reportes`}
       </p>
       <div className="flex items-center gap-2">
         <button
@@ -37,7 +39,8 @@ export function Paginacion({
           Anterior
         </button>
         <span className="px-2 text-tinta-600" aria-current="page">
-          Página {numero(pagina)} de {numero(paginas)}
+          Página {numero(pagina)}
+          {totalExacto ? ` de ${numero(paginas)}` : ''}
         </span>
         <button
           type="button"

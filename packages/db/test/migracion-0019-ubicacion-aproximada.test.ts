@@ -58,7 +58,7 @@ interface FilaReporte {
 
 /**
  * Un reporte con el método y la precisión/distancia indicados; `publicar_en` es NOT NULL sin DEFAULT
- * desde la 0016. Las columnas son las de la base migrada hasta el final (mismo juego que la 0017).
+ * desde la 0016. Las columnas son las históricas de 0019, antes del renombre de la 0020.
  */
 function insertarReporte(
   ex: Ejecutor,
@@ -79,6 +79,28 @@ function insertarReporte(
   );
 }
 
+async function comprobarHistoria0019(ex: Ejecutor) {
+  const [fila] = await insertarReporte(ex, 'aproximada', 178, null);
+  expect(fila?.id).toMatch(/^[0-9a-f-]{36}$/);
+  expect(fila?.ubicacion_metodo).toBe('aproximada');
+  expect(Number(fila?.precision_gps_m)).toBe(178);
+  expect(fila?.distancia_dispositivo_m).toBeNull();
+  await expect(insertarReporte(ex, 'metodo_inexistente', null, null)).rejects.toMatchObject({
+    code: '22P02',
+  });
+  const [relacion] = await ex.consultar<{ tipo: string; moderna: string | null }>(
+    `SELECT relkind::text AS tipo, to_regclass('public.reporte')::text AS moderna
+       FROM pg_class WHERE oid = 'public.reporte_inundacion'::regclass`,
+  );
+  expect(relacion).toEqual({ tipo: 'r', moderna: null });
+  const registradas = await ex.consultar<{ nombre: string }>(
+    'SELECT nombre FROM _migraciones ORDER BY nombre',
+  );
+  expect(registradas.map((r) => r.nombre)).toEqual(
+    listarMigraciones().filter((f) => numero(f) <= '0019'),
+  );
+}
+
 describe('migración 0019 sobre una base en uso (desde 0018)', () => {
   let db: Awaited<ReturnType<typeof crearPglite>>;
   let ex: Ejecutor;
@@ -91,7 +113,7 @@ describe('migración 0019 sobre una base en uso (desde 0018)', () => {
     ex = ejecutorPglite(db);
     hasta0018 = await aplicarMigraciones(ex, { hasta: '0018' });
     valoresAntes = await valoresUbicacionMetodo(ex);
-    con0019 = await aplicarMigraciones(ex);
+    con0019 = await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {
@@ -130,12 +152,16 @@ describe('migración 0019 sobre una base en uso (desde 0018)', () => {
   });
 
   it('volver a migrar no aplica nada y ejecutar el archivo a mano no falla ni duplica el valor', async () => {
-    const otra = await aplicarMigraciones(ex);
+    const otra = await aplicarMigraciones(ex, { hasta: '0019' });
     expect(otra.aplicadas).toEqual([]);
     await ex.transaccion((tx) =>
       tx.ejecutar(readFileSync(join(DIRECTORIO_MIGRACIONES, ARCHIVO_0019), 'utf8')),
     );
     expect(await valoresUbicacionMetodo(ex)).toEqual(METODOS_ESPERADOS);
+  });
+
+  it('M10.5: transición e idempotencia conservan 0019, precisión 178 y distancia NULL', async () => {
+    await comprobarHistoria0019(ex);
   });
 });
 
@@ -146,7 +172,7 @@ describe('migración 0019 desde cero', () => {
   beforeAll(async () => {
     db = await crearPglite();
     ex = ejecutorPglite(db);
-    await aplicarMigraciones(ex);
+    await aplicarMigraciones(ex, { hasta: '0019' });
   }, 240_000);
 
   afterAll(async () => {
@@ -162,5 +188,9 @@ describe('migración 0019 desde cero', () => {
     expect(r?.ubicacion_metodo).toBe('aproximada');
     expect(Number(r?.precision_gps_m)).toBe(178);
     expect(r?.distancia_dispositivo_m).toBeNull();
+  });
+
+  it('M10.5: desde cero termina en 0019 con tabla física y ubicación aproximada real', async () => {
+    await comprobarHistoria0019(ex);
   });
 });

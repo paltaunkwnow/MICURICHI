@@ -59,6 +59,7 @@ function grupoDe(n: number): FilaReporte[] {
       lat_publico: Math.round(lat * 1e5) / 1e5,
       creado_en: new Date(Date.UTC(2026, 0, 1, 0, 0, i % 60)).toISOString(),
       severidad: (['baja', 'media', 'alta', 'critica'] as const)[i % 4] as string,
+      categoria: 'inundacion',
     });
   }
   return filas;

@@ -1,8 +1,15 @@
 /**
- * Cupo diario por cuenta (contracts 0.10.0, migración 0014): `REPORTES_POR_DIA_POR_CUENTA`
- * reportes y `FOTOS_POR_DIA_POR_CUENTA` fotos por día calendario en `ZONA_HORARIA`, contados en
- * `cuota_reporte_diaria` (una fila por cuenta y por día). Reemplaza a la espera de 60 min entre
- * reportes (`usuario.ultimo_reporte_en`), que ya no se lee ni se escribe.
+ * Cupo por cuenta sobre `cupo_contador` (contador genérico, migración 0020, ADR 0017). Desde M3 el
+ * cupo es POR REGLA, no por una tabla de columnas fijas:
+ *
+ *  - reportes: clave `reportes:<slug>`, ventana del día local de la ciudad, límite de la `ReglaCupo`
+ *    de la categoría (o el override de instalación `REPORTES_POR_DIA_POR_CUENTA`). Cada categoría
+ *    cuenta en su propia fila, así que el 4.º de inundación se rechaza sin tocar el cupo de otra;
+ *  - fotos: clave `fotos:cuenta`, GLOBAL (suma todas las categorías, ADR 0017), límite
+ *    `FOTOS_POR_DIA_POR_CUENTA`.
+ *
+ * Reemplaza a `cuota_reporte_diaria` (0014), que queda SIN USO hasta M10 (no se borra). El
+ * mantenimiento ya borra las ventanas de días anteriores (packages/db/mantenimiento.ts).
  *
  * POR QUÉ NO BASTA EL LÍMITE POR IP
  *
@@ -13,16 +20,19 @@
  * POR QUÉ UN INSERT … ON CONFLICT DO UPDATE … WHERE
  *
  * Leer el contador, comparar e incrementar abre una ventana de carrera: dos envíos simultáneos
- * leen lo mismo y entran los dos. Con el upsert condicional la fila `(usuario_id, dia)` hace de
- * cerrojo: la segunda transacción espera a la primera y vuelve a evaluar el WHERE con el valor ya
- * incrementado (EvalPlanQual). Sin fila devuelta, el cupo del día está agotado. El `n` devuelto
- * es el número de reporte del día y decide la demora de publicación (1.º: 60 s; siguientes: 240 s).
+ * leen lo mismo y entran los dos. Con el upsert condicional la fila `(usuario_id, clave,
+ * ventana_inicio)` hace de cerrojo: la segunda transacción espera a la primera y vuelve a evaluar
+ * el WHERE con el valor ya incrementado (EvalPlanQual). Sin fila devuelta, el cupo está agotado.
+ * El `n` devuelto es el número de reporte del día de esa categoría y decide la demora de
+ * publicación (1.º: 60 s; siguientes: 240 s).
  *
  * EL DÍA ES EL DE LA CIUDAD
  *
- * `dia` se calcula aquí, con la zona de la instalación, y no con `current_date`: con la sesión de
- * PostgreSQL en UTC, en La Paz el día cambiaría a las 20:00. Todas las funciones aceptan `ahora`
- * para que las pruebas fijen el instante (23:59 y 00:01 locales caen en días distintos).
+ * La ventana de `dia_local` se calcula aquí con la zona de la instalación, no con `current_date`:
+ * con la sesión de PostgreSQL en UTC, en La Paz el día cambiaría a las 20:00. Todas las funciones
+ * aceptan `ahora` para que las pruebas fijen el instante (23:59 y 00:01 locales caen en días
+ * distintos). `ventana_inicio` es la medianoche local de hoy como `timestamptz`, el mismo valor con
+ * el que el mantenimiento decide qué ventanas ya pasaron.
  */
 
 interface ClienteSql {
@@ -53,29 +63,38 @@ export interface EsperaCupo {
 }
 
 export type ResultadoReserva =
-  | { permitido: true; n: number; dia: string }
+  | { permitido: true; n: number; ventanaInicio: string }
   | { permitido: false; espera: EsperaCupo };
 
-export interface CupoDelDia {
-  dia: string;
-  reportesN: number;
-  fotosN: number;
-  espera: EsperaCupo;
-}
+/** Clave de `cupo_contador` para el cupo de reportes de una categoría (por cuenta y categoría). */
+export const claveReportes = (slug: string): string => `reportes:${slug}`;
+
+/** Clave de `cupo_contador` para el cupo de fotos: GLOBAL, una por cuenta (ADR 0017). */
+export const CLAVE_FOTOS = 'fotos:cuenta';
 
 const ahoraSql = (o: OpcionesDia) =>
   o.ahora === undefined ? null : o.ahora instanceof Date ? o.ahora.toISOString() : o.ahora;
 
 /**
- * El día local y su medianoche siguiente. `$1` es el instante (o null = now()) y `$2` la zona.
- * `medianoche_local` y `desfase_s` sirven para escribir la hora con el desfase de la ciudad.
+ * Medianoche local de HOY como `timestamptz` (la ventana de `dia_local`). `$ts` es el instante (o
+ * null = now()) y `$zona` la zona. Es el mismo valor con el que el mantenimiento compara.
+ */
+const VENTANA_DIA_LOCAL = (ts: string, zona: string) =>
+  `(((COALESCE(${ts}::timestamptz, now()) AT TIME ZONE ${zona}::text)::date)::timestamp AT TIME ZONE ${zona}::text)`;
+
+/**
+ * El día local, su medianoche siguiente y la medianoche de hoy (ventana). `$1` es el instante (o
+ * null = now()) y `$2` la zona. `medianoche_local` y `desfase_s` sirven para escribir la hora con
+ * el desfase de la ciudad.
  */
 const SQL_DIA = `
   SELECT d.dia::text AS dia,
          to_char(d.medianoche AT TIME ZONE $2::text, 'YYYY-MM-DD"T"HH24:MI:SS') AS medianoche_local,
          extract(epoch FROM (d.medianoche AT TIME ZONE $2::text) - (d.medianoche AT TIME ZONE 'UTC'))::int AS desfase_s,
-         GREATEST(1, ceil(extract(epoch FROM d.medianoche - d.t)))::int AS segundos
+         GREATEST(1, ceil(extract(epoch FROM d.medianoche - d.t)))::int AS segundos,
+         d.ventana_inicio::text AS ventana_inicio
     FROM (SELECT a.t, (a.t AT TIME ZONE $2::text)::date AS dia,
+                 ((a.t AT TIME ZONE $2::text)::date::timestamp AT TIME ZONE $2::text) AS ventana_inicio,
                  (((a.t AT TIME ZONE $2::text)::date + 1)::timestamp AT TIME ZONE $2::text) AS medianoche
             FROM (SELECT COALESCE($1::timestamptz, now()) AS t) a) d`;
 
@@ -84,6 +103,7 @@ interface FilaDia extends Record<string, unknown> {
   medianoche_local: string;
   desfase_s: number;
   segundos: number;
+  ventana_inicio: string;
 }
 
 /** `-04:00` a partir de -14400 s. */
@@ -117,79 +137,104 @@ export async function momentoDelDia(
   return { dia: f.dia, espera: esperaDe(f), minutosDesdeMedianoche: Number(f.minutos) };
 }
 
-/** Lo gastado hoy por la cuenta y cuándo vuelve el cupo. Solo lee. */
-export async function cupoDelDia(
-  cliente: ClienteSql,
-  usuarioId: string,
-  o: OpcionesDia,
-): Promise<CupoDelDia> {
-  const r = await cliente.query<FilaDia & { reportes_n: number; fotos_n: number }>(
-    `SELECT x.*, COALESCE(c.reportes_n, 0)::int AS reportes_n, COALESCE(c.fotos_n, 0)::int AS fotos_n
-       FROM (${SQL_DIA}) x
-       LEFT JOIN cuota_reporte_diaria c ON c.usuario_id = $3 AND c.dia = x.dia::date`,
-    [ahoraSql(o), o.zona, usuarioId],
-  );
-  const f = r.rows[0]!;
-  return { dia: f.dia, reportesN: f.reportes_n, fotosN: f.fotos_n, espera: esperaDe(f) };
+/** Estado de un conjunto de cupos de la cuenta en la ventana de HOY. Solo lee (para `/auth/yo`). */
+export interface EstadoCupos {
+  dia: string;
+  ventanaInicio: string;
+  espera: EsperaCupo;
+  /** `clave` → `n` gastado hoy; una clave sin fila no aparece (cuenta como 0). */
+  conteos: Record<string, number>;
 }
 
+/**
+ * Lo gastado hoy por la cuenta en cada una de `claves` y cuándo vuelve el cupo. Una sola consulta:
+ * el día (y la ventana) de `SQL_DIA` más un LEFT JOIN de `cupo_contador` por esas claves.
+ */
+export async function leerCupos(
+  cliente: ClienteSql,
+  usuarioId: string,
+  claves: readonly string[],
+  o: OpcionesDia,
+): Promise<EstadoCupos> {
+  const r = await cliente.query<FilaDia & { clave: string | null; n: number | null }>(
+    // `x.ventana_inicio` sale como texto de SQL_DIA (lo devolvemos así en `EstadoCupos`); se castea
+    // a timestamptz para compararlo con la columna, que lo es.
+    `SELECT x.*, c.clave, c.n::int AS n
+       FROM (${SQL_DIA}) x
+       LEFT JOIN cupo_contador c
+         ON c.usuario_id = $3 AND c.ventana_inicio = x.ventana_inicio::timestamptz AND c.clave = ANY($4::text[])`,
+    [ahoraSql(o), o.zona, usuarioId, [...claves]],
+  );
+  const f = r.rows[0]!;
+  const conteos: Record<string, number> = {};
+  for (const fila of r.rows) if (fila.clave !== null) conteos[fila.clave] = Number(fila.n ?? 0);
+  return {
+    dia: f.dia,
+    ventanaInicio: f.ventana_inicio,
+    espera: esperaDe(f),
+    conteos,
+  };
+}
+
+/** Upsert atómico genérico sobre `cupo_contador` para una `clave` y la ventana del día local. */
 async function reservar(
   cliente: ClienteSql,
-  columna: 'reportes_n' | 'fotos_n',
   usuarioId: string,
+  clave: string,
   o: OpcionesCupo,
 ): Promise<ResultadoReserva> {
-  const r = await cliente.query<{ n: number; dia: string }>(
-    `INSERT INTO cuota_reporte_diaria (usuario_id, dia, ${columna})
-     VALUES ($1::uuid, (COALESCE($3::timestamptz, now()) AT TIME ZONE $4::text)::date, 1)
-     ON CONFLICT (usuario_id, dia) DO UPDATE
-       SET ${columna} = cuota_reporte_diaria.${columna} + 1, actualizado_en = now()
-       WHERE cuota_reporte_diaria.${columna} < $2
-     RETURNING ${columna}::int AS n, dia::text AS dia`,
-    [usuarioId, o.maximo, ahoraSql(o), o.zona],
+  const r = await cliente.query<{ n: number; ventana_inicio: string }>(
+    `INSERT INTO cupo_contador (usuario_id, clave, ventana_inicio, n)
+     VALUES ($1::uuid, $2, ${VENTANA_DIA_LOCAL('$3', '$5')}, 1)
+     ON CONFLICT (usuario_id, clave, ventana_inicio) DO UPDATE
+       SET n = cupo_contador.n + 1, actualizado_en = now()
+       WHERE cupo_contador.n < $4
+     RETURNING n::int AS n, ventana_inicio::text AS ventana_inicio`,
+    [usuarioId, clave, ahoraSql(o), o.maximo, o.zona],
   );
   const fila = r.rows[0];
-  if (fila) return { permitido: true, n: fila.n, dia: fila.dia };
+  if (fila) return { permitido: true, n: fila.n, ventanaInicio: fila.ventana_inicio };
   const d = await cliente.query<FilaDia>(SQL_DIA, [ahoraSql(o), o.zona]);
   return { permitido: false, espera: esperaDe(d.rows[0]!) };
 }
 
 /**
- * Reserva un turno de reporte. Va DENTRO de la transacción que inserta el reporte y DESPUÉS de la
- * idempotencia: un reenvío del mismo envío no gasta turno, y si el reporte no llega a guardarse
- * (fotos inválidas, error posterior) el ROLLBACK devuelve el turno.
+ * Reserva un turno de reporte de la categoría `slug`. Va DENTRO de la transacción que inserta el
+ * reporte y DESPUÉS de la idempotencia: un reenvío del mismo envío no gasta turno, y si el reporte
+ * no llega a guardarse (fotos inválidas, error posterior) el ROLLBACK devuelve el turno.
  */
 export function reservarTurnoDeReporte(
   cliente: ClienteSql,
   usuarioId: string,
+  slug: string,
   o: OpcionesCupo,
 ): Promise<ResultadoReserva> {
-  return reservar(cliente, 'reportes_n', usuarioId, o);
+  return reservar(cliente, usuarioId, claveReportes(slug), o);
 }
 
 /**
- * Reserva un turno de foto ANTES de leer y procesar la imagen, en su propia sentencia (no se
- * retiene ninguna transacción mientras trabaja sharp). Si el procesamiento falla, se devuelve con
- * `devolverTurnoDeFoto`. La limpieza de fotos huérfanas no lo toca: borrar lo propio no devuelve
- * turnos.
+ * Reserva un turno de foto (clave global `fotos:cuenta`) ANTES de leer y procesar la imagen, en su
+ * propia sentencia (no se retiene ninguna transacción mientras trabaja sharp). Si el procesamiento
+ * falla, se devuelve con `devolverTurnoDeFoto`. La limpieza de fotos huérfanas no lo toca: borrar
+ * lo propio no devuelve turnos.
  */
 export function reservarTurnoDeFoto(
   cliente: ClienteSql,
   usuarioId: string,
   o: OpcionesCupo,
 ): Promise<ResultadoReserva> {
-  return reservar(cliente, 'fotos_n', usuarioId, o);
+  return reservar(cliente, usuarioId, CLAVE_FOTOS, o);
 }
 
-/** Devuelve el turno de foto reservado en `dia` (el de la reserva, aunque ya sea otro día). */
+/** Devuelve el turno de foto reservado en `ventanaInicio` (la de la reserva, aunque ya sea otro día). */
 export async function devolverTurnoDeFoto(
   cliente: ClienteSql,
   usuarioId: string,
-  dia: string,
+  ventanaInicio: string,
 ): Promise<void> {
   await cliente.query(
-    `UPDATE cuota_reporte_diaria SET fotos_n = fotos_n - 1, actualizado_en = now()
-      WHERE usuario_id = $1 AND dia = $2::date AND fotos_n > 0`,
-    [usuarioId, dia],
+    `UPDATE cupo_contador SET n = n - 1, actualizado_en = now()
+      WHERE usuario_id = $1 AND clave = $2 AND ventana_inicio = $3::timestamptz AND n > 0`,
+    [usuarioId, CLAVE_FOTOS, ventanaInicio],
   );
 }

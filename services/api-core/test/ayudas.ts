@@ -46,7 +46,10 @@ export function configDePrueba(env: NodeJS.ProcessEnv = {}): ConfigApi {
 
 /** Termina la espera de un reporte: lo publica ya (el CHECK exige `publicar_en >= creado_en`). */
 export async function publicarYa(ex: Ejecutor, id: string) {
-  await ex.consultar('UPDATE reporte_inundacion SET publicar_en = creado_en WHERE id = $1', [id]);
+  await ex.consultar(
+    "UPDATE reporte SET publicar_en = creado_en WHERE categoria = 'inundacion' AND id = $1",
+    [id],
+  );
 }
 
 /**
@@ -55,8 +58,8 @@ export async function publicarYa(ex: Ejecutor, id: string) {
  */
 export async function enEspera(ex: Ejecutor, id: string) {
   const filas = await ex.consultar(
-    `UPDATE reporte_inundacion SET publicar_en = GREATEST(creado_en, now()) + interval '30 minutes'
-      WHERE id = $1 AND creado_en > now() - interval '25 minutes' RETURNING id`,
+    `UPDATE reporte SET publicar_en = GREATEST(creado_en, now()) + interval '30 minutes'
+      WHERE categoria = 'inundacion' AND id = $1 AND creado_en > now() - interval '25 minutes' RETURNING id`,
     [id],
   );
   if (filas.length !== 1) throw new Error(`enEspera: el reporte ${id} no existe o es viejo`);
@@ -105,18 +108,20 @@ export async function iniciarSesion(app: FastifyInstance, email: string): Promis
 export const sesion = (cookie: string) => ({ curichi_sesion: cookie });
 
 /**
- * Devuelve los turnos de reporte del día a una cuenta (contracts 0.10.0: `cuota_reporte_diaria`).
+ * Devuelve los turnos de reporte del día a una cuenta (desde M3: `cupo_contador`, clave
+ * `reportes:<slug>` por categoría).
  *
  * NO desactiva el cupo: sigue aplicándose en cada creación, y hay pruebas dedicadas a comprobar
  * que rechaza el 4.º envío y que resiste la concurrencia (`cupo-diario.test.ts` y los `*-pg`).
  * Esto es para las pruebas que necesitan VARIOS reportes para montar el escenario que sí están
  * probando (fotos, filtros, moderación, privacidad), y que si no tendrían que esperar al día
- * siguiente o inventar una cuenta cada tres reportes. Las fotos del día no se tocan.
+ * siguiente o inventar una cuenta cada tres reportes. Borra las filas `reportes:%` de la cuenta (de
+ * todas las categorías); las fotos (`fotos:cuenta`) no se tocan.
  */
 export async function liberarCuota(ex: Ejecutor, email: string = CUENTAS.vecina) {
   await ex.consultar(
-    `UPDATE cuota_reporte_diaria SET reportes_n = 0
-      WHERE usuario_id = (SELECT id FROM usuario WHERE email = $1)`,
+    `DELETE FROM cupo_contador
+      WHERE usuario_id = (SELECT id FROM usuario WHERE email = $1) AND clave LIKE 'reportes:%'`,
     [email],
   );
 }

@@ -5,6 +5,7 @@ import { CONFIG_DOMINIO } from 'contracts';
 import { ChartColumn, Layers, type LucideIcon, MapPin, Search } from 'lucide-react';
 import Link from 'next/link';
 import { obtenerCapas, obtenerReportes } from '@/lib/api';
+import { useCategorias } from '@/lib/categorias-contexto';
 import { useCiudad } from '@/lib/ciudad-contexto';
 import { useEsEscritorio } from '@/lib/useEsEscritorio';
 import { TEXTO_SIN_VERIFICAR } from '@/lib/verificacion';
@@ -59,11 +60,14 @@ export function Portada() {
   // el mapa se inicializaba en un contenedor de tamaño cero y estas dos consultas salían para
   // nada, en el dispositivo donde menos sobra el ancho de banda.
   const visible = useEsEscritorio();
+  // La portada no lee la preferencia del dispositivo (solo el mapa, ADR 0014): muestra la primera
+  // categoría activa, que con una sola es Inundaciones, como siempre.
+  const categoria = useCategorias().activas[0];
   const reportes = useQuery({
-    queryKey: ['reportes', { limite: '60' }],
-    queryFn: ({ signal }) => obtenerReportes({ limite: '60' }, signal),
+    queryKey: ['reportes', { limite: '60', categoria }],
+    queryFn: ({ signal }) => obtenerReportes({ limite: '60', categoria }, signal),
     // Sin `staleTime` propio: el cliente de consultas no deja caducar ['reportes'] (S31).
-    enabled: visible,
+    enabled: visible && categoria !== undefined,
   });
   const capas = useQuery({
     queryKey: ['capas'],

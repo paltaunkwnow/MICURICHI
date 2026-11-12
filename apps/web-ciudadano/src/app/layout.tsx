@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { AvisoPuntoResuelto } from '@/componentes/AvisoPuntoResuelto';
 import { BarraSuperior } from '@/componentes/BarraSuperior';
-import { obtenerCiudad } from '@/lib/ciudad-servidor';
+import { obtenerConfiguracion } from '@/lib/ciudad-servidor';
 import { Proveedores } from './proveedores';
 import './globals.css';
 
@@ -35,7 +35,7 @@ export const viewport: Viewport = {
  * páginas al pedirlas y no al compilar (ver `ciudad-servidor.ts`).
  */
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const ciudad = await obtenerCiudad();
+  const { ciudad, categoriasActivas } = await obtenerConfiguracion();
   return (
     <html lang="es">
       <body>
@@ -45,7 +45,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         >
           Ir al contenido
         </a>
-        <Proveedores ciudad={ciudad}>
+        <Proveedores ciudad={ciudad} categoriasActivas={categoriasActivas}>
           {/* Altura definida, no mínima: el mapa necesita que su contenedor sepa cuánto mide para
               poder ocuparlo entero. Con `min-h-dvh` la cadena de flex se resolvía por contenido y
               la columna del mapa crecía hasta la altura de la lista, dejando el mapa sin sitio.

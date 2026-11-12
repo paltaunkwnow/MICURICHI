@@ -440,7 +440,7 @@ async function baseExiste(urls) {
       '-U',
       'curichi',
       '-d',
-      urls.baseReal,
+      'postgres',
       '-tAc',
       `SELECT 1 FROM pg_database WHERE datname='${urls.base}'`,
     ],

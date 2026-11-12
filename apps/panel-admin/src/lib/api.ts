@@ -8,15 +8,15 @@ import {
   type Indicadores,
   type Login,
   type ReporteCambiarEstado,
+  type ReporteFeatureCollection,
   type ReporteFusionar,
   type ReporteReclasificar,
-  type ReporteTecnicoFeature,
-  type ReporteTecnicoFeatureCollection,
   type ResumenEjecutivo,
   type TipoCapa,
   type Usuario,
   type VentanaResumen,
 } from 'contracts';
+import type { ColeccionReportesPanel, ReportePanel } from './reportes-panel';
 
 /** Error devuelto por api-core o geo-service ({ codigo, mensaje, detalles }) con el status HTTP. */
 export class ErrorApi extends Error {
@@ -54,6 +54,7 @@ export const CABECERA_SONDEO = 'x-curichi-sondeo';
 
 /** Opciones de las lecturas que el panel refresca solo. */
 export interface OpcionesLectura {
+  categoria?: string;
   /** Refresco automático: sale con `CABECERA_SONDEO`. */
   sondeo?: boolean;
 }
@@ -210,7 +211,7 @@ export function obtenerReportes(
   signal?: AbortSignal,
   opciones: OpcionesLectura = {},
 ) {
-  return pedir<ReporteTecnicoFeatureCollection>(`/api/v1/tecnico/reportes?${aQuery(params)}`, {
+  return pedir<ColeccionReportesPanel>(`/api/v1/tecnico/reportes?${aQuery(params)}`, {
     signal,
     headers: cabecerasLectura(opciones),
   });
@@ -226,35 +227,37 @@ export function obtenerReportesPublicos(
   signal?: AbortSignal,
   opciones: OpcionesLectura = {},
 ) {
-  return pedir<ReporteTecnicoFeatureCollection>(`/api/v1/reportes?${aQuery(params)}`, {
+  if (params.categoria === 'todas')
+    throw new Error('Las rutas públicas requieren una categoría concreta.');
+  return pedir<ReporteFeatureCollection>(`/api/v1/reportes?${aQuery(params)}`, {
     signal,
     headers: cabecerasLectura(opciones),
   });
 }
 
 export function obtenerReporte(id: string, signal?: AbortSignal, opciones: OpcionesLectura = {}) {
-  return pedir<ReporteTecnicoFeature>(`/api/v1/tecnico/reportes/${encodeURIComponent(id)}`, {
+  return pedir<ReportePanel>(`/api/v1/tecnico/reportes/${encodeURIComponent(id)}`, {
     signal,
     headers: cabecerasLectura(opciones),
   });
 }
 
 export function cambiarEstado(id: string, cuerpo: ReporteCambiarEstado) {
-  return pedir<ReporteTecnicoFeature>(`/api/v1/reportes/${encodeURIComponent(id)}/estado`, {
+  return pedir<ReportePanel>(`/api/v1/reportes/${encodeURIComponent(id)}/estado`, {
     method: 'PATCH',
     body: JSON.stringify(cuerpo),
   });
 }
 
 export function reclasificarSeveridad(id: string, cuerpo: ReporteReclasificar) {
-  return pedir<ReporteTecnicoFeature>(`/api/v1/reportes/${encodeURIComponent(id)}/severidad`, {
+  return pedir<ReportePanel>(`/api/v1/reportes/${encodeURIComponent(id)}/severidad`, {
     method: 'PATCH',
     body: JSON.stringify(cuerpo),
   });
 }
 
 export function fusionarReporte(id: string, cuerpo: ReporteFusionar) {
-  return pedir<ReporteTecnicoFeature>(`/api/v1/reportes/${encodeURIComponent(id)}/fusionar`, {
+  return pedir<ReportePanel>(`/api/v1/reportes/${encodeURIComponent(id)}/fusionar`, {
     method: 'POST',
     body: JSON.stringify(cuerpo),
   });
@@ -320,10 +323,13 @@ export function obtenerResumenEjecutivo(
   signal?: AbortSignal,
   opciones: OpcionesLectura = {},
 ) {
-  return pedir<ResumenEjecutivo>(`/api/v1/ejecutivo/resumen?${aQuery({ ventana })}`, {
-    signal,
-    headers: cabecerasLectura(opciones),
-  });
+  return pedir<ResumenEjecutivo>(
+    `/api/v1/ejecutivo/resumen?${aQuery({ ventana, ...(opciones.categoria ? { categoria: opciones.categoria } : {}) })}`,
+    {
+      signal,
+      headers: cabecerasLectura(opciones),
+    },
+  );
 }
 
 // --- Indicadores y capas -------------------------------------------------
@@ -353,8 +359,12 @@ export function obtenerCapasMapa(signal?: AbortSignal) {
   return pedir<CapaInfo[]>('/geo/v1/capas', { signal });
 }
 
-export function obtenerAgregadosUv(signal?: AbortSignal) {
-  return pedir<AgregadoUv[]>('/geo/v1/agregados/unidades-vecinales', { signal });
+export function obtenerAgregadosUv(signal?: AbortSignal, categoria?: string) {
+  if (categoria === 'todas') throw new Error('Geo-service requiere una categoría concreta.');
+  return pedir<AgregadoUv[]>(
+    `/geo/v1/agregados/unidades-vecinales${categoria ? `?${aQuery({ categoria })}` : ''}`,
+    { signal },
+  );
 }
 
 function aUnidades(fc: FeatureCollectionUnidades): UnidadGeo[] {

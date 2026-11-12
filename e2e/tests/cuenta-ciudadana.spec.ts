@@ -8,7 +8,7 @@ import {
   PUNTO_CENTRO,
   REPORTES_POR_DIA,
   reporteValido,
-  TEXTO_CUPO_AGOTADO,
+  TEXTO_CUPO_AGOTADO_API,
   textoCupo,
 } from './ayudas';
 
@@ -132,7 +132,7 @@ test.describe('cuenta ciudadana: el mapa abierto, el envío con cuenta', () => {
     expect(cuarto.status()).toBe(429);
     const cuerpo = await cuarto.json();
     expect(cuerpo.codigo).toBe('CUOTA_DE_REPORTES');
-    expect(cuerpo.mensaje).toBe(TEXTO_CUPO_AGOTADO);
+    expect(cuerpo.mensaje).toBe(TEXTO_CUPO_AGOTADO_API);
 
     // Se le dice cuándo, no solo que no: la próxima medianoche de la ciudad, a menos de un día.
     const ahora = Date.now();

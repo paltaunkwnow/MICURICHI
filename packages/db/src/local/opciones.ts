@@ -26,7 +26,10 @@ export async function migrarBaseLocal(
 ): Promise<ResultadoMigracion & { publicarNuevosExistentes: boolean }> {
   const publicarNuevosExistentes = publicarNuevosExistentesLocal(argv, env);
   try {
-    const r = await aplicarMigraciones(ex, { publicarNuevosExistentes });
+    const r = await aplicarMigraciones(ex, {
+      publicarNuevosExistentes,
+      autorizarContraccionCompatible: argv.includes('--autorizar-contraccion-compatible'),
+    });
     return { ...r, publicarNuevosExistentes };
   } catch (e) {
     const mensaje = (e as Error).message;

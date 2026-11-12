@@ -1,4 +1,4 @@
-import { type QueryClient, type QueryFunctionContext, queryOptions } from '@tanstack/react-query';
+import { type QueryClient, queryOptions } from '@tanstack/react-query';
 import type { PuntoLatLon, VentanaResumen } from 'contracts';
 import {
   obtenerAgregadosUv,
@@ -13,6 +13,12 @@ import {
   type ParametrosConsulta,
 } from './api';
 import { parametrosCandidatosFusion } from './fusion-cercana';
+import { type ControlMovimientoMapa, pestanaVisible } from './movimiento-mapa';
+import { esSondeo, opcionesSondeo } from './sondeo';
+
+export { consultaAgregadosCompuestos, consultaMapaEjecutivo } from './consultas-compuestas';
+export { crearControlMovimientoMapa } from './movimiento-mapa';
+export { esSondeo } from './sondeo';
 
 /**
  * Consultas de TanStack Query del panel, en un solo lugar para que las pantallas y las pruebas
@@ -62,28 +68,39 @@ export const PLAZO_LISTA_CAPAS_MS = 60_000;
  * sesión. Mirar solo los datos no alcanzaba: si la primera carga fallaba, cada refresco salía como
  * pedido de la persona y la sesión no vencía nunca.
  */
-export function esSondeo(ctx: Pick<QueryFunctionContext, 'client' | 'queryKey' | 'meta'>): boolean {
-  if (ctx.meta?.sondeo !== true) return false;
-  const estado = ctx.client.getQueryState(ctx.queryKey);
-  return !!estado && (estado.dataUpdatedAt > 0 || estado.errorUpdatedAt > 0);
-}
-
 // --- Pantallas de trabajo: sondeo cada 10 s ---------------------------------------------------
 
 /** Bandeja (y sus conteos de «esperan revisión»): lista técnica con los filtros de la URL. */
-export function consultaReportes(params: ParametrosConsulta) {
+export function consultaReportes(
+  params: ParametrosConsulta,
+  opciones: { controlMapa?: ControlMovimientoMapa; habilitada?: boolean } = {},
+) {
+  const categoria = params.categoria || 'inundacion';
   return queryOptions({
-    queryKey: ['reportes', params],
+    queryKey: ['reportes', { ...params, categoria }],
     queryFn: (ctx) => obtenerReportes(params, ctx.signal, { sondeo: esSondeo(ctx) }),
-    ...SONDEO,
+    ...opcionesSondeo(),
+    meta: {
+      ...SONDEO.meta,
+      ...(!pestanaVisible() ? { iniciadaOculta: true } : {}),
+      ...(opciones.controlMapa ? { controlMapa: opciones.controlMapa } : {}),
+    },
+    enabled: () =>
+      opciones.habilitada !== false &&
+      (opciones.controlMapa?.permiteConsulta(params) ?? pestanaVisible()),
+    placeholderData: (anterior, consultaAnterior) => {
+      const parametrosAnteriores = consultaAnterior?.queryKey[1] as ParametrosConsulta | undefined;
+      return parametrosAnteriores?.categoria === categoria ? anterior : undefined;
+    },
   });
 }
 
-export function consultaReportesPublicos(params: ParametrosConsulta) {
+export function consultaReportesPublicos(params: ParametrosConsulta, habilitada = true) {
   return queryOptions({
-    queryKey: ['reportes-publicos', params],
+    queryKey: ['reportes-publicos', { ...params, categoria: params.categoria || 'inundacion' }],
     queryFn: (ctx) => obtenerReportesPublicos(params, ctx.signal, { sondeo: esSondeo(ctx) }),
-    ...SONDEO,
+    ...opcionesSondeo(),
+    enabled: () => habilitada && params.categoria !== 'todas' && pestanaVisible(),
   });
 }
 
@@ -91,7 +108,7 @@ export function consultaReporte(id: string) {
   return queryOptions({
     queryKey: ['reporte', id],
     queryFn: (ctx) => obtenerReporte(id, ctx.signal, { sondeo: esSondeo(ctx) }),
-    ...SONDEO,
+    ...opcionesSondeo(),
   });
 }
 
@@ -103,10 +120,21 @@ export function consultaReporte(id: string) {
  * consulta. No es una pantalla que se refresque sola: la pide la persona al abrir el formulario
  * (renueva la sesión, sin marca de sondeo) y `staleTime` 0 vuelve a pedirla al reabrirlo.
  */
-export function consultaCandidatosFusion(centro: PuntoLatLon, radioM: number, abierto: boolean) {
-  const params = parametrosCandidatosFusion(centro, radioM);
+export function consultaCandidatosFusion(
+  centro: PuntoLatLon,
+  radioM: number,
+  abierto: boolean,
+  categoria?: string,
+) {
+  const params: ParametrosConsulta = {
+    ...parametrosCandidatosFusion(centro, radioM),
+    ...(categoria ? { categoria } : {}),
+  };
   return queryOptions({
-    queryKey: ['reportes-candidatos-fusion', { bbox: params.bbox, radio_m: radioM }],
+    queryKey: [
+      'reportes-candidatos-fusion',
+      { bbox: params.bbox, radio_m: radioM, categoria: categoria || 'inundacion' },
+    ],
     queryFn: (ctx) => obtenerReportes(params, ctx.signal),
     enabled: abierto,
     staleTime: 0,
@@ -119,20 +147,24 @@ export function consultaCandidatosFusion(centro: PuntoLatLon, radioM: number, ab
  * parámetros, así que cambiar un filtro pide de nuevo y `invalidarTrasActivarCapa` sigue casando
  * por el prefijo `['indicadores']`.
  */
-export function consultaIndicadores(params: ParametrosConsulta = {}) {
+export function consultaIndicadores(params: ParametrosConsulta = {}, habilitada = true) {
   return queryOptions({
-    queryKey: ['indicadores', params],
+    queryKey: ['indicadores', { ...params, categoria: params.categoria || 'inundacion' }],
     queryFn: (ctx) => obtenerIndicadores(params, ctx.signal, { sondeo: esSondeo(ctx) }),
-    ...SONDEO,
+    ...opcionesSondeo(habilitada),
+    placeholderData: (anterior, consultaAnterior) => {
+      const anteriores = consultaAnterior?.queryKey[1] as ParametrosConsulta | undefined;
+      return anteriores?.categoria === (params.categoria || 'inundacion') ? anterior : undefined;
+    },
   });
 }
 
-export function consultaResumenEjecutivo() {
+export function consultaResumenEjecutivo(categoria?: string, habilitada = true) {
   return queryOptions({
-    queryKey: ['ejecutivo', 'resumen', VENTANA_EJECUTIVO],
+    queryKey: ['ejecutivo', 'resumen', VENTANA_EJECUTIVO, categoria || 'inundacion'],
     queryFn: (ctx) =>
-      obtenerResumenEjecutivo(VENTANA_EJECUTIVO, ctx.signal, { sondeo: esSondeo(ctx) }),
-    ...SONDEO,
+      obtenerResumenEjecutivo(VENTANA_EJECUTIVO, ctx.signal, { sondeo: esSondeo(ctx), categoria }),
+    ...opcionesSondeo(habilitada),
   });
 }
 
@@ -171,11 +203,12 @@ export function consultaUnidadesVecinales() {
  * las demás cifras y no la caché infinita de la geometría. Sin `meta.sondeo`: geo-service no tiene
  * sesión que renovar.
  */
-export function consultaAgregadosUv() {
+export function consultaAgregadosUv(categoria?: string, habilitada = true) {
   return queryOptions({
-    queryKey: ['geo', 'agregados-uv'],
-    queryFn: ({ signal }) => obtenerAgregadosUv(signal),
+    queryKey: ['geo', 'agregados-uv', categoria || 'inundacion'],
+    queryFn: ({ signal }) => obtenerAgregadosUv(signal, categoria),
     ...REFRESCO,
+    enabled: () => habilitada && categoria !== 'todas' && pestanaVisible(),
   });
 }
 

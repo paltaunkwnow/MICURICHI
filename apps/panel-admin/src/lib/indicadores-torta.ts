@@ -219,9 +219,14 @@ export function paramsIndicadores(
  * parámetro de `lib/filtros.ts` (`unidad_vecinal_id`, `severidad`) para que la bandeja los lea tal
  * cual, y `serializarFiltros` para no repetir el orden de los parámetros.
  */
-export function urlBandejaUv(unidadVecinalId: string, severidades: readonly Severidad[]): string {
+export function urlBandejaUv(
+  unidadVecinalId: string,
+  severidades: readonly Severidad[],
+  categoria?: string,
+): string {
   const q = serializarFiltros({
     ...FILTROS_VACIOS,
+    ...(categoria ? { categoria } : {}),
     unidad_vecinal_id: unidadVecinalId,
     severidad: ordenarSeveridades(severidades),
   }).toString();

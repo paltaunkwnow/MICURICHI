@@ -40,11 +40,18 @@ const VERIFICADO = condicionVerificado('r');
  * críticos salen solo de lo verificado, para que un reporte falso de más de 70 cm no pinte de
  * crítica una UV entera (contrato 0.11.0).
  *
+ * Se lee la tabla `reporte` (no la vista `reporte_inundacion`) con `r.categoria = $1` (M3.4, ADR
+ * 0012, 0013): el servidor pasa el slug de la categoría a filtrar. Sin parámetro de categoría la
+ * ruta ya traduce a `inundacion`, así que el resultado por defecto es el de hoy. `categoria` está
+ * en el INCLUDE del índice parcial `reporte_agregado_uv` desde la migración 0020, de modo que el
+ * filtro no pierde el Index Only Scan (se resuelve como Filter sobre las columnas incluidas).
+ *
  * Una sola pasada: antes había una subconsulta correlacionada por CADA unidad vecinal (576 con las
- * capas reales) solo para sacar la severidad máxima. Todas las columnas de `r` están en el índice
- * parcial `reporte_agregado_uv` (migración 0015), así que con datos reales es un Index Only Scan.
+ * capas reales) solo para sacar la severidad máxima. Todas las columnas de `r` están en ese índice
+ * parcial (migración 0015, ampliado en la 0020), así que con datos reales es un Index Only Scan.
  */
 export const SQL_AGREGADOS_UV = `SELECT u.id AS unidad_vecinal_id, u.codigo, u.nombre, u.distrito_id,
+    $1::text AS categoria,
     count(r.id)::int AS n_reportes,
     (count(r.id) FILTER (WHERE ${VERIFICADO}))::int AS n_verificados,
     (count(DISTINCT r.punto_critico_id) FILTER (WHERE ${VERIFICADO}))::int AS n_puntos_criticos,
@@ -52,6 +59,6 @@ export const SQL_AGREGADOS_UV = `SELECT u.id AS unidad_vecinal_id, u.codigo, u.n
     ${severidadDesdeNum(`max(${SEVERIDAD_EFECTIVA_NUM}) FILTER (WHERE ${VERIFICADO})`)}
       AS severidad_max_verificada
   FROM geo.unidad_vecinal_vigente u
-  LEFT JOIN reporte_inundacion r ON r.unidad_vecinal_id = u.id AND ${condicionPublico('r')}
+  LEFT JOIN reporte r ON r.unidad_vecinal_id = u.id AND r.categoria = $1 AND ${condicionPublico('r')}
   GROUP BY u.id, u.codigo, u.nombre, u.distrito_id
   ORDER BY n_reportes DESC, u.id`;

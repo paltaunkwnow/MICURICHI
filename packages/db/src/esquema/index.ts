@@ -1,5 +1,5 @@
 /**
- * Esquema Drizzle: espejo tipado de las migraciones SQL (0001 … 0015) para consultas en api-core y geo-service.
+ * Esquema Drizzle: espejo tipado del esquema0022 para consultas en api-core y geo-service.
  * La fuente de verdad del DDL son las migraciones SQL; este archivo no genera DDL.
  *
  * Una migración que añade o cambia columnas tiene que actualizar este archivo en el mismo cambio:
@@ -33,28 +33,6 @@ export const geometry = customType<{ data: string; driverData: string }>({
   },
 });
 
-export const profundidadEnum = pgEnum('profundidad_estimada', [
-  'tobillo',
-  'rodilla',
-  'muslo',
-  'mas_70',
-]);
-export const frecuenciaEnum = pgEnum('frecuencia', [
-  'primera_vez',
-  'ocasional',
-  'cada_lluvia_fuerte',
-  'permanente',
-  'agua_estancada',
-]);
-export const causaEnum = pgEnum('causa_presunta', [
-  'sumidero_tapado',
-  'falta_sumidero',
-  'hundimiento_pavimento',
-  'contrapendiente',
-  'colector_saturado',
-  'desborde_cauce',
-  'desconocida',
-]);
 export const severidadEnum = pgEnum('severidad', ['baja', 'media', 'alta', 'critica']);
 export const estadoEnum = pgEnum('estado_reporte', [
   'nuevo',
@@ -70,8 +48,6 @@ export const ubicacionTipoEnum = pgEnum('ubicacion_tipo', [
   'vivienda_o_predio',
   'otro',
 ]);
-export const sumideroCercanoEnum = pgEnum('sumidero_cercano', ['si', 'no']);
-export const sumideroEstadoEnum = pgEnum('sumidero_estado', ['tapado', 'no_tapado']);
 
 export const geo = pgSchema('geo');
 
@@ -137,16 +113,14 @@ export const usuario = pgTable('usuario', {
 });
 
 /**
- * Cupo diario por cuenta (migración 0014, contrato 0.10.0): una fila por cuenta y por día calendario
- * de la ciudad. api-core la incrementa con INSERT … ON CONFLICT DO UPDATE … WHERE n < máximo y el
- * mantenimiento borra los días anteriores. `dia` lo calcula quien escribe, en `ZONA_HORARIA`.
+ * Archivo histórico0022 exclusivo del dueño: mantiene valores y PK, sin FK ni limpieza.
+ * Los servicios no lo consultan. El contador vigente continúa en `cupo_contador`.
  */
-export const cuotaReporteDiaria = pgTable(
+export const resguardoM10 = pgSchema('resguardo_m10');
+export const cuotaReporteDiariaArchivada = resguardoM10.table(
   'cuota_reporte_diaria',
   {
-    usuarioId: uuid('usuario_id')
-      .notNull()
-      .references(() => usuario.id, { onDelete: 'cascade' }),
+    usuarioId: uuid('usuario_id').notNull(),
     dia: date('dia').notNull(),
     reportesN: smallint('reportes_n').notNull().default(0),
     fotosN: smallint('fotos_n').notNull().default(0),
@@ -184,65 +158,91 @@ export const puntoCritico = pgTable('punto_critico', {
   diametroM: numeric('diametro_m').notNull().default('0'),
   advertenciaDiametro: boolean('advertencia_diametro').notNull().default(false),
   calculadoEn: timestamp('calculado_en', { withTimezone: true }).notNull().defaultNow(),
+  /** Categoría del punto crítico (migración 0020): los existentes son de inundación. */
+  categoria: text('categoria').notNull().default('inundacion'),
 });
 
-export const reporteInundacion = pgTable(
-  'reporte_inundacion',
+/**
+ * Catálogo de categorías de la plataforma (migración 0020, ADR 0009). El admin activa cada una con
+ * auditoría; mientras haya una sola activa, la interfaz no muestra selector. El orden es el de
+ * `SLUGS_CATEGORIA` de contracts.
+ */
+export const categoria = pgTable('categoria', {
+  slug: text('slug').primaryKey(),
+  activa: boolean('activa').notNull().default(false),
+  orden: smallint('orden').notNull(),
+  activadaEn: timestamp('activada_en', { withTimezone: true }),
+  activadaPor: uuid('activada_por').references(() => usuario.id, { onDelete: 'set null' }),
+});
+
+/**
+ * Tabla de reportes del modelo multicategoría (migración 0020, ADR 0010): antes `reporte_inundacion`,
+ * renombrada. Lo común va tipado; `categoria` (FK al catálogo), `subtipo` y `detalle` jsonb
+ * (`detalle_version`) llevan lo propio de cada categoría. Desde0022 no existen planos/vista/trigger:
+ * el JSON es la fuente única. Una operación equivalente a la antigua vista incluye
+ * explícitamente `categoria = 'inundacion'`.
+ */
+export const reporte = pgTable('reporte', {
+  id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
+  geom: geometry('geom').notNull(),
+  geomPublico: geometry('geom_publico'),
+  creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
+  publicarEn: timestamp('publicar_en', { withTimezone: true }).notNull(),
+  actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
+  eventoEn: timestamp('evento_en', { withTimezone: true }),
+  autorId: uuid('autor_id').references(() => usuario.id, { onDelete: 'set null' }),
+  distritoId: text('distrito_id').notNull(),
+  unidadVecinalId: text('unidad_vecinal_id').notNull(),
+  versionCapa: text('version_capa'),
+  resolucionFlags: jsonb('resolucion_flags').notNull().default({}),
+  ubicacionMetodo: ubicacionMetodoEnum('ubicacion_metodo').notNull(),
+  precisionGpsM: numeric('precision_gps_m'),
+  distanciaDispositivoM: smallint('distancia_dispositivo_m'),
+  ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
+  descripcion: text('descripcion').notNull(),
+  severidadCalculada: severidadEnum('severidad_calculada').notNull(),
+  severidadPuntaje: integer('severidad_puntaje').notNull(),
+  severidadVersion: integer('severidad_version').notNull().default(2),
+  severidadManual: severidadEnum('severidad_manual'),
+  severidadMotivo: text('severidad_motivo'),
+  estado: estadoEnum('estado').notNull().default('nuevo'),
+  estadoMotivo: text('estado_motivo'),
+  fusionadoEnId: uuid('fusionado_en_id'),
+  puntoCriticoId: uuid('punto_critico_id').references(() => puntoCritico.id, {
+    onDelete: 'set null',
+  }),
+  validadoPor: uuid('validado_por').references(() => usuario.id, { onDelete: 'set null' }),
+  validadoEn: timestamp('validado_en', { withTimezone: true }),
+  ipHash: text('ip_hash'),
+  // Columnas del modelo multicategoría (0020).
+  categoria: text('categoria').notNull().default('inundacion'),
+  subtipo: text('subtipo'),
+  detalle: jsonb('detalle').notNull().default({}),
+  detalleVersion: smallint('detalle_version').notNull().default(1),
+});
+
+/**
+ * Contador vigente desde M3b (0020, ADR 0017). Upsert atómico por
+ * `(usuario_id, clave, ventana_inicio)`: reportes por categoría y fotos globales por cuenta.
+ * El archivo histórico0022 no se mezcla con este contador ni se limpia.
+ */
+export const cupoContador = pgTable(
+  'cupo_contador',
   {
-    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    geom: geometry('geom').notNull(),
-    /** Punto publicable (migración 0005): redondeado y, en vivienda o predio, con jitter (§13). */
-    geomPublico: geometry('geom_publico'),
-    creadoEn: timestamp('creado_en', { withTimezone: true }).notNull().defaultNow(),
-    /**
-     * Desde cuándo es visible (migración 0015, contrato 0.11.0): api-core la fija al crear el
-     * reporte (60 o 240 s). CHECK entre `creado_en` y `creado_en + 1 hora`. Sin DEFAULT desde la
-     * 0016: un INSERT que no la fije falla en lugar de publicar el reporte al instante.
-     */
-    publicarEn: timestamp('publicar_en', { withTimezone: true }).notNull(),
+    usuarioId: uuid('usuario_id')
+      .notNull()
+      .references(() => usuario.id, { onDelete: 'cascade' }),
+    clave: text('clave').notNull(),
+    ventanaInicio: timestamp('ventana_inicio', { withTimezone: true }).notNull(),
+    n: integer('n').notNull(),
     actualizadoEn: timestamp('actualizado_en', { withTimezone: true }).notNull().defaultNow(),
-    eventoEn: timestamp('evento_en', { withTimezone: true }),
-    autorId: uuid('autor_id').references(() => usuario.id, { onDelete: 'set null' }),
-    distritoId: text('distrito_id').notNull(),
-    unidadVecinalId: text('unidad_vecinal_id').notNull(),
-    versionCapa: text('version_capa'),
-    resolucionFlags: jsonb('resolucion_flags').notNull().default({}),
-    ubicacionMetodo: ubicacionMetodoEnum('ubicacion_metodo').notNull(),
-    precisionGpsM: numeric('precision_gps_m'),
-    /**
-     * Metros entre el punto y el dispositivo al enviar (migración 0013, CHECK de 0 a 1000). NULL en
-     * los reportes anteriores. La posición del dispositivo no se guarda.
-     */
-    distanciaDispositivoM: smallint('distancia_dispositivo_m'),
-    ubicacionTipo: ubicacionTipoEnum('ubicacion_tipo').notNull(),
-    descripcion: text('descripcion').notNull(),
-    profundidadEstimada: profundidadEnum('profundidad_estimada').notNull(),
-    frecuencia: frecuenciaEnum('frecuencia').notNull(),
-    causaPresunta: causaEnum('causa_presunta').notNull().default('desconocida'),
-    sumideroCercano: sumideroCercanoEnum('sumidero_cercano'),
-    sumideroEstado: sumideroEstadoEnum('sumidero_estado'),
-    aguaBrotaSumidero: boolean('agua_brota_sumidero'),
-    severidadCalculada: severidadEnum('severidad_calculada').notNull(),
-    severidadPuntaje: integer('severidad_puntaje').notNull(),
-    severidadVersion: integer('severidad_version').notNull().default(2),
-    severidadManual: severidadEnum('severidad_manual'),
-    severidadMotivo: text('severidad_motivo'),
-    estado: estadoEnum('estado').notNull().default('nuevo'),
-    estadoMotivo: text('estado_motivo'),
-    fusionadoEnId: uuid('fusionado_en_id'),
-    puntoCriticoId: uuid('punto_critico_id').references(() => puntoCritico.id, {
-      onDelete: 'set null',
-    }),
-    validadoPor: uuid('validado_por').references(() => usuario.id, { onDelete: 'set null' }),
-    validadoEn: timestamp('validado_en', { withTimezone: true }),
-    ipHash: text('ip_hash'),
   },
-  (t) => [index('reporte_estado_idx').on(t.estado), index('reporte_uv_idx').on(t.unidadVecinalId)],
+  (t) => [primaryKey({ columns: [t.usuarioId, t.clave, t.ventanaInicio] })],
 );
 
 export const reporteFoto = pgTable('reporte_foto', {
   id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-  reporteId: uuid('reporte_id').references(() => reporteInundacion.id, { onDelete: 'cascade' }),
+  reporteId: uuid('reporte_id').references(() => reporte.id, { onDelete: 'cascade' }),
   objetoKey: text('objeto_key').notNull().unique(),
   mime: text('mime').notNull(),
   bytes: integer('bytes').notNull(),

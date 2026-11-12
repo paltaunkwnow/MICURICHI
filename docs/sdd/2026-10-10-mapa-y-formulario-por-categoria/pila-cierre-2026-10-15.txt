@@ -1,0 +1,2 @@
+curichi-postgis|Up 45 minutes (healthy)|127.0.0.1:5432->5432/tcp
+curichi-minio|Up 45 minutes (healthy)|127.0.0.1:9000-9001->9000-9001/tcp

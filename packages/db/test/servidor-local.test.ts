@@ -61,7 +61,7 @@ describe('arranque de db:local sobre una base persistida con «nuevo» anteriore
     ex = ejecutorPglite(db);
     await aplicarMigraciones(ex, { hasta: '0014' });
     await insertarNuevoViejo(ex);
-    error = await migrarBaseLocal(ex, [], {}).then(
+    error = await migrarBaseLocal(ex, ['--autorizar-contraccion-compatible'], {}).then(
       () => null,
       (e: unknown) => e,
     );
@@ -78,12 +78,24 @@ describe('arranque de db:local sobre una base persistida con «nuevo» anteriore
     expect(texto).toMatch(/PGLITE_PUBLICAR_NUEVOS_EXISTENTES=1 pnpm db:local/);
   });
 
+  it('sin consentimiento0022 ni una variable heredada ni la bandera0015 autorizan la contracción', async () => {
+    const antes = await ex.consultar('SELECT * FROM _migraciones ORDER BY nombre');
+    await expect(
+      migrarBaseLocal(ex, ['--publicar-nuevos-existentes'], {
+        AUTORIZAR_CONTRACCION_COMPATIBLE: '1',
+      }),
+    ).rejects.toThrow(/autorizar-contraccion-compatible/);
+    expect(await ex.consultar('SELECT * FROM _migraciones ORDER BY nombre')).toStrictEqual(antes);
+  });
+
   it('con PGLITE_PUBLICAR_NUEVOS_EXISTENTES=1 migra todo y lo informa', async () => {
-    const r = await migrarBaseLocal(ex, [], { PGLITE_PUBLICAR_NUEVOS_EXISTENTES: '1' });
+    const r = await migrarBaseLocal(ex, ['--autorizar-contraccion-compatible'], {
+      PGLITE_PUBLICAR_NUEVOS_EXISTENTES: '1',
+    });
     expect(r.publicarNuevosExistentes).toBe(true);
     expect(r.aplicadas).toContain('0015_publicacion_sin_moderacion.sql');
     const [n] = await ex.consultar<{ n: number }>(
-      `SELECT count(*)::int AS n FROM reporte_inundacion WHERE estado = 'nuevo' AND publicar_en = creado_en`,
+      `SELECT count(*)::int AS n FROM reporte WHERE categoria = 'inundacion' AND estado = 'nuevo' AND publicar_en = creado_en`,
     );
     expect(n?.n).toBe(1);
   });

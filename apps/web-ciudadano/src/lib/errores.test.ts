@@ -130,7 +130,9 @@ describe('respuestas que cambian el flujo del formulario', () => {
     const delServidor = 'Ya enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.';
     expect(mensajeDeCuota(new ErrorApi('CUOTA_DE_REPORTES', delServidor, 429))).toBe(delServidor);
     const sinCuerpo = mensajeDeCuota(new ErrorApi('CUOTA_DE_REPORTES', 'Error 429', 429));
-    expect(sinCuerpo).toBe('Ya enviaste los 3 reportes de hoy. Vas a poder enviar otro mañana.');
+    expect(sinCuerpo).toBe(
+      'Agotaste el cupo de reportes de hoy para esta categoría. Vas a poder enviar otro mañana.',
+    );
     expect(sinCuerpo).not.toMatch(/minutos/);
   });
 

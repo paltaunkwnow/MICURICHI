@@ -36,13 +36,14 @@ let delVeintiuno: string;
 
 async function sembrar(creado: string): Promise<string> {
   const r = await pool.query<{ id: string }>(
-    `INSERT INTO reporte_inundacion (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa,
-       ubicacion_metodo, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia,
-       severidad_calculada, severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
-     VALUES (ST_SetSRID(ST_MakePoint(-63.185, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.185, -17.79), 4326),
-       'distrito_municipal:01', 'unidad_vecinal:B', 'test', 'manual', 'via_publica',
-       'Reporte sembrado para el filtro por día', 'rodilla', 'ocasional', 'media', 6, 2,
-       'validado', $1::timestamptz, $1::timestamptz)
+    `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, version_capa, ubicacion_metodo,
+       ubicacion_tipo, descripcion, categoria, detalle, detalle_version, severidad_calculada,
+       severidad_puntaje, severidad_version, estado, creado_en, publicar_en)
+     VALUES (ST_SetSRID(ST_MakePoint(-63.185, -17.79), 4326), ST_SetSRID(ST_MakePoint(-63.185, -17.79), 4326), 'distrito_municipal:01', 'unidad_vecinal:B',
+       'test', 'manual', 'via_publica', 'Reporte sembrado para el filtro por día',
+       'inundacion', '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media',
+       6, 2, 'validado', $1::timestamptz,
+       $1::timestamptz)
      RETURNING id::text`,
     [creado],
   );

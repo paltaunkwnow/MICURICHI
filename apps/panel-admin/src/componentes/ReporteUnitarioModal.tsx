@@ -1,12 +1,14 @@
 'use client';
 
-import { type Ciudad, NOTA_METODOLOGICA, type ReporteTecnicoFeature } from 'contracts';
+import { type Ciudad, REGISTRO_CATEGORIAS, type RegistroCategorias } from 'contracts';
 import { Download, FileCode, FileText, Printer, X } from 'lucide-react';
 import type { RefObject } from 'react';
 import { useCiudad, useFormato } from '@/lib/ciudad-contexto';
 import { useDialogoModal } from '@/lib/dialogo';
 import {
   aclaracionMetodo,
+  avisosResolucion,
+  distanciaDispositivo,
   etiquetaCausa,
   etiquetaDistrito,
   etiquetaEstado,
@@ -22,7 +24,10 @@ import {
   idCorto,
   precisionGps,
 } from '@/lib/formato';
+import { presentarReporte } from '@/lib/presentacion-reporte';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
 import { textoPuntaje } from '@/lib/severidad';
+import { DatosCategoriaReporte } from './DatosCategoriaReporte';
 
 /** Ancho de la ficha en texto plano: el de sus rayas. */
 const ANCHO_TXT = 80;
@@ -73,13 +78,15 @@ export function generarTextoReporteUnitario(
   f: ReporteTecnicoFeature,
   formato: { fechaHora: (f: string | null | undefined) => string; numero: (n: number) => string },
   ciudad: Pick<Ciudad, 'nombre'>,
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
 ): string {
   const p = f.properties;
+  const vista = presentarReporte(p, registro);
   const [lon, lat] = f.geometry.coordinates;
 
   return `================================================================================
 ${encabezadoFicha(ciudad)}
-FICHA TÉCNICA - REPORTE UNITARIO DE INUNDACIÓN
+${vista.inundacion ? 'FICHA TÉCNICA - REPORTE UNITARIO DE INUNDACIÓN' : `FICHA TÉCNICA - REPORTE UNITARIO · ${vista.nombre}`}
 ================================================================================
 FECHA DE EMISIÓN: ${formato.fechaHora(new Date().toISOString())}
 
@@ -87,6 +94,8 @@ FECHA DE EMISIÓN: ${formato.fechaHora(new Date().toISOString())}
 --------------------------------------------------------------------------------
 ID Reporte (UUID):  ${p.id}
 Código de Rastreo:  ${idCorto(p.id)}
+Categoría:         ${vista.nombre}
+Subtipo:           ${vista.subtipo || 'Sin subtipo'}
 Fecha de Recepción: ${formato.fechaHora(p.creado_en)}
 Fecha del Evento:   ${formato.fechaHora(p.evento_en) || 'No especificada'}
 Estado Actual:      ${etiquetaEstado(p.estado).toUpperCase()}
@@ -101,16 +110,28 @@ Coordenadas WGS84:  Latitud: ${lat.toFixed(6)}, Longitud: ${lon.toFixed(6)}
 Tipo de Ubicación:  ${etiquetaUbicacionTipo(p.ubicacion_tipo)}
 Método de Captura:  ${metodoDeCapturaTxt(p)}
 Precisión GPS:      ${precisionGps(p.precision_gps_m)}
+Distancia al dispositivo: ${distanciaDispositivo(p.distancia_dispositivo_m, p.ubicacion_metodo)}
+Versión de capa:    ${p.version_capa}
+Resolución espacial: ${avisosResolucion(p.resolucion_flags).join(' · ') || 'Sin avisos'}
 
 3. DATOS DEL REPORTE Y SEVERIDAD
 --------------------------------------------------------------------------------
-Profundidad Estimada: ${etiquetaProfundidad(p.profundidad_estimada)}
+${
+  vista.inundacion
+    ? `Profundidad Estimada: ${etiquetaProfundidad(p.profundidad_estimada)}
 Frecuencia de Agua:   ${etiquetaFrecuencia(p.frecuencia)}
 Causa Presunta:       ${etiquetaCausa(p.causa_presunta)}
 Sumidero Cercano:     ${p.sumidero_cercano ? etiquetaSumideroCercano(p.sumidero_cercano) : 'Sin dato'}
 Sumidero Tapado:      ${p.sumidero_estado ? etiquetaSumideroEstado(p.sumidero_estado) : 'Sin dato'}
 Agua Brota Sumidero:  ${etiquetaSiNo(p.agua_brota_sumidero)}
 Puntaje de Severidad: ${textoPuntaje(p.severidad_puntaje)}
+`
+    : `${vista.campos.map((c) => `${c.etiqueta}: ${c.valor}`).join('\n')}
+${vista.aviso ?? ''}
+Puntaje de Severidad: ${p.severidad_puntaje} puntos
+`
+}
+${vista.versiones}
 Severidad Calculada:  ${etiquetaSeveridad(p.severidad_calculada).toUpperCase()}
 Severidad Efectiva:   ${etiquetaSeveridad(p.severidad).toUpperCase()}
 Reclasif. Manual:     ${p.severidad_manual ? etiquetaSeveridad(p.severidad_manual) : 'No aplicada'}
@@ -126,6 +147,8 @@ Validado Por:       ${p.validado_por || 'Pendiente de asignación'}
 Fecha Validación:   ${formato.fechaHora(p.validado_en) || 'Pendiente'}
 Motivo de Estado:   ${p.estado_motivo || 'Sin observaciones'}
 Autor Registrado:   ${p.autor_id ? `Cuenta registrada (${p.autor_id})` : 'Anónimo'}
+Fusionado En:       ${p.fusionado_en_id || 'No fusionado'}
+Actualizado El:     ${formato.fechaHora(p.actualizado_en)}
 
 6. REGISTRO FOTOGRÁFICO
 --------------------------------------------------------------------------------
@@ -133,7 +156,7 @@ ${p.fotos.length === 0 ? 'Sin fotografías adjuntas.' : p.fotos.map((u, i) => `[
 
 7. LIMITACIONES
 --------------------------------------------------------------------------------
-${ajustarLineas(NOTA_METODOLOGICA, ANCHO_TXT)}
+${ajustarLineas(vista.nota, ANCHO_TXT)}
 
 ================================================================================
 
@@ -148,8 +171,29 @@ Firma y aclaración                          Firma y aclaración
  * El Feature tal como llegó, más la nota metodológica (§9.4) como miembro propio: GeoJSON admite
  * miembros extra en un Feature (RFC 7946, §6.1) y así el archivo no viaja sin sus limitaciones.
  */
-export function generarJsonReporteUnitario(f: ReporteTecnicoFeature): string {
-  return JSON.stringify({ ...f, nota_metodologica: NOTA_METODOLOGICA }, null, 2);
+export function generarJsonReporteUnitario(
+  f: ReporteTecnicoFeature,
+  registro: RegistroCategorias = REGISTRO_CATEGORIAS,
+): string {
+  const vista = presentarReporte(f.properties, registro);
+  const def = registro.obtener(f.properties.categoria ?? 'inundacion');
+  return JSON.stringify(
+    {
+      ...f,
+      nota_metodologica: vista.nota,
+      ...(f.properties.categoria
+        ? {
+            definicion_disponible: def
+              ? { detalle: def.detalleVersion, severidad: def.severidad.version }
+              : null,
+            versiones: vista.versiones,
+            aviso: vista.aviso,
+          }
+        : {}),
+    },
+    null,
+    2,
+  );
 }
 
 export function descargarArchivo(contenido: string, nombreArchivo: string, tipoMime: string) {
@@ -173,8 +217,10 @@ export function ReporteUnitarioModal({
   reporte,
   onCerrar,
   retorno,
+  registro = REGISTRO_CATEGORIAS,
 }: {
   reporte: ReporteTecnicoFeature;
+  registro?: RegistroCategorias;
   onCerrar: () => void;
   /** El botón que abre la ficha, para devolverle el foco al cerrarla. */
   retorno?: RefObject<HTMLElement | null>;
@@ -183,6 +229,7 @@ export function ReporteUnitarioModal({
   const formato = useFormato();
   const { fechaHora, numero } = formato;
   const p = reporte.properties;
+  const vista = presentarReporte(p, registro);
   const [lon, lat] = reporte.geometry.coordinates;
   const aclaracionUbicacion = aclaracionMetodo(p.ubicacion_metodo);
   const { dialogo, alTeclear } = useDialogoModal({ onCerrar, retorno });
@@ -192,13 +239,13 @@ export function ReporteUnitarioModal({
   };
 
   const descargarTxt = () => {
-    const texto = generarTextoReporteUnitario(reporte, { fechaHora, numero }, ciudad);
+    const texto = generarTextoReporteUnitario(reporte, { fechaHora, numero }, ciudad, registro);
     descargarArchivo(texto, `reporte-unitario-${idCorto(p.id)}.txt`, 'text/plain;charset=utf-8');
   };
 
   const descargarJson = () => {
     descargarArchivo(
-      generarJsonReporteUnitario(reporte),
+      generarJsonReporteUnitario(reporte, registro),
       `reporte-unitario-${idCorto(p.id)}.json`,
       'application/json;charset=utf-8',
     );
@@ -272,7 +319,9 @@ export function ReporteUnitarioModal({
                 {encabezadoFicha(ciudad)}
               </p>
               <h1 className="mt-1 text-2xl font-black tracking-tight text-tinta-900">
-                FICHA TÉCNICA - REPORTE UNITARIO DE INUNDACIÓN
+                {vista.inundacion
+                  ? 'FICHA TÉCNICA - REPORTE UNITARIO DE INUNDACIÓN'
+                  : `FICHA TÉCNICA - REPORTE UNITARIO · ${vista.nombre}`}
               </h1>
               <div className="mt-2 flex flex-wrap items-center justify-center gap-3 text-xs text-tinta-600">
                 <span>
@@ -294,6 +343,10 @@ export function ReporteUnitarioModal({
               <h3 className="border-b border-tinta-200 pb-2 text-sm font-bold text-tinta-700 uppercase">
                 1. Identificación del Evento
               </h3>
+              <p>
+                Categoría: {vista.nombre}
+                {vista.subtipo ? ` · ${vista.subtipo}` : ''}
+              </p>
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 text-sm">
                 <div>
                   <span className="text-tinta-600">ID Completo (UUID):</span>{' '}
@@ -357,6 +410,17 @@ export function ReporteUnitarioModal({
                   <span className="text-tinta-600">Precisión Declarada:</span>{' '}
                   <b>{precisionGps(p.precision_gps_m)}</b>
                 </div>
+                <div>
+                  <span className="text-tinta-600">Distancia al dispositivo:</span>{' '}
+                  <b>{distanciaDispositivo(p.distancia_dispositivo_m, p.ubicacion_metodo)}</b>
+                </div>
+                <div>
+                  <span className="text-tinta-600">Versión de capa:</span> <b>{p.version_capa}</b>
+                </div>
+                <div>
+                  <span className="text-tinta-600">Resolución espacial:</span>{' '}
+                  <b>{avisosResolucion(p.resolucion_flags).join(' · ') || 'Sin avisos'}</b>
+                </div>
               </div>
             </div>
 
@@ -366,52 +430,66 @@ export function ReporteUnitarioModal({
                 3. Datos del reporte y severidad
               </h3>
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 text-sm">
-                <div>
-                  <span className="text-tinta-600">Profundidad del Agua:</span>{' '}
-                  <b>{etiquetaProfundidad(p.profundidad_estimada)}</b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Frecuencia:</span>{' '}
-                  <b>{etiquetaFrecuencia(p.frecuencia)}</b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Causa Presunta:</span>{' '}
-                  <b>{etiquetaCausa(p.causa_presunta)}</b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Puntaje Severidad:</span>{' '}
-                  <b className="font-mono text-base">{textoPuntaje(p.severidad_puntaje)}</b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Severidad Calculada:</span>{' '}
-                  <span className="font-bold uppercase">
-                    {etiquetaSeveridad(p.severidad_calculada)}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Severidad Efectiva:</span>{' '}
-                  <span className="font-bold uppercase">{etiquetaSeveridad(p.severidad)}</span>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Sumidero Cercano:</span>{' '}
-                  <b>
-                    {p.sumidero_cercano ? etiquetaSumideroCercano(p.sumidero_cercano) : 'Sin dato'}
-                  </b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Sumidero Tapado:</span>{' '}
-                  <b>
-                    {p.sumidero_estado ? etiquetaSumideroEstado(p.sumidero_estado) : 'Sin dato'}
-                  </b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Agua Brota del Sumidero:</span>{' '}
-                  <b>{etiquetaSiNo(p.agua_brota_sumidero)}</b>
-                </div>
-                <div>
-                  <span className="text-tinta-600">Punto Crítico Asociado:</span>{' '}
-                  <b>{p.punto_critico_id ? idCorto(p.punto_critico_id) : 'Ninguno'}</b>
-                </div>
+                {vista.inundacion ? (
+                  <>
+                    <div>
+                      <span className="text-tinta-600">Profundidad del Agua:</span>{' '}
+                      <b>{etiquetaProfundidad(p.profundidad_estimada)}</b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Frecuencia:</span>{' '}
+                      <b>{etiquetaFrecuencia(p.frecuencia)}</b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Causa Presunta:</span>{' '}
+                      <b>{etiquetaCausa(p.causa_presunta)}</b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Puntaje Severidad:</span>{' '}
+                      <b className="font-mono text-base">{textoPuntaje(p.severidad_puntaje)}</b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Severidad Calculada:</span>{' '}
+                      <span className="font-bold uppercase">
+                        {etiquetaSeveridad(p.severidad_calculada)}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Severidad Efectiva:</span>{' '}
+                      <span className="font-bold uppercase">{etiquetaSeveridad(p.severidad)}</span>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Sumidero Cercano:</span>{' '}
+                      <b>
+                        {p.sumidero_cercano
+                          ? etiquetaSumideroCercano(p.sumidero_cercano)
+                          : 'Sin dato'}
+                      </b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Sumidero Tapado:</span>{' '}
+                      <b>
+                        {p.sumidero_estado ? etiquetaSumideroEstado(p.sumidero_estado) : 'Sin dato'}
+                      </b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Agua Brota del Sumidero:</span>{' '}
+                      <b>{etiquetaSiNo(p.agua_brota_sumidero)}</b>
+                    </div>
+                    <div>
+                      <span className="text-tinta-600">Punto Crítico Asociado:</span>{' '}
+                      <b>{p.punto_critico_id ? idCorto(p.punto_critico_id) : 'Ninguno'}</b>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <DatosCategoriaReporte reporte={p} registro={registro} />
+                    <p>Puntaje Severidad: {p.severidad_puntaje} puntos</p>
+                    <p>Severidad Calculada: {etiquetaSeveridad(p.severidad_calculada)}</p>
+                    <p>Severidad Efectiva: {etiquetaSeveridad(p.severidad)}</p>
+                  </>
+                )}
+                <p className="sm:col-span-2 ayuda">{vista.versiones}</p>
               </div>
             </div>
 
@@ -463,6 +541,23 @@ export function ReporteUnitarioModal({
                   <b>{p.validado_por || 'Pendiente'}</b>
                 </div>
                 <div>
+                  <span className="text-tinta-600">Autor:</span> <b>{p.autor_id ?? 'Anónimo'}</b>
+                </div>
+                <div>
+                  <span className="text-tinta-600">Fusionado en:</span>{' '}
+                  <b>{p.fusionado_en_id ?? 'No fusionado'}</b>
+                </div>
+                <div>
+                  <span className="text-tinta-600">Actualizado el:</span>{' '}
+                  <b>{fechaHora(p.actualizado_en)}</b>
+                </div>
+                <div>
+                  <span className="text-tinta-600">Severidad manual:</span>{' '}
+                  <b>
+                    {p.severidad_manual ? etiquetaSeveridad(p.severidad_manual) : 'No aplicada'}
+                  </b>
+                </div>
+                <div>
                   <span className="text-tinta-600">Fecha de Validación:</span>{' '}
                   <b>{fechaHora(p.validado_en) || 'Pendiente'}</b>
                 </div>
@@ -485,7 +580,7 @@ export function ReporteUnitarioModal({
                 7. Limitaciones
               </h3>
               <p className="mt-2 text-sm text-tinta-800" data-testid="ficha-limitaciones">
-                {NOTA_METODOLOGICA}
+                {vista.nota}
               </p>
             </div>
 

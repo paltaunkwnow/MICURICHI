@@ -18,7 +18,12 @@ import {
   SesionActualSchema,
 } from 'contracts';
 import { ejecutorPg } from 'db';
-import { type BaseEfimera, cargarCapasDePrueba, levantarBaseEfimera } from 'db/test-utils';
+import {
+  type BaseEfimera,
+  cargarCapasDePrueba,
+  insertarReporte,
+  levantarBaseEfimera,
+} from 'db/test-utils';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import sharp from 'sharp';
@@ -90,7 +95,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('DELETE FROM cuota_reporte_diaria');
+  // Desde M3 el cupo vive en `cupo_contador`: se vacía para que cada prueba parta con el cupo entero.
+  await pool.query('DELETE FROM cupo_contador');
 });
 
 function crear(cookie: string, payload: Record<string, unknown> = reporteValido, headers = {}) {
@@ -265,7 +271,7 @@ describe('mientras espera no lo ve nadie más que su autor (prueba de tabla)', (
 
     const antes = await cifras();
     const n = await pool.query<{ n: number }>(
-      "SELECT count(*)::int AS n FROM reporte_inundacion WHERE estado = 'nuevo' AND publicar_en <= now()",
+      "SELECT count(*)::int AS n FROM reporte WHERE categoria = 'inundacion' AND estado = 'nuevo' AND publicar_en <= now()",
     );
     expect(antes.nuevos).toBe(n.rows[0]!.n);
     expect(antes.enRevision).toBe(n.rows[0]!.n);
@@ -303,7 +309,7 @@ describe('mientras espera no lo ve nadie más que su autor (prueba de tabla)', (
       severidad_manual: string | null;
       fusionado_en_id: string | null;
     }>(
-      'SELECT estado::text, severidad_manual::text, fusionado_en_id::text FROM reporte_inundacion WHERE id = $1',
+      "SELECT estado::text, severidad_manual::text, fusionado_en_id::text FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [id],
     );
     expect(estado.rows[0]).toEqual({
@@ -407,6 +413,62 @@ describe('mientras espera no lo ve nadie más que su autor (prueba de tabla)', (
   });
 });
 
+describe('la dimensión categoría en la tabla de visibilidad (M3)', () => {
+  // Un reporte de OTRA categoría (bache), publicado, en las mismas coordenadas que los de
+  // inundación. Con el registro POR DEFECTO (solo inundacion) bache está INACTIVA: nunca aparece en
+  // las vistas por defecto, y en lo público pedirla da 400. En el panel, `todas` o su slug la traen.
+  let bacheId: string;
+  beforeAll(async () => {
+    bacheId = await insertarReporte(ex, -63.195, -17.79, 'validado', 'media', 'bache');
+  });
+
+  it('por defecto (= inundacion) el reporte de bache no está en ninguna vista pública ni de lista', async () => {
+    expect(ids(await get('/api/v1/reportes?limite=500'))).not.toContain(bacheId);
+    // Detalle público: 404 igual que uno oculto (categoría inactiva), sin delatar su existencia.
+    expect((await get(`/api/v1/reportes/${bacheId}`)).statusCode).toBe(404);
+    expect(ids(await get('/api/v1/tecnico/reportes?limite=500', cookies.tecnico))).not.toContain(
+      bacheId,
+    );
+    expect((await get('/api/v1/exportar?formato=csv', cookies.tecnico)).body).not.toContain(
+      bacheId,
+    );
+    expect(ids(await get('/api/v1/exportar?formato=geojson', cookies.tecnico))).not.toContain(
+      bacheId,
+    );
+  });
+
+  it('en lo público, una categoría inactiva o `todas` dan 400 CATEGORIA_NO_DISPONIBLE', async () => {
+    for (const q of ['categoria=bache', 'categoria=todas']) {
+      const r = await get(`/api/v1/reportes?${q}`);
+      expect(r.statusCode, q).toBe(400);
+      expect(r.json().codigo, q).toBe('CATEGORIA_NO_DISPONIBLE');
+    }
+  });
+
+  it('en el panel, `todas` y el slug conocido (aunque inactivo) traen el bache', async () => {
+    expect(
+      ids(await get('/api/v1/tecnico/reportes?categoria=todas&limite=500', cookies.tecnico)),
+    ).toContain(bacheId);
+    expect(
+      ids(await get('/api/v1/tecnico/reportes?categoria=bache&limite=500', cookies.tecnico)),
+    ).toContain(bacheId);
+    // El técnico ve el detalle de cualquier categoría (no se le oculta por inactiva).
+    expect((await get(`/api/v1/tecnico/reportes/${bacheId}`, cookies.tecnico)).statusCode).toBe(
+      200,
+    );
+    // Exportación del panel con `todas`: el bache entra, y en el CSV lleva la columna `categoria`.
+    const csv = await get('/api/v1/exportar?formato=csv&categoria=todas', cookies.tecnico);
+    expect(csv.body).toContain(bacheId);
+    expect(csv.body.split('\n').find((l) => l.includes('id,estado'))).toContain('categoria');
+  });
+
+  it('un slug desconocido en el panel es 400 FILTROS_INVALIDOS', async () => {
+    const r = await get('/api/v1/tecnico/reportes?categoria=noexiste', cookies.tecnico);
+    expect(r.statusCode).toBe(400);
+    expect(r.json().codigo).toBe('FILTROS_INVALIDOS');
+  });
+});
+
 describe('duplicado y retiro de verificados', () => {
   async function publicado(cookie: string, lat: number, lon: number): Promise<string> {
     const r = await crear(cookie, reporteEn(lat, lon));
@@ -503,8 +565,8 @@ describe('GET /mis-reportes', () => {
     expect(mio.properties.segundos_para_publicar).toBeGreaterThan(0);
     expect(mio.properties).toMatchObject({ estado: 'nuevo', verificado: false, retirado: false });
     const autores = await pool.query<{ n: number }>(
-      `SELECT count(*)::int AS n FROM reporte_inundacion
-        WHERE id = ANY($1::uuid[]) AND autor_id <> (SELECT id FROM usuario WHERE email = $2)`,
+      `SELECT count(*)::int AS n FROM reporte
+        WHERE categoria = 'inundacion' AND id = ANY($1::uuid[]) AND autor_id <> (SELECT id FROM usuario WHERE email = $2)`,
       [lista, CUENTAS.ejecutivo],
     );
     expect(autores.rows[0]!.n).toBe(0);
@@ -533,15 +595,15 @@ describe('métrica de la bandeja sin verificar', () => {
 
   it('0 sin pendientes publicados; la antigüedad del más viejo si hay', async () => {
     await pool.query(
-      "UPDATE reporte_inundacion SET estado = 'rechazado', estado_motivo = 'x' WHERE estado = 'nuevo'",
+      "UPDATE reporte SET estado = 'rechazado', estado_motivo = 'x' WHERE categoria = 'inundacion' AND estado = 'nuevo'",
     );
     expect(await valor()).toBe(0);
     const r = await crear(cookies.vecino, reporteEn(-17.798, -63.198));
     // En espera no cuenta: todavía no está en la bandeja pública.
     expect(await valor()).toBe(0);
     await pool.query(
-      `UPDATE reporte_inundacion SET creado_en = now() - interval '2 hours',
-              publicar_en = now() - interval '2 hours' + interval '1 minute' WHERE id = $1`,
+      `UPDATE reporte SET creado_en = now() - interval '2 hours',
+              publicar_en = now() - interval '2 hours' + interval '1 minute' WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     const s = await valor();

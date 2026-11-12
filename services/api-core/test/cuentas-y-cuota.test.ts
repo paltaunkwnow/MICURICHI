@@ -96,13 +96,13 @@ function enviar(cookie: string | null, payload: unknown = reporteValido, extra =
 describe('crear un reporte exige sesión; ver el mapa no', () => {
   it('sin sesión, POST /reportes responde 401 y no crea nada', async () => {
     const antes = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     const r = await enviar(null);
     expect(r.statusCode).toBe(401);
     expect(r.json().codigo).toBe('SIN_SESION');
     const despues = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
     );
     expect(despues.rows[0]?.n).toBe(antes.rows[0]?.n);
   });
@@ -121,8 +121,8 @@ describe('crear un reporte exige sesión; ver el mapa no', () => {
     expect(r.statusCode, r.body.slice(0, 200)).toBe(201);
     const id = r.json().id as string;
     const { rows } = await pool.query<{ autor_id: string; email: string }>(
-      `SELECT r.autor_id::text, u.email FROM reporte_inundacion r
-       JOIN usuario u ON u.id = r.autor_id WHERE r.id = $1`,
+      `SELECT r.autor_id::text, u.email FROM reporte r
+       JOIN usuario u ON u.id = r.autor_id WHERE r.categoria = 'inundacion' AND r.id = $1`,
       [id],
     );
     expect(rows[0]?.email).toBe(CUENTAS.vecina);
@@ -200,7 +200,7 @@ describe('el autor lo decide el servidor: no hay forma de reportar en nombre de 
       const r = await enviar(cookieVecina, { ...reporteValido, [campo]: idAjeno });
       expect(r.statusCode, `${campo}: ${r.body.slice(0, 160)}`).toBe(201);
       const { rows } = await pool.query<{ email: string }>(
-        `SELECT u.email FROM reporte_inundacion r JOIN usuario u ON u.id = r.autor_id WHERE r.id = $1`,
+        `SELECT u.email FROM reporte r JOIN usuario u ON u.id = r.autor_id WHERE r.categoria = 'inundacion' AND r.id = $1`,
         [r.json().id],
       );
       expect(rows[0]?.email, `con ${campo} se atribuyó a otra cuenta`).toBe(CUENTAS.vecina);
@@ -234,7 +234,7 @@ describe('el autor lo decide el servidor: no hay forma de reportar en nombre de 
       validado_por: string | null;
     }>(
       `SELECT estado, severidad_calculada, creado_en::text, validado_por::text
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [id],
     );
     const f = rows[0]!;
@@ -302,7 +302,7 @@ describe('cupo diario por cuenta (el detalle, en cupo-diario.test.ts)', () => {
    */
   it('varios envíos simultáneos con claves distintas dejan un solo reporte', async () => {
     const { rows: antes } = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion WHERE autor_id = (SELECT id FROM usuario WHERE email = $1)',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion' AND autor_id = (SELECT id FROM usuario WHERE email = $1)",
       [CUENTAS.vecina],
     );
     const resultados = await Promise.all(
@@ -313,7 +313,7 @@ describe('cupo diario por cuenta (el detalle, en cupo-diario.test.ts)', () => {
       ),
     );
     const { rows: despues } = await pool.query<{ n: string }>(
-      'SELECT count(*)::text AS n FROM reporte_inundacion WHERE autor_id = (SELECT id FROM usuario WHERE email = $1)',
+      "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion' AND autor_id = (SELECT id FROM usuario WHERE email = $1)",
       [CUENTAS.vecina],
     );
     // LA INVARIANTE, que es la que importa: pase lo que pase con los códigos, de cinco envíos
@@ -573,9 +573,13 @@ describe('alta de cuenta ciudadana', () => {
       cookies: sesion(cookieVecina),
     });
     expect(yo.statusCode).toBe(200);
+    // Desde 0.20.0 (M3) suma `cupos` (por categoría activa) y `fotos_restantes_hoy`, ambos datos
+    // propios de quien pregunta. Sigue sin devolver la contraseña ni nada de otra cuenta.
     expect(Object.keys(yo.json()).sort()).toEqual([
+      'cupos',
       'demora_proximo_s',
       'email',
+      'fotos_restantes_hoy',
       'id',
       'nombre',
       'puede_reportar_desde',

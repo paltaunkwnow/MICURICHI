@@ -236,6 +236,9 @@ services:
   # moderarlos antes o, a sabiendas, `docker compose --profile servicios run --rm migraciones node
   # node_modules/db/dist/cli/migrar.js --publicar-nuevos-existentes` (produccion.md, «Migración 0015»).
   migraciones:
+    # 0022 exige parada coordinada, respaldo restaurado y actualización explícita de código+DB.
+    # Este job ordinario NO concede --autorizar-contraccion-compatible; el CLI falla cerrado
+    # mientras 0022 esté pendiente. El protocolo autorizado opera la actualización por separado.
     <<: [*comun, *servicio-node]
     profiles: ["servicios"]
     image: ${IMAGEN_API_CORE:-mi-curichi-api-core:local}

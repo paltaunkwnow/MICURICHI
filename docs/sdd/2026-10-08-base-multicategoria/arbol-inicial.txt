@@ -1,0 +1,102 @@
+# git status --porcelain (2026-10-08, antes de M2)
+ M CLAUDE.md
+ M docs/decisiones/README.md
+ M packages/contracts/CHANGELOG.md
+ M packages/contracts/README.md
+ M packages/contracts/package.json
+ M packages/contracts/src/index.ts
+ M packages/contracts/test/contrato-0-16.test.ts
+?? .claude/settings.local.json
+?? ContextosySkills/
+?? PROJECT_STRUCTURE_AND_FUNCTIONALITY.md
+?? docs/arquitectura/
+?? docs/decisiones/0008-ampliacion-mision-1-plataforma-multitematica.md
+?? docs/decisiones/0009-nucleo-y-registro-de-categorias.md
+?? docs/decisiones/0010-modelo-de-datos-hibrido-del-reporte.md
+?? docs/decisiones/0011-migracion-de-inundaciones.md
+?? docs/decisiones/0012-compatibilidad-de-api.md
+?? docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md
+?? docs/decisiones/0014-categoria-inicial-en-el-dispositivo.md
+?? docs/decisiones/0015-prioridad-url-y-categoria-guardada.md
+?? docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md
+?? docs/decisiones/0017-cupo-por-categoria-configurable.md
+?? docs/decisiones/0018-persona-en-situacion-de-calle.md
+?? docs/decisiones/0019-areas-verdes-con-point.md
+?? docs/decisiones/0020-areas-verdes-sin-capa-municipal.md
+?? docs/decisiones/0021-formularios-por-categoria.md
+?? docs/decisiones/0022-paleta-e-iconografia-de-categorias.md
+?? docs/sdd/2026-10-07-registro-de-categorias/
+?? docs/sdd/2026-10-08-base-multicategoria/
+?? packages/contracts/src/categorias/
+?? packages/contracts/test/contrato-0-19.test.ts
+
+# git diff --stat
+ CLAUDE.md                                     | 18 +++++---
+ docs/decisiones/README.md                     | 15 ++++++
+ packages/contracts/CHANGELOG.md               | 66 +++++++++++++++++++++++++++
+ packages/contracts/README.md                  | 26 ++++++++++-
+ packages/contracts/package.json               |  2 +-
+ packages/contracts/src/index.ts               |  1 +
+ packages/contracts/test/contrato-0-16.test.ts |  4 +-
+ 7 files changed, 121 insertions(+), 11 deletions(-)
+
+# sha256 de archivos sin seguimiento
+08b92f96039a93361f182bf4bf81b6c9e5f976a83d2d3898284bde340aed0d50 *.claude/settings.local.json
+240a3e0d37d2e86b614063f5347eb02d4f99ca6c254de6b82871ff8d95532a7d *ContextosySkills/.estado/.gitignore
+ac41083065ac198dfd9fcf43d24c745080e29036170996c4d42a6cf1964da7c5 *ContextosySkills/README.md
+f5752f0b613673146b38540808994526b0d2d947859e1962138c4ef04c5ffc35 *ContextosySkills/VentanaContextoSesion1.md
+20a289679303015b6467104eb098c0afde4a2d663090c4e0b41acb1f209a743b *ContextosySkills/VentanaContextoSesion2.md
+b207c9512e4e4c5d00ce511fc73318b11969abf1c17bcae8eb08509bb763305b *ContextosySkills/VentanaContextoSesion3.md
+3e864ffe960d5156a91be7fbb638b2b7a7152ed3bc36f71691baa6b80d96e039 *ContextosySkills/hooks/contexto.mjs
+437a68dc4f933044186f35ec5ffde73d087d78e63c9408f2fc2a3708ee11b416 *PROJECT_STRUCTURE_AND_FUNCTIONALITY.md
+f420b696dd454f5e9850d4dd9448938540bab2d33d0cf8ae57f3fe44eb26023c *docs/arquitectura/00-puesta-en-marcha-y-prueba-manual.md
+3c08b6a158db117d48c3a86c27b8f87ac0369a552e3959b6df1f5aa90df18388 *docs/arquitectura/01-contracts.md
+d6ca325d4bd986449aa5de9e7f321e44d1521604fa5c0ab6915e7af556f92d7e *docs/arquitectura/02-db.md
+971810e349dd444c857085a5f5ac13b0df732635132408364fc0b8cf5f456ce6 *docs/arquitectura/03-geo-service.md
+bdbc058a70113f24c7230501e2ea0ccc0fdd091c30496c7ae2acea1429370eb3 *docs/arquitectura/04-api-core.md
+af93e4d9988b0cfb092484c8a7c6e318df93cb2faa76e2faba0adec5a0d6743f *docs/arquitectura/05-web-ciudadano.md
+4722485e2d57762a98e93b0b57b25193592d7b6aa70f1dea2d882179e9080b63 *docs/arquitectura/06-panel-admin.md
+27232e06865f18d97e046d024f897b0914a909080f2d070455c43faadab5b084 *docs/arquitectura/07-geodata-etl.md
+97f2b11dd6357e2dce9bb79c6b7e568463dbaf53d51f7c27f24ab26eaa413172 *docs/arquitectura/08-infraestructura-y-devops.md
+05ee70a667ec95361baf584472725a10a85471aec61b1bc95761fa2922d58098 *docs/arquitectura/09-calidad-y-pruebas.md
+db89fc6fd506d397a7865277ed7c8b079edb829ddb3f8f1e6126efdb75dcce3a *docs/arquitectura/10-flujos-de-punta-a-punta.md
+a335366a901b38a2125fe2ceaa136fa93eb955c556236cc0c6f72b2cdbc8dab7 *docs/arquitectura/11-escalado-y-ecosistema.md
+bc347ff9377384729e77eb862ba2872c86efbfa914327e39f45bd536ce4d0fac *docs/arquitectura/12-evaluacion-arquitectonica-y-escalabilidad.md
+7bd9613f651851031501ce0109ec8d87ddc8aa5e13566f28dd9db08b04b1ef43 *docs/arquitectura/13-planificacion-plataforma-multitematica.md
+ff1fa65fb078be8722311174932c49b5b6a9ec1dda66242e3ed6263d5ffe95a7 *docs/arquitectura/13.1-analisis-html-y-ux.md
+8a9cb44b795d0565182bea0c6b5250404aa19ec050a6ac545b7e9e4c96dc1546 *docs/arquitectura/13.2-modelo-core-y-categorias.md
+415202034ed4fb4a28ec45d7f76774a437b63d3800edaaadbe22ba6d75420060 *docs/arquitectura/13.3-plan-migracion.md
+1dc5c5fcb6ac8a897641dfe5356323739782aa6112cc8f063eb5672409e46e2f *docs/arquitectura/14-decisiones-m0-y-plan-m1.md
+a2fd1a0ea860249cf0c7a5b75367bdc63adf63642e4aea0ca1c7d42525a63b1e *docs/arquitectura/14.1-adr-propuestos.md
+c94105480fb7adc776f18a7ab426c27e96be20e7400f211fba39ef589f3208df *docs/arquitectura/README.md
+7235f585af2bc10ef7bc9a5b0fc4c06b8f9260640fe665d548260df3a5dc39e1 *docs/decisiones/0008-ampliacion-mision-1-plataforma-multitematica.md
+d7c9d57c189fac641a849a6af4bea1dce48333ae6fef2d9e4f9625abbeca398e *docs/decisiones/0009-nucleo-y-registro-de-categorias.md
+844d8e6f135801419f91f60d1bb16af0dc6a0c1fea1a1aa3dd308df063db9ef6 *docs/decisiones/0010-modelo-de-datos-hibrido-del-reporte.md
+aa92ac0def072dcd6a6bb33d1edb6865c423d9b236f3f2a5095a2534503e5663 *docs/decisiones/0011-migracion-de-inundaciones.md
+8a0d60ed7cae4158ac19301eb27a1b74a3359d9cb0e1cfa4102038f0518397e3 *docs/decisiones/0012-compatibilidad-de-api.md
+40087610b675c0609422c24d99ebdb5f4186400580f5b4d9c721b119ec99dd12 *docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md
+9070c515561aedbcd592803fdadf02e1ab4a5e16a758c42b61963cdca4131b8f *docs/decisiones/0014-categoria-inicial-en-el-dispositivo.md
+c2c1f47da342b1a740e1b75a953aa8494a5e1634c4e799dc6aca48ffa2e446c7 *docs/decisiones/0015-prioridad-url-y-categoria-guardada.md
+4588ca477ab31e74b706909defcf1f0144b9104440105d914f1bbbbbee99d29f *docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md
+c2e8eefb7f8f1cfea04784e15517ddfe4c98cfab30c7bc57bcf24d5ca8d5b81e *docs/decisiones/0017-cupo-por-categoria-configurable.md
+837256f8175924d29bf10c193c1d832faeb70365ce4931e21936d017b06c6986 *docs/decisiones/0018-persona-en-situacion-de-calle.md
+d67dc51a5c98201a2244bfc927c49df224ef4664c3aebdb5f3bf549398f1b62e *docs/decisiones/0019-areas-verdes-con-point.md
+80a49b79662d1ef136f755f94e058a15df0021ae6838e2b9d1aa83f2bbfd2ef1 *docs/decisiones/0020-areas-verdes-sin-capa-municipal.md
+8bc3713367763ed780faf4b0ece3799787ed92251810f8abad5b00aedbc26317 *docs/decisiones/0021-formularios-por-categoria.md
+dd3b1f651ca9bfe8ed96669520e0436645fc0779f147f1c30e4fcaed2e4587d3 *docs/decisiones/0022-paleta-e-iconografia-de-categorias.md
+a51fc6d5a6a1462575ee2e7ec02daf8e60218f5690ff0e94340da97f59059750 *docs/sdd/2026-10-07-registro-de-categorias/arbol-inicial.txt
+d8f345885aa8b17565036e1b6449f0da78c1e321eae4962691a12e056b9abb1a *docs/sdd/2026-10-07-registro-de-categorias/archivos.txt
+420dbca9158c3bc45d9101f75ffd039b50221c539760d32f1d58bed4cae56154 *docs/sdd/2026-10-07-registro-de-categorias/implementacion.md
+ca809ba25c0ca37b1451864a94d8939cdc56689e5e5188405a7cb7f8f201ba66 *docs/sdd/2026-10-07-registro-de-categorias/informe.md
+363bad607c96e00d90900d5ee489afbfe7b43efa0b3e367240f40ffb1b65e993 *docs/sdd/2026-10-07-registro-de-categorias/linea-base.md
+11633c7530f950a73b78b53d302cef799682b18ae6b961240079920ace25937b *docs/sdd/2026-10-07-registro-de-categorias/plan.md
+ccba6f8468238f75248d425965908995b71e93ab3aac9e7a916a484f13d125d6 *docs/sdd/2026-10-07-registro-de-categorias/verificacion.md
+835f44dd776c4bb082c8beb5f89a551ecb15f089faef59514324d11860c0a936 *docs/sdd/2026-10-08-base-multicategoria/arbol-inicial.txt
+dba0ed669214da366e14d705b8163af411e22514b40b8eb17a8d0fc96793ebc3 *docs/sdd/2026-10-08-base-multicategoria/plan.md
+d9c12f988eca33c57b3e1a5d9999328e4ed036dad06cb78e8a9107318c57285b *packages/contracts/src/categorias/index.ts
+daa4cc4eaf3b1f5a9b8cfae7655f2c74c6d0132fc1988407820e72b57714195e *packages/contracts/src/categorias/inundacion/definicion.ts
+355d1cdf734b9c6a18ab218056a826e4535629ddbc620ec239664ef84ad1ec66 *packages/contracts/src/categorias/inundacion/esquema.ts
+168649211b0b5630151c8317a31ea6faaeff8acb9b7d2ab89bd68440fd8fd7af *packages/contracts/src/categorias/resolver.ts
+c5735ffa918ed8da760497f1b49f938ec0b343192b353cfb109c989bb865bb0e *packages/contracts/src/categorias/slugs.ts
+e1058a8018d35b44c57c6ec6e2544892f345367c144fd1fdf47f968388503df0 *packages/contracts/src/categorias/tipos.ts
+5912ac27f6b911615a7ae0e1e76964e66bbe2b3614eef1b3a710656d6aea8d83 *packages/contracts/test/contrato-0-19.test.ts

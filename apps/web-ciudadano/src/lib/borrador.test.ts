@@ -238,6 +238,7 @@ describe('borrador del formulario de reporte', () => {
     const recienAbierto: Borrador = {
       guardado_en: Date.now(),
       creado_en: Date.now(),
+      categoria: 'inundacion',
       paso: 1,
       ubicacion: { lat: -17.78, lon: -63.18, precargada: true },
       resuelto: { dentro_cobertura: true },
@@ -400,6 +401,7 @@ describe('borrador del formulario de reporte', () => {
     const vacio: Borrador = {
       guardado_en: Date.now(),
       creado_en: Date.now(),
+      categoria: 'inundacion',
       paso: 1,
       ubicacion: null,
       resuelto: null,
@@ -411,5 +413,45 @@ describe('borrador del formulario de reporte', () => {
     expect(borradorTieneContenido(vacio)).toBe(false);
     expect(borradorTieneContenido({ ...vacio, paso: 2 })).toBe(true);
     expect(borradorTieneContenido({ ...vacio, valores: { descripcion: 'algo' } })).toBe(true);
+    // Un `detalle` vacío de una categoría declarativa tampoco cuenta; una respuesta sí.
+    expect(borradorTieneContenido({ ...vacio, valores: { detalle: {} } })).toBe(false);
+    expect(borradorTieneContenido({ ...vacio, valores: { detalle: { tamano: 'grande' } } })).toBe(
+      true,
+    );
+  });
+
+  describe('categoría del borrador (formato 3, M4)', () => {
+    it('guarda y lee la categoría del reporte', () => {
+      instalar(almacenFalso());
+      guardarBorrador({ ...BASE, categoria: 'bache' });
+      expect(leerBorrador()?.categoria).toBe('bache');
+    });
+
+    it('un borrador de formato 2 (sin categoría) se lee como Inundaciones, con sus mismos pasos', () => {
+      const almacen = almacenFalso();
+      instalar(almacen);
+      almacen.setItem(CLAVE, JSON.stringify({ ...BASE, formato: 2, guardado_en: Date.now() }));
+      const b = leerBorrador();
+      expect(b?.categoria).toBe('inundacion');
+      // El formato 2 ya es de cuatro pasos: su paso 3 NO se remapea como el asistente de cinco.
+      expect(b?.paso).toBe(3);
+    });
+
+    it('no restaura un borrador de otra categoría que la del formulario', () => {
+      instalar(almacenFalso());
+      guardarBorrador({ ...BASE, categoria: 'bache' });
+      expect(leerBorrador('inundacion')).toBeNull();
+      expect(leerBorrador('bache')?.categoria).toBe('bache');
+      // Sin categoría esperada se lee igual: el que lo llama decide.
+      expect(leerBorrador()?.categoria).toBe('bache');
+    });
+
+    it('un borrador de formato 2 cuenta como Inundaciones al filtrar por categoría', () => {
+      const almacen = almacenFalso();
+      instalar(almacen);
+      almacen.setItem(CLAVE, JSON.stringify({ ...BASE, formato: 2, guardado_en: Date.now() }));
+      expect(leerBorrador('bache')).toBeNull();
+      expect(leerBorrador('inundacion')?.paso).toBe(3);
+    });
   });
 });

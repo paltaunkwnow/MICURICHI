@@ -168,7 +168,7 @@ describe('CA-A1: camino crítico con el payload nuevo', () => {
       }>(
         `SELECT estado::text, unidad_vecinal_id, distrito_id, severidad_version,
                 severidad_calculada::text, severidad_puntaje
-           FROM reporte_inundacion WHERE id = $1`,
+           FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
         [id],
       );
       expect(rows[0]).toEqual({

@@ -1,15 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import {
+  CODIGO_CATEGORIA_NO_DISPONIBLE,
   CONFIG_DOMINIO,
-  calcularSeveridad,
   coordenadaPublica,
-  ReporteCrearSchema,
+  normalizarReporteCrear,
   ReporteFiltrosSchema,
 } from 'contracts';
-import type { FastifyInstance } from 'fastify';
-import type { Dependencias } from '../app.js';
+import type { FastifyBaseLogger, FastifyInstance } from 'fastify';
+import { type Dependencias, registroDe } from '../app.js';
 import { requerirRol } from '../auth.js';
 import { cacheDeListadoPublico } from '../cache.js';
+import { categoriaPanel, categoriaPublica, limiteReportesDe } from '../categorias.js';
 import { listarReportes, MAX_OFFSET, obtenerReporte, reportesDelAutor } from '../consultas.js';
 import { reservarTurnoDeReporte } from '../cuota.js';
 import { IdReporteParam, resolverIdReporte } from '../id-reporte.js';
@@ -28,11 +29,48 @@ import { aFeature, vistaMiReporte, vistaPublica, vistaTecnica } from '../vistas.
 /** Ventana en la que una `objeto_key` recién subida puede asociarse a un reporte. */
 export const HORAS_VALIDEZ_FOTO = 24;
 
+/**
+ * Tope de tamaño del `detalle`, igual al CHECK `detalle_tope` de la migración 0020
+ * (`packages/db/migraciones/0020_base_multicategoria.sql`: `octet_length(detalle::text) <= 8192`).
+ * `contracts` no exporta la constante, así que vive acá citando el CHECK; si algún día la exporta, se
+ * reemplaza por esa.
+ */
+const DETALLE_TOPE_BYTES = 8192;
+
+/**
+ * El mismo 400 para el `detalle` demasiado grande, lo detecte la comprobación previa
+ * (`JSON.stringify`) o el CHECK `detalle_tope` dentro de la transacción (sobre `detalle::text`, que
+ * agrega espacios de separador y puede superar el tope aunque el `JSON.stringify` no lo haga). Se
+ * comparte para que las dos salidas sean idénticas.
+ */
+const RESPUESTA_DETALLE_GRANDE = {
+  codigo: 'PAYLOAD_INVALIDO',
+  mensaje: 'Revisá los datos del reporte.',
+  detalles: [
+    { campo: 'detalle', mensaje: `El detalle supera el tope de ${DETALLE_TOPE_BYTES} bytes.` },
+  ],
+} as const;
+
 export function esTecnico(rol: string | undefined) {
   return rol === 'tecnico' || rol === 'admin';
 }
 
 export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
+  // Solo el entorno controlado del runner se identifica como prueba. Development y la demo
+  // pueden recibir tráfico real: quedan sin clasificar. Ninguna cabecera decide este origen.
+  const origen = process.env.NODE_ENV === 'test' ? 'entorno_prueba' : 'no_clasificado';
+  const registrarCompatibilidad = (
+    log: FastifyBaseLogger,
+    forma: ReturnType<typeof normalizarReporteCrear>['forma'],
+    resultado: 'aceptado' | 'replay',
+  ) => {
+    const etiquetas = { forma, resultado, origen };
+    app.metricas.contar('curichi_reportes_forma_total', etiquetas);
+    log.info(
+      { evento: 'compatibilidad_reporte', ...etiquetas },
+      'compatibilidad de creación de reportes',
+    );
+  };
   /*
    * ───────────────────────────── Creación de reportes ─────────────────────────────
    *
@@ -62,21 +100,90 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         return res
           .status(401)
           .send({ codigo: 'SIN_SESION', mensaje: 'Iniciá sesión para enviar un reporte.' });
-      const p = ReporteCrearSchema.safeParse(req.body);
-      if (!p.success) {
+      /*
+       * Dos formas de entrada (0.20.0, ADR 0010, 0012): la PLANA de hoy (= inundación) y la NUEVA
+       * `{ …núcleo, categoria, subtipo?, detalle }`. `normalizarReporteCrear` valida el núcleo con
+       * el mismo Zod de siempre y deja todo en la forma por categoría; el `detalle` se valida
+       * después, con el Zod ESTRICTO de la definición. La forma plana crea una inundación idéntica
+       * a la de hoy.
+       */
+      const norm = normalizarReporteCrear(req.body);
+      if (!norm.resultado.exito) {
         return res.status(400).send({
           codigo: 'PAYLOAD_INVALIDO',
           mensaje: 'Revisá los datos del reporte.',
-          detalles: p.error.issues.map((i) => ({ campo: i.path.join('.'), mensaje: i.message })),
+          detalles: norm.resultado.error.issues.map((i) => ({
+            campo: i.path.join('.'),
+            mensaje: i.message,
+          })),
         });
       }
-      const { dispositivo, ...d } = p.data;
+      const datos = norm.resultado.datos;
       /*
-       * La posición del teléfono (contracts 0.9.0). Va antes de resolver: no tiene sentido
-       * preguntarle a geo-service por un punto que se va a rechazar. Y fuera de la transacción,
-       * así un rechazo no gasta cupo. Desde acá `dispositivo` no se usa más: no llega a la fila,
-       * ni a la auditoría, ni a la huella de idempotencia, ni al log (§0 regla 8).
+       * Categoría: un valor desconocido queda en `null` al normalizar, y una categoría conocida
+       * puede estar inactiva en el catálogo. Las dos dan 422 CATEGORIA_NO_DISPONIBLE ANTES de
+       * resolver la ubicación y ANTES de gastar cupo (CA5). El contrato no valida la actividad: la
+       * decide el catálogo (`app.categorias`).
        */
+      const slug = datos.categoria;
+      if (slug === null || !(await app.categorias.estaActiva(slug)))
+        return res.status(422).send({
+          codigo: CODIGO_CATEGORIA_NO_DISPONIBLE,
+          mensaje: 'Esa categoría no está disponible para reportar.',
+        });
+      const registro = registroDe(dep);
+      // Activa ⇒ tiene definición en el registro: `estaActiva` exige catálogo ∩ registro (regla 3).
+      const def = registro.obtener(slug)!;
+      // Si hay opciones, el subtipo es obligatorio y pertenece a esta definición. Se corta antes
+      // del PIP y del cupo; las categorías sin subtipos conservan su comportamiento anterior.
+      if (def.subtipos?.length && !def.subtipos.some((opcion) => opcion.valor === datos.subtipo))
+        return res.status(400).send({
+          codigo: 'PAYLOAD_INVALIDO',
+          mensaje: 'Revisá los datos del reporte.',
+          detalles: [
+            {
+              campo: 'subtipo',
+              mensaje: 'Seleccioná un tipo de problema válido para esa categoría.',
+            },
+          ],
+        });
+      /*
+       * El `detalle` con el Zod ESTRICTO de la categoría: una clave de más o un valor fuera de
+       * rango dan 400 con el mismo código de validación de siempre (PAYLOAD_INVALIDO); la base suma
+       * el CHECK de objeto y el tope de 8192 bytes. Para inundación, `DetalleInundacionSchema`.
+       */
+      const pd = def.esquemaDetalle.safeParse(datos.detalle);
+      if (!pd.success)
+        return res.status(400).send({
+          codigo: 'PAYLOAD_INVALIDO',
+          mensaje: 'Revisá los datos del reporte.',
+          detalles: pd.error.issues.map((i) => ({
+            campo: `detalle.${i.path.join('.')}`,
+            mensaje: i.message,
+          })),
+        });
+      // El registro es heterogéneo (`DefinicionCategoriaCualquiera`, detalle `any`): el detalle
+      // validado se maneja como objeto genérico para el INSERT y la severidad.
+      const detalle = pd.data as Record<string, unknown>;
+      /*
+       * Tope de tamaño del `detalle`: el Zod de la categoría acota la FORMA, pero no el largo de un
+       * texto libre. Sin esto, un `detalle` que supera el tope hace saltar el CHECK `detalle_tope`
+       * DENTRO de la transacción del INSERT y la ruta responde 500. Se mide ACÁ —junto a la
+       * validación del detalle y ANTES del PIP y del cupo— para devolver el mismo 400 PAYLOAD_INVALIDO
+       * que el resto de la ruta sin gastar una llamada a geo-service ni un turno de la cuenta (CA5).
+       * Se mide el JSON que se guarda (`JSON.stringify(detalle)`, lo mismo que va al INSERT); el CHECK
+       * lo remide sobre `detalle::text`, que solo agrega espacios de separador, así que la diferencia
+       * es de pocos bytes lejos del tope. El borde (JSON ≤ tope pero jsonb > tope) lo cierra el
+       * CHECK `detalle_tope`, traducido también a este 400 en el catch del INSERT.
+       */
+      if (Buffer.byteLength(JSON.stringify(detalle), 'utf8') > DETALLE_TOPE_BYTES)
+        return res.status(400).send(RESPUESTA_DETALLE_GRANDE);
+      /*
+       * La posición del teléfono (contracts 0.9.0). `dispositivo` no se usa más allá de esta
+       * comprobación: no llega a la fila, ni a la auditoría, ni a la huella de idempotencia, ni al
+       * log (§0 regla 8). El resto del núcleo (lat, lon, ubicacion_tipo…) va en `d`.
+       */
+      const { dispositivo, ...d } = datos;
       const ubicacion = revisarDispositivo(d, dispositivo, { aproximada: d.ubicacion_aproximada });
       if (!ubicacion.ok) {
         app.metricas.contar('curichi_reportes_fuera_de_radio_total', { codigo: ubicacion.codigo });
@@ -111,10 +218,14 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
           mensaje: 'La cabecera Idempotency-Key no tiene un formato aceptable.',
         });
       // Sin `dispositivo`: un reintento del mismo envío relee el GPS (otra antigüedad, otra
-      // lectura) y tiene que devolver el mismo reporte, no un 409 por «otro contenido».
-      const huella = huellaDePayload(d);
+      // lectura) y tiene que devolver el mismo reporte, no un 409 por «otro contenido». `d` incluye
+      // `categoria`, `subtipo` y `detalle`, así que la huella distingue envíos de categorías o
+      // detalles distintos (idempotencia por categoría).
+      const huella = huellaDePayload({ ...d, detalle });
 
-      const sev = calcularSeveridad(d);
+      // Severidad de la definición de la categoría (puntaje, banda y versión), no una función fija:
+      // para inundación es la misma v2 de siempre; para otra categoría, la suya.
+      const sev = def.severidad.calcular(detalle);
       const ipHash = ipHashDiario(req.ip, dep.cfg.salIp);
       // El id se genera aquí y no en la base porque el punto publicable se deriva de él: el
       // jitter va sembrado con `id|sal` para que el mismo reporte salga siempre en el mismo
@@ -136,7 +247,22 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         // Con el prefijo de la cuenta: la misma clave en dos cuentas son dos envíos distintos.
         const claveGuardada = clave.success ? claveDeCuenta(autor.id, clave.data) : null;
         if (claveGuardada) {
-          const estado = await reclamarClave(cliente, claveGuardada, huella);
+          let estado = await reclamarClave(cliente, claveGuardada, huella);
+          if (
+            estado.tipo === 'conflicto' &&
+            slug === 'inundacion' &&
+            detalle.causa_presunta === 'desconocida'
+          ) {
+            // Antes del detalle validado, la forma por categoría podía omitir este único default.
+            // Se conserva el bloqueo de la fila vigente y la misma transacción, sin reescribirla.
+            const detalleHistorico = { ...detalle };
+            delete detalleHistorico.causa_presunta;
+            estado = await reclamarClave(
+              cliente,
+              claveGuardada,
+              huellaDePayload({ ...d, detalle: detalleHistorico }),
+            );
+          }
           if (estado.tipo === 'conflicto') {
             await cliente.query('ROLLBACK');
             return res.status(409).send({
@@ -157,6 +283,7 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             const yaCreado = await obtenerReporte(cliente, estado.reporteId, 'cualquiera');
             if (yaCreado) {
               res.header('Idempotent-Replay', 'true');
+              registrarCompatibilidad(req.log, norm.forma, 'replay');
               return res.status(200).send(aFeature(vistaMiReporte(yaCreado, dep.cfg.urlPublica)));
             }
             // La clave apunta a un reporte que ya no está. Antes se seguía adelante, pero la
@@ -181,8 +308,10 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
          * Es la autoridad: lo que la interfaz muestre con `reportes_restantes_hoy` es una
          * cortesía, y el servidor no se fía de ella.
          */
-        const cupo = await reservarTurnoDeReporte(cliente, autor.id, {
-          maximo: dep.cfg.reportesPorDia,
+        // El límite efectivo de la categoría: el override de instalación o el de su `ReglaCupo`.
+        const limite = limiteReportesDe(def, dep.cfg.reportesPorDiaOverride);
+        const cupo = await reservarTurnoDeReporte(cliente, autor.id, slug, {
+          maximo: limite,
           zona: dep.cfg.zonaHoraria,
         });
         if (!cupo.permitido) {
@@ -191,32 +320,55 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
           res.header('Retry-After', String(cupo.espera.reintentarEnS));
           return res.status(429).send({
             codigo: 'CUOTA_DE_REPORTES',
-            mensaje: `Ya enviaste los ${dep.cfg.reportesPorDia} reportes de hoy. Vas a poder enviar otro mañana.`,
-            detalles: { disponible_en: cupo.espera.disponibleEn },
+            mensaje: `Ya enviaste los ${limite} reportes de hoy. Vas a poder enviar otro mañana.`,
+            // El cupo es por categoría (ADR 0017): la respuesta dice de cuál se agotó.
+            detalles: { disponible_en: cupo.espera.disponibleEn, categoria: slug },
           });
         }
 
         /*
-         * La demora de publicación (ADR 0006): el 1.º reporte del día de la cuenta se ve 60 s
-         * después y los siguientes, 240 s. `n` sale del contador de arriba, en esta misma
-         * transacción, así que dos envíos simultáneos reciben 60 y 240 sin carrera. La calcula la
-         * base con su reloj (el mismo de `creado_en` y del filtro `publicar_en <= now()`), y ningún
-         * cliente la puede adelantar.
+         * La demora de publicación (ADR 0006): el 1.º reporte del día de la cuenta EN ESA CATEGORÍA
+         * se ve 60 s después y los siguientes, 240 s. `n` sale del contador de arriba (la fila de la
+         * categoría), en esta misma transacción, así que dos envíos simultáneos reciben 60 y 240 sin
+         * carrera. La calcula la base con su reloj (el mismo de `creado_en` y del filtro
+         * `publicar_en <= now()`), y ningún cliente la puede adelantar.
          */
         const demoraS = cupo.n === 1 ? dep.cfg.demoraPrimeroS : dep.cfg.demoraSiguientesS;
+        // Reproduce el JSON de la 0020 sin alterar el detalle validado de huella/RF-01/severidad.
+        // Los opcionales NULL se omiten; false se conserva. Otras categorías guardan todo su detalle.
+        const detallePersistido =
+          slug === 'inundacion'
+            ? {
+                profundidad_estimada: detalle.profundidad_estimada,
+                frecuencia: detalle.frecuencia,
+                causa_presunta: detalle.causa_presunta,
+                ...(detalle.sumidero_cercano != null && {
+                  sumidero_cercano: detalle.sumidero_cercano,
+                }),
+                ...(detalle.sumidero_estado != null && {
+                  sumidero_estado: detalle.sumidero_estado,
+                }),
+                ...(detalle.agua_brota_sumidero != null && {
+                  agua_brota_sumidero: detalle.agua_brota_sumidero,
+                }),
+              }
+            : detalle;
         const ins = await cliente.query<{ id: string; publicar_en: Date }>(
-          `INSERT INTO reporte_inundacion (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
-           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion, profundidad_estimada, frecuencia, causa_presunta,
-           sumidero_cercano, sumidero_estado, agua_brota_sumidero, severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id,
+          `INSERT INTO reporte (geom, geom_publico, evento_en, autor_id, distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+           ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion,
+           categoria, subtipo, detalle, detalle_version,
+           severidad_calculada, severidad_puntaje, severidad_version, estado, ip_hash, id,
            distancia_dispositivo_m, publicar_en)
-         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($23, $24), 4326), $3, $4, $5, $6, $7, $8::jsonb,
-           $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, 'nuevo', $22, $25, $26,
-           now() + make_interval(secs => $27::int)) RETURNING id, publicar_en`,
+         VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($21, $22), 4326), $3, $4, $5, $6, $7, $8::jsonb,
+           $9, $10, $11, $12,
+           $13, $14, $15::jsonb, $16,
+           $17, $18, $19, 'nuevo', $20, $23,
+           $24, now() + make_interval(secs => $25::int)) RETURNING id, publicar_en`,
           [
             d.lon,
             d.lat,
             d.evento_en ?? null,
-            // SIEMPRE de la sesión, nunca del cuerpo de la petición. `ReporteCrearSchema` ni
+            // SIEMPRE de la sesión, nunca del cuerpo de la petición. El esquema de creación ni
             // siquiera tiene un campo de autor, así que un `autor_id` (o `usuario_id`, `userId`,
             // `owner_id`…) enviado por el cliente se descarta al validar y jamás llega hasta aquí.
             autor.id,
@@ -234,15 +386,14 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             ubicacion.precisionM,
             d.ubicacion_tipo,
             d.descripcion,
-            d.profundidad_estimada,
-            d.frecuencia,
-            d.causa_presunta,
-            d.sumidero_cercano ?? null,
-            d.sumidero_estado ?? null,
-            d.agua_brota_sumidero ?? null,
+            // Esquema 0022: JSON como única fuente física del dominio.
+            slug,
+            d.subtipo ?? null,
+            JSON.stringify(detallePersistido),
+            def.detalleVersion,
             sev.banda,
             sev.puntaje,
-            sev.version,
+            def.severidad.version,
             ipHash,
             publico.lon,
             publico.lat,
@@ -286,11 +437,16 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
             autor.id,
             JSON.stringify({
               estado: 'nuevo',
+              // La categoría del reporte (0.20.0): la auditoría de creación la registra para poder
+              // seguir el inventario por categoría.
+              categoria: slug,
               // El método con que se fijó la coordenada (ADR 0007). Nunca la posición del
               // dispositivo: `ubicacion` solo trae método, distancia y precisión (§0 regla 8).
               ubicacion_metodo: ubicacion.metodo,
               severidad: sev.banda,
               puntaje: sev.puntaje,
+              // Reglas de escalamiento de la definición (E1 de inundación con P = 4, §9.1): se anotan
+              // cuando la categoría las devuelve. `undefined` para una categoría que no escala.
               reglas: sev.reglas,
               publicar_en: publicarEn,
             }),
@@ -320,11 +476,22 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
         // La vista del autor (contracts 0.11.0): coordenada exacta, publicar_en y los segundos que
         // faltan, calculados en la base; la cuenta regresiva de la interfaz parte de acá.
         const fila = await obtenerReporte(cliente, id, 'cualquiera');
+        registrarCompatibilidad(req.log, norm.forma, 'aceptado');
         return res.status(201).send(aFeature(vistaMiReporte(fila!, dep.cfg.urlPublica)));
       } catch (e) {
         // Con .catch(): si el ROLLBACK también falla (conexión ya caída), el error que sube
         // tiene que seguir siendo el original, no el del rollback, que no explica nada.
         await cliente.query('ROLLBACK').catch(() => {});
+        // Borde del tope del `detalle`: la comprobación previa mide `JSON.stringify`, pero el CHECK
+        // `detalle_tope` mide `octet_length(detalle::text)` sobre el jsonb reserializado (con
+        // espacios tras `:` y `,`), que puede superar el tope aunque el `JSON.stringify` no lo haga.
+        // En ese caso el CHECK salta en el INSERT: se traduce al MISMO 400 PAYLOAD_INVALIDO que la
+        // comprobación previa, con el turno ya devuelto por el ROLLBACK. Solo esa violación concreta
+        // (23514 check_violation + la constraint por nombre); cualquier otro error sigue subiendo al
+        // manejador general (503 si es la base, 500 si no), sin tragarse otras violaciones.
+        const pe = e as { code?: string; constraint?: string };
+        if (pe.code === '23514' && pe.constraint === 'detalle_tope')
+          return res.status(400).send(RESPUESTA_DETALLE_GRANDE);
         throw e;
       } finally {
         cliente.release();
@@ -382,9 +549,21 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
    * de caché y que un proxy puede distinguir de un vistazo. Aquí no hay rama que equivocarse:
    * este código es incapaz de construir una vista técnica.
    */
+  const registro = registroDe(dep);
+
+  /** 400 CATEGORIA_NO_DISPONIBLE de las rutas públicas (categoría desconocida, inactiva o `todas`). */
+  const categoriaNoDisponible = {
+    codigo: CODIGO_CATEGORIA_NO_DISPONIBLE,
+    mensaje: 'Esa categoría no está disponible.',
+  };
+
   app.get('/api/v1/reportes', limiteLectura, async (req, res) => {
     const f = leerFiltros(req.query);
     if (f.error) return res.status(400).send(f.error);
+    // Público: exige UNA categoría activa. Sin el parámetro = inundacion (activa). `null`,
+    // `todas` o una categoría inactiva → 400 CATEGORIA_NO_DISPONIBLE (ADR 0012).
+    if (!(await categoriaPublica(app.categorias, f.datos.categoria)).ok)
+      return res.status(400).send(categoriaNoDisponible);
     const { filas, total, totalExacto } = await listarReportes(dep.pool, {
       filtros: f.datos,
       soloPublicos: true,
@@ -395,7 +574,9 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     cacheDeListadoPublico(res);
     return {
       type: 'FeatureCollection',
-      features: filas.map((r) => aFeature(vistaPublica(r, dep.cfg.urlPublica, dep.cfg.salJitter))),
+      features: filas.map((r) =>
+        aFeature(vistaPublica(r, dep.cfg.urlPublica, dep.cfg.salJitter, registro)),
+      ),
       total,
       total_exacto: totalExacto,
       pagina: f.datos.pagina,
@@ -413,12 +594,14 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
     if (!uuid)
       return res.status(404).send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado.' });
     const fila = await obtenerReporte(dep.pool, uuid, 'publico');
-    if (!fila)
+    // Sin `?categoria`: se acepta el reporte de cualquier categoría ACTIVA. Si el reporte es de una
+    // categoría inactiva, 404 igual que uno oculto: no se delata su existencia (decisión M3.3).
+    if (!fila || !(await app.categorias.estaActiva(fila.categoria)))
       return res
         .status(404)
         .send({ codigo: 'NO_EXISTE', mensaje: 'Reporte no encontrado o aún no publicado.' });
     cacheDeListadoPublico(res);
-    return aFeature(vistaPublica(fila, dep.cfg.urlPublica, dep.cfg.salJitter));
+    return aFeature(vistaPublica(fila, dep.cfg.urlPublica, dep.cfg.salJitter, registro));
   });
 
   /*
@@ -441,6 +624,13 @@ export async function rutasReportes(app: FastifyInstance, dep: Dependencias) {
   app.get('/api/v1/tecnico/reportes', soloTecnico, async (req, res) => {
     const f = leerFiltros(req.query);
     if (f.error) return res.status(400).send(f.error);
+    // Panel: admite `todas` y cualquier categoría conocida, activa o no. Un slug desconocido
+    // (`null`) es un filtro inválido, con el mismo código que los demás filtros de la ruta.
+    if (!categoriaPanel(f.datos.categoria).ok)
+      return res.status(400).send({
+        codigo: 'FILTROS_INVALIDOS',
+        mensaje: 'categoria: la categoría indicada no existe.',
+      });
     const { filas, total, totalExacto } = await listarReportes(dep.pool, {
       filtros: f.datos,
       soloPublicos: false,

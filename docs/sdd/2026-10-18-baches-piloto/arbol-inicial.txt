@@ -1,0 +1,17 @@
+# F0 — M6 Baches
+Fecha: 2026-10-18
+Rama: codex/baches-piloto
+HEAD y ref de partida: 59b80781030707b8c3334bfbfd40f80000c60a57
+Referencia: refs/sdd/baches-piloto (59b80781030707b8c3334bfbfd40f80000c60a57)
+Archivos seguidos con SHA256: 877
+Inventario físico: .turbo/m6-2026-10-18/arbol-inicial.json
+Plan tal como se aprobó: .turbo/m6-2026-10-18/plan-aprobado.md
+
+Estado inicial:
+## codex/baches-piloto
+ M VentanaContexto.md
+ M docs/README.md
+ M docs/sdd/README.md
+?? docs/sdd/2026-10-18-baches-piloto/
+
+Los únicos cambios iniciales son plan, índices y continuidad propios de la preparación M6. No hay ajenos funcionales. Sin stash, snapshot commit, reset ni borrado.

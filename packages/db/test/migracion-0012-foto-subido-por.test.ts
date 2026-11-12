@@ -49,7 +49,7 @@ beforeAll(async () => {
   );
   fotoVieja = f!.id;
 
-  resto = await aplicarMigraciones(ex);
+  resto = await aplicarMigraciones(ex, { autorizarContraccionCompatible: true });
 }, 240_000);
 
 afterAll(async () => {

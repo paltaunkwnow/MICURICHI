@@ -6,12 +6,21 @@
  * migrada desde cero, que cada tabla tiene una decisión escrita para los dos roles: una tabla nueva
  * sin decisión falla en las pruebas y no recién al verificar contra Docker.
  *
- * Es la misma matriz que documentan las migraciones 0008, 0009, 0014 y 0016 y el informe de seguridad.
+ * Es la misma matriz que documentan las migraciones 0008, 0009, 0014, 0016 y 0020 y el informe de
+ * seguridad. Desde la 0020 `reporte_inundacion` es una VISTA (no una tabla) y no aparece aquí:
+ * `verificar-privilegios.mjs` recorre tablas base (pg_tables). La tabla real es `reporte`, con los
+ * mismos privilegios que tenía `reporte_inundacion` (heredados del renombre).
  */
 
 export const ESPERADO = {
   curichi_api: {
-    'public.reporte_inundacion': ['SELECT', 'INSERT', 'UPDATE'],
+    // Antes `reporte_inundacion` (renombrada por la 0020). La vista de compatibilidad hereda sus
+    // privilegios al consultarla (security_invoker).
+    'public.reporte': ['SELECT', 'INSERT', 'UPDATE'],
+    // Catálogo de categorías (0020): solo lectura; lo listará api-core en M3.
+    'public.categoria': ['SELECT'],
+    // Contador genérico de cupo (0020): cuenta, reserva, libera y el mantenimiento borra ventanas viejas.
+    'public.cupo_contador': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
     'public.reporte_foto': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
     'public.auditoria': ['INSERT'],
     // Solo SELECT a nivel de TABLA. El INSERT y el UPDATE existen, pero acotados a unas pocas
@@ -23,9 +32,8 @@ export const ESPERADO = {
     'public.sesion': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
     'public.intento_login': ['SELECT', 'INSERT', 'DELETE'],
     'public.idempotencia': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
-    // Cupo diario (0014): cuenta y reserva (INSERT/UPDATE), libera el turno de una foto que no se
-    // pudo procesar (UPDATE) y el mantenimiento borra los días anteriores (DELETE).
-    'public.cuota_reporte_diaria': ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+    // Archivo0022: ninguna operación de aplicación, tampoco limpieza o FK que elimine la copia.
+    'resguardo_m10.cuota_reporte_diaria': [],
     'public.punto_critico': ['SELECT', 'INSERT', 'DELETE'],
     'public.spatial_ref_sys': ['SELECT'],
     'public._migraciones': [],
@@ -35,7 +43,9 @@ export const ESPERADO = {
     'geo.capa_version': ['SELECT', 'UPDATE'],
   },
   curichi_geo: {
-    'public.reporte_inundacion': ['SELECT'],
+    'public.reporte': ['SELECT'],
+    'public.categoria': ['SELECT'],
+    'public.cupo_contador': [],
     'public.punto_critico': ['SELECT'],
     'public.spatial_ref_sys': ['SELECT'],
     'public.reporte_foto': [],
@@ -44,7 +54,7 @@ export const ESPERADO = {
     'public.sesion': [],
     'public.intento_login': [],
     'public.idempotencia': [],
-    'public.cuota_reporte_diaria': [],
+    'resguardo_m10.cuota_reporte_diaria': [],
     'public._migraciones': [],
     'geo.distrito_municipal': ['SELECT'],
     'geo.unidad_vecinal': ['SELECT'],

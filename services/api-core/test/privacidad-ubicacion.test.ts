@@ -191,14 +191,13 @@ describe('el bbox público no puede usarse como oráculo de la coordenada exacta
   // bloque no cambian.
   async function insertarConPuntoPublicable(): Promise<string> {
     const { rows } = await pool.query<{ id: string }>(
-      `INSERT INTO reporte_inundacion
-         (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
-          descripcion, profundidad_estimada, frecuencia,
-          severidad_calculada, severidad_puntaje, severidad_version, estado, publicar_en)
-       VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($3, $4), 4326),
-          'distrito_municipal:01', 'unidad_vecinal:A', 'manual', 'vivienda_o_predio',
-          'Reporte con punto publicable fijado para la prueba', 'rodilla', 'ocasional',
-          'media', 6, 2, 'validado', now())
+      `INSERT INTO reporte (geom, geom_publico, distrito_id, unidad_vecinal_id, ubicacion_metodo, ubicacion_tipo,
+       descripcion, categoria, detalle, detalle_version, severidad_calculada, severidad_puntaje,
+       severidad_version, estado, publicar_en)
+     VALUES (ST_SetSRID(ST_MakePoint($1, $2), 4326), ST_SetSRID(ST_MakePoint($3, $4), 4326), 'distrito_municipal:01', 'unidad_vecinal:A',
+       'manual', 'vivienda_o_predio', 'Reporte con punto publicable fijado para la prueba', 'inundacion',
+       '{"profundidad_estimada":"rodilla","frecuencia":"ocasional","causa_presunta":"desconocida"}'::jsonb, 1, 'media', 6,
+       2, 'validado', now())
        RETURNING id::text`,
       [EXACTO.lon, EXACTO.lat, PUBLICADO.lon, PUBLICADO.lat],
     );
@@ -278,7 +277,7 @@ describe('el punto crítico no publica la coordenada exacta de un reporte aislad
       `SELECT ST_Y(pc.geom) AS lat, ST_X(pc.geom) AS lon,
               ST_Y(pc.geom_publico) AS lat_pub, ST_X(pc.geom_publico) AS lon_pub, pc.n_reportes AS n
        FROM punto_critico pc
-       JOIN reporte_inundacion r ON r.punto_critico_id = pc.id
+       JOIN reporte r ON r.categoria = 'inundacion' AND r.punto_critico_id = pc.id
        WHERE r.id = $1`,
       [id],
     );
@@ -294,7 +293,7 @@ describe('el punto crítico no publica la coordenada exacta de un reporte aislad
     // exigir que cada componente difiera del original no lo es, ya que el redondeo a 5 decimales
     // (≈ 1 m) devuelve a veces la latitud o la longitud a su valor de partida.
     const { rows: rep } = await pool.query<{ lon_pub: number; lat_pub: number }>(
-      'SELECT ST_X(geom_publico) AS lon_pub, ST_Y(geom_publico) AS lat_pub FROM reporte_inundacion WHERE id = $1',
+      "SELECT ST_X(geom_publico) AS lon_pub, ST_Y(geom_publico) AS lat_pub FROM reporte WHERE categoria = 'inundacion' AND id = $1",
       [id],
     );
     expect(pc.lon_pub).not.toBeNull();

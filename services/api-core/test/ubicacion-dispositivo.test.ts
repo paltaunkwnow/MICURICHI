@@ -70,14 +70,18 @@ async function crear(payload: Record<string, unknown>, headers: Record<string, s
 }
 
 async function cuantosReportes(): Promise<number> {
-  const r = await pool.query<{ n: string }>('SELECT count(*)::text AS n FROM reporte_inundacion');
+  const r = await pool.query<{ n: string }>(
+    "SELECT count(*)::text AS n FROM reporte WHERE categoria = 'inundacion'",
+  );
   return Number(r.rows[0]!.n);
 }
 
 async function turnoGastado(): Promise<boolean> {
+  // Desde M3 el cupo de reportes vive en `cupo_contador` (clave `reportes:<categoría>`).
   const r = await pool.query<{ gastado: boolean }>(
-    `SELECT COALESCE(sum(c.reportes_n), 0) > 0 AS gastado
-       FROM cuota_reporte_diaria c JOIN usuario u ON u.id = c.usuario_id WHERE u.email = $1`,
+    `SELECT COALESCE(sum(c.n), 0) > 0 AS gastado
+       FROM cupo_contador c JOIN usuario u ON u.id = c.usuario_id
+      WHERE u.email = $1 AND c.clave LIKE 'reportes:%'`,
     [CUENTAS.vecina],
   );
   return r.rows[0]!.gastado;
@@ -133,7 +137,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await pool.query('DELETE FROM auditoria');
   await pool.query('DELETE FROM idempotencia');
-  await pool.query('DELETE FROM reporte_inundacion');
+  await pool.query("DELETE FROM reporte WHERE categoria = 'inundacion'");
   await liberarCuota(ex);
 });
 
@@ -258,7 +262,7 @@ describe('POST /reportes: radio, precisión y antigüedad', () => {
     expect(r.statusCode, r.body).toBe(201);
     const fila = await pool.query(
       `SELECT ubicacion_metodo::text, precision_gps_m::float8 AS precision, distancia_dispositivo_m
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     expect(fila.rows[0]).toEqual({
@@ -283,7 +287,7 @@ describe('POST /reportes: radio, precisión y antigüedad', () => {
       expect(r.statusCode, r.body).toBe(201);
       const fila = await pool.query<{ metodo: string; distancia: number }>(
         `SELECT ubicacion_metodo::text AS metodo, distancia_dispositivo_m AS distancia
-           FROM reporte_inundacion WHERE id = $1`,
+           FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
         [r.json().id],
       );
       return fila.rows[0];
@@ -356,7 +360,7 @@ describe('POST /reportes: radio, precisión y antigüedad', () => {
     expect(r.statusCode, r.body).toBe(201);
     const fila = await pool.query(
       `SELECT ubicacion_metodo::text, precision_gps_m::float8 AS precision
-         FROM reporte_inundacion WHERE id = $1`,
+         FROM reporte WHERE categoria = 'inundacion' AND id = $1`,
       [r.json().id],
     );
     expect(fila.rows[0]).toEqual({
@@ -406,7 +410,7 @@ describe('la posición del teléfono no queda en ningún lado', () => {
     expect(rechazo.statusCode).toBe(422);
 
     const fila = await pool.query<{ t: string }>(
-      'SELECT row_to_json(r)::text AS t FROM reporte_inundacion r WHERE id = $1',
+      "SELECT row_to_json(r)::text AS t FROM reporte r WHERE r.categoria = 'inundacion' AND id = $1",
       [id],
     );
     const auditoria = await pool.query<{ t: string }>(

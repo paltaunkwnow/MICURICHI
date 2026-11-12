@@ -19,7 +19,12 @@
  *  - La caché es esta, en memoria (`cache: 'no-store'` para la de datos de Next): el respaldo nunca
  *    queda guardado y el contenedor no necesita escribir en disco.
  */
-import { type Ciudad, CONFIG_DOMINIO, ConfiguracionPublicaSchema } from 'contracts';
+import {
+  type Ciudad,
+  CONFIG_DOMINIO,
+  type ConfiguracionPublica,
+  ConfiguracionPublicaSchema,
+} from 'contracts';
 
 export const RUTA_CONFIGURACION = '/api/v1/configuracion';
 
@@ -39,6 +44,71 @@ export interface DependenciasLector {
   ahora?: () => number;
   registrar?: (mensaje: string, causa?: unknown) => void;
   plazoMs?: number;
+}
+
+/** Estado de lectura del panel; el respaldo de ciudad nunca habilita categorías. */
+export type EstadoConfiguracion = {
+  configuracion: ConfiguracionPublica | null;
+  aviso: string | null;
+};
+
+/** Lector completo, separado para conservar el contrato del lector de ciudad legado. */
+export function crearLectorDeConfiguracion({
+  urlBase,
+  pedir = fetch,
+  ahora = Date.now,
+  registrar = console.error,
+  plazoMs = PLAZO_MS,
+  inicial,
+  esperarRenovacion = false,
+}: DependenciasLector & {
+  inicial?: EstadoConfiguracion;
+  esperarRenovacion?: boolean;
+}): () => Promise<EstadoConfiguracion> {
+  let estado: EstadoConfiguracion = inicial ?? { configuracion: null, aviso: null };
+  let leidaEn = estado.configuracion ? ahora() : 0;
+  let enCurso: Promise<EstadoConfiguracion> | null = null;
+  function renovar(): Promise<EstadoConfiguracion> {
+    if (!enCurso)
+      enCurso = Promise.resolve()
+        .then(async () => {
+          const r = await pedir(`${urlBase().replace(/\/+$/, '')}${RUTA_CONFIGURACION}`, {
+            cache: 'no-store',
+            credentials: 'omit',
+            headers: { accept: 'application/json' },
+            signal: AbortSignal.timeout(plazoMs),
+          });
+          if (r.status !== 200) throw new Error(`api-core respondió ${r.status}`);
+          const resultado = ConfiguracionPublicaSchema.safeParse(await r.json());
+          if (!resultado.success || resultado.data.categorias_activas === undefined)
+            throw new Error('Falta una configuración completa válida con categorias_activas.');
+          estado = { configuracion: resultado.data, aviso: null };
+          leidaEn = ahora();
+          return estado;
+        })
+        .catch((causa: unknown) => {
+          estado = {
+            configuracion: estado.configuracion,
+            aviso: estado.configuracion
+              ? 'No se pudo actualizar la configuración. Se usa la última configuración válida.'
+              : 'La configuración de categorías no está disponible. Intentá de nuevo.',
+          };
+          registrar('[configuracion] No se pudo leer la configuración completa del panel.', causa);
+          return estado;
+        })
+        .finally(() => {
+          enCurso = null;
+        });
+    return enCurso;
+  }
+  return async () => {
+    if (!estado.configuracion) return renovar();
+    if (ahora() - leidaEn >= REVALIDAR_MS) {
+      if (esperarRenovacion) return renovar();
+      void renovar();
+    }
+    return estado;
+  };
 }
 
 export function crearLectorDeCiudad({

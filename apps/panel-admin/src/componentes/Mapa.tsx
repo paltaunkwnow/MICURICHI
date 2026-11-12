@@ -1,13 +1,14 @@
 'use client';
 
 import { useQueryClient } from '@tanstack/react-query';
-import type { CapaInfo, EstadoReporte, ReporteTecnicoFeature, Severidad } from 'contracts';
+import type { CapaInfo, EstadoReporte, RegistroCategorias, Severidad } from 'contracts';
 import { X } from 'lucide-react';
 import type { LngLatBoundsLike, Map as MapaGl } from 'maplibre-gl';
 // MapLibre 6 es ESM puro: no tiene export por defecto.
 import * as maplibregl from 'maplibre-gl';
 import Link from 'next/link';
 import { etiquetarControlesDelMapa } from '@/lib/accesibilidad-mapa';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
 import { configurarWorkerDeMapLibre } from '@/lib/worker-maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef, useState } from 'react';
@@ -29,6 +30,8 @@ import {
   etiquetaUnidadVecinal,
 } from '@/lib/formato';
 import { bboxDeLimites, textoZonaCentro, zonaDeFeature } from '@/lib/mapa-seleccion';
+import { urlDetallePanel } from '@/lib/seleccion-panel';
+import { InsigniaCategoria } from './InsigniaCategoria';
 
 // Base clara y desaturada, como en el prototipo: el técnico necesita leer las calles debajo de
 // los puntos. Fase 2: base vectorial propia <a confirmar> (CLAUDE.md §14.3).
@@ -69,6 +72,9 @@ export type FeaturePuntoReporte = {
 };
 
 export interface PropsMapa {
+  ambito?: string | null;
+  registro?: RegistroCategorias;
+  volver?: string;
   reportes?: (ReporteTecnicoFeature | FeaturePuntoReporte)[];
   capas?: CapaInfo[];
   onSeleccionar?: (id: string) => void;
@@ -86,6 +92,8 @@ export interface PropsMapa {
   seleccionado?: string | null;
   /** Encuadra los reportes cada vez que cambian (tabla) o el punto único (detalle). */
   ajustarAPuntos?: boolean;
+  /** Acción explícita de selección territorial; permite encuadrar una UV nueva tras cambiar categoría. */
+  claveEncuadre?: string | null;
   /**
    * Vista inicial. Sin ellos, el centro de la ciudad del despliegue y su zoom inicial un nivel
    * más lejos (`vistaInicialDelPanel`); después mandan los filtros y los puntos.
@@ -152,6 +160,9 @@ const OPCIONES_CAPAS: Array<{ valor: CapaVisible; texto: string }> = [
 
 export function Mapa({
   reportes = [],
+  ambito,
+  registro,
+  volver,
   capas = [],
   onSeleccionar,
   onSeleccionarDistrito,
@@ -160,6 +171,7 @@ export function Mapa({
   mostrarZonaCentro = false,
   seleccionado = null,
   ajustarAPuntos = false,
+  claveEncuadre,
   centro,
   zoom,
   className = '',
@@ -186,6 +198,28 @@ export function Mapa({
   const [zonaCentroTexto, setZonaCentroTexto] = useState<string | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
   const popupNodo = useRef<HTMLDivElement | null>(null);
+  const ultimoAmbito = useRef(ambito);
+  const conservarVista = useRef(false);
+  const ajusteAnterior = useRef(ajustarAPuntos);
+  const claveAnterior = useRef(claveEncuadre);
+  if (ultimoAmbito.current !== ambito) {
+    conservarVista.current = true;
+    ultimoAmbito.current = ambito;
+  } else if (
+    (!ajusteAnterior.current && ajustarAPuntos) ||
+    claveAnterior.current !== claveEncuadre
+  ) {
+    conservarVista.current = false;
+  }
+  ajusteAnterior.current = ajustarAPuntos;
+  claveAnterior.current = claveEncuadre;
+  const ambitoPopup = useRef(ambito);
+  useEffect(() => {
+    if (ambitoPopup.current !== ambito) {
+      ambitoPopup.current = ambito;
+      setPopup(null);
+    }
+  }, [ambito]);
   if (typeof document !== 'undefined' && !popupNodo.current) {
     popupNodo.current = document.createElement('div');
   }
@@ -389,7 +423,7 @@ export function Mapa({
       listo.current = true;
       aplicarCapas(m, capasRef.current, origenDeLaPagina());
       ajustarVisibilidadCapas(m, modoCapaRef.current);
-      aplicarReportes(m, reportesRef.current, ajustarRef.current);
+      aplicarReportes(m, reportesRef.current, ajustarRef.current && !conservarVista.current);
       if (m.getLayer('puntos-seleccionado')) {
         m.setFilter('puntos-seleccionado', ['==', ['get', 'id'], seleccionRef.current ?? '']);
       }
@@ -446,11 +480,12 @@ export function Mapa({
     return () => document.removeEventListener('keydown', alTecla);
   }, [popup]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: un ámbito o una selección territorial nuevos deben aplicar su resguardo/encuadre aunque reutilicen el mismo array cacheado.
   useEffect(() => {
     if (mapa.current && listo.current) {
-      aplicarReportes(mapa.current, reportes, ajustarAPuntos);
+      aplicarReportes(mapa.current, reportes, ajustarAPuntos && !conservarVista.current);
     }
-  }, [reportes, ajustarAPuntos]);
+  }, [reportes, ajustarAPuntos, ambito, claveEncuadre]);
 
   useEffect(() => {
     if (mapa.current && listo.current && mapa.current.getLayer('puntos-seleccionado')) {
@@ -485,7 +520,13 @@ export function Mapa({
       )}
       {popup && repPopup && popupNodo.current
         ? createPortal(
-            <TarjetaPunto reporte={repPopup} onCerrar={() => setPopup(null)} />,
+            <TarjetaPunto
+              reporte={repPopup}
+              onCerrar={() => setPopup(null)}
+              ambito={ambito}
+              registro={registro}
+              volver={volver}
+            />,
             popupNodo.current,
           )
         : null}
@@ -521,12 +562,18 @@ export function Mapa({
  * enlace «Ver detalle». No navega sola (el clic en el punto solo abre esto); el enlace sí. Se
  * enfoca al abrirse y se cierra con Escape (en el componente del mapa) o con el botón.
  */
-function TarjetaPunto({
+export function TarjetaPunto({
   reporte,
   onCerrar,
+  ambito,
+  registro,
+  volver,
 }: {
   reporte: ReporteTecnicoFeature | FeaturePuntoReporte;
   onCerrar: () => void;
+  ambito?: string | null;
+  registro?: RegistroCategorias;
+  volver?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -534,6 +581,7 @@ function TarjetaPunto({
   }, []);
   const p = reporte.properties as {
     id?: string;
+    categoria?: string;
     severidad: Severidad;
     estado?: EstadoReporte;
     unidad_vecinal?: { codigo?: string } | null;
@@ -566,12 +614,13 @@ function TarjetaPunto({
         </button>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <InsigniaCategoria categoria={p.categoria ?? 'inundacion'} registro={registro} />
         <ChipSeveridad severidad={p.severidad} />
         {p.estado ? <ChipEstado estado={p.estado} /> : null}
       </div>
       {id ? (
         <Link
-          href={`/reportes/${id}`}
+          href={urlDetallePanel(id, ambito ?? null, volver)}
           className="btn btn-sm btn-secundario mt-3 inline-flex items-center gap-1 px-2.5 py-1 text-xs font-normal"
           data-testid="popup-ver-detalle"
         >

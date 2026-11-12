@@ -20,13 +20,29 @@ export function reportesRestantes(
   return usuario.puede_reportar_desde ? 0 : null;
 }
 
-/** «Te quedan N de 3 reportes hoy», igual para cualquier N: es un contador, no una frase. */
-export function textoCupo(restantes: number): string {
-  return `Te quedan ${restantes} de ${REPORTES_POR_DIA} reportes hoy`;
+/**
+ * Reportes que le quedan hoy a la cuenta para UNA categoría (0.20.0, ADR 0012, 0017). Lo dice
+ * `/auth/yo` en `cupos[categoria]` desde M3b; con respaldo en los campos sueltos, que valen para
+ * inundación o para un api-core anterior a 0.20.0. Con inundación y una sola categoría activa el
+ * número es el mismo que `reportesRestantes`.
+ */
+export function restantesDeCategoria(
+  usuario: Pick<SesionActual, 'reportes_restantes_hoy' | 'puede_reportar_desde' | 'cupos'> | null,
+  categoria: string | null,
+): number | null {
+  const porCategoria = usuario && categoria ? usuario.cupos?.[categoria] : undefined;
+  if (porCategoria) return porCategoria.restantes;
+  return reportesRestantes(usuario);
 }
 
-/** El mismo texto que manda api-core en su 429, para cuando el cuerpo no lo trae. */
-export const TEXTO_CUPO_AGOTADO = `Ya enviaste los ${REPORTES_POR_DIA} reportes de hoy. Vas a poder enviar otro mañana.`;
+/** El servidor informa restantes, no el límite efectivo de la instalación. */
+export function textoCupo(restantes: number): string {
+  return `Te quedan ${restantes} reportes hoy`;
+}
+
+/** Aviso visual y respaldo del 429 cuando el servidor no entrega un mensaje propio. */
+export const TEXTO_CUPO_AGOTADO =
+  'Agotaste el cupo de reportes de hoy para esta categoría. Vas a poder enviar otro mañana.';
 
 export type EstadoCupo = 'comprobando' | 'agotado' | 'disponible';
 

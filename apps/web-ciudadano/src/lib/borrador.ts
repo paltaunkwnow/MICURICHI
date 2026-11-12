@@ -1,3 +1,4 @@
+import { CATEGORIA_DE_REPORTE_SIN_CAMPO } from './categoria';
 import {
   fechaEventoVigente,
   PASOS_REPORTE,
@@ -42,12 +43,20 @@ export const VALIDEZ_MS = 12 * 60 * 60 * 1000;
 export const VALIDEZ_FOTO_MS = 23 * 60 * 60 * 1000;
 
 /**
- * Formato del borrador. Hasta la corrida 2026-09-25-quitar-campos-del-reporte el asistente tenía
- * cinco pasos (profundidad y duración en el 2, frecuencia y afectación en el 3); ahora profundidad y
- * frecuencia van juntos en el 2 y todo lo que seguía se corre uno. Un borrador sin `formato` es
- * del asistente viejo: sin traducir su paso, quien iba por las fotos caería en la revisión.
+ * Formato del borrador.
+ *
+ * - Sin `formato`: el asistente de cinco pasos de antes de 2026-09-25-quitar-campos-del-reporte
+ *   (profundidad y duración en el 2, frecuencia y afectación en el 3). Su paso se traduce con
+ *   `PASO_VIEJO_A_NUEVO`; sin traducir, quien iba por las fotos caería en la revisión.
+ * - `formato: 2`: el asistente de cuatro pasos (profundidad y frecuencia juntas en el 2), todo de
+ *   Inundaciones y plano, sin `categoria`.
+ * - `formato: 3` (M4, ADR 0009, 0021): suma `categoria`. Los pasos y los valores de Inundaciones no
+ *   cambian respecto del 2, así que un borrador 2 se lee con los mismos pasos y se le pone la
+ *   categoría de siempre; una categoría declarativa guarda sus respuestas bajo `valores.detalle`.
  */
-const FORMATO = 2;
+const FORMATO = 3;
+/** Los formatos con la numeración de pasos ACTUAL (cuatro pasos). El formato sin número es el viejo (cinco). */
+const FORMATOS_CUATRO_PASOS = [2, 3];
 const PASO_VIEJO_A_NUEVO: Record<number, number> = { 1: 1, 2: 2, 3: 2, 4: 3, 5: 4 };
 
 /**
@@ -132,6 +141,12 @@ export interface Borrador {
   guardado_en: number;
   /** Momento en que se empezó ESTE formulario (misma clave). De acá se cuenta la caducidad. */
   creado_en: number;
+  /**
+   * La categoría del reporte (M4, formato 3). Un borrador de formato 2 o anterior es de Inundaciones
+   * (la única que había), así que al leerlo se le pone esa. Si no coincide con la categoría del
+   * formulario que se abre, no se restaura (`leerBorrador(categoriaEsperada)`).
+   */
+  categoria: string;
   paso: number;
   ubicacion: Ubicacion | null;
   /** Lo que respondió `POST /geo/v1/resolver` para esa ubicación, para no repetir la llamada. */
@@ -150,8 +165,13 @@ export interface Borrador {
   aproximado?: boolean;
 }
 
-/** Lo que guarda el formulario; las dos marcas de tiempo las pone `guardarBorrador`. */
-export type BorradorNuevo = Omit<Borrador, 'guardado_en' | 'creado_en'>;
+/**
+ * Lo que guarda el formulario; las dos marcas de tiempo las pone `guardarBorrador`. La `categoria`
+ * es opcional al guardar (sin ella se asume Inundaciones, la de siempre); el formulario la manda.
+ */
+export type BorradorNuevo = Omit<Borrador, 'guardado_en' | 'creado_en' | 'categoria'> & {
+  categoria?: string;
+};
 
 function almacen(): Storage | null {
   try {
@@ -195,6 +215,7 @@ export function guardarBorrador(b: BorradorNuevo): void {
         guardado_en: ahora,
         // Se conserva mientras sea el mismo formulario: guardar (o restaurar) no renueva el plazo.
         creado_en: creadoEnGuardado(s, b.clave) ?? ahora,
+        categoria: b.categoria ?? CATEGORIA_DE_REPORTE_SIN_CAMPO,
         formato: FORMATO,
       }),
     );
@@ -214,8 +235,12 @@ function fotosVigentes(fotos: unknown, ahora: number): FotoDelBorrador[] {
   );
 }
 
-/** Devuelve el borrador si existe, es legible y no caducó. Cualquier otra cosa es `null`. */
-export function leerBorrador(): Borrador | null {
+/**
+ * Devuelve el borrador si existe, es legible y no caducó. Cualquier otra cosa es `null`. Con
+ * `categoriaEsperada` (la del formulario que se abre) NO restaura un borrador de OTRA categoría:
+ * sus respuestas del paso 2 no servirían y mezclarlas sería peor que empezar de cero (M4, ADR 0021).
+ */
+export function leerBorrador(categoriaEsperada?: string): Borrador | null {
   const s = almacen();
   if (!s) return null;
   try {
@@ -225,6 +250,10 @@ export function leerBorrador(): Borrador | null {
     if (typeof b !== 'object' || b === null) return null;
     const d = b as Partial<Borrador>;
     if (typeof d.guardado_en !== 'number' || typeof d.clave !== 'string') return null;
+    // Un borrador de formato 2 o anterior es de Inundaciones (la única categoría que había).
+    const categoria =
+      typeof d.categoria === 'string' && d.categoria ? d.categoria : CATEGORIA_DE_REPORTE_SIN_CAMPO;
+    if (categoriaEsperada !== undefined && categoria !== categoriaEsperada) return null;
     // Un borrador anterior a `creado_en` no sabe cuándo empezó: lo mejor que hay es su guardado.
     const creadoEn = typeof d.creado_en === 'number' ? d.creado_en : d.guardado_en;
     const ahora = Date.now();
@@ -237,10 +266,13 @@ export function leerBorrador(): Borrador | null {
     );
     if (typeof valores.evento_en === 'string')
       valores.evento_en = fechaEventoVigente(valores.evento_en, new Date(ahora));
+    const formato = (b as { formato?: unknown }).formato;
+    const pasosActuales = typeof formato === 'number' && FORMATOS_CUATRO_PASOS.includes(formato);
     return {
       guardado_en: d.guardado_en,
       creado_en: creadoEn,
-      paso: pasoRestaurado(d.paso, (b as { formato?: unknown }).formato === FORMATO),
+      categoria,
+      paso: pasoRestaurado(d.paso, pasosActuales),
       ubicacion: ubicacionGuardada(d.ubicacion),
       resuelto: d.resuelto ?? null,
       fotos: fotosVigentes(d.fotos, ahora),
@@ -286,19 +318,29 @@ const VALORES_QUE_NO_CUENTAN = new Set([
   'lon',
 ]);
 
+/** ¿El `detalle` de una categoría declarativa trae alguna respuesta contestada? */
+function detalleTieneRespuestas(detalle: unknown): boolean {
+  if (typeof detalle !== 'object' || detalle === null) return false;
+  return Object.values(detalle).some(
+    (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && v.length === 0),
+  );
+}
+
 /**
  * ¿Hay algo que valga la pena restaurar, o el borrador está prácticamente vacío? Solo cuenta lo
  * que hizo la persona: el punto que puso la app (la posición del teléfono o el enlace «Me pasa a
- * mí») no, y los valores iniciales (todos `null` o vacíos) tampoco.
+ * mí») no, y los valores iniciales (todos `null` o vacíos) tampoco. El `detalle` de una categoría
+ * declarativa cuenta solo si trae una respuesta, no por existir vacío.
  */
 export function borradorTieneContenido(b: Borrador): boolean {
   return (
     b.paso > 1 ||
     b.fotos.length > 0 ||
     (!!b.ubicacion && !b.ubicacion.precargada) ||
-    Object.entries(b.valores).some(
-      ([clave, v]) =>
-        !VALORES_QUE_NO_CUENTAN.has(clave) && v !== undefined && v !== null && v !== '',
+    Object.entries(b.valores).some(([clave, v]) =>
+      clave === 'detalle'
+        ? detalleTieneRespuestas(v)
+        : !VALORES_QUE_NO_CUENTAN.has(clave) && v !== undefined && v !== null && v !== '',
     )
   );
 }

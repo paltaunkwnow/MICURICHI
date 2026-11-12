@@ -1,4 +1,3 @@
-import type { ReporteTecnicoFeature } from 'contracts';
 import {
   aclaracionMetodo,
   coordenadas,
@@ -8,6 +7,7 @@ import {
   precisionGps,
 } from '@/lib/formato';
 import { visibilidadPublica } from '@/lib/publicacion';
+import type { ReportePanel as ReporteTecnicoFeature } from '@/lib/reportes-panel';
 import { Dato } from './Dato';
 
 /** Lista de datos del bloque «Ubicación» del detalle técnico. */

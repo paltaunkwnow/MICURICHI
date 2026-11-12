@@ -1,8 +1,11 @@
 # web-ciudadano — Parte 1 — Frontend público / experiencia ciudadana
 
-App pública: mapa de puntos de inundación, panel de detalle y formulario de reporte. Especificación
-en `CLAUDE.md` §4.3. Implementada (tarea 7 de la Fase 1); el estado y los pendientes están en
-[`docs/TRASPASO.md`](../../docs/TRASPASO.md).
+App pública: mapa de puntos reportados por los vecinos, panel de detalle y formulario de reporte.
+Especificación en `CLAUDE.md` §4.3. Implementada (tarea 7 de la Fase 1); el estado y los pendientes
+están en [`docs/TRASPASO.md`](../../docs/TRASPASO.md). Desde M4 trabaja **por categoría** sobre el
+registro de `contracts` (ver [Categorías](#categorías)), con las cuatro definiciones reales de
+la versión 0.24.0: Inundaciones, Baches, Áreas verdes y Basura. El catálogo de cada instalación
+decide cuáles están activas; con una sola categoría activa no cambia nada visible.
 
 ```bash
 pnpm --filter web-ciudadano dev        # 3000; necesita api-core (3001) y geo-service (3002)
@@ -23,18 +26,28 @@ petición, y cambiarlas no exige volver a construir. Ver `.env.example`.
 | `PROXY_DE_CONFIANZA` | En cada petición (`src/proxy.ts`) | `1` solo con un proxy propio delante que reescriba `X-Forwarded-For` |
 | `HSTS` | En cada petición (`src/proxy.ts`) | `1` añade `Strict-Transport-Security`. Solo detrás de HTTPS |
 | `NODE_ENV` | En cada petición (`src/proxy.ts`) y al compilar | Distingue `next dev` de la imagen: `'unsafe-eval'` en la CSP y el registro del service worker. No cambia entre despliegues |
+| `CURICHI_INSTALACION_LOCAL` | Al compilar y arrancar Next | Solo `1` usa `.next-multitematica`, para la instalación local separada. Sin ese valor se conserva `.next` |
+
+El modo local se pasa únicamente al proceso de Next que se construye o arranca. No exige editar
+`.env` ni variables persistentes. Su salida standalone queda en
+`.next-multitematica/standalone/apps/web-ciudadano/server.js`; las instrucciones de la imagen
+habitual de abajo usan `.next`. Este cambio de salida no activa categorías ni prepara la base.
 
 Lo que **ya no** se configura en esta app:
 
-- **La ciudad** (nombre, centro y zoom del mapa, locale, zona horaria): la sirve api-core en
-  `GET /api/v1/configuracion` (contracts 0.7.0) a partir de sus variables `CIUDAD_*`. El layout
-  raíz la lee **en el servidor, antes del primer HTML** (`src/lib/ciudad-servidor.ts`) y la
-  reparte por contexto (`useCiudad()`), así que ninguna pantalla enseña otra ciudad ni un
-  instante. Se guarda 5 minutos y se renueva por detrás (`src/lib/configuracion.ts`). Si api-core
-  no responde y nunca respondió, se usa `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO` (Santa Cruz), se
-  registra en el log del servidor y **no** se guarda: la petición siguiente vuelve a preguntar.
-  Consecuencia: todas las páginas se generan al pedirlas (`connection()`), nunca al compilar;
-  si no, `next build` dejaría escrita en el HTML la ciudad del momento de construir.
+- **La ciudad** (nombre, centro y zoom del mapa, locale, zona horaria) **y las categorías
+  activas**: las sirve api-core en `GET /api/v1/configuracion` (contracts 0.7.0 y, para
+  `categorias_activas`, 0.20.0). La ciudad sale de sus variables `CIUDAD_*`; las categorías, del
+  catálogo de la base (ADR 0009). El layout raíz las lee **en el servidor, antes del primer HTML**
+  (`src/lib/ciudad-servidor.ts`) y las reparte por contexto (`useCiudad()`, `useCategorias()`),
+  así que ninguna pantalla enseña otra ciudad ni otra categoría ni un instante. Se guardan
+  5 minutos y se renuevan por detrás (`src/lib/configuracion.ts`). Si api-core no responde y nunca
+  respondió, se usa `CONFIG_DOMINIO.CIUDAD_POR_DEFECTO` (Santa Cruz) con `['inundacion']` como única
+  categoría activa (`CATEGORIAS_ACTIVAS_POR_DEFECTO`), se registra en el log del servidor y **no**
+  se guarda: la petición siguiente vuelve a preguntar. Un api-core que todavía no manda
+  `categorias_activas` recibe el mismo respaldo. Consecuencia: todas las páginas se generan al
+  pedirlas (`connection()`), nunca al compilar; si no, `next build` dejaría escrita en el HTML la
+  ciudad del momento de construir.
 - **La URL del panel**: llega en `panel_url` de `GET /api/v1/auth/yo`, que api-core solo manda a
   técnico, admin y ejecutivo (se configura en api-core con `PANEL_ADMIN_URL`). Antes se fijaba al
   compilar y viajaba en el JavaScript público.
@@ -77,9 +90,9 @@ corresponde a una pantalla suya:
 
 | Ruta | Pantalla del prototipo | Qué hace |
 |---|---|---|
-| `/` | C-01 en móvil, W-01 en escritorio | Mapa público. Buscador, filtros de severidad, capas, lista lateral en escritorio |
+| `/` | C-01 en móvil, W-01 en escritorio | Mapa público. Selector de categoría (solo con dos o más activas), buscador, filtros de severidad, capas, lista lateral en escritorio |
 | `/reporte/:id` | C-02 / W-02 | Detalle de un punto con enlace propio |
-| `/reportar` | C-07 a C-12 | Asistente de cuatro pasos, anclado a la posición del teléfono, y confirmación con código de seguimiento |
+| `/reportar` | C-07 a C-12 | Asistente de cuatro pasos de la categoría elegida (`?categoria=`), anclado a la posición del teléfono, y confirmación con código de seguimiento |
 | `/mis-reportes` | C-16 | Reportes de la cuenta en cualquier estado (`GET /api/v1/mis-reportes`), con la cuenta regresiva de los que esperan su publicación |
 | `/mis-reportes/:id` | C-17 | Línea de tiempo del reporte propio |
 | `/como-funciona` | C-06 | Tres pestañas: los pasos, los colores, qué no es |
@@ -114,7 +127,7 @@ MapLibre, con la base raster desaturada y los marcadores en pastilla del prototi
 color + nombre de la severidad escrito). Las pastillas son HTML y por eso se dibujan **solo cuando
 la vista trae pocos puntos**; por encima de ese tope manda el agrupamiento de MapLibre, que los
 resuelve en la GPU. Los distritos y las unidades vecinales se rellenan según cuántos reportes
-tienen, con el conteo escrito en la etiqueta.
+tienen **de la categoría que se está viendo**, con el conteo escrito en la etiqueta.
 
 ### El worker de MapLibre hay que servirlo aparte
 
@@ -141,6 +154,295 @@ acababan dibujadas por el navegador como último recurso. Ahora salen de
 ¿, ¡ y ·). Si alguna vez hiciera falta un carácter de fuera del rango, MapLibre lo dibuja
 localmente, que es exactamente lo que hacía antes con todo el texto.
 
+## Categorías
+
+Desde M4 la web trabaja **por categoría** (ADR [0009](../../docs/decisiones/0009-nucleo-y-registro-de-categorias.md),
+[0013](../../docs/decisiones/0013-mapa-unico-con-datos-por-categoria.md),
+[0014](../../docs/decisiones/0014-categoria-inicial-en-el-dispositivo.md),
+[0015](../../docs/decisiones/0015-prioridad-url-y-categoria-guardada.md),
+[0016](../../docs/decisiones/0016-reinicio-de-filtros-al-cambiar-categoria.md),
+[0021](../../docs/decisiones/0021-formularios-por-categoria.md) y
+[0022](../../docs/decisiones/0022-paleta-e-iconografia-de-categorias.md)) sobre el registro de
+`contracts` (0.23.0 desde M6.1). Una `DefinicionCategoria` trae los textos de pantalla, el icono (su nombre),
+los colores, las `preguntas` del paso 2, el esquema del `detalle`, la severidad, los filtros con
+alcance y los `camposPublicos`; el código común lee eso y no pregunta por una categoría concreta
+(ADR 0009 §6.3). Con una sola categoría activa no aparece selector y se conservan pasos,
+`name`, `data-testid` y URL sin `?categoria=`. En el cierre de M4 se corrigió el texto de cupo:
+«Te quedan N reportes hoy», sin un máximo supuesto. El anuncio de categoría mantiene una región
+invisible vacía desde el montaje y actualiza su contenido después, incluso con una sola activa.
+
+### Cuáles hay
+
+`ProveedorCategorias` (`src/lib/categorias-contexto.tsx`, montado en `src/app/proveedores.tsx`)
+recibe las activas del layout y `useCategorias()` entrega `{ activas, registro, definicionDe(slug) }`.
+`activasDelRegistro` deja solo las que además tienen definición en `REGISTRO_CATEGORIAS`, en el
+orden del registro: una categoría activa en la base y sin definición no existe para la web (falla
+cerrado, igual que en el servidor). `useCategoriasOpcional()`, sin proveedor, devuelve el registro y
+el respaldo `['inundacion']`: es para las piezas de presentación que también se pintan sueltas
+(`HojaDetalle`, `TarjetaReporte`); las pantallas que deciden qué categoría se muestra usan
+`useCategorias()`, que exige el proveedor.
+
+El registro real contiene **Inundaciones y Baches**. Registrar Baches no la activa: para
+ofrecerla hacen falta también `categorias_activas` de la instalación. M6 solo autoriza su
+activación temporal en el piloto aislado y la restauración del catálogo; esta app no cambia
+ese catálogo. Áreas verdes y Basura siguen sin definición. No se afirma actividad ni
+despliegue de las instalaciones habituales.
+
+### Cuál se muestra al abrir el mapa
+
+Prioridad de `resolverCategoriaInicial` (`contracts`), que `resolverCategoriaDeUrl`
+(`src/lib/categoria.ts`) compone con la URL:
+
+| # | Fuente | Regla |
+|---|---|---|
+| 1 | `?categoria=` | Válida y activa. Acepta alias: `Inundaciones`, `baches`, `areas-verdes`, con mayúsculas o sin tildes |
+| 2 | Preferencia del dispositivo | Válida y activa |
+| 3 | Defecto | Inundaciones; si no está activa, la primera activa en el orden del registro |
+
+`useCategoriaEfectiva()` devuelve `categoria: null` en el servidor y durante la hidratación, y
+resuelve al montar: hasta entonces **no se pide nada** (`enabled: categoria !== null`), para no
+traer ni un punto de una categoría que no es. Al resolver:
+
+- **La URL (D1 del plan M4).** Con **una sola** categoría activa el parámetro no existe: si llega,
+  se quita con `history.replaceState`, con el resto de la query y el `hash` intactos. Con **dos o
+  más**, se reescribe a la forma pública del slug (`inundacion`, `bache`, `area-verde`, `basura`) y
+  se agrega si faltaba.
+- **Una URL inválida o inactiva** se ignora (la prioridad cae a la preferencia o al defecto), se
+  corrige y se anuncia por `aria-live`: «Esa categoría no está disponible: mostrando X».
+- **La efectiva se guarda como «última usada»**, también si llegó por un enlace (ADR 0015).
+
+### La preferencia es del dispositivo
+
+`localStorage`, clave `micurichi.mapa.categoria`, valor `{ "v": 1, "slug": … }` (ADR 0014;
+`leerPreferenciaCategoria` y `guardarPreferenciaCategoria`). La lectura y la escritura van dentro
+de `try/catch`: un almacenamiento ausente, bloqueado (navegación privada) o lleno, un JSON roto o
+un valor de otra versión equivalen a «sin preferencia», nunca a un error. Las dos funciones reciben
+el almacén como parámetro (`AlmacenCategoria`), así que se prueban con uno falso y la escritura no
+usa el texto `localStorage.setItem`, que `misReportes.test.ts` prohíbe en el código de la app. No
+viaja al servidor ni se guarda en la cuenta, y en la URL y en el almacenamiento va **únicamente el
+slug**. **Solo el mapa la lee y la escribe**: la portada (`/inicio`) muestra la primera categoría
+activa y el formulario de reporte no la usa.
+
+### El selector y el cambio de categoría
+
+`SelectorCategoria` (`src/componentes/SelectorCategoria.tsx`) no dibuja nada con menos de dos
+categorías activas. Con dos o más es un `role="tablist"` con una pestaña (`role="tab"`) por
+categoría activa, en el orden del registro, con su icono y su nombre: la identidad es icono más
+nombre, el color de la categoría es solo el acento de la activa y el foco es el de la marca. Solo
+la pestaña activa entra en el orden de tabulación; flechas, Inicio y Fin mueven el foco y activan
+(`src/lib/teclado-pestanas.ts`); los objetivos miden 48 px y la activa se acerca a la vista, porque
+con cuatro en un celular la lista se desplaza a los lados. Se dibuja dos veces —la columna de
+escritorio (`selector-categoria`) y el panel flotante de móvil (`selector-categoria-movil`)— y solo
+una se ve.
+
+Al elegir otra (`VistaMapa.cambiarCategoria`), `reiniciarAlCambiarCategoria` aplica la ADR 0016
+mirando el `alcance` de cada `FiltroDef` de la definición **nueva**, no una lista suelta:
+
+| Qué | Pasa |
+|---|---|
+| Encuadre (`bbox`; el mapa no se mueve), distrito, unidad vecinal, capa de fondo | Se conservan (alcance global) |
+| Severidad | Se reinicia si su `FiltroDef` es `alcance: 'categoria'`, como en Inundaciones; solo se conservaría si la definición la marcara `global`. Una categoría con más filtros de dominio suma su campo a `EstadoMapaCategoria` y se clasifica igual |
+| Punto crítico elegido | Se reinicia siempre: es una agrupación por categoría |
+| Selección, hoja de detalle, búsqueda escrita | Se limpian |
+
+Además se guarda la preferencia, se corrige la URL (D1) y la región `aria-live`
+(`data-testid="anuncio-categoria"`, presente y vacía antes de actualizar el mensaje)
+anuncia «Mostrando Baches: 12 puntos» cuando llegan **los datos de la categoría nueva**
+(`textoAnuncioCategoria`). La URL no guarda los demás filtros del mapa: siguen en memoria.
+
+### Las lecturas llevan la categoría y no se mezclan
+
+- **Toda lectura del mapa manda la categoría efectiva**: `obtenerReportes({ categoria, … })` →
+  `GET /api/v1/reportes?categoria=…`, y `obtenerAgregados(categoria)` →
+  `GET /geo/v1/agregados/unidades-vecinales?categoria=…` (sin el parámetro, el servidor
+  respondería Inundaciones). La portada manda la primera categoría activa.
+- **Las claves la incluyen**: `['reportes', { categoria, … }]` y `['agregados', categoria]`.
+- **Sin contaminación.** El mapa conserva la vista anterior mientras llega la nueva
+  (`placeholderData`), pero `conservarSoloDeLaMismaCategoria` la deja pasar **solo si era de la
+  misma categoría**. Reemplaza a `keepPreviousData`, que la conservaba sin mirar la clave: al
+  cambiar de categoría mostraba los puntos de la otra mientras cargaba. Ahora la lista y el mapa
+  quedan en «Buscando puntos…» hasta que llegan los de la nueva. Los agregados no tienen
+  `placeholderData`, y `Mapa` recibe `claveDeDatos={categoria}`: cuando cambia, descarta el relleno
+  y los conteos por unidad vecinal y distrito de la anterior (`limpiarConteosDeCapas`,
+  `src/lib/conteos-mapa.ts`). Las fusiones asíncronas de etiquetas se invalidan por mapa y fuente:
+  una respuesta tardía de otra serie o de una limpieza no puede sobrescribir la vigente.
+- **Sigue sin haber tráfico automático**: la categoría es un parámetro, no una petición nueva.
+  Cambiar de categoría pide la nueva una vez; `['reportes']` y `['agregados']` mantienen
+  `staleTime: Infinity`, así que volver a una ya vista usa lo que siga en memoria.
+
+### Textos, detalle, tarjeta, leyenda y enlaces
+
+- **Textos de pantalla** (`textos` de la definición, contracts 0.21.0;
+  `textosParaCategoria(registro, slug)`): el título y el `aria-label` del mapa (`puntosDelMapa`), el
+  `h1` oculto del detalle (`puntoSingular`), el cuerpo de la lista vacía (`listaVaciaCuerpo`), el
+  título del paso 2 (`tituloPaso2`), el aviso de percepción del detalle (`avisoPercepcion`) y la
+  descripción de `/reportar` para buscadores (`descripcionReportar`, la de la primera categoría
+  activa: esa página se genera en el servidor). Lo que una definición no trae lo rellena
+  `textosDeCategoria`; mientras la categoría no se resolvió se usa `TEXTOS_CATEGORIA_POR_DEFECTO`,
+  que son los de Inundaciones, los de siempre.
+- **Detalle y tarjeta.** `presentadorDe(slug)` (`src/componentes/categorias/registro.ts`) da el
+  `PresentadorCategoria`, con `CamposDetalle` (las filas del `<dl>` del detalle) y `PastillaTarjeta`
+  (el dato de la tarjeta). Inundaciones registra el suyo (`inundacion.tsx`: profundidad por
+  referencia corporal, frecuencia y causa presunta). Cada dato toma primero un valor válido del
+  `detalle`, después un plano válido y, si faltan ambos, dice «Sin datos». Los planos nulos de
+  otra categoría o una respuesta malformada no se convierten en estimaciones de agua.
+  Áreas verdes envuelve ese presentador (`area-verde.tsx`) para mostrar el aviso de Persona y
+  su destino previsto, conservando datos, fotos y severidad recibidos. Las demás usan el genérico
+  (`generico.tsx`, `filas.ts`):
+  una fila por cada campo de `camposPublicos`, con la etiqueta de su pregunta y la de la opción
+  elegida (sin pregunta, la clave; un valor desconocido se muestra tal cual; lo vacío no produce
+  fila). Si el subtipo corresponde a una opción de la definición, el detalle lo muestra como
+  «Tipo de problema» y la tarjeta lleva esa etiqueta. Sin tipo reconocido, la tarjeta conserva
+  el primer dato público; sin definición no inventa filas. No se aplica a un reporte histórico
+  un subtipo actual que no se conoce.
+- **Leyenda.** `LeyendaMapa` suma el icono y el nombre de la categoría solo con dos o más activas.
+- **Iconos.** La definición guarda solo el nombre; `iconoDeCategoria` (`categorias/iconos.ts`) lo
+  resuelve a su componente de `lucide-react`, y un nombre desconocido cae al pin de mapa.
+- **Enlaces a `/reportar`** (`hrefReportar`): con una sola activa son `/reportar` o
+  `/reportar?lat=…&lon=…`, como siempre; con dos o más suman `categoria=` con la forma pública.
+  «Me pasa a mí» del detalle lleva la categoría del reporte.
+
+### El formulario por categoría
+
+- **Cuál categoría.** Sale de `?categoria=` de `/reportar` (los mismos alias y la misma corrección
+  de URL, D1; una inválida o inactiva se ignora, se corrige y se anuncia por `aria-live`) o, sin un
+  valor válido, es Inundaciones. **No lee ni guarda la preferencia del
+  dispositivo**, que es solo del mapa: por eso los enlaces del mapa llevan la categoría. Con dos o
+  más activas el paso 1 muestra «Categoría: X · Cambiar» (`SelectorCategoriaFormulario`); con una
+  no se dibuja. `cambiarCategoria` conserva la ubicación, el tipo de lugar, la descripción y las
+  fotos ya contestadas (`valoresTrasCambiarCategoria`) y reinicia las respuestas del paso 2, que
+  son de la categoría.
+- **Un adaptador por categoría** (ADR 0021). Los cuatro pasos son fijos: 1 ubicación, 2
+  «Qué pasa», 3 foto y descripción, 4 revisión. `FormularioReporte` resuelve el núcleo y le pide al
+  adaptador (`adaptadorFormularioDe(definicion)`, `src/componentes/formulario-categorias/`) lo
+  propio: `CuerpoPaso2`, `ExtraPaso3`, `valoresIniciales`, `puedeAvanzarPaso2`, `pasoDeCampo`,
+  `filasRevision`, `previsualizarSeveridad`, `aDetalle`, `subtipo` y el esquema de validación
+  (`esquemaFormulario`, `prepararParaValidar`). Se resuelve por
+  `ADAPTADORES_FORMULARIO[definicion.componenteEspecialPaso2]`; si el identificador está ausente,
+  usa el **declarativo**. Un identificador presente sin registro falla explícitamente:
+  - **Inundaciones** (componente especial, `inundacion.tsx`): el paso 2 de siempre, extraído sin
+    cambios —fecha del evento, profundidad, frecuencia y severidad con su puntaje—, y el bloque de
+    causa y sumidero del paso 3, con la lógica condicional del sumidero que una `Pregunta` no
+    expresa. Valida con el contrato plano.
+  - **Áreas verdes y Basura** (`area-verde.tsx`, `basura.tsx`): envolturas pequeñas del
+    declarativo, con las mismas preguntas, validación, detalle y previsualización. Persona
+    muestra el aviso literal aprobado en el paso 2, las fotos, la revisión y el detalle:
+    «Esto no es una denuncia. Se deriva a Desarrollo Social para ofrecer ayuda, no a seguridad.
+    No subas fotos donde se vea la cara de la persona.» Su destino previsto es Desarrollo Social;
+    los demás subtipos de Áreas verdes indican Parques y jardines. Se aclara que no hay derivación
+    municipal automática. No se promete ocultación ni difuminado de fotos; el comportamiento
+    local y la puerta de privacidad previa a producción siguen los límites de ADR 0018 y del
+    [plan aprobado](../../docs/sdd/2026-10-22-cuatro-categorias/plan.md).
+    Quema de basura muestra «Reportar quema de basura no sustituye la atención de emergencias.»
+    en el paso 2 y la revisión, sin número nuevo ni escalamiento por subtipo.
+    Los avisos dependen de la selección actual y desaparecen al cambiar o reiniciar el subtipo.
+  - **Declarativo** (`generico.tsx`, `crearAdaptadorGenerico`): dibuja las `preguntas` de la
+    definición (`opcion_unica`, `opcion_multiple`, `booleana`) bajo `detalle.<id>`, exige las
+    `obligatoria`, valida el núcleo más `def.esquemaDetalle`, arma la revisión desde las respuestas
+    y previsualiza la banda con `def.severidad.calcular` (sin puntaje). Si la definición ofrece
+    `subtipos`, pide elegir una opción con el rótulo público «Tipo de problema» y la conserva
+    con su etiqueta en revisión y con su valor en borrador/envío (`subtipo`, fuera de `detalle`). Aplica
+    `ubicacionTipoPorDefecto`; al cambiar categoría conserva el tipo de lugar ya elegido por la
+    persona, y si no lo eligió adopta el defecto nuevo. Un borrador restaurado conserva su lugar.
+- **El cuerpo** (D2 del plan M4). `armarEnvio` manda **la forma por categoría para todas, también
+  Inundaciones**: `{ lat, lon, dispositivo, ubicacion_aproximada, ubicacion_tipo, descripcion,
+  evento_en, fotos, sitio_web, categoria, detalle, subtipo? }` (`CuerpoReporte`, de
+  `ReporteCrearCategoriaSchema`). Para Inundaciones, `detalle` trae `profundidad_estimada`,
+  `frecuencia`, `causa_presunta` y el sumidero, y el contrato lo normaliza al mismo reporte que la
+  forma plana (`normalizarReporteCrear`; lo comprueba `formulario-reporte.test.ts`). La API sigue
+  aceptando la plana hasta M10 por los clientes viejos y la PWA en caché; esta web ya no la manda.
+- **El borrador es del formato 3** y guarda la `categoria` (ver
+  [El formulario no pierde lo escrito](#el-formulario-no-pierde-lo-escrito)).
+- **Cupo y demora por categoría.** `restantesDeCategoria` y `demoraDeCategoria`
+  (`src/lib/cupo.ts`, `src/lib/publicacion.ts`) leen `cupos[categoria]` de `GET /auth/yo`:
+  restantes y demora por categoría. El límite predeterminado es 3, configurable en el servidor;
+  la UI no lo supone a partir del contrato. El cupo de fotos (12) es global. Si falta, caen a los campos
+  sueltos (`reportes_restantes_hoy`, `demora_proximo_s`, `puede_reportar_desde`), que valen para
+  Inundaciones y para un api-core anterior a 0.20.0. Con el cupo de la categoría agotado se avisa
+  antes de pedir la ubicación. Un `CATEGORIA_NO_DISPONIBLE` del servidor tiene su texto en
+  `src/lib/errores.ts`.
+
+### Baches reales (M6.4)
+
+Baches reutiliza el adaptador y el presentador genéricos. Sus cinco tipos son Bache,
+Hundimiento de calzada, Tapa de alcantarilla faltante, Asfalto levantado y Calle de tierra
+intransitable. El paso 2 exige tipo, gravedad declarada y tamaño por referencia visual;
+`detalle` solo contiene `gravedad_declarada` y `tamano`, sin claves de agua. Se mantienen
+los cuatro pasos comunes, la ubicación, la cámara opcional, la revisión y el envío.
+
+La previsualización usa la banda de la definición real (16 combinaciones); no presenta su
+índice auxiliar como una medición ni lo compara con Inundaciones. El tamaño y la gravedad
+son percepción ciudadana; «Ya causó un accidente» es una declaración sin comprobar.
+Detalle y modelo disponibles en la **definición** son versión 1. La API actual no devuelve
+sus versiones históricas por reporte, por lo que la interfaz no se las atribuye a datos
+anteriores. Los parámetros del piloto requieren validación municipal antes de producción.
+
+La compatibilidad de contratos 0.23.0 permite planos públicos/propios nulos para Baches.
+Inundaciones explícita y el legado sin categoría siguen exigiendo sus tres planos de agua
+en el contrato; el respaldo visual «Sin datos» solo evita inventarlos ante una respuesta
+incompleta. El mapa conserva su encuadre y zona al cambiar de categoría, limpia la selección
+y los filtros propios, y mantiene la prioridad URL → preferencia → defecto. El borrador 3
+no se restaura en otra categoría; cupo/demora siguen viniendo de la sesión por categoría,
+con fotos globales. No se cambian rutas ni se agrega un formulario especial para Baches.
+
+### Sumar una categoría (M6 en adelante)
+
+1. **En `contracts`** (Parte 3, con anuncio): la definición en `src/categorias/<slug>/` y su línea
+   en `REGISTRO_CATEGORIAS` (`src/categorias/index.ts`), en el orden canónico: ese orden es el de
+   las pestañas del mapa y el de «Cambiar» del formulario. Los slugs y su forma de URL ya están en
+   `SLUGS_CATEGORIA`. Lo que la web lee de la definición: `nombre`, `textos`, `icono` y `colores`,
+   `preguntas`, `esquemaDetalle`, `severidad`, `filtros` con su `alcance` y `camposPublicos`. La
+   categoría tiene que estar además activa en el catálogo de la base, que es lo que llega en
+   `categorias_activas`.
+2. **En esta app**, comprobar el nombre de su icono en `ICONOS`
+   (`componentes/categorias/iconos.ts`; si falta, se usa el pin de mapa). `TrafficCone` para Baches
+   ya está resuelto con Lucide; no necesita otra dependencia ni rediseño. Con eso funcionan el
+   selector, las lecturas, los textos, el detalle y la tarjeta genéricos, el paso 2 declarativo, el
+   borrador, el cupo y los enlaces.
+3. **Cuándo hace falta algo especial** (el código común no cambia):
+   - un **presentador** (`PRESENTADORES` en `categorias/registro.ts`) si el detalle o la tarjeta no
+     se arman con «etiqueta de la pregunta, etiqueta de la opción» sobre `camposPublicos`;
+   - un **adaptador de formulario** (`ADAPTADORES_FORMULARIO` en
+     `formulario-categorias/registro.ts`) si el paso 2 necesita algo que `Pregunta` no expresa:
+     preguntas condicionales como las del sumidero, controles propios o una severidad con puntaje.
+     Hoy solo Inundaciones registra ambos. El presentador se elige por slug y el adaptador por
+     `definicion.componenteEspecialPaso2`, con error explícito si falta ese identificador en el registro.
+4. **Pruebas**: Vitest con una segunda categoría sintética (`src/lib/categoria-de-prueba.ts`,
+   `REGISTRO_DOS_CATEGORIAS`), que solo importan los `*.test.ts`: no hay una categoría de prueba
+   en el bundle. M6.4 añade `src/lib/m6-bache-real.test.ts` con la definición real, sin sustituir
+   los sintéticos; los negativos de registro ausente lo inyectan explícitamente. El E2E del
+   cambio de categoría, cámara/envío y encuadre en navegador corresponde al piloto M6.6;
+   las pruebas de helpers y render estático no lo certifican.
+5. **Cupo efectivo:** la UI consume restantes y demora del servidor, porque el límite de la
+   definición puede ser sustituido por la configuración de la instalación. `/cuenta` muestra
+   aún los campos sueltos de Inundaciones; el selector de cupos de cuenta queda para una fase
+   posterior. Subtipos y ubicación por defecto ya están cubiertos por el formulario común.
+6. **Escrito todavía para Inundaciones**: la portada (`/inicio`), `descripcionDeInicio`
+   (`src/lib/ciudad.ts`) y `CupoAgotado`.
+
+### Pruebas de las categorías
+
+Vitest, sin navegador (`pnpm --filter web-ciudadano test`):
+
+| Archivo | Qué cubre |
+|---|---|
+| `src/lib/categoria.test.ts` | Preferencia (almacén roto, lleno, corrupto, de otra versión), prioridad URL → guardada → defecto, alias, D1 con una y con dos o más activas, activas contra el registro y reinicio por alcance |
+| `src/lib/categoria-mapa.test.ts` | `conservarSoloDeLaMismaCategoria` con TanStack Query real, `hrefReportar`, `urlTrasElegirCategoria` y los textos de pantalla |
+| `src/lib/api-categoria.test.ts` | Las lecturas del mapa llevan `categoria` |
+| `src/lib/configuracion.test.ts` | Ciudad y `categorias_activas` normalizadas, con su respaldo |
+| `src/lib/conteos-mapa.test.ts` | La limpieza de los conteos al cambiar de categoría |
+| `src/lib/teclado-pestanas.test.ts`, `src/componentes/SelectorCategoria.test.ts` | Teclado y estado del tablist; oculto con una sola activa |
+| `src/componentes/VistaMapa.test.ts` | El mapa con una y con dos categorías, y que lee por categoría |
+| `src/componentes/categorias/presentadores.test.ts` | Presentadores de Inundaciones, Áreas verdes y genérico; Persona conserva foto y severidad recibida |
+| `src/lib/formato.test.ts` | Etiquetas válidas, nulos y respuestas malformadas sin datos de agua inventados |
+| `src/componentes/formulario-categorias/adaptadores.test.ts`, `SelectorCategoriaFormulario.test.ts` | Adaptadores del paso 2 y «Categoría: X · Cambiar» |
+| `src/componentes/formulario-categorias/area-verde.test.ts`, `basura.test.ts` | Avisos condicionales, revisión, validación y previsualización heredadas del declarativo |
+| `src/lib/cuatro-categorias-reales.test.ts` | Subtipos y envío real de las nuevas categorías, cambio sin contaminación, URL/catálogo de cuatro y salida Next optativa |
+| `src/lib/formulario-reporte.test.ts`, `src/lib/borrador.test.ts`, `src/lib/cupo-categoria.test.ts` | Cuerpo y su equivalencia con la forma plana, cambio de categoría, borrador 3, `cupos[categoria]` |
+| `src/lib/m6-bache-real.test.ts` | Adaptador/render real, cinco tipos legibles, detalle estricto, 16 bandas, respuestas públicas/propias nulas y estados del autor; URL/preferencia, disponibilidad, borrador y cupo con el registro productivo |
+
+`src/lib/categoria-de-prueba.ts` es la segunda categoría sintética que usan.
+
 ## El formulario no pierde lo escrito
 
 El asistente de cuatro pasos guarda un borrador en `sessionStorage` (`src/lib/borrador.ts`). El
@@ -156,9 +458,21 @@ tocar nada no deja borrador que retomar.
 El borrador guarda el punto del reporte, **nunca la posición del teléfono**: un borrador retomado
 vuelve al paso 1 a pedir la ubicación, y «Continuar» lleva de vuelta al paso donde había quedado.
 
+**Formato 3** (M4, ADR 0021): el borrador guarda la `categoria` del reporte, y una categoría
+declarativa guarda sus respuestas del paso 2 bajo `valores.detalle`. `leerBorrador(categoria)` **no
+restaura el borrador de otra categoría**: sus respuestas del paso 2 no servirían, y mezclarlas es
+peor que empezar de cero. Un borrador del formato 2 (cuatro pasos, plano) se lee con los mismos
+pasos y se le pone la categoría de siempre, Inundaciones; el formato sin número (cinco pasos)
+sigue traduciéndose con `PASO_VIEJO_A_NUEVO`. `borradorTieneContenido` cuenta el `detalle` solo si
+trae alguna respuesta, no por existir vacío.
+
 Las reglas del asistente que no necesitan React (qué habilita cada paso, la fecha del evento en la
-hora local, la coherencia del sumidero, el paso al que lleva cada error, el cuerpo del envío)
-viven en `src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`.
+hora local, la coherencia del sumidero, el paso al que lleva cada error, el cuerpo del envío, la
+validación contra el esquema de la categoría y qué se conserva al cambiar de categoría) viven en
+`src/lib/formulario-reporte.ts` y están probadas en su `.test.ts`. Lo propio de cada categoría
+—el paso 2, sus filas de la revisión, su `detalle`— las aporta su adaptador
+(`src/componentes/formulario-categorias/`, ver [Categorías](#categorías)); las funciones de
+`formulario-reporte.ts` reciben el adaptador y no preguntan por una categoría concreta.
 
 ## Paso 1: anclado a la posición del teléfono
 
@@ -317,7 +631,8 @@ sus estilos.
 La página pública no se refresca sola (`src/lib/consultas.ts`): ninguna consulta se vuelve a pedir
 por recuperar el foco, por volver la red ni por intervalo, y los reportes, los agregados y el
 detalle tienen `staleTime: Infinity`. Lo nuevo aparece al abrir una pantalla, al mover el mapa o
-tras enviar un reporte (invalidación explícita). `src/lib/consultas.test.ts` falla si alguna
+tras enviar un reporte (invalidación explícita) o al elegir otra categoría, cuya lectura lleva
+`categoria` en su clave (ver [Categorías](#categorías)). `src/lib/consultas.test.ts` falla si alguna
 pantalla vuelve a poner `refetchInterval` o el refresco por foco o reconexión. Un `staleTime`
 escrito en el propio `useQuery` pisa el `Infinity`: las pantallas no deben ponerlo para esas claves.
 
@@ -333,6 +648,13 @@ pnpm db:local          # terminal 1
 pnpm db:seed:samples
 pnpm --filter e2e test:e2e
 ```
+
+De las categorías, el E2E cubre hoy lo que existe con una sola activa: el cuerpo del envío en la
+forma por categoría (`categoria: 'inundacion'` y los campos propios dentro de `detalle`, en
+`quitar-campos-web.spec.ts` y `formulario-sumidero-y-fotos.spec.ts`) y `categorias_activas` en
+`GET /api/v1/configuracion` (`api-contratos.spec.ts`). **No hay E2E del cambio de categoría ni del
+selector**: necesitan una segunda categoría real y pasan a M6 (D3 del plan M4). Hasta entonces se
+prueban con Vitest y una categoría sintética (ver [Pruebas de las categorías](#pruebas-de-las-categorías)).
 
 La Definition of Done de `CLAUDE.md` §4.3 y §4.4 pide además una suite propia por app; queda
 pendiente de decidir si aporta algo sobre la transversal o si se consolida allí.

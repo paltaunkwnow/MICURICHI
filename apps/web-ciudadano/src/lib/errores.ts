@@ -1,4 +1,5 @@
 import {
+  CODIGO_CATEGORIA_NO_DISPONIBLE,
   CODIGOS_UBICACION_DISPOSITIVO,
   CONFIG_DOMINIO,
   type CodigoUbicacionDispositivo,
@@ -92,6 +93,11 @@ export function mensajeDeError(e: unknown): string {
   if (e instanceof ErrorApi) {
     if (e.codigo === 'FUERA_DE_COBERTURA') {
       return 'Ese punto queda fuera del municipio. Revisá la ubicación e intentá de nuevo.';
+    }
+    // La categoría del reporte no está activa o no existe (0.20.0, ADR 0012): el servidor la rechaza
+    // sin gastar cupo. Puede pasar con un enlace viejo o si se desactivó mientras se reportaba.
+    if (e.codigo === CODIGO_CATEGORIA_NO_DISPONIBLE) {
+      return 'Esa categoría ya no está disponible para reportar. Volvé al mapa y elegí una de las categorías activas.';
     }
     if (esUbicacionRechazada(e)) return MENSAJES_UBICACION[e.codigo as CodigoUbicacionDispositivo];
     if (e.estado === 429) {

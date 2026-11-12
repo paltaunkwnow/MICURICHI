@@ -87,10 +87,10 @@ afterAll(async () => {
   await base?.cerrar();
 });
 
-// Cada prueba parte de cero fotos y con el cupo del día entero.
+// Cada prueba parte de cero fotos y con el cupo del día entero (desde M3, en `cupo_contador`).
 beforeEach(async () => {
   await pool.query('DELETE FROM reporte_foto');
-  await pool.query('DELETE FROM cuota_reporte_diaria');
+  await pool.query('DELETE FROM cupo_contador');
 });
 
 function subir(cookie: string, datos: Buffer = JPEG) {
@@ -183,20 +183,24 @@ describe('autoría de la foto', PLAZO, () => {
   });
 });
 
-/** Fotos ya gastadas hoy (o `dias` atrás) por la cuenta, en el contador de la base. */
+/**
+ * Fotos ya gastadas hoy (o `dias` atrás) por la cuenta, en `cupo_contador` (clave global
+ * `fotos:cuenta`, M3). La ventana de un día es su medianoche local como `timestamptz`.
+ */
 async function fotosGastadas(usuarioId: string, n: number, dias = 0) {
   await pool.query(
-    `INSERT INTO cuota_reporte_diaria (usuario_id, dia, fotos_n)
-     VALUES ($1, (now() AT TIME ZONE $2)::date - $4::int, $3)
-     ON CONFLICT (usuario_id, dia) DO UPDATE SET fotos_n = EXCLUDED.fotos_n`,
+    `INSERT INTO cupo_contador (usuario_id, clave, ventana_inicio, n)
+     VALUES ($1, 'fotos:cuenta', (((now() AT TIME ZONE $2)::date - $4::int)::timestamp AT TIME ZONE $2), $3)
+     ON CONFLICT (usuario_id, clave, ventana_inicio) DO UPDATE SET n = EXCLUDED.n`,
     [usuarioId, ZONA, n, dias],
   );
 }
 
 async function gastadasHoy(usuarioId: string): Promise<number> {
   const r = await pool.query<{ n: number }>(
-    `SELECT COALESCE(sum(fotos_n), 0)::int AS n FROM cuota_reporte_diaria
-      WHERE usuario_id = $1 AND dia = (now() AT TIME ZONE $2)::date`,
+    `SELECT COALESCE(sum(n), 0)::int AS n FROM cupo_contador
+      WHERE usuario_id = $1 AND clave = 'fotos:cuenta'
+        AND ventana_inicio = ((now() AT TIME ZONE $2)::date::timestamp AT TIME ZONE $2)`,
     [usuarioId, ZONA],
   );
   return r.rows[0]!.n;

@@ -40,6 +40,8 @@ function ejecutorEspia(migracionesYaAplicadas: string[] = []): {
     },
     async consultar<T>(sql: string, params: unknown[] = []) {
       pasos.push({ tipo: 'consultar', sql, enTransaccion: profundidad });
+      if (sql.includes('to_regclass'))
+        return [{ existe: migracionesYaAplicadas.length > 0 }] as T[];
       if (sql.includes('FROM _migraciones')) {
         const nombre = params[0] as string;
         return (migracionesYaAplicadas.includes(nombre) ? [{ nombre }] : []) as T[];
@@ -132,6 +134,49 @@ describe('arranque de las migraciones con varias réplicas (§7)', () => {
     // de omitir sea fiable y no una lectura sucia de antes de que la otra réplica terminara.
     expect(pasos.some((p) => ES_LOCK(p.sql))).toBe(true);
     expect(pasos.some((p) => p.sql.includes('INSERT INTO _migraciones'))).toBe(false);
+  });
+});
+
+describe('consentimiento0022 del runner', () => {
+  it('no ejecuta DDL ni siquiera de una migración anterior sin consentimiento general', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0022_contraccion_compatible.sql']);
+    const { ex, pasos } = ejecutorEspia();
+    await expect(aplicarMigraciones(ex, { directorio: dir })).rejects.toThrow(
+      /autorizar-contraccion-compatible/,
+    );
+    expect(pasos.filter((p) => CREA_TABLA(p.sql) || ES_SQL_DE_MIGRACION(p.sql))).toEqual([]);
+  });
+  it('limita ambas señales locales a la transacción0022, conservando locks y plazos', async () => {
+    const dir = directorioConMigraciones(['0001_a.sql', '0022_contraccion_compatible.sql']);
+    const { ex, pasos } = ejecutorEspia();
+    await aplicarMigraciones(ex, { directorio: dir, autorizarContraccionCompatible: true });
+    const tx = porTransaccion(pasos);
+    expect(tx).toHaveLength(3);
+    expect(
+      tx
+        .slice(0, 2)
+        .flat()
+        .some((p) => p.sql.includes('autorizar_contraccion_compatible')),
+    ).toBe(false);
+    const ultima = tx[2]!;
+    expect(
+      ultima.findIndex((p) =>
+        p.sql.includes("SET LOCAL curichi.autorizar_contraccion_compatible = 'si'"),
+      ),
+    ).toBeGreaterThan(indice(ultima, ES_LOCK));
+    expect(
+      ultima.some((p) =>
+        p.sql.includes(
+          "set_config('curichi.autorizar_contraccion_compatible_tx',txid_current()::text,true)",
+        ),
+      ),
+    ).toBe(true);
+  });
+  it('0022 ya aplicada se omite sin autorización ni SET de consentimiento', async () => {
+    const dir = directorioConMigraciones(['0022_contraccion_compatible.sql']);
+    const { ex, pasos } = ejecutorEspia(['0022_contraccion_compatible.sql']);
+    expect((await aplicarMigraciones(ex, { directorio: dir })).aplicadas).toEqual([]);
+    expect(pasos.some((p) => p.sql.includes('SET LOCAL curichi.autorizar'))).toBe(false);
   });
 });
 

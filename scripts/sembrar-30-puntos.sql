@@ -1,7 +1,8 @@
 BEGIN;
 
 -- Insertar 30 reportes esparcidos por toda la ciudad, con Distrito 1 teniendo 5 puntos críticos.
-INSERT INTO reporte_inundacion (
+WITH fuente (
+  categoria,
   geom,
   geom_publico,
   creado_en,
@@ -28,11 +29,12 @@ INSERT INTO reporte_inundacion (
   estado,
   validado_por,
   validado_en
-) VALUES
+) AS (VALUES
   -- =========================================================================
   -- DISTRITO 1: 5 PUNTOS CRÍTICOS (Severidad Crítica)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.199742, -17.789610), 4326),
     ST_SetSRID(ST_MakePoint(-63.199742, -17.789610), 4326),
     now() - interval '2 days',
@@ -61,6 +63,7 @@ INSERT INTO reporte_inundacion (
     now() - interval '2 days' + interval '15 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.189383, -17.766424), 4326),
     ST_SetSRID(ST_MakePoint(-63.189383, -17.766424), 4326),
     now() - interval '2 days' + interval '3 hours',
@@ -89,6 +92,7 @@ INSERT INTO reporte_inundacion (
     now() - interval '2 days' + interval '3 hours' + interval '10 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.211217, -17.793948), 4326),
     ST_SetSRID(ST_MakePoint(-63.211217, -17.793948), 4326),
     now() - interval '1 day' + interval '5 hours',
@@ -117,6 +121,7 @@ INSERT INTO reporte_inundacion (
     now() - interval '1 day' + interval '5 hours' + interval '20 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.205842, -17.768803), 4326),
     ST_SetSRID(ST_MakePoint(-63.205842, -17.768803), 4326),
     now() - interval '1 day' + interval '8 hours',
@@ -145,6 +150,7 @@ INSERT INTO reporte_inundacion (
     now() - interval '1 day' + interval '8 hours' + interval '12 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.189099, -17.755434), 4326),
     ST_SetSRID(ST_MakePoint(-63.189099, -17.755434), 4326),
     now() - interval '18 hours',
@@ -177,6 +183,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 2 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.178860, -17.765000), 4326),
     ST_SetSRID(ST_MakePoint(-63.178860, -17.765000), 4326),
     now() - interval '3 days',
@@ -193,6 +200,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '20 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.165878, -17.766173), 4326),
     ST_SetSRID(ST_MakePoint(-63.165878, -17.766173), 4326),
     now() - interval '2 days',
@@ -213,6 +221,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 3 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.164114, -17.791008), 4326),
     ST_SetSRID(ST_MakePoint(-63.164114, -17.791008), 4326),
     now() - interval '3 days',
@@ -229,6 +238,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '15 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.170485, -17.802315), 4326),
     ST_SetSRID(ST_MakePoint(-63.170485, -17.802315), 4326),
     now() - interval '2 days',
@@ -249,6 +259,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 4 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.185164, -17.806231), 4326),
     ST_SetSRID(ST_MakePoint(-63.185164, -17.806231), 4326),
     now() - interval '4 days',
@@ -265,6 +276,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '4 days' + interval '12 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.198294, -17.797106), 4326),
     ST_SetSRID(ST_MakePoint(-63.198294, -17.797106), 4326),
     now() - interval '1 day',
@@ -285,6 +297,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 5 (3 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.170986, -17.747246), 4326),
     ST_SetSRID(ST_MakePoint(-63.170986, -17.747246), 4326),
     now() - interval '2 days',
@@ -301,6 +314,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '18 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.155465, -17.750504), 4326),
     ST_SetSRID(ST_MakePoint(-63.155465, -17.750504), 4326),
     now() - interval '1 day',
@@ -317,6 +331,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '22 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.156267, -17.715417), 4326),
     ST_SetSRID(ST_MakePoint(-63.156267, -17.715417), 4326),
     now() - interval '3 days',
@@ -337,6 +352,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 6 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.134292, -17.785469), 4326),
     ST_SetSRID(ST_MakePoint(-63.134292, -17.785469), 4326),
     now() - interval '2 days',
@@ -353,6 +369,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '14 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.124134, -17.775973), 4326),
     ST_SetSRID(ST_MakePoint(-63.124134, -17.775973), 4326),
     now() - interval '1 day',
@@ -373,6 +390,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 7 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.114281, -17.810830), 4326),
     ST_SetSRID(ST_MakePoint(-63.114281, -17.810830), 4326),
     now() - interval '3 days',
@@ -389,6 +407,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '25 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.103477, -17.815244), 4326),
     ST_SetSRID(ST_MakePoint(-63.103477, -17.815244), 4326),
     now() - interval '2 days',
@@ -409,6 +428,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 8 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.116658, -17.816381), 4326),
     ST_SetSRID(ST_MakePoint(-63.116658, -17.816381), 4326),
     now() - interval '2 days',
@@ -425,6 +445,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '35 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.114041, -17.819241), 4326),
     ST_SetSRID(ST_MakePoint(-63.114041, -17.819241), 4326),
     now() - interval '1 day',
@@ -445,6 +466,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 9 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.180762, -17.827597), 4326),
     ST_SetSRID(ST_MakePoint(-63.180762, -17.827597), 4326),
     now() - interval '3 days',
@@ -461,6 +483,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '3 days' + interval '20 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.177531, -17.838528), 4326),
     ST_SetSRID(ST_MakePoint(-63.177531, -17.838528), 4326),
     now() - interval '2 days',
@@ -481,6 +504,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 10 (2 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.203881, -17.822535), 4326),
     ST_SetSRID(ST_MakePoint(-63.203881, -17.822535), 4326),
     now() - interval '2 days',
@@ -497,6 +521,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '16 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.209043, -17.818232), 4326),
     ST_SetSRID(ST_MakePoint(-63.209043, -17.818232), 4326),
     now() - interval '1 day',
@@ -517,6 +542,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 11 - CENTRO HISTÓRICO (3 puntos)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.177585, -17.771902), 4326),
     ST_SetSRID(ST_MakePoint(-63.177585, -17.771902), 4326),
     now() - interval '2 days',
@@ -533,6 +559,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '2 days' + interval '20 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.170434, -17.774021), 4326),
     ST_SetSRID(ST_MakePoint(-63.170434, -17.774021), 4326),
     now() - interval '1 day',
@@ -549,6 +576,7 @@ INSERT INTO reporte_inundacion (
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '15 minutes'
   ),
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.168942, -17.778532), 4326),
     ST_SetSRID(ST_MakePoint(-63.168942, -17.778532), 4326),
     now() - interval '3 days',
@@ -569,6 +597,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 12 (1 punto)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.158894, -17.830043), 4326),
     ST_SetSRID(ST_MakePoint(-63.158894, -17.830043), 4326),
     now() - interval '2 days',
@@ -589,6 +618,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO 13 (1 punto)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.101074, -17.896190), 4326),
     ST_SetSRID(ST_MakePoint(-63.101074, -17.896190), 4326),
     now() - interval '4 days',
@@ -609,6 +639,7 @@ INSERT INTO reporte_inundacion (
   -- DISTRITO PARQUE INDUSTRIAL (1 punto)
   -- =========================================================================
   (
+    'inundacion',
     ST_SetSRID(ST_MakePoint(-63.142701, -17.755296), 4326),
     ST_SetSRID(ST_MakePoint(-63.142701, -17.755296), 4326),
     now() - interval '1 day',
@@ -623,6 +654,25 @@ INSERT INTO reporte_inundacion (
     'Retención de agua en acceso a manzana industrial por sumidero bloqueado.',
     'rodilla', 'cada_lluvia_fuerte', 'sumidero_tapado', 'si', 'tapado', false, 'media', 7, 2, 'validado',
     '12f435be-5854-41bd-876c-a3ab833247b3', now() - interval '1 day' + interval '18 minutes'
-  );
+  )
+)
+INSERT INTO reporte (
+  categoria, geom, geom_publico, creado_en, actualizado_en, publicar_en, evento_en,
+  distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+  ubicacion_metodo, precision_gps_m, ubicacion_tipo, descripcion,
+  detalle, detalle_version, severidad_calculada, severidad_puntaje, severidad_version,
+  estado, validado_por, validado_en
+)
+SELECT
+  categoria, geom, geom_publico, creado_en, actualizado_en, publicar_en, evento_en,
+  distrito_id, unidad_vecinal_id, version_capa, resolucion_flags,
+  ubicacion_metodo::ubicacion_metodo, precision_gps_m, ubicacion_tipo::ubicacion_tipo, descripcion,
+  jsonb_strip_nulls(jsonb_build_object(
+    'profundidad_estimada', profundidad_estimada, 'frecuencia', frecuencia,
+    'causa_presunta', causa_presunta, 'sumidero_cercano', sumidero_cercano,
+    'sumidero_estado', sumidero_estado, 'agua_brota_sumidero', agua_brota_sumidero)),
+  1, severidad_calculada::severidad, severidad_puntaje, severidad_version,
+  estado::estado_reporte, validado_por::uuid, validado_en
+FROM fuente;
 
 COMMIT;

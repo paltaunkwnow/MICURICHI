@@ -1,0 +1,12 @@
+packages/contracts/src/index.ts
+packages/contracts/src/categorias/slugs.ts
+packages/contracts/src/categorias/tipos.ts
+packages/contracts/src/categorias/resolver.ts
+packages/contracts/src/categorias/index.ts
+packages/contracts/src/categorias/inundacion/esquema.ts
+packages/contracts/src/categorias/inundacion/definicion.ts
+packages/contracts/test/contrato-0-19.test.ts
+packages/contracts/package.json
+packages/contracts/CHANGELOG.md
+packages/contracts/README.md
+packages/contracts/test/contrato-0-16.test.ts

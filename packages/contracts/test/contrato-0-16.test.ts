@@ -98,12 +98,19 @@ describe('0.16.0: OpenAPI', () => {
 });
 
 describe('versión del paquete', () => {
-  it('package.json y la última entrada del CHANGELOG dicen la misma versión, 0.18.0', () => {
+  it('package.json y la última entrada del CHANGELOG dicen la misma versión (≥ 0.21.0)', () => {
     const { version } = JSON.parse(readFileSync(resolve(raiz, 'package.json'), 'utf8')) as {
       version: string;
     };
     const ultima = readFileSync(resolve(raiz, 'CHANGELOG.md'), 'utf8').match(/^## (\S+)/m)?.[1];
-    expect(version).toBe('0.18.0');
+    // El piso sube con cada hito (antes fijaba 0.20.0); 0.21.0 sumó `textos` a la definición de
+    // categoría (aditivo). Se usa un piso «≥» para no editar esta prueba en cada versión, sin tocar
+    // la invariante central: package.json y la cabecera del CHANGELOG siempre coinciden.
+    const parte = (v: string, i: number) => Number.parseInt(v.split('.')[i] ?? '0', 10);
+    const [may, min, par] = [parte(version, 0), parte(version, 1), parte(version, 2)];
+    const noBajaDe = (a: number, b: number, c: number) =>
+      may > a || (may === a && (min > b || (min === b && par >= c)));
+    expect(noBajaDe(0, 21, 0)).toBe(true);
     expect(ultima).toBe(version);
   });
 });

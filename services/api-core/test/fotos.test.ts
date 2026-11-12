@@ -347,7 +347,7 @@ describe('visibilidad de las fotos de un reporte (§13, contracts 0.11.0)', () =
     if (estado !== 'nuevo')
       // La 0018 exige motivo en rechazado/duplicado: se pone uno al mover el estado por SQL.
       await pool.query(
-        "UPDATE reporte_inundacion SET estado = $2::estado_reporte, estado_motivo = CASE WHEN $2 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE estado_motivo END WHERE id = $1",
+        "UPDATE reporte SET estado = $2::estado_reporte, estado_motivo = CASE WHEN $2 IN ('rechazado', 'duplicado') THEN 'Motivo de prueba' ELSE estado_motivo END WHERE categoria = 'inundacion' AND id = $1",
         [creado.json().id, estado],
       );
     if (espera) await enEspera(ex, creado.json().id);
@@ -395,7 +395,7 @@ describe('visibilidad de las fotos de un reporte (§13, contracts 0.11.0)', () =
     expect(creado.statusCode).toBe(201);
     const reporteId = creado.json().id as string;
     await pool.query(
-      "UPDATE reporte_inundacion SET estado = 'validado'::estado_reporte WHERE id = $1",
+      "UPDATE reporte SET estado = 'validado'::estado_reporte WHERE categoria = 'inundacion' AND id = $1",
       [reporteId],
     );
     const jpeg = await sharp({ create: { width: 30, height: 20, channels: 3, background: '#789' } })

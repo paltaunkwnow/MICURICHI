@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { SEVERIDADES, TIPOS_CAPA, type TipoCapa } from '../dominio/enums.js';
-import { CoordenadaSchema, LatSchema, LonSchema, UnidadAdministrativaSchema } from './comunes.js';
+import {
+  BboxSchema,
+  CategoriaFiltroSchema,
+  CoordenadaSchema,
+  LatSchema,
+  LonSchema,
+  UnidadAdministrativaSchema,
+} from './comunes.js';
 
 export const ResolverEntradaSchema = CoordenadaSchema;
 export type ResolverEntrada = z.infer<typeof ResolverEntradaSchema>;
@@ -60,6 +67,12 @@ export const PuntoCriticoSchema = z.object({
   distrito_id: z.string().nullable(),
   unidad_vecinal_id: z.string().nullable(),
   calculado_en: z.iso.datetime({ offset: true }),
+  // Categoría del punto crítico (0.20.0, aditivo y OPCIONAL): geo-service (M3.4) la completa; el
+  // DBSCAN pasa a particionar por categoría. Opcional para no romper su construcción actual.
+  categoria: z.string().optional().meta({
+    description:
+      'Slug de la categoría del punto crítico (aditivo desde 0.20.0). Obligatorio más adelante.',
+  }),
 });
 export type PuntoCritico = z.infer<typeof PuntoCriticoSchema>;
 
@@ -76,11 +89,33 @@ export const CAMPOS_PUNTO_CRITICO_NO_PUBLICABLES = [
  * pública se pinta con `severidad_max_verificada` y no con `severidad_max`: un solo reporte falso
  * de más de 70 cm pintaría de crítica una UV entera.
  */
+/**
+ * Query de `GET /geo/v1/agregados/unidades-vecinales` (0.20.0, ADR 0012, 0013). Ruta PÚBLICA: una
+ * sola categoría. Sin el parámetro = inundación; una categoría desconocida o inactiva da 400
+ * CATEGORIA_NO_DISPONIBLE (lo decide geo-service con su catálogo). `todas` no se admite acá (lo
+ * reconoce el campo, pero geo-service lo rechaza en una ruta pública).
+ */
+export const GeoAgregadosQuerySchema = z.object({ categoria: CategoriaFiltroSchema });
+export type GeoAgregadosQuery = z.infer<typeof GeoAgregadosQuerySchema>;
+
+/** Query de `GET /geo/v1/puntos-criticos` (0.20.0): `bbox` opcional y `categoria` como en agregados. */
+export const GeoPuntosCriticosQuerySchema = z.object({
+  bbox: BboxSchema.optional(),
+  categoria: CategoriaFiltroSchema,
+});
+export type GeoPuntosCriticosQuery = z.infer<typeof GeoPuntosCriticosQuerySchema>;
+
 export const AgregadoUvSchema = z.object({
   unidad_vecinal_id: z.string(),
   codigo: z.string(),
   nombre: z.string(),
   distrito_id: z.string(),
+  // Categoría del agregado (0.20.0, aditivo y OPCIONAL): geo-service (M3.4) la completa. Opcional
+  // para no romper su construcción actual ni el typecheck hasta entonces.
+  categoria: z.string().optional().meta({
+    description:
+      'Slug de la categoría del agregado (aditivo desde 0.20.0). Obligatorio más adelante.',
+  }),
   n_reportes: z.number().int().meta({
     description: 'Reportes publicados en la UV: nuevo (sin verificar), validado y resuelto',
   }),

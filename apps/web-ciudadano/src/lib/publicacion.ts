@@ -1,5 +1,5 @@
 import { CONFIG_DOMINIO, type SesionActual } from 'contracts';
-import { REPORTES_POR_DIA, reportesRestantes } from './cupo';
+import { REPORTES_POR_DIA, reportesRestantes, restantesDeCategoria } from './cupo';
 
 /**
  * Demora de publicación (contracts 0.11.0): el reporte llega al servidor al tocar «Enviar» y se
@@ -26,6 +26,24 @@ export function demoraDelProximo(
   return restantes >= REPORTES_POR_DIA
     ? CONFIG_DOMINIO.DEMORA_PUBLICACION_PRIMERO_S
     : CONFIG_DOMINIO.DEMORA_PUBLICACION_SIGUIENTES_S;
+}
+
+/**
+ * Segundos que tardaría en publicarse el próximo reporte de UNA categoría (0.20.0, ADR 0012, 0017).
+ * Lo dice `/auth/yo` en `cupos[categoria].demora_proximo_s`; con respaldo en los campos sueltos
+ * (`demoraDelProximo`), que valen para inundación. Con el cupo de la categoría agotado no hay
+ * «próximo» hoy: la demora no aplica (null), igual que `cupoDeLaSesion`.
+ */
+export function demoraDeCategoria(
+  usuario: Pick<
+    SesionActual,
+    'demora_proximo_s' | 'reportes_restantes_hoy' | 'puede_reportar_desde' | 'cupos'
+  > | null,
+  categoria: string | null,
+): number | null {
+  if (restantesDeCategoria(usuario, categoria) === 0) return null;
+  const porCategoria = usuario && categoria ? usuario.cupos?.[categoria] : undefined;
+  return porCategoria ? porCategoria.demora_proximo_s : demoraDelProximo(usuario);
 }
 
 /** «Se publica 1 minuto después de enviarlo» (o 4), para la revisión antes de enviar. */

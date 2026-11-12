@@ -83,7 +83,8 @@ afterAll(async () => {
 beforeEach(async () => {
   libre = 10 * GIB;
   llamadasStatfs = 0;
-  await pool.query('DELETE FROM cuota_reporte_diaria');
+  // El cupo de fotos vive en `cupo_contador` (clave `fotos:cuenta`) desde M3.
+  await pool.query('DELETE FROM cupo_contador');
 });
 
 function subir(datos: Buffer = JPEG) {
@@ -97,7 +98,7 @@ function subir(datos: Buffer = JPEG) {
 
 async function fotosGastadas(): Promise<number> {
   const r = await pool.query<{ n: number }>(
-    'SELECT COALESCE(sum(fotos_n), 0)::int AS n FROM cuota_reporte_diaria',
+    `SELECT COALESCE(sum(n), 0)::int AS n FROM cupo_contador WHERE clave = 'fotos:cuenta'`,
   );
   return r.rows[0]!.n;
 }

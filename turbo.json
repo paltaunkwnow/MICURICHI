@@ -17,6 +17,7 @@
     "COOKIE_SEGURA",
     "CORS_ORIGENES",
     "CRS_METRICO_EPSG",
+    "CURICHI_INSTALACION_LOCAL",
     "DATABASE_URL",
     "DATABASE_URL_PG_REAL",
     "DB_ESPERA_CONEXION_MS",
@@ -58,6 +59,8 @@
     "METRICAS_RUTA",
     "METRICAS_TOKEN",
     "MIGRAR_LOCK_TIMEOUT_MS",
+    "MULTITEMATICA_E2E_DESTINO",
+    "MULTITEMATICA_E2E_RUN_ID",
     "NODE_ENV",
     "OPENAPI_PATH",
     "PANEL_ADMIN_URL",
@@ -68,6 +71,7 @@
     "PGLITE_MAX_CONEXIONES",
     "PGLITE_MEMORIA",
     "PGLITE_PUERTO",
+    "PLAYWRIGHT_BROWSERS_PATH",
     "PROXY_DE_CONFIANZA",
     "PUBLIC_BASE_URL",
     "RATE_LIMIT_LECTURAS_POR_MINUTO",
@@ -100,7 +104,13 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+      "outputs": [
+        "dist/**",
+        ".next/**",
+        "!.next/cache/**",
+        ".next-multitematica/**",
+        "!.next-multitematica/cache/**"
+      ]
     },
     "dev": {
       "cache": false,

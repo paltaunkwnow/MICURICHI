@@ -301,8 +301,7 @@ export function ComoFunciona() {
               Después un técnico municipal lo verifica, lo retira del mapa si no corresponde o lo
               suma a otro punto que reportaba lo mismo. Los puntos críticos y el color de cada
               barrio se arman solo con los reportes verificados, para que uno equivocado no los
-              cambie. Cada cuenta puede enviar {CONFIG_DOMINIO.REPORTES_POR_DIA_POR_CUENTA} reportes
-              por día.
+              cambie. Cada cuenta tiene un cupo diario de reportes por categoría.
             </p>
           </div>
         ) : null}

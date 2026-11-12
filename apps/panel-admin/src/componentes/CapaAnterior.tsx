@@ -6,7 +6,13 @@ import type { FilaCapaAnterior } from '@/lib/ejecutivo';
  * vigente y su código acortado puede repetir el de uno vigente, así que van aparte y con el
  * código completo. En el panel ejecutivo sus activas cuentan dentro de «Otros».
  */
-export function CapaAnterior({ filas }: { filas: FilaCapaAnterior[] }) {
+export function CapaAnterior({
+  filas,
+  tituloActivas = 'Inundaciones activas',
+}: {
+  filas: FilaCapaAnterior[];
+  tituloActivas?: string;
+}) {
   const { numero } = useFormato();
   return (
     <section
@@ -28,7 +34,7 @@ export function CapaAnterior({ filas }: { filas: FilaCapaAnterior[] }) {
             <tr>
               <th scope="col">Distrito</th>
               <th scope="col" className="numero">
-                Inundaciones activas
+                {tituloActivas}
               </th>
               <th scope="col" className="numero">
                 En revisión
